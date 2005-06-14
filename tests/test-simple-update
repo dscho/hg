@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -ex
+
+mkdir test
+cd test
+echo foo>foo
+hg init
+hg addremove
+hg commit -t "1"
+hg verify
+cd ..
+
+mkdir branch
+cd branch
+hg init ../test
+hg co
+echo bar>>foo
+hg commit -t "2"
+
+cd ../test
+hg pull ../branch
+hg verify
+hg co
+cat foo
+hg manifest
