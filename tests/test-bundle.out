@@ -19,11 +19,6 @@ adding file changes
 added 0 changesets with 0 changes to 4 files
 (run 'hg update' to get a working copy)
 ====== Verify empty
-changeset:   -1:000000000000
-tag:         tip
-user:        
-date:        Thu Jan 01 00:00:00 1970 +0000
-
 checking changesets
 checking manifests
 crosschecking files in changesets and manifests
@@ -346,3 +341,25 @@ common changesets up to c0025332f9ed
 list of changesets:
 d2ae7f538514cd87c17547b0de4cea71fe1af9fb
 5ece8e77363e2b5269e27c66828b72da29e4341a
+bundle changes: 0 chunks
+bundle changes: 1 chunks
+bundle changes: 2 chunks
+bundle changes: 3 chunks
+bundle changes: 4 chunks
+bundle changes: 5 chunks
+bundle changes: 6 chunks
+bundle manifests: 0 chunks
+bundle manifests: 1 chunks
+bundle manifests: 2 chunks
+bundle manifests: 3 chunks
+bundle manifests: 4 chunks
+bundle manifests: 5 chunks
+bundle manifests: 6 chunks
+bundle files: b 0 chunks
+bundle files: b 1 chunks
+bundle files: b 2 chunks
+bundle files: b 3 chunks
+bundle files: b1 4 chunks
+bundle files: b1 5 chunks
+bundle files: b1 6 chunks
+bundle files: b1 7 chunks

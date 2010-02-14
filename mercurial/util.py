@@ -16,7 +16,7 @@ hide platform-specific details from the core.
 from i18n import _
 import error, osutil, encoding
 import cStringIO, errno, re, shutil, sys, tempfile, traceback
-import os, stat, time, calendar, textwrap
+import os, stat, time, calendar, textwrap, signal
 import imp
 
 # Python compatibility
@@ -38,19 +38,25 @@ def _fastsha1(s):
 
 import subprocess
 closefds = os.name == 'posix'
-def popen2(cmd):
+
+def popen2(cmd, env=None, newlines=False):
     # Setting bufsize to -1 lets the system decide the buffer size.
     # The default for bufsize is 0, meaning unbuffered. This leads to
     # poor performance on Mac OS X: http://bugs.python.org/issue4194
     p = subprocess.Popen(cmd, shell=True, bufsize=-1,
                          close_fds=closefds,
-                         stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         universal_newlines=newlines,
+                         env=env)
     return p.stdin, p.stdout
-def popen3(cmd):
+
+def popen3(cmd, env=None, newlines=False):
     p = subprocess.Popen(cmd, shell=True, bufsize=-1,
                          close_fds=closefds,
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE)
+                         stderr=subprocess.PIPE,
+                         universal_newlines=newlines,
+                         env=env)
     return p.stdin, p.stdout, p.stderr
 
 def version():
@@ -176,16 +182,21 @@ def tempfilter(s, cmd):
         code = os.system(cmd)
         if sys.platform == 'OpenVMS' and code & 1:
             code = 0
-        if code: raise Abort(_("command '%s' failed: %s") %
-                             (cmd, explain_exit(code)))
+        if code:
+            raise Abort(_("command '%s' failed: %s") %
+                        (cmd, explain_exit(code)))
         return open(outname, 'rb').read()
     finally:
         try:
-            if inname: os.unlink(inname)
-        except: pass
+            if inname:
+                os.unlink(inname)
+        except:
+            pass
         try:
-            if outname: os.unlink(outname)
-        except: pass
+            if outname:
+                os.unlink(outname)
+        except:
+            pass
 
 filtertable = {
     'tempfile:': tempfilter,
@@ -236,8 +247,11 @@ def increasingchunks(source, min=1024, max=65536):
 
 Abort = error.Abort
 
-def always(fn): return True
-def never(fn): return False
+def always(fn):
+    return True
+
+def never(fn):
+    return False
 
 def pathto(root, n1, n2):
     '''return the relative path from one place to another.
@@ -250,7 +264,8 @@ def pathto(root, n1, n2):
     relative to root.
     n2 should always be relative to root.
     '''
-    if not n1: return localpath(n2)
+    if not n1:
+        return localpath(n2)
     if os.path.isabs(n1):
         if os.path.splitdrive(root)[0] != os.path.splitdrive(n1)[0]:
             return os.path.join(root, localpath(n2))
@@ -522,6 +537,14 @@ else:
 
 def lookup_reg(key, name=None, scope=None):
     return None
+
+def hidewindow():
+    """Hide current shell window.
+
+    Used to hide the window opened when starting asynchronous
+    child process under Windows, unneeded on other systems.
+    """
+    pass
 
 if os.name == 'nt':
     from windows import *
@@ -898,11 +921,15 @@ def filechunkiter(f, size=65536, limit=None):
     assert size >= 0
     assert limit is None or limit >= 0
     while True:
-        if limit is None: nbytes = size
-        else: nbytes = min(limit, size)
+        if limit is None:
+            nbytes = size
+        else:
+            nbytes = min(limit, size)
         s = nbytes and f.read(nbytes)
-        if not s: break
-        if limit: limit -= len(s)
+        if not s:
+            break
+        if limit:
+            limit -= len(s)
         yield s
 
 def makedate():
@@ -1070,7 +1097,7 @@ def shortuser(user):
         user = user[:f]
     f = user.find('<')
     if f >= 0:
-        user = user[f+1:]
+        user = user[f + 1:]
     f = user.find(' ')
     if f >= 0:
         user = user[:f]
@@ -1082,15 +1109,16 @@ def shortuser(user):
 def email(author):
     '''get email of author.'''
     r = author.find('>')
-    if r == -1: r = None
-    return author[author.find('<')+1:r]
+    if r == -1:
+        r = None
+    return author[author.find('<') + 1:r]
 
 def ellipsis(text, maxlength=400):
     """Trim string to at most maxlength (default: 400) characters."""
     if len(text) <= maxlength:
         return text
     else:
-        return "%s..." % (text[:maxlength-3])
+        return "%s..." % (text[:maxlength - 3])
 
 def walkrepos(path, followsym=False, seen_dirs=None, recurse=False):
     '''yield every hg repository under path, recursively.'''
@@ -1159,7 +1187,8 @@ def rcpath():
         if 'HGRCPATH' in os.environ:
             _rcpath = []
             for p in os.environ['HGRCPATH'].split(os.pathsep):
-                if not p: continue
+                if not p:
+                    continue
                 p = expandpath(p)
                 if os.path.isdir(p):
                     for f, kind in osutil.listdir(p):
@@ -1175,15 +1204,15 @@ def bytecount(nbytes):
     '''return byte count formatted as readable string, with units'''
 
     units = (
-        (100, 1<<30, _('%.0f GB')),
-        (10, 1<<30, _('%.1f GB')),
-        (1, 1<<30, _('%.2f GB')),
-        (100, 1<<20, _('%.0f MB')),
-        (10, 1<<20, _('%.1f MB')),
-        (1, 1<<20, _('%.2f MB')),
-        (100, 1<<10, _('%.0f KB')),
-        (10, 1<<10, _('%.1f KB')),
-        (1, 1<<10, _('%.2f KB')),
+        (100, 1 << 30, _('%.0f GB')),
+        (10, 1 << 30, _('%.1f GB')),
+        (1, 1 << 30, _('%.2f GB')),
+        (100, 1 << 20, _('%.0f MB')),
+        (10, 1 << 20, _('%.1f MB')),
+        (1, 1 << 20, _('%.2f MB')),
+        (100, 1 << 10, _('%.0f KB')),
+        (10, 1 << 10, _('%.1f KB')),
+        (1, 1 << 10, _('%.2f KB')),
         (1, 1, _('%.0f bytes')),
         )
 
@@ -1205,7 +1234,7 @@ def drop_scheme(scheme, path):
                 # root. On POSIX they are rooted at the file system root.
                 if os.name == 'nt':
                     droot = os.path.splitdrive(os.getcwd())[0] + '/'
-                    path = os.path.join(droot, path[i+1:])
+                    path = os.path.join(droot, path[i + 1:])
                 else:
                     path = path[i:]
             else:
@@ -1268,3 +1297,60 @@ def iterlines(iterator):
 
 def expandpath(path):
     return os.path.expanduser(os.path.expandvars(path))
+
+def hgcmd():
+    """Return the command used to execute current hg
+
+    This is different from hgexecutable() because on Windows we want
+    to avoid things opening new shell windows like batch files, so we
+    get either the python call or current executable.
+    """
+    if main_is_frozen():
+        return [sys.executable]
+    return gethgcmd()
+
+def rundetached(args, condfn):
+    """Execute the argument list in a detached process.
+
+    condfn is a callable which is called repeatedly and should return
+    True once the child process is known to have started successfully.
+    At this point, the child process PID is returned. If the child
+    process fails to start or finishes before condfn() evaluates to
+    True, return -1.
+    """
+    # Windows case is easier because the child process is either
+    # successfully starting and validating the condition or exiting
+    # on failure. We just poll on its PID. On Unix, if the child
+    # process fails to start, it will be left in a zombie state until
+    # the parent wait on it, which we cannot do since we expect a long
+    # running process on success. Instead we listen for SIGCHLD telling
+    # us our child process terminated.
+    terminated = set()
+    def handler(signum, frame):
+        terminated.add(os.wait())
+    prevhandler = None
+    if hasattr(signal, 'SIGCHLD'):
+        prevhandler = signal.signal(signal.SIGCHLD, handler)
+    try:
+        pid = spawndetached(args)
+        while not condfn():
+            if ((pid in terminated or not testpid(pid))
+                and not condfn()):
+                return -1
+            time.sleep(0.1)
+        return pid
+    finally:
+        if prevhandler is not None:
+            signal.signal(signal.SIGCHLD, prevhandler)
+
+def any(iterable):
+    for i in iterable:
+        if i:
+            return True
+    return False
+
+def all(iterable):
+    for i in iterable:
+        if not i:
+            return False
+    return True

@@ -29,8 +29,11 @@ class ui(object):
             self._ocfg = src._ocfg.copy()
             self._trustusers = src._trustusers.copy()
             self._trustgroups = src._trustgroups.copy()
+            self.environ = src.environ
             self.fixconfig()
         else:
+            # shared read-only environment
+            self.environ = os.environ
             # we always trust global config files
             for f in util.rcpath():
                 self.readconfig(f, trust=True)
@@ -75,6 +78,14 @@ class ui(object):
             if trusted:
                 raise
             self.warn(_("Ignored: %s\n") % str(inst))
+
+        if self.plain():
+            for k in ('debug', 'fallbackencoding', 'quiet', 'traceback',
+                      'verbose'):
+                if k in cfg['ui']:
+                    del cfg['ui'][k]
+            for k, v in cfg.items('defaults'):
+                del cfg['defaults'][k]
 
         if trusted:
             self._tcfg.update(cfg)
@@ -166,6 +177,9 @@ class ui(object):
             for name, value in self.configitems(section, untrusted):
                 yield section, name, str(value).replace('\n', '\\n')
 
+    def plain(self):
+        return 'HGPLAIN' in os.environ
+
     def username(self):
         """Return default username to be used in commits.
 
@@ -195,7 +209,8 @@ class ui(object):
 
     def shortuser(self, user):
         """Return a short representation of a user name or email address."""
-        if not self.verbose: user = util.shortuser(user)
+        if not self.verbose:
+            user = util.shortuser(user)
         return user
 
     def _path(self, loc):
@@ -233,12 +248,14 @@ class ui(object):
 
     def write_err(self, *args):
         try:
-            if not sys.stdout.closed: sys.stdout.flush()
+            if not getattr(sys.stdout, 'closed', False):
+                sys.stdout.flush()
             for a in args:
                 sys.stderr.write(str(a))
             # stderr may be buffered under win32 when redirected to files,
             # including stdout.
-            if not sys.stderr.closed: sys.stderr.flush()
+            if not getattr(sys.stderr, 'closed', False):
+                sys.stderr.flush()
         except IOError, inst:
             if inst.errno != errno.EPIPE:
                 raise
@@ -252,7 +269,13 @@ class ui(object):
     def interactive(self):
         i = self.configbool("ui", "interactive", None)
         if i is None:
-            return sys.stdin.isatty()
+            try:
+                return sys.stdin.isatty()
+            except AttributeError:
+                # some environments replace stdin without implementing isatty
+                # usually those are non-interactive
+                return False
+
         return i
 
     def _readline(self, prompt=''):
@@ -302,21 +325,24 @@ class ui(object):
                 return resps.index(r.lower())
             self.write(_("unrecognized response\n"))
 
-
     def getpass(self, prompt=None, default=None):
-        if not self.interactive(): return default
+        if not self.interactive():
+            return default
         try:
             return getpass.getpass(prompt or _('password: '))
         except EOFError:
             raise util.Abort(_('response expected'))
     def status(self, *msg):
-        if not self.quiet: self.write(*msg)
+        if not self.quiet:
+            self.write(*msg)
     def warn(self, *msg):
         self.write_err(*msg)
     def note(self, *msg):
-        if self.verbose: self.write(*msg)
+        if self.verbose:
+            self.write(*msg)
     def debug(self, *msg):
-        if self.debugflag: self.write(*msg)
+        if self.debugflag:
+            self.write(*msg)
     def edit(self, text, user):
         (fd, name) = tempfile.mkstemp(prefix="hg-editor-", suffix=".txt",
                                       text=True)
@@ -368,8 +394,10 @@ class ui(object):
         revision, bytes, etc.), unit is a corresponding unit label,
         and total is the highest expected pos.
 
-        Multiple nested topics may be active at a time. All topics
-        should be marked closed by setting pos to None at termination.
+        Multiple nested topics may be active at a time.
+
+        All topics should be marked closed by setting pos to None at
+        termination.
         '''
 
         if pos == None or not self.debugflag:

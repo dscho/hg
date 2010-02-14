@@ -24,13 +24,15 @@ def getchunk(source):
                           % (len(d), l - 4))
     return d
 
-def chunkiter(source):
+def chunkiter(source, progress=None):
     """iterate through the chunks in source, yielding a sequence of chunks
     (strings)"""
     while 1:
         c = getchunk(source)
         if not c:
             break
+        elif progress is not None:
+            progress()
         yield c
 
 def chunkheader(length):
@@ -53,6 +55,16 @@ bundletypes = {
     "HG10BZ": ("HG10", lambda: bz2.BZ2Compressor()),
     "HG10GZ": ("HG10GZ", lambda: zlib.compressobj()),
 }
+
+def collector(cl, mmfs, files):
+    # Gather information about changeset nodes going out in a bundle.
+    # We want to gather manifests needed and filelogs affected.
+    def collect(node):
+        c = cl.read(node)
+        for fn in c[3]:
+            files.setdefault(fn, fn)
+        mmfs.setdefault(c[0], node)
+    return collect
 
 # hgweb uses this list to communicate its preferred type
 bundlepriority = ['HG10GZ', 'HG10BZ', 'HG10UN']

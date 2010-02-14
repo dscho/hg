@@ -42,7 +42,8 @@ class sshserver(object):
 
     def serve_forever(self):
         try:
-            while self.serve_one(): pass
+            while self.serve_one():
+                pass
         finally:
             if self.lock is not None:
                 self.lock.release()
@@ -52,7 +53,8 @@ class sshserver(object):
         cmd = self.fin.readline()[:-1]
         if cmd:
             impl = getattr(self, 'do_' + cmd, None)
-            if impl: impl()
+            if impl:
+                impl()
             else: self.respond("")
         return cmd != ''
 
@@ -89,7 +91,7 @@ class sshserver(object):
         capabilities: space separated list of tokens
         '''
         caps = copy.copy(self.caps)
-        if self.ui.configbool('server', 'uncompressed'):
+        if streamclone.allowed(self.repo.ui):
             caps.append('stream=%d' % self.repo.changelog.version)
         self.respond("capabilities: %s\n" % (' '.join(caps),))
 

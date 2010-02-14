@@ -37,14 +37,13 @@ from distutils.command.build_py import build_py
 from distutils.spawn import spawn, find_executable
 from distutils.ccompiler import new_compiler
 
-extra = {}
 scripts = ['hg']
 if os.name == 'nt':
     scripts.append('contrib/win32/hg.bat')
 
 # simplified version of distutils.ccompiler.CCompiler.has_function
 # that actually removes its temporary files.
-def has_function(cc, funcname):
+def hasfunction(cc, funcname):
     tmpdir = tempfile.mkdtemp(prefix='hg-install-')
     devnull = oldstderr = None
     try:
@@ -77,6 +76,7 @@ def has_function(cc, funcname):
 # py2exe needs to be installed to work
 try:
     import py2exe
+    py2exeloaded = True
 
     # Help py2exe to find win32com.shell
     try:
@@ -92,9 +92,8 @@ try:
     except ImportError:
         pass
 
-    extra['console'] = ['hg']
-
 except ImportError:
+    py2exeloaded = False
     pass
 
 def runcmd(cmd, env):
@@ -167,13 +166,7 @@ try:
 except ImportError:
     version = 'unknown'
 
-class install_package_data(install_data):
-    def finalize_options(self):
-        self.set_undefined_options('install',
-                                   ('install_lib', 'install_dir'))
-        install_data.finalize_options(self)
-
-class build_mo(build):
+class hgbuildmo(build):
 
     description = "build translations (.mo files)"
 
@@ -195,22 +188,23 @@ class build_mo(build):
             pofile = join(podir, po)
             modir = join('locale', po[:-3], 'LC_MESSAGES')
             mofile = join(modir, 'hg.mo')
-            cmd = ['msgfmt', '-v', '-o', mofile, pofile]
+            mobuildfile = join('mercurial', mofile)
+            cmd = ['msgfmt', '-v', '-o', mobuildfile, pofile]
             if sys.platform != 'sunos5':
                 # msgfmt on Solaris does not know about -c
                 cmd.append('-c')
-            self.mkpath(modir)
-            self.make_file([pofile], mofile, spawn, (cmd,))
-            self.distribution.data_files.append((join('mercurial', modir),
-                                                 [mofile]))
+            self.mkpath(join('mercurial', modir))
+            self.make_file([pofile], mobuildfile, spawn, (cmd,))
 
-build.sub_commands.append(('build_mo', None))
+# Insert hgbuildmo first so that files in mercurial/locale/ are found
+# when build_py is run next.
+build.sub_commands.insert(0, ('build_mo', None))
 
 Distribution.pure = 0
 Distribution.global_options.append(('pure', None, "use pure (slow) Python "
                                     "code instead of C extensions"))
 
-class hg_build_py(build_py):
+class hgbuildpy(build_py):
 
     def finalize_options(self):
         build_py.finalize_options(self)
@@ -232,11 +226,10 @@ class hg_build_py(build_py):
             else:
                 yield module
 
-cmdclass = {'install_data': install_package_data,
-            'build_mo': build_mo,
-            'build_py': hg_build_py}
+cmdclass = {'build_mo': hgbuildmo,
+            'build_py': hgbuildpy}
 
-ext_modules=[
+extmodules = [
     Extension('mercurial.base85', ['mercurial/base85.c']),
     Extension('mercurial.bdiff', ['mercurial/bdiff.c']),
     Extension('mercurial.diffhelpers', ['mercurial/diffhelpers.c']),
@@ -246,27 +239,48 @@ ext_modules=[
     ]
 
 packages = ['mercurial', 'mercurial.hgweb', 'hgext', 'hgext.convert',
-            'hgext.highlight', 'hgext.zeroconf', ]
+            'hgext.highlight', 'hgext.zeroconf']
 
 if sys.platform == 'linux2' and os.uname()[2] > '2.6':
     # The inotify extension is only usable with Linux 2.6 kernels.
     # You also need a reasonably recent C library.
     cc = new_compiler()
-    if has_function(cc, 'inotify_add_watch'):
-        ext_modules.append(Extension('hgext.inotify.linux._inotify',
+    if hasfunction(cc, 'inotify_add_watch'):
+        extmodules.append(Extension('hgext.inotify.linux._inotify',
                                      ['hgext/inotify/linux/_inotify.c']))
         packages.extend(['hgext.inotify', 'hgext.inotify.linux'])
 
+packagedata = {'mercurial': ['locale/*/LC_MESSAGES/hg.mo',
+                             'help/*.txt']}
+
+def ordinarypath(p):
+    return p and p[0] != '.' and p[-1] != '~'
+
+for root in ('templates',):
+    for curdir, dirs, files in os.walk(os.path.join('mercurial', root)):
+        curdir = curdir.split(os.sep, 1)[1]
+        dirs[:] = filter(ordinarypath, dirs)
+        for f in filter(ordinarypath, files):
+            f = os.path.join(curdir, f)
+            packagedata['mercurial'].append(f)
+
 datafiles = []
-for root in ('templates', 'i18n', 'help'):
-    for dir, dirs, files in os.walk(root):
-        dirs[:] = [x for x in dirs if not x.startswith('.')]
-        files = [x for x in files if not x.startswith('.')]
-        datafiles.append((os.path.join('mercurial', dir),
-                          [os.path.join(dir, file_) for file_ in files]))
+setupversion = version
+extra = {}
+
+if py2exeloaded:
+    extra['console'] = [
+        {'script':'hg',
+         'copyright':'Copyright (C) 2005-2010 Matt Mackall and others',
+         'product_version':version}]
+
+if os.name == 'nt':
+    # Windows binary file versions for exe/dll files must have the
+    # form W.X.Y.Z, where W,X,Y,Z are numbers in the range 0..65535
+    setupversion = version.split('+', 1)[0]
 
 setup(name='mercurial',
-      version=version,
+      version=setupversion,
       author='Matt Mackall',
       author_email='mpm@selenic.com',
       url='http://mercurial.selenic.com/',
@@ -274,8 +288,9 @@ setup(name='mercurial',
       license='GNU GPLv2+',
       scripts=scripts,
       packages=packages,
-      ext_modules=ext_modules,
+      ext_modules=extmodules,
       data_files=datafiles,
+      package_data=packagedata,
       cmdclass=cmdclass,
       options=dict(py2exe=dict(packages=['hgext', 'email']),
                    bdist_mpkg=dict(zipdist=True,

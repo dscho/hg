@@ -32,6 +32,7 @@ hg add second
 hg commit -m second -d '1000000 0' -u 'User Name <user@hostname>'
 echo third > third
 hg add third
+hg mv second fourth
 hg commit -m third -d "2020-01-01 10:01"
 
 # make sure user/global hgrc does not affect tests
@@ -60,6 +61,14 @@ echo '# compact style works'
 hg log --style compact
 hg log -v --style compact
 hg log --debug --style compact
+
+# Test xml styles
+echo '# xml style works (--style xml)'
+hg log --style xml
+echo '# xml style works (-v --style xml)'
+hg log -v --style xml
+echo '# xml style works (--debug --style xml)'
+hg log --debug --style xml
 
 echo '# error if style not readable'
 touch q
@@ -93,7 +102,8 @@ cat changelog
 
 echo "# keys work"
 for key in author branches date desc file_adds file_dels file_mods \
-        files manifest node parents rev tags diffstat; do
+        file_copies file_copies_switch files \
+        manifest node parents rev tags diffstat extras; do
     for mode in '' --verbose --debug; do
         hg log $mode --template "$key$mode: {$key}\n"
     done
@@ -184,5 +194,14 @@ cat > latesttag/.hg/hgrc <<EOF
 style = ~/styles/teststyle
 EOF
 hg -R latesttag tip
+
+echo '# test recursive showlist template (issue1989)'
+cat > style1989 <<EOF
+changeset = '{file_mods}{manifest}{extras}'
+file_mod  = 'M|{author|person}\n'
+manifest = '{rev},{author}\n'
+extra = '{key}: {author}\n'
+EOF
+hg -R latesttag log -r tip --style=style1989
 
 echo '# done'

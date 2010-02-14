@@ -1,6 +1,6 @@
 # minirst.py - minimal reStructuredText parser
 #
-# Copyright 2009 Matt Mackall <mpm@selenic.com> and others
+# Copyright 2009, 2010 Matt Mackall <mpm@selenic.com> and others
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
@@ -78,9 +78,9 @@ def findliteralblocks(blocks):
         #    | indented literal block    |
         #    +---------------------------+
         blocks[i]['type'] = 'paragraph'
-        if blocks[i]['lines'][-1].endswith('::') and i+1 < len(blocks):
+        if blocks[i]['lines'][-1].endswith('::') and i + 1 < len(blocks):
             indent = blocks[i]['indent']
-            adjustment = blocks[i+1]['indent'] - indent
+            adjustment = blocks[i + 1]['indent'] - indent
 
             if blocks[i]['lines'] == ['::']:
                 # Expanded form: remove block
@@ -104,16 +104,16 @@ def findliteralblocks(blocks):
                 adjustment -= m.end()
 
             # Mark the following indented blocks.
-            while i+1 < len(blocks) and blocks[i+1]['indent'] > indent:
-                blocks[i+1]['type'] = 'literal'
-                blocks[i+1]['indent'] -= adjustment
+            while i + 1 < len(blocks) and blocks[i + 1]['indent'] > indent:
+                blocks[i + 1]['type'] = 'literal'
+                blocks[i + 1]['indent'] -= adjustment
                 i += 1
         i += 1
     return blocks
 
-_bulletre = re.compile(r'(-|[0-9A-Za-z]+\.|\(?[0-9A-Za-z]+\)) ')
+_bulletre = re.compile(r'(-|[0-9A-Za-z]+\.|\(?[0-9A-Za-z]+\)|\|) ')
 _optionre = re.compile(r'^(--[a-z-]+)((?:[ =][a-zA-Z][\w-]*)?  +)(.*)$')
-_fieldre = re.compile(r':(?![: ])([^:]*)(?<! ):( +)(.*)')
+_fieldre = re.compile(r':(?![: ])([^:]*)(?<! ):[ ]+(.*)')
 _definitionre = re.compile(r'[^ ]')
 
 def splitparagraphs(blocks):
@@ -133,7 +133,7 @@ def splitparagraphs(blocks):
         item (but only if singleline is True).
         """
         line1 = lines[i]
-        line2 = i+1 < len(lines) and lines[i+1] or ''
+        line2 = i + 1 < len(lines) and lines[i + 1] or ''
         if not itemre.match(line1):
             return False
         if singleline:
@@ -153,10 +153,76 @@ def splitparagraphs(blocks):
                             items.append(dict(type=type, lines=[],
                                               indent=blocks[i]['indent']))
                         items[-1]['lines'].append(line)
-                    blocks[i:i+1] = items
+                    blocks[i:i + 1] = items
                     break
         i += 1
     return blocks
+
+
+_fieldwidth = 12
+
+def updatefieldlists(blocks):
+    """Find key and maximum key width for field lists."""
+    i = 0
+    while i < len(blocks):
+        if blocks[i]['type'] != 'field':
+            i += 1
+            continue
+
+        keywidth = 0
+        j = i
+        while j < len(blocks) and blocks[j]['type'] == 'field':
+            m = _fieldre.match(blocks[j]['lines'][0])
+            key, rest = m.groups()
+            blocks[j]['lines'][0] = rest
+            blocks[j]['key'] = key
+            keywidth = max(keywidth, len(key))
+            j += 1
+
+        for block in blocks[i:j]:
+            block['keywidth'] = keywidth
+        i = j + 1
+
+    return blocks
+
+
+def prunecontainers(blocks, keep):
+    """Prune unwanted containers.
+
+    The blocks must have a 'type' field, i.e., they should have been
+    run through findliteralblocks first.
+    """
+    pruned = []
+    i = 0
+    while i + 1 < len(blocks):
+        # Searching for a block that looks like this:
+        #
+        # +-------+---------------------------+
+        # | ".. container ::" type            |
+        # +---+                               |
+        #     | blocks                        |
+        #     +-------------------------------+
+        if (blocks[i]['type'] == 'paragraph' and
+            blocks[i]['lines'][0].startswith('.. container::')):
+            indent = blocks[i]['indent']
+            adjustment = blocks[i + 1]['indent'] - indent
+            containertype = blocks[i]['lines'][0][15:]
+            prune = containertype not in keep
+            if prune:
+                pruned.append(containertype)
+
+            # Always delete "..container:: type" block
+            del blocks[i]
+            j = i
+            while j < len(blocks) and blocks[j]['indent'] > indent:
+                if prune:
+                    del blocks[j]
+                    i -= 1 # adjust outer index
+                else:
+                    blocks[j]['indent'] -= adjustment
+                    j += 1
+        i += 1
+    return blocks, pruned
 
 
 def findsections(blocks):
@@ -194,7 +260,7 @@ def addmargins(blocks):
     """
     i = 1
     while i < len(blocks):
-        if (blocks[i]['type'] == blocks[i-1]['type'] and
+        if (blocks[i]['type'] == blocks[i - 1]['type'] and
             blocks[i]['type'] in ('bullet', 'option', 'field', 'definition')):
             i += 1
         else:
@@ -225,21 +291,33 @@ def formatblock(block, width):
                                                subsequent_indent=defindent))
     initindent = subindent = indent
     if block['type'] == 'bullet':
-        m = _bulletre.match(block['lines'][0])
-        if m:
+        if block['lines'][0].startswith('| '):
+            # Remove bullet for line blocks and add no extra
+            # indention.
+            block['lines'][0] = block['lines'][0][2:]
+        else:
+            m = _bulletre.match(block['lines'][0])
             subindent = indent + m.end() * ' '
     elif block['type'] == 'field':
-        m = _fieldre.match(block['lines'][0])
-        if m:
-            key, spaces, rest = m.groups()
-            # Turn ":foo: bar" into "foo   bar".
-            block['lines'][0] = '%s  %s%s' % (key, spaces, rest)
-            subindent = indent + (2 + len(key) + len(spaces)) * ' '
+        keywidth = block['keywidth']
+        key = block['key']
+
+        subindent = indent + _fieldwidth * ' '
+        if len(key) + 2 > _fieldwidth:
+            # key too large, use full line width
+            key = key.ljust(width)
+        elif keywidth + 2 < _fieldwidth:
+            # all keys are small, add only two spaces
+            key = key.ljust(keywidth + 2)
+            subindent = indent + (keywidth + 2) * ' '
+        else:
+            # mixed sizes, use fieldwidth for this one
+            key = key.ljust(_fieldwidth)
+        block['lines'][0] = key + block['lines'][0]
     elif block['type'] == 'option':
         m = _optionre.match(block['lines'][0])
-        if m:
-            option, arg, rest = m.groups()
-            subindent = indent + (len(option) + len(arg)) * ' '
+        option, arg, rest = m.groups()
+        subindent = indent + (len(option) + len(arg)) * ' '
 
     text = ' '.join(map(str.strip, block['lines']))
     return textwrap.fill(text, width=width,
@@ -247,24 +325,30 @@ def formatblock(block, width):
                          subsequent_indent=subindent)
 
 
-def format(text, width, indent=0):
+def format(text, width, indent=0, keep=None):
     """Parse and format the text according to width."""
     blocks = findblocks(text)
     for b in blocks:
         b['indent'] += indent
     blocks = findliteralblocks(blocks)
+    blocks, pruned = prunecontainers(blocks, keep or [])
     blocks = inlineliterals(blocks)
     blocks = splitparagraphs(blocks)
+    blocks = updatefieldlists(blocks)
     blocks = findsections(blocks)
     blocks = addmargins(blocks)
-    return '\n'.join(formatblock(b, width) for b in blocks)
+    text = '\n'.join(formatblock(b, width) for b in blocks)
+    if keep is None:
+        return text
+    else:
+        return text, pruned
 
 
 if __name__ == "__main__":
     from pprint import pprint
 
-    def debug(func, blocks):
-        blocks = func(blocks)
+    def debug(func, *args):
+        blocks = func(*args)
         print "*** after %s:" % func.__name__
         pprint(blocks)
         print
@@ -273,7 +357,10 @@ if __name__ == "__main__":
     text = open(sys.argv[1]).read()
     blocks = debug(findblocks, text)
     blocks = debug(findliteralblocks, blocks)
+    blocks = debug(prunecontainers, blocks, sys.argv[2:])
+    blocks = debug(inlineliterals, blocks)
     blocks = debug(splitparagraphs, blocks)
+    blocks = debug(updatefieldlists, blocks)
     blocks = debug(findsections, blocks)
     blocks = debug(addmargins, blocks)
     print '\n'.join(formatblock(b, 30) for b in blocks)

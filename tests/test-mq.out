@@ -21,11 +21,22 @@ Common tasks (use "hg help command" for more details):
   remove patch from applied stack           qpop
   refresh contents of top applied patch     qrefresh
 
+By default, mq will automatically use git patches when required to avoid
+losing file mode changes, copy records, binary files or empty files creations
+or deletions. This behaviour can be configured with:
+
+  [mq]
+  git = auto/keep/yes/no
+
+If set to 'keep', mq will obey the [diff] section configuration while
+preserving existing git patches upon qrefresh. If set to 'yes' or 'no', mq
+will override the [diff] section and always generate git or regular patches,
+possibly losing data in the second case.
+
 list of commands:
 
  qapplied     print the patches already applied
  qclone       clone main and patch repository at same time
- qcommit      commit changes in the queue repository
  qdelete      remove patches from queue
  qdiff        diff of the current patch and subsequent modifications
  qfinish      move applied patches into repository history
@@ -34,7 +45,6 @@ list of commands:
  qguard       set or print guards for a patch
  qheader      print the header of the topmost or specified patch
  qimport      import a patch
- qinit        init a new queue repository
  qnew         create a new patch
  qnext        print the name of the next patch
  qpop         pop the current patch off the stack
@@ -42,8 +52,6 @@ list of commands:
  qpush        push the next patch onto the stack
  qrefresh     update the current patch
  qrename      rename a patch
- qrestore     restore the queue state saved by a revision
- qsave        save current queue state
  qselect      set or print guarded patches to push
  qseries      print the entire series file
  qtop         print the name of the current patch
@@ -380,6 +388,7 @@ copy to copy
 diff --git a/new b/copy
 copy from new
 copy to copy
+% test file addition in slow path
 1 files updated, 0 files merged, 2 files removed, 0 files unresolved
 created new head
 2 files updated, 0 files merged, 1 files removed, 0 files unresolved
@@ -410,7 +419,7 @@ rename to baz
 2 baz (foo)
 diff --git a/bar b/bar
 diff --git a/foo b/baz
-
+% test file move chains in the slow path
 1 files updated, 0 files merged, 2 files removed, 0 files unresolved
 2 files updated, 0 files merged, 1 files removed, 0 files unresolved
 adding branch

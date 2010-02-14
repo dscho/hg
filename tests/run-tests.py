@@ -45,6 +45,7 @@ import difflib
 import errno
 import optparse
 import os
+import signal
 import subprocess
 import shutil
 import signal
@@ -130,6 +131,10 @@ def parseargs():
         help="use pure Python code instead of C extensions")
     parser.add_option("-3", "--py3k-warnings", action="store_true",
         help="enable Py3k warnings on Python 2.6+")
+    parser.add_option("--inotify", action="store_true",
+        help="enable inotify extension when running tests")
+    parser.add_option("--blacklist", action="append",
+        help="skip tests listed in the specified blacklist file")
 
     for option, default in defaults.items():
         defaults[option] = int(os.environ.get(*default))
@@ -195,6 +200,24 @@ def parseargs():
     if options.py3k_warnings:
         if sys.version_info[:2] < (2, 6) or sys.version_info[:2] >= (3, 0):
             parser.error('--py3k-warnings can only be used on Python 2.6+')
+    if options.blacklist:
+        blacklist = dict()
+        for filename in options.blacklist:
+            try:
+                path = os.path.expanduser(os.path.expandvars(filename))
+                f = open(path, "r")
+            except IOError, err:
+                if err.errno != errno.ENOENT:
+                    raise
+                print "warning: no such blacklist file: %s" % filename
+                continue
+
+            for line in f.readlines():
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    blacklist[line] = filename
+
+        options.blacklist = blacklist
 
     return (options, args)
 
@@ -217,7 +240,7 @@ def splitnewlines(text):
             if last:
                 lines.append(last)
             return lines
-        lines.append(text[i:n+1])
+        lines.append(text[i:n + 1])
         i = n + 1
 
 def parsehghaveoutput(lines):
@@ -237,9 +260,8 @@ def parsehghaveoutput(lines):
 
     return missing, failed
 
-def showdiff(expected, output):
-    for line in difflib.unified_diff(expected, output,
-            "Expected output", "Test output"):
+def showdiff(expected, output, ref, err):
+    for line in difflib.unified_diff(expected, output, ref, err):
         sys.stdout.write(line)
 
 def findprogram(program):
@@ -261,6 +283,31 @@ def checktools():
             vlog("# Found prerequisite", p, "at", found)
         else:
             print "WARNING: Did not find prerequisite tool: "+p
+
+def killdaemons():
+    # Kill off any leftover daemon processes
+    try:
+        fp = open(DAEMON_PIDS)
+        for line in fp:
+            try:
+                pid = int(line)
+            except ValueError:
+                continue
+            try:
+                os.kill(pid, 0)
+                vlog('# Killing daemon process %d' % pid)
+                os.kill(pid, signal.SIGTERM)
+                time.sleep(0.25)
+                os.kill(pid, 0)
+                vlog('# Daemon process %d is stuck - really killing it' % pid)
+                os.kill(pid, signal.SIGKILL)
+            except OSError, err:
+                if err.errno != errno.ESRCH:
+                    raise
+        fp.close()
+        os.unlink(DAEMON_PIDS)
+    except IOError:
+        pass
 
 def cleanup(options):
     if not options.keep_tmpdir:
@@ -293,10 +340,18 @@ def installhg(options):
     script = os.path.realpath(sys.argv[0])
     hgroot = os.path.dirname(os.path.dirname(script))
     os.chdir(hgroot)
+    nohome = '--home=""'
+    if os.name == 'nt':
+        # The --home="" trick works only on OS where os.sep == '/'
+        # because of a distutils convert_path() fast-path. Avoid it at
+        # least on Windows for now, deal with .pydistutils.cfg bugs
+        # when they happen.
+        nohome = ''
     cmd = ('%s setup.py %s clean --all'
            ' install --force --prefix="%s" --install-lib="%s"'
-           ' --install-scripts="%s" >%s 2>&1'
-           % (sys.executable, pure, INST, PYTHONDIR, BINDIR, installerrs))
+           ' --install-scripts="%s" %s >%s 2>&1'
+           % (sys.executable, pure, INST, PYTHONDIR, BINDIR, nohome,
+              installerrs))
     vlog("# Running", cmd)
     if os.system(cmd) == 0:
         if not options.verbose:
@@ -403,6 +458,14 @@ def run(cmd, options):
             ret = 0
     else:
         proc = Popen4(cmd)
+        def cleanup():
+            os.kill(proc.pid, signal.SIGTERM)
+            ret = proc.wait()
+            if ret == 0:
+                ret = signal.SIGTERM << 8
+            killdaemons()
+            return ret
+
         try:
             output = ''
             proc.tochild.close()
@@ -412,12 +475,14 @@ def run(cmd, options):
                 ret = os.WEXITSTATUS(ret)
         except Timeout:
             vlog('# Process %d timed out - killing it' % proc.pid)
-            os.kill(proc.pid, signal.SIGTERM)
-            ret = proc.wait()
-            if ret == 0:
-                ret = signal.SIGTERM << 8
+            ret = cleanup()
             output += ("\n### Abort: timeout after %d seconds.\n"
                        % options.timeout)
+        except KeyboardInterrupt:
+            vlog('# Handling keyboard interrupt')
+            cleanup()
+            raise
+
     return ret, splitnewlines(output)
 
 def runone(options, test, skips, fails):
@@ -430,13 +495,13 @@ def runone(options, test, skips, fails):
         if not options.verbose:
             skips.append((test, msg))
         else:
-            print "\nSkipping %s: %s" % (test, msg)
+            print "\nSkipping %s: %s" % (testpath, msg)
         return None
 
     def fail(msg):
         fails.append((test, msg))
         if not options.nodiff:
-            print "\nERROR: %s %s" % (test, msg)
+            print "\nERROR: %s %s" % (testpath, msg)
         return None
 
     vlog("# Test", test)
@@ -449,20 +514,19 @@ def runone(options, test, skips, fails):
     hgrc.write('backout = -d "0 0"\n')
     hgrc.write('commit = -d "0 0"\n')
     hgrc.write('tag = -d "0 0"\n')
+    if options.inotify:
+        hgrc.write('[extensions]\n')
+        hgrc.write('inotify=\n')
+        hgrc.write('[inotify]\n')
+        hgrc.write('pidfile=%s\n' % DAEMON_PIDS)
+        hgrc.write('appendpid=True\n')
     hgrc.close()
 
-    err = os.path.join(TESTDIR, test+".err")
-    ref = os.path.join(TESTDIR, test+".out")
     testpath = os.path.join(TESTDIR, test)
-
+    ref = os.path.join(TESTDIR, test+".out")
+    err = os.path.join(TESTDIR, test+".err")
     if os.path.exists(err):
         os.remove(err)       # Remove any previous output files
-
-    # Make a tmp subdirectory to work in
-    tmpd = os.path.join(HGTMP, test)
-    os.mkdir(tmpd)
-    os.chdir(tmpd)
-
     try:
         tf = open(testpath)
         firstline = tf.readline().rstrip()
@@ -491,6 +555,11 @@ def runone(options, test, skips, fails):
         elif not os.access(testpath, os.X_OK):
             return skip("not executable")
         cmd = '"%s"' % testpath
+
+    # Make a tmp subdirectory to work in
+    tmpd = os.path.join(HGTMP, test)
+    os.mkdir(tmpd)
+    os.chdir(tmpd)
 
     if options.timeout > 0:
         signal.alarm(options.timeout)
@@ -537,7 +606,7 @@ def runone(options, test, skips, fails):
         else:
             fail("output changed")
         if not options.nodiff:
-            showdiff(refout, out)
+            showdiff(refout, out, ref, err)
         ret = 1
     elif ret:
         mark = '!'
@@ -554,29 +623,7 @@ def runone(options, test, skips, fails):
             f.write(line)
         f.close()
 
-    # Kill off any leftover daemon processes
-    try:
-        fp = open(DAEMON_PIDS)
-        for line in fp:
-            try:
-                pid = int(line)
-            except ValueError:
-                continue
-            try:
-                os.kill(pid, 0)
-                vlog('# Killing daemon process %d' % pid)
-                os.kill(pid, signal.SIGTERM)
-                time.sleep(0.25)
-                os.kill(pid, 0)
-                vlog('# Daemon process %d is stuck - really killing it' % pid)
-                os.kill(pid, signal.SIGKILL)
-            except OSError, err:
-                if err.errno != errno.ESRCH:
-                    raise
-        fp.close()
-        os.unlink(DAEMON_PIDS)
-    except IOError:
-        pass
+    killdaemons()
 
     os.chdir(TESTDIR)
     if not options.keep_tmpdir:
@@ -633,9 +680,11 @@ def runchildren(options, tests):
     jobs = [[] for j in xrange(options.jobs)]
     while tests:
         for job in jobs:
-            if not tests: break
+            if not tests:
+                break
             job.append(tests.pop())
     fps = {}
+
     for j, job in enumerate(jobs):
         if not job:
             continue
@@ -647,6 +696,7 @@ def runchildren(options, tests):
         vlog(' '.join(cmdline))
         fps[os.spawnvp(os.P_NOWAIT, cmdline[0], cmdline)] = os.fdopen(rfd, 'r')
         os.close(wfd)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     failures = 0
     tested, skipped, failed = 0, 0, 0
     skips = []
@@ -655,7 +705,10 @@ def runchildren(options, tests):
         pid, status = os.wait()
         fp = fps.pop(pid)
         l = fp.read().splitlines()
-        test, skip, fail = map(int, l[:3])
+        try:
+            test, skip, fail = map(int, l[:3])
+        except ValueError:
+            test, skip, fail = 0, 0, 0
         split = -fail or len(l)
         for s in l[3:split]:
             skips.append(s.split(" ", 1))
@@ -715,6 +768,13 @@ def runtests(options, tests):
         fails = []
 
         for test in tests:
+            if options.blacklist:
+                filename = options.blacklist.get(test)
+                if filename is not None:
+                    skips.append((test, "blacklisted (%s)" % filename))
+                    skipped += 1
+                    continue
+
             if options.retest and not os.path.exists(test + ".err"):
                 skipped += 1
                 continue
@@ -725,7 +785,7 @@ def runtests(options, tests):
                     if k in t:
                         break
                 else:
-                    skipped +=1
+                    skipped += 1
                     continue
 
             ret = runone(options, test, skips, fails)
@@ -882,6 +942,7 @@ def main():
         else:
             runtests(options, tests)
     finally:
+        time.sleep(1)
         cleanup(options)
 
 main()

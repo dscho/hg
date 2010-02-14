@@ -1,11 +1,18 @@
 #!/usr/bin/env python
 
+from pprint import pprint
 from mercurial import minirst
 
-def debugformat(title, text, width):
+def debugformat(title, text, width, **kwargs):
     print "%s formatted to fit within %d characters:" % (title, width)
     print "-" * 70
-    print minirst.format(text, width)
+    formatted = minirst.format(text, width, **kwargs)
+    if type(formatted) == tuple:
+        print formatted[0]
+        print "-" * 70
+        pprint(formatted[1])
+    else:
+        print formatted
     print "-" * 70
     print
 
@@ -15,10 +22,7 @@ This is some text in the first paragraph.
   A small indented paragraph.
   It is followed by some lines
   containing random whitespace.
- 
-  
-   
-The third and final paragraph.
+ \n  \n   \nThe third and final paragraph.
 """
 
 debugformat('paragraphs', paragraphs, 60)
@@ -102,6 +106,12 @@ We can have indented lists:
 
 1) Another
 2) List
+
+Line blocks are also a form of list:
+
+| This is the first line.
+  The line continues here.
+| This is the second line.
 """
 
 debugformat('lists', lists, 60)
@@ -134,14 +144,37 @@ debugformat('options', options, 30)
 
 
 fields = """
-Field lists give a simple two-column layout:
+:a: First item.
+:ab: Second item. Indentation and wrapping
+     is handled automatically.
 
-:key:         The whitespace following the key is
-  significant for the wrapping of this text.
-:another key: More text.
-    The indentation on the following
-    lines is not significant.
+Next list:
+
+:small: The larger key below triggers full indentation here.
+:much too large: This key is big enough to get its own line.
 """
 
 debugformat('fields', fields, 60)
 debugformat('fields', fields, 30)
+
+containers = """
+Normal output.
+
+.. container:: debug
+
+   Initial debug output.
+
+.. container:: verbose
+
+   Verbose output.
+
+   .. container:: debug
+
+      Debug output.
+"""
+
+debugformat('containers (normal)', containers, 60)
+debugformat('containers (verbose)', containers, 60, keep=['verbose'])
+debugformat('containers (debug)', containers, 60, keep=['debug'])
+debugformat('containers (verbose debug)', containers, 60,
+            keep=['verbose', 'debug'])

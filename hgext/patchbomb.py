@@ -83,7 +83,7 @@ def prompt(ui, prompt, default=None, rest=':'):
     if not ui.interactive():
         if default is not None:
             return default
-        raise util.Abort(_("%s Please enter a valid value" % (prompt+rest)))
+        raise util.Abort(_("%s Please enter a valid value" % (prompt + rest)))
     if default:
         prompt += ' [%s]' % default
     prompt += rest
@@ -233,7 +233,8 @@ def patchbomb(ui, repo, *revs, **opts):
     def outgoing(dest, revs):
         '''Return the revisions present locally but not in dest'''
         dest = ui.expandpath(dest or 'default-push', dest or 'default')
-        dest, revs, checkout = hg.parseurl(dest, revs)
+        dest, branches = hg.parseurl(dest)
+        revs, checkout = hg.addbranchrevs(repo, repo, branches, revs)
         if revs:
             revs = [repo.lookup(rev) for rev in revs]
         other = hg.repository(cmdutil.remoteui(repo, opts), dest)
@@ -384,20 +385,21 @@ def patchbomb(ui, repo, *revs, **opts):
     else:
         msgs = getpatchmsgs(list(getpatches(revs)))
 
-    def getaddrs(opt, prpt, default = None):
-        addrs = opts.get(opt) or (ui.config('email', opt) or
-                                  ui.config('patchbomb', opt) or
-                                  prompt(ui, prpt, default)).split(',')
-        return [mail.addressencode(ui, a.strip(), _charsets, opts.get('test'))
-                for a in addrs if a.strip()]
+    def getaddrs(opt, prpt=None, default=None):
+        if opts.get(opt):
+            return mail.addrlistencode(ui, opts.get(opt), _charsets,
+                                       opts.get('test'))
+
+        addrs = (ui.config('email', opt) or
+                 ui.config('patchbomb', opt) or '')
+        if not addrs and prpt:
+            addrs = prompt(ui, prpt, default)
+
+        return mail.addrlistencode(ui, [addrs], _charsets, opts.get('test'))
 
     to = getaddrs('to', 'To')
     cc = getaddrs('cc', 'Cc', '')
-
-    bcc = opts.get('bcc') or (ui.config('email', 'bcc') or
-                          ui.config('patchbomb', 'bcc') or '').split(',')
-    bcc = [mail.addressencode(ui, a.strip(), _charsets, opts.get('test'))
-           for a in bcc if a.strip()]
+    bcc = getaddrs('bcc')
 
     ui.write('\n')
 

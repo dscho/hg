@@ -35,7 +35,8 @@ def _runcatch(ui, args):
 
     for name in 'SIGBREAK', 'SIGHUP', 'SIGTERM':
         num = getattr(signal, name, None)
-        if num: signal.signal(num, catchterm)
+        if num:
+            signal.signal(num, catchterm)
 
     try:
         try:
@@ -92,7 +93,12 @@ def _runcatch(ui, args):
         ui.warn(_("killed!\n"))
     except error.UnknownCommand, inst:
         ui.warn(_("hg: unknown command '%s'\n") % inst.args[0])
-        commands.help_(ui, 'shortlist')
+        try:
+            # check if the command is in a disabled extension
+            # (but don't check for extensions themselves)
+            commands.help_(ui, inst.args[0], unknowncmd=True)
+        except error.UnknownCommand:
+            commands.help_(ui, 'shortlist')
     except util.Abort, inst:
         ui.warn(_("abort: %s\n") % inst)
     except ImportError, inst:
@@ -156,14 +162,6 @@ def _runcatch(ui, args):
 
     return -1
 
-def _findrepo(p):
-    while not os.path.isdir(os.path.join(p, ".hg")):
-        oldp, p = p, os.path.dirname(p)
-        if p == oldp:
-            return None
-
-    return p
-
 def aliasargs(fn):
     if hasattr(fn, 'args'):
         return fn.args
@@ -177,6 +175,7 @@ class cmdalias(object):
         self.opts = []
         self.help = ''
         self.norepo = True
+        self.badalias = False
 
         try:
             cmdutil.findcmd(self.name, cmdtable, True)
@@ -189,6 +188,7 @@ class cmdalias(object):
                 ui.warn(_("no definition for alias '%s'\n") % self.name)
                 return 1
             self.fn = fn
+            self.badalias = True
 
             return
 
@@ -205,18 +205,31 @@ class cmdalias(object):
             self.args = aliasargs(self.fn) + args
             if cmd not in commands.norepo.split(' '):
                 self.norepo = False
+            if self.help.startswith("hg " + cmd):
+                # drop prefix in old-style help lines so hg shows the alias
+                self.help = self.help[4 + len(cmd):]
+            self.__doc__ = _("alias for: hg %s\n\n%s") \
+                               % (definition, self.fn.__doc__)
+
         except error.UnknownCommand:
             def fn(ui, *args):
                 ui.warn(_("alias '%s' resolves to unknown command '%s'\n") \
                             % (self.name, cmd))
+                try:
+                    # check if the command is in a disabled extension
+                    commands.help_(ui, cmd, unknowncmd=True)
+                except error.UnknownCommand:
+                    pass
                 return 1
             self.fn = fn
+            self.badalias = True
         except error.AmbiguousCommand:
             def fn(ui, *args):
                 ui.warn(_("alias '%s' resolves to ambiguous command '%s'\n") \
                             % (self.name, cmd))
                 return 1
             self.fn = fn
+            self.badalias = True
 
     def __call__(self, ui, *args, **opts):
         if self.shadows:
@@ -245,14 +258,14 @@ def _parse(ui, args):
 
     if args:
         cmd, args = args[0], args[1:]
-        aliases, i = cmdutil.findcmd(cmd, commands.table,
+        aliases, entry = cmdutil.findcmd(cmd, commands.table,
                                      ui.config("ui", "strict"))
         cmd = aliases[0]
-        args = aliasargs(i[0]) + args
+        args = aliasargs(entry[0]) + args
         defaults = ui.config("defaults", cmd)
         if defaults:
             args = map(util.expandpath, shlex.split(defaults)) + args
-        c = list(i[1])
+        c = list(entry[1])
     else:
         cmd = None
         c = []
@@ -272,7 +285,7 @@ def _parse(ui, args):
         options[n] = cmdoptions[n]
         del cmdoptions[n]
 
-    return (cmd, cmd and i[0] or None, args, options, cmdoptions)
+    return (cmd, cmd and entry[0] or None, args, options, cmdoptions)
 
 def _parseconfig(ui, config):
     """parse the --config options from the command line"""
@@ -339,7 +352,7 @@ def _dispatch(ui, args):
         os.chdir(cwd[-1])
 
     # read the local repository .hgrc into a local ui object
-    path = _findrepo(os.getcwd()) or ""
+    path = cmdutil.findrepo(os.getcwd()) or ""
     if not path:
         lui = ui
     else:
@@ -438,7 +451,7 @@ def _dispatch(ui, args):
         except error.RepoError:
             if cmd not in commands.optionalrepo.split():
                 if args and not path: # try to infer -R from command args
-                    repos = map(_findrepo, args)
+                    repos = map(cmdutil.findrepo, args)
                     guess = repos[0]
                     if guess and repos.count(guess) == len(repos):
                         return _dispatch(ui, ['--repository', guess] + fullargs)

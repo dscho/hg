@@ -18,8 +18,8 @@
 
 '''colorize output from some commands
 
-This extension modifies the status command to add color to its output
-to reflect file status, the qseries command to add color to reflect
+This extension modifies the status and resolve commands to add color to their
+output to reflect file status, the qseries command to add color to reflect
 patch status (applied, unapplied, missing), and to diff-related
 commands to highlight additions, removals, diff headers, and trailing
 whitespace.
@@ -56,6 +56,11 @@ Default effects may be overridden from the .hgrc file::
   diff.inserted = green
   diff.changed = white
   diff.trailingwhitespace = bold red_background
+
+  resolve.unresolved = red bold
+  resolve.resolved = green bold
+
+  bookmarks.current = green
 '''
 
 import os, sys
@@ -93,18 +98,17 @@ def render_effects(text, effects):
     stop = '\033[' + str(_effect_params['none']) + 'm'
     return ''.join([start, text, stop])
 
-def colorstatus(orig, ui, repo, *pats, **opts):
-    '''run the status command with colored output'''
-
-    delimiter = opts['print0'] and '\0' or '\n'
+def _colorstatuslike(abbreviations, effectdefs, orig, ui, repo, *pats, **opts):
+    '''run a status-like command with colorized output'''
+    delimiter = opts.get('print0') and '\0' or '\n'
 
     nostatus = opts.get('no_status')
     opts['no_status'] = False
-    # run status and capture its output
+    # run original command and capture its output
     ui.pushbuffer()
     retval = orig(ui, repo, *pats, **opts)
     # filter out empty strings
-    lines_with_status = [ line for line in ui.popbuffer().split(delimiter) if line ]
+    lines_with_status = [line for line in ui.popbuffer().split(delimiter) if line]
 
     if nostatus:
         lines = [l[2:] for l in lines_with_status]
@@ -113,12 +117,13 @@ def colorstatus(orig, ui, repo, *pats, **opts):
 
     # apply color to output and display it
     for i in xrange(len(lines)):
-        status = _status_abbreviations[lines_with_status[i][0]]
-        effects = _status_effects[status]
+        status = abbreviations[lines_with_status[i][0]]
+        effects = effectdefs[status]
         if effects:
             lines[i] = render_effects(lines[i], effects)
         ui.write(lines[i] + delimiter)
     return retval
+
 
 _status_abbreviations = { 'M': 'modified',
                           'A': 'added',
@@ -138,6 +143,42 @@ _status_effects = { 'modified': ['blue', 'bold'],
                     'clean': ['none'],
                     'copied': ['none'], }
 
+def colorstatus(orig, ui, repo, *pats, **opts):
+    '''run the status command with colored output'''
+    return _colorstatuslike(_status_abbreviations, _status_effects,
+                            orig, ui, repo, *pats, **opts)
+
+
+_resolve_abbreviations = { 'U': 'unresolved',
+                           'R': 'resolved', }
+
+_resolve_effects = { 'unresolved': ['red', 'bold'],
+                     'resolved': ['green', 'bold'], }
+
+def colorresolve(orig, ui, repo, *pats, **opts):
+    '''run the resolve command with colored output'''
+    if not opts.get('list'):
+        # only colorize for resolve -l
+        return orig(ui, repo, *pats, **opts)
+    return _colorstatuslike(_resolve_abbreviations, _resolve_effects,
+                            orig, ui, repo, *pats, **opts)
+
+
+_bookmark_effects = { 'current': ['green'] }
+
+def colorbookmarks(orig, ui, repo, *pats, **opts):
+    def colorize(orig, s):
+        lines = s.split('\n')
+        for i, line in enumerate(lines):
+            if line.startswith(" *"):
+                lines[i] = render_effects(line, _bookmark_effects['current'])
+        orig('\n'.join(lines))
+    oldwrite = extensions.wrapfunction(ui, 'write', colorize)
+    try:
+        orig(ui, repo, *pats, **opts)
+    finally:
+        ui.write = oldwrite
+
 def colorqseries(orig, ui, repo, *dummy, **opts):
     '''run the qseries command with colored output'''
     ui.pushbuffer()
@@ -149,8 +190,8 @@ def colorqseries(orig, ui, repo, *dummy, **opts):
         if opts['missing']:
             effects = _patch_effects['missing']
         # Determine if patch is applied.
-        elif [ applied for applied in repo.mq.applied
-               if patchname == applied.name ]:
+        elif [applied for applied in repo.mq.applied
+               if patchname == applied.name]:
             effects = _patch_effects['applied']
         else:
             effects = _patch_effects['unapplied']
@@ -213,6 +254,16 @@ def colordiff(orig, ui, repo, *pats, **opts):
     finally:
         ui.write = oldwrite
 
+def colorchurn(orig, ui, repo, *pats, **opts):
+    '''run the churn command with colored output'''
+    if not opts.get('diffstat'):
+        return orig(ui, repo, *pats, **opts)
+    oldwrite = extensions.wrapfunction(ui, 'write', colordiffstat)
+    try:
+        orig(ui, repo, *pats, **opts)
+    finally:
+        ui.write = oldwrite
+
 _diff_prefixes = [('diff', 'diffline'),
                   ('copy', 'extended'),
                   ('rename', 'extended'),
@@ -243,6 +294,7 @@ def extsetup(ui):
     _setupcmd(ui, 'outgoing', commands.table, None, _diff_effects)
     _setupcmd(ui, 'tip', commands.table, None, _diff_effects)
     _setupcmd(ui, 'status', commands.table, colorstatus, _status_effects)
+    _setupcmd(ui, 'resolve', commands.table, colorresolve, _resolve_effects)
 
     try:
         mq = extensions.find('mq')
@@ -259,7 +311,19 @@ def extsetup(ui):
 
     if mq and rec:
         _setupcmd(ui, 'qrecord', rec.cmdtable, colordiff, _diff_effects)
+    try:
+        churn = extensions.find('churn')
+        _setupcmd(ui, 'churn', churn.cmdtable, colorchurn, _diff_effects)
+    except KeyError:
+        churn = None
 
+    try:
+        bookmarks = extensions.find('bookmarks')
+        _setupcmd(ui, 'bookmarks', bookmarks.cmdtable, colorbookmarks,
+                  _bookmark_effects)
+    except KeyError:
+        # The bookmarks extension is not enabled
+        pass
 
 def _setupcmd(ui, cmd, table, func, effectsmap):
     '''patch in command to command table and load effect map'''
@@ -268,10 +332,14 @@ def _setupcmd(ui, cmd, table, func, effectsmap):
         if (opts['no_color'] or opts['color'] == 'never' or
             (opts['color'] == 'auto' and (os.environ.get('TERM') == 'dumb'
                                           or not sys.__stdout__.isatty()))):
+            del opts['no_color']
+            del opts['color']
             return orig(*args, **opts)
 
         oldshowpatch = extensions.wrapfunction(cmdutil.changeset_printer,
                                                'showpatch', colorshowpatch)
+        del opts['no_color']
+        del opts['color']
         try:
             if func is not None:
                 return func(orig, *args, **opts)

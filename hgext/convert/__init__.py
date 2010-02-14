@@ -165,6 +165,15 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
         matched. If a match occurs, then the conversion process will
         add the most recent revision on the branch indicated in the
         regex as the second parent of the changeset.
+    --config hook.cvslog
+        Specify a Python function to be called at the end of gathering
+        the CVS log. The function is passed a list with the log entries,
+        and can modify the entries in-place, or add or delete them.
+    --config hook.cvschangesets
+        Specify a Python function to be called after the changesets
+        are calculated from the the CVS log. The function is passed
+        a list with the changeset entries, and can modify the changesets
+        in-place, or add or delete them.
 
     An additional "debugcvsps" Mercurial command allows the builtin
     changeset merging code to be run without doing a conversion. Its
@@ -270,7 +279,8 @@ cmdtable = {
           # Main options shared with cvsps-2.1
           ('b', 'branches', [], _('only return changes on specified branches')),
           ('p', 'prefix', '', _('prefix to remove from file names')),
-          ('r', 'revisions', [], _('only return changes after or between specified tags')),
+          ('r', 'revisions', [],
+           _('only return changes after or between specified tags')),
           ('u', 'update-cache', None, _("update cvs log cache")),
           ('x', 'new-cache', None, _("create new cvs log cache")),
           ('z', 'fuzz', 60, _('set commit time fuzz in seconds')),

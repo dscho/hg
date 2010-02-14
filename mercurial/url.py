@@ -30,18 +30,18 @@ def netlocsplit(netloc):
     if a == -1:
         user, passwd = None, None
     else:
-        userpass, netloc = netloc[:a], netloc[a+1:]
+        userpass, netloc = netloc[:a], netloc[a + 1:]
         c = userpass.find(':')
         if c == -1:
             user, passwd = urllib.unquote(userpass), None
         else:
             user = urllib.unquote(userpass[:c])
-            passwd = urllib.unquote(userpass[c+1:])
+            passwd = urllib.unquote(userpass[c + 1:])
     c = netloc.find(':')
     if c == -1:
         host, port = netloc, None
     else:
-        host, port = netloc[:c], netloc[c+1:]
+        host, port = netloc[:c], netloc[c + 1:]
     return host, port, user, passwd
 
 def netlocunsplit(host, port, user=None, passwd=None):
@@ -89,7 +89,8 @@ def quotepath(path):
     l = list(path)
     for i in xrange(len(l)):
         c = l[i]
-        if c == '%' and i + 2 < len(l) and (l[i+1] in _hex and l[i+2] in _hex):
+        if (c == '%' and i + 2 < len(l) and
+            l[i + 1] in _hex and l[i + 2] in _hex):
             pass
         elif c not in _safeset:
             l[i] = '%%%02X' % ord(c)
@@ -148,7 +149,8 @@ class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
         bestauth = None
         for auth in config.itervalues():
             prefix = auth.get('prefix')
-            if not prefix: continue
+            if not prefix:
+                continue
             p = prefix.split('://', 1)
             if len(p) > 1:
                 schemes, prefix = [p[0]], p[1]
@@ -180,7 +182,7 @@ class proxyhandler(urllib2.ProxyHandler):
                 proxypasswd = ui.config("http_proxy", "passwd")
 
             # see if we should use a proxy for this url
-            no_list = [ "localhost", "127.0.0.1" ]
+            no_list = ["localhost", "127.0.0.1"]
             no_list.extend([p.lower() for
                             p in ui.configlist("http_proxy", "no")])
             no_list.extend([p.strip().lower() for
@@ -253,17 +255,54 @@ if has_https:
         # avoid using deprecated/broken FakeSocket in python 2.6
         import ssl
         _ssl_wrap_socket = ssl.wrap_socket
+        CERT_REQUIRED = ssl.CERT_REQUIRED
     except ImportError:
-        def _ssl_wrap_socket(sock, key_file, cert_file):
+        CERT_REQUIRED = 2
+
+        def _ssl_wrap_socket(sock, key_file, cert_file,
+                             cert_reqs=CERT_REQUIRED, ca_certs=None):
+            if ca_certs:
+                raise util.Abort(_(
+                    'certificate checking requires Python 2.6'))
+
             ssl = socket.ssl(sock, key_file, cert_file)
             return httplib.FakeSocket(sock, ssl)
+
+        _GLOBAL_DEFAULT_TIMEOUT = object()
+
+    try:
+        _create_connection = socket.create_connection
+    except AttributeError:
+        def _create_connection(address, timeout=_GLOBAL_DEFAULT_TIMEOUT,
+                               source_address=None):
+            # lifted from Python 2.6
+
+            msg = "getaddrinfo returns an empty list"
+            host, port = address
+            for res in socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM):
+                af, socktype, proto, canonname, sa = res
+                sock = None
+                try:
+                    sock = socket.socket(af, socktype, proto)
+                    if timeout is not _GLOBAL_DEFAULT_TIMEOUT:
+                        sock.settimeout(timeout)
+                    if source_address:
+                        sock.bind(source_address)
+                    sock.connect(sa)
+                    return sock
+
+                except socket.error, msg:
+                    if sock is not None:
+                        sock.close()
+
+            raise socket.error, msg
 
 class httpconnection(keepalive.HTTPConnection):
     # must be able to send big bundle as stream.
     send = _gen_sendfile(keepalive.HTTPConnection)
 
     def connect(self):
-        if has_https and self.realhost: # use CONNECT proxy
+        if has_https and self.realhostport: # use CONNECT proxy
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((self.host, self.port))
             if _generic_proxytunnel(self):
@@ -296,21 +335,16 @@ def _generic_start_transaction(handler, h, req):
     if new_tunnel or tunnel_host == req.get_full_url(): # has proxy
         urlparts = urlparse.urlparse(tunnel_host)
         if new_tunnel or urlparts[0] == 'https': # only use CONNECT for HTTPS
-            if ':' in urlparts[1]:
-                realhost, realport = urlparts[1].split(':')
-                realport = int(realport)
-            else:
-                realhost = urlparts[1]
-                realport = 443
+            realhostport = urlparts[1]
+            if realhostport[-1] == ']' or ':' not in realhostport:
+                realhostport += ':443'
 
-            h.realhost = realhost
-            h.realport = realport
+            h.realhostport = realhostport
             h.headers = req.headers.copy()
             h.headers.update(handler.parent.addheaders)
             return
 
-    h.realhost = None
-    h.realport = None
+    h.realhostport = None
     h.headers = None
 
 def _generic_proxytunnel(self):
@@ -318,7 +352,7 @@ def _generic_proxytunnel(self):
             [(x, self.headers[x]) for x in self.headers
              if x.lower().startswith('proxy-')])
     self._set_hostport(self.host, self.port)
-    self.send('CONNECT %s:%d HTTP/1.0\r\n' % (self.realhost, self.realport))
+    self.send('CONNECT %s HTTP/1.0\r\n' % self.realhostport)
     for header in proxyheaders.iteritems():
         self.send('%s: %s\r\n' % header)
     self.send('\r\n')
@@ -425,6 +459,21 @@ if has_https:
     class BetterHTTPS(httplib.HTTPSConnection):
         send = keepalive.safesend
 
+        def connect(self):
+            if hasattr(self, 'ui'):
+                cacerts = self.ui.config('web', 'cacerts')
+            else:
+                cacerts = None
+
+            if cacerts:
+                sock = _create_connection((self.host, self.port))
+                self.sock = _ssl_wrap_socket(sock, self.key_file,
+                        self.cert_file, cert_reqs=CERT_REQUIRED,
+                        ca_certs=cacerts)
+                self.ui.debug(_('server identity verification succeeded\n'))
+            else:
+                httplib.HTTPSConnection.connect(self)
+
     class httpsconnection(BetterHTTPS):
         response_class = keepalive.HTTPResponse
         # must be able to send big bundle as stream.
@@ -432,11 +481,12 @@ if has_https:
         getresponse = keepalive.wrapgetresponse(httplib.HTTPSConnection)
 
         def connect(self):
-            if self.realhost: # use CONNECT proxy
+            if self.realhostport: # use CONNECT proxy
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.connect((self.host, self.port))
                 if _generic_proxytunnel(self):
-                    self.sock = _ssl_wrap_socket(self.sock, self.cert_file, self.key_file)
+                    self.sock = _ssl_wrap_socket(self.sock, self.cert_file,
+                                                 self.key_file)
             else:
                 BetterHTTPS.connect(self)
 
@@ -455,7 +505,7 @@ if has_https:
             self.auth = self.pwmgr.readauthtoken(req.get_full_url())
             return self.do_open(self._makeconnection, req)
 
-        def _makeconnection(self, host, port=443, *args, **kwargs):
+        def _makeconnection(self, host, port=None, *args, **kwargs):
             keyfile = None
             certfile = None
 
@@ -470,14 +520,9 @@ if has_https:
                 keyfile = self.auth['key']
                 certfile = self.auth['cert']
 
-            # let host port take precedence
-            if ':' in host and '[' not in host or ']:' in host:
-                host, port = host.rsplit(':', 1)
-                port = int(port)
-                if '[' in host:
-                    host = host[1:-1]
-
-            return httpsconnection(host, port, keyfile, certfile, *args, **kwargs)
+            conn = httpsconnection(host, port, keyfile, certfile, *args, **kwargs)
+            conn.ui = self.ui
+            return conn
 
 # In python < 2.5 AbstractDigestAuthHandler raises a ValueError if
 # it doesn't know about the auth type requested.  This can happen if

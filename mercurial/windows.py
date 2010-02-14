@@ -7,7 +7,7 @@
 
 from i18n import _
 import osutil, error
-import errno, msvcrt, os, re, sys, random
+import errno, msvcrt, os, re, sys, random, subprocess
 
 nulldev = 'NUL:'
 umask = 002
@@ -41,13 +41,14 @@ class winstdout(object):
             limit = 16000
             l = len(s)
             start = 0
-            self.softspace = 0;
+            self.softspace = 0
             while start < l:
                 end = start + limit
                 self.fp.write(s[start:end])
                 start = end
         except IOError, inst:
-            if inst.errno != 0: raise
+            if inst.errno != 0:
+                raise
             self.close()
             raise IOError(errno.EPIPE, 'Broken pipe')
 
@@ -55,7 +56,8 @@ class winstdout(object):
         try:
             return self.fp.flush()
         except IOError, inst:
-            if inst.errno != errno.EINVAL: raise
+            if inst.errno != errno.EINVAL:
+                raise
             self.close()
             raise IOError(errno.EPIPE, 'Broken pipe')
 
@@ -203,7 +205,7 @@ def find_exe(command):
         executable = findexisting(os.path.join(path, command))
         if executable is not None:
             return executable
-    return None
+    return findexisting(os.path.expanduser(os.path.expandvars(command)))
 
 def set_signal_handler():
     try:
@@ -215,7 +217,6 @@ def statfiles(files):
     '''Stat each file in files and yield stat or None if file does not exist.
     Cluster and cache stat per directory to minimize number of OS stat calls.'''
     ncase = os.path.normcase
-    sep   = os.sep
     dircache = {} # dirname -> filename -> status | None if file does not exist
     for nf in files:
         nf  = ncase(nf)
@@ -320,6 +321,40 @@ def rename(src, dst):
             # Ideally, we would notify the user here.
             pass
         os.rename(src, dst)
+
+def spawndetached(args):
+    # No standard library function really spawns a fully detached
+    # process under win32 because they allocate pipes or other objects
+    # to handle standard streams communications. Passing these objects
+    # to the child process requires handle inheritance to be enabled
+    # which makes really detached processes impossible.
+    class STARTUPINFO:
+        dwFlags = subprocess.STARTF_USESHOWWINDOW
+        hStdInput = None
+        hStdOutput = None
+        hStdError = None
+        wShowWindow = subprocess.SW_HIDE
+
+    args = subprocess.list2cmdline(args)
+    # Not running the command in shell mode makes python26 hang when
+    # writing to hgweb output socket.
+    comspec = os.environ.get("COMSPEC", "cmd.exe")
+    args = comspec + " /c " + args
+    hp, ht, pid, tid = subprocess.CreateProcess(
+        None, args,
+        # no special security
+        None, None,
+        # Do not inherit handles
+        0,
+        # DETACHED_PROCESS
+        0x00000008,
+        os.environ,
+        os.getcwd(),
+        STARTUPINFO())
+    return pid
+
+def gethgcmd():
+    return [sys.executable] + sys.argv[:1]
 
 try:
     # override functions with win32 versions if possible

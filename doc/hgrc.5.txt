@@ -72,16 +72,19 @@ ones.
     in ``/shared/tools/etc/mercurial/hgrc``. Options in these files apply
     to all Mercurial commands executed by any user in any directory.
 
-| (Windows) ``C:\Mercurial\Mercurial.ini``
-| (Windows) ``HKEY_LOCAL_MACHINE\SOFTWARE\Mercurial``
 | (Windows) ``<install-dir>\Mercurial.ini``
+| (Windows) ``<install-dir>\hgrc.d\*.rc``
+| (Windows) ``HKEY_LOCAL_MACHINE\SOFTWARE\Mercurial``
 
     Per-installation/system configuration files, for the system on
     which Mercurial is running. Options in these files apply to all
     Mercurial commands executed by any user in any directory. Registry
     keys contain PATH-like strings, every part of which must reference
     a ``Mercurial.ini`` file or be a directory where ``*.rc`` files will
-    be read.
+    be read.  Mercurial checks each of these locations in the specified
+    order until one or more configuration files are detected.  If the
+    pywin32 extensions are not installed, Mercurial will only look for
+    site-wide configuration in ``C:\Mercurial\Mercurial.ini``.
 
 Syntax
 ------
@@ -615,6 +618,9 @@ proxy.
     Optional. Password to authenticate with at the proxy server.
 ``user``
     Optional. User name to authenticate with at the proxy server.
+``always``
+    Optional. Always use the proxy, even for localhost and any entries
+    in ``http_proxy.no``. True or False. Default: False.
 
 ``smtp``
 """"""""
@@ -647,9 +653,13 @@ command or with Mercurial Queues extension.
 
 ``eol``
     When set to 'strict' patch content and patched files end of lines
-    are preserved. When set to ``lf`` or ``crlf``, both files end of lines
-    are ignored when patching and the result line endings are
-    normalized to either LF (Unix) or CRLF (Windows).
+    are preserved. When set to ``lf`` or ``crlf``, both files end of
+    lines are ignored when patching and the result line endings are
+    normalized to either LF (Unix) or CRLF (Windows). When set to
+    ``auto``, end of lines are again ignored while patching but line
+    endings in patched files are normalized to their original setting
+    on a per-file basis. If target file does not exist or has no end
+    of line, patch line endings are preserved.
     Default: strict.
 
 
@@ -706,8 +716,14 @@ Controls generic server settings.
     WAN, an uncompressed streaming clone is a lot faster (~10x) than a
     regular clone. Over most WAN connections (anything slower than
     about 6 Mbps), uncompressed streaming is slower, because of the
-    extra data transfer overhead. Default is False.
+    extra data transfer overhead. This mode will also temporarily hold
+    the write lock while determining what data to transfer.
+    Default is True.
 
+``validate``
+    Whether to validate the completeness of pushed changesets by
+    checking that all new file revisions specified in manifests are
+    present. Default is False.
 
 ``trusted``
 """""""""""
@@ -866,6 +882,26 @@ Web interface configuration.
     Base URL to use when publishing URLs in other locations, so
     third-party tools like email notification hooks can construct
     URLs. Example: ``http://hgserver/repos/``.
+``cacerts``
+    Path to file containing a list of PEM encoded certificate authorities
+    that may be used to verify an SSL server's identity. The form must be
+    as follows::
+
+        -----BEGIN CERTIFICATE-----
+        ... (certificate in base64 PEM encoding) ...
+        -----END CERTIFICATE-----
+        -----BEGIN CERTIFICATE-----
+        ... (certificate in base64 PEM encoding) ...
+        -----END CERTIFICATE-----
+
+    This feature is only supported when using Python 2.6. If you wish to
+    use it with earlier versions of Python, install the backported
+    version of the ssl library that is available from
+    ``http://pypi.python.org``.
+
+    You can use OpenSSL's CA certificate file if your platform has one.
+    On most Linux systems this will be ``/etc/ssl/certs/ca-certificates.crt``.
+    Otherwise you will have to generate this file manually.
 ``contact``
     Name or email address of the person in charge of the repository.
     Defaults to ui.username or ``$EMAIL`` or "unknown" if unset or empty.

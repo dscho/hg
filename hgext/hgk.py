@@ -92,7 +92,7 @@ def difftree(ui, repo, node1=None, node2=None, *files, **opts):
             break
 
 def catcommit(ui, repo, n, prefix, ctx=None):
-    nlprefix = '\n' + prefix;
+    nlprefix = '\n' + prefix
     if ctx is None:
         ctx = repo[n]
     ui.write("tree %s\n" % short(ctx.changeset()[0])) # use ctx.node() instead ??
@@ -135,7 +135,7 @@ def catfile(ui, repo, type=None, r=None, **opts):
     prefix = ""
     if opts['stdin']:
         try:
-            (type, r) = raw_input().split(' ');
+            (type, r) = raw_input().split(' ')
             prefix = "    "
         except EOFError:
             return
@@ -148,12 +148,12 @@ def catfile(ui, repo, type=None, r=None, **opts):
     while r:
         if type != "commit":
             ui.warn(_("aborting hg cat-file only understands commits\n"))
-            return 1;
+            return 1
         n = repo.lookup(r)
         catcommit(ui, repo, n, prefix)
         if opts['stdin']:
             try:
-                (type, r) = raw_input().split(' ');
+                (type, r) = raw_input().split(' ')
             except EOFError:
                 break
         else:
@@ -186,7 +186,7 @@ def revtree(ui, args, repo, full="tree", maxnr=0, parents=False):
                     l[x].changeset() # force reading
                 else:
                     l[x] = 1
-            for x in xrange(chunk-1, -1, -1):
+            for x in xrange(chunk - 1, -1, -1):
                 if l[x] != 0:
                     yield (i + x, full != None and l[x] or None)
             if i == 0:
@@ -220,8 +220,8 @@ def revtree(ui, args, repo, full="tree", maxnr=0, parents=False):
 
     # calculate the graph for the supplied commits
     for i, n in enumerate(want_sha1):
-        reachable.append(set());
-        visit = [n];
+        reachable.append(set())
+        visit = [n]
         reachable[i].add(n)
         while visit:
             n = visit.pop(0)

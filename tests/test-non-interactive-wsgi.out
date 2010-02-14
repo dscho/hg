@@ -10,3 +10,7 @@ summary:     test
 [('Content-Type', 'text/html; charset=ascii')]
 ---- ERRORS
 
+---- OS.ENVIRON wsgi variables
+[]
+---- request.ENVIRON wsgi variables
+['wsgi.errors', 'wsgi.input', 'wsgi.multiprocess', 'wsgi.multithread', 'wsgi.run_once', 'wsgi.url_scheme', 'wsgi.version']

@@ -10,7 +10,7 @@ import os, re, time
 from mercurial.i18n import _
 from mercurial import ui, hg, util, templater
 from mercurial import error, encoding
-from common import ErrorResponse, get_mtime, staticfile, paritygen,\
+from common import ErrorResponse, get_mtime, staticfile, paritygen, \
                    get_contact, HTTP_OK, HTTP_NOT_FOUND, HTTP_SERVER_ERROR
 from hgweb_mod import hgweb
 from request import wsgirequest
@@ -235,7 +235,8 @@ class hgwebdir(object):
 
                 # update time with local timezone
                 try:
-                    d = (get_mtime(path), util.makedate()[1])
+                    r = hg.repository(self.ui, path)
+                    d = (get_mtime(r.spath), util.makedate()[1])
                 except OSError:
                     continue
 
@@ -323,7 +324,7 @@ class hgwebdir(object):
         style, mapfile = templater.stylemap(styles)
         if style == styles[0]:
             vars['style'] = style
-        
+
         start = url[-1] == '?' and '&' or '?'
         sessionvars = webutil.sessionvars(vars, start)
         staticurl = config('web', 'staticurl') or url + 'static/'

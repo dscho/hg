@@ -6,7 +6,7 @@
 # GNU General Public License version 2 or any later version.
 
 import imp, os
-import util, cmdutil, help
+import util, cmdutil, help, error
 from i18n import _, gettext
 
 _extensions = {}
@@ -131,22 +131,18 @@ def wrapfunction(container, funcname, wrapper):
     setattr(container, funcname, wrap)
     return origfn
 
-def disabled():
-    '''find disabled extensions from hgext
-    returns a dict of {name: desc}, and the max name length'''
-
+def _disabledpaths(strip_init=False):
+    '''find paths of disabled extensions. returns a dict of {name: path}
+    removes /__init__.py from packages if strip_init is True'''
     import hgext
     extpath = os.path.dirname(os.path.abspath(hgext.__file__))
-
     try: # might not be a filesystem path
         files = os.listdir(extpath)
     except OSError:
-        return None, 0
+        return {}
 
     exts = {}
-    maxlength = 0
     for e in files:
-
         if e.endswith('.py'):
             name = e.rsplit('.', 1)[0]
             path = os.path.join(extpath, e)
@@ -155,27 +151,95 @@ def disabled():
             path = os.path.join(extpath, e, '__init__.py')
             if not os.path.exists(path):
                 continue
-
+            if strip_init:
+                path = os.path.dirname(path)
         if name in exts or name in _order or name == '__init__':
             continue
+        exts[name] = path
+    return exts
 
-        try:
-            file = open(path)
-        except IOError:
+def _disabledhelp(path):
+    '''retrieve help synopsis of a disabled extension (without importing)'''
+    try:
+        file = open(path)
+    except IOError:
+        return
+    else:
+        doc = help.moduledoc(file)
+        file.close()
+
+    if doc: # extracting localized synopsis
+        return gettext(doc).splitlines()[0]
+    else:
+        return _('(no help text available)')
+
+def disabled():
+    '''find disabled extensions from hgext
+    returns a dict of {name: desc}, and the max name length'''
+
+    paths = _disabledpaths()
+    if not paths:
+        return None, 0
+
+    exts = {}
+    maxlength = 0
+    for name, path in paths.iteritems():
+        doc = _disabledhelp(path)
+        if not doc:
             continue
-        else:
-            doc = help.moduledoc(file)
-            file.close()
 
-        if doc: # extracting localized synopsis
-            exts[name] = gettext(doc).splitlines()[0]
-        else:
-            exts[name] = _('(no help text available)')
-
+        exts[name] = doc
         if len(name) > maxlength:
             maxlength = len(name)
 
     return exts, maxlength
+
+def disabledext(name):
+    '''find a specific disabled extension from hgext. returns desc'''
+    paths = _disabledpaths()
+    if name in paths:
+        return _disabledhelp(paths[name])
+
+def disabledcmd(cmd, strict=False):
+    '''import disabled extensions until cmd is found.
+    returns (cmdname, extname, doc)'''
+
+    paths = _disabledpaths(strip_init=True)
+    if not paths:
+        raise error.UnknownCommand(cmd)
+
+    def findcmd(cmd, name, path):
+        try:
+            mod = loadpath(path, 'hgext.%s' % name)
+        except Exception:
+            return
+        try:
+            aliases, entry = cmdutil.findcmd(cmd,
+                getattr(mod, 'cmdtable', {}), strict)
+        except (error.AmbiguousCommand, error.UnknownCommand):
+            return
+        for c in aliases:
+            if c.startswith(cmd):
+                cmd = c
+                break
+        else:
+            cmd = aliases[0]
+        return (cmd, name, mod)
+
+    # first, search for an extension with the same name as the command
+    path = paths.pop(cmd, None)
+    if path:
+        ext = findcmd(cmd, cmd, path)
+        if ext:
+            return ext
+
+    # otherwise, interrogate each extension until there's a match
+    for name, path in paths.iteritems():
+        ext = findcmd(cmd, name, path)
+        if ext:
+            return ext
+
+    raise error.UnknownCommand(cmd)
 
 def enabled():
     '''return a dict of {name: desc} of extensions, and the max name length'''

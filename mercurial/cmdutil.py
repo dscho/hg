@@ -7,11 +7,14 @@
 
 from node import hex, nullid, nullrev, short
 from i18n import _
-import os, sys, errno, re, glob
-import mdiff, bdiff, util, templater, patch, error, encoding
+import os, sys, errno, re, glob, tempfile, time
+import mdiff, bdiff, util, templater, patch, error, encoding, templatekw
 import match as _match
 
 revrangesep = ':'
+
+def parsealiases(cmd):
+    return cmd.lstrip("^").split("|")
 
 def findpossible(cmd, table, strict=False):
     """
@@ -22,7 +25,7 @@ def findpossible(cmd, table, strict=False):
     choice = {}
     debugchoice = {}
     for e in table.keys():
-        aliases = e.lstrip("^").split("|")
+        aliases = parsealiases(e)
         found = None
         if cmd in aliases:
             found = cmd
@@ -59,6 +62,14 @@ def findcmd(cmd, table, strict=True):
 
     raise error.UnknownCommand(cmd)
 
+def findrepo(p):
+    while not os.path.isdir(os.path.join(p, ".hg")):
+        oldp, p = p, os.path.dirname(p)
+        if p == oldp:
+            return None
+
+    return p
+
 def bail_if_changed(repo):
     if repo.dirstate.parents()[1] != nullid:
         raise util.Abort(_('outstanding uncommitted merge'))
@@ -93,9 +104,10 @@ def loglimit(opts):
             limit = int(limit)
         except ValueError:
             raise util.Abort(_('limit must be a positive integer'))
-        if limit <= 0: raise util.Abort(_('limit must be positive'))
+        if limit <= 0:
+            raise util.Abort(_('limit must be positive'))
     else:
-        limit = sys.maxint
+        limit = None
     return limit
 
 def remoteui(src, opts):
@@ -166,7 +178,7 @@ def revrange(repo, revs):
             start = revfix(repo, start, 0)
             end = revfix(repo, end, len(repo) - 1)
             step = start > end and -1 or 1
-            for rev in xrange(start, end+step, step):
+            for rev in xrange(start, end + step, step):
                 if rev in seen:
                     continue
                 seen.add(rev)
@@ -275,31 +287,42 @@ def matchfiles(repo, files):
 
 def findrenames(repo, added, removed, threshold):
     '''find renamed files -- yields (before, after, score) tuples'''
+    copies = {}
     ctx = repo['.']
-    for a in added:
-        aa = repo.wread(a)
-        bestname, bestscore = None, threshold
-        for r in removed:
-            if r not in ctx:
-                continue
-            rr = ctx.filectx(r).data()
+    for r in removed:
+        if r not in ctx:
+            continue
+        fctx = ctx.filectx(r)
 
+        def score(text):
+            if not len(text):
+                return 0.0
+            if not fctx.cmp(text):
+                return 1.0
+            if threshold == 1.0:
+                return 0.0
+            orig = fctx.data()
             # bdiff.blocks() returns blocks of matching lines
             # count the number of bytes in each
             equal = 0
-            alines = mdiff.splitnewlines(aa)
-            matches = bdiff.blocks(aa, rr)
-            for x1,x2,y1,y2 in matches:
+            alines = mdiff.splitnewlines(text)
+            matches = bdiff.blocks(text, orig)
+            for x1, x2, y1, y2 in matches:
                 for line in alines[x1:x2]:
                     equal += len(line)
 
-            lengths = len(aa) + len(rr)
-            if lengths:
-                myscore = equal*2.0 / lengths
-                if myscore >= bestscore:
-                    bestname, bestscore = r, myscore
-        if bestname:
-            yield bestname, a, bestscore
+            lengths = len(text) + len(orig)
+            return equal * 2.0 / lengths
+
+        for a in added:
+            bestscore = copies.get(a, (None, threshold))[1]
+            myscore = score(repo.wread(a))
+            if myscore >= bestscore:
+                copies[a] = (r, myscore)
+
+    for dest, v in copies.iteritems():
+        source, score = v
+        yield source, dest, score
 
 def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
     if dry_run is None:
@@ -552,27 +575,37 @@ def copy(ui, repo, pats, opts, rename=False):
     return errors
 
 def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
-    runargs=None):
+    runargs=None, appendpid=False):
     '''Run a command as a service.'''
 
     if opts['daemon'] and not opts['daemon_pipefds']:
-        rfd, wfd = os.pipe()
-        if not runargs:
-            runargs = sys.argv[:]
-        runargs.append('--daemon-pipefds=%d,%d' % (rfd, wfd))
-        # Don't pass --cwd to the child process, because we've already
-        # changed directory.
-        for i in xrange(1,len(runargs)):
-            if runargs[i].startswith('--cwd='):
-                del runargs[i]
-                break
-            elif runargs[i].startswith('--cwd'):
-                del runargs[i:i+2]
-                break
-        pid = os.spawnvp(os.P_NOWAIT | getattr(os, 'P_DETACH', 0),
-                         runargs[0], runargs)
-        os.close(wfd)
-        os.read(rfd, 1)
+        # Signal child process startup with file removal
+        lockfd, lockpath = tempfile.mkstemp(prefix='hg-service-')
+        os.close(lockfd)
+        try:
+            if not runargs:
+                runargs = util.hgcmd() + sys.argv[1:]
+            runargs.append('--daemon-pipefds=%s' % lockpath)
+            # Don't pass --cwd to the child process, because we've already
+            # changed directory.
+            for i in xrange(1, len(runargs)):
+                if runargs[i].startswith('--cwd='):
+                    del runargs[i]
+                    break
+                elif runargs[i].startswith('--cwd'):
+                    del runargs[i:i + 2]
+                    break
+            def condfn():
+                return not os.path.exists(lockpath)
+            pid = util.rundetached(runargs, condfn)
+            if pid < 0:
+                raise util.Abort(_('child process failed to start'))
+        finally:
+            try:
+                os.unlink(lockpath)
+            except OSError, e:
+                if e.errno != errno.ENOENT:
+                    raise
         if parentfn:
             return parentfn(pid)
         else:
@@ -582,19 +615,19 @@ def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
         initfn()
 
     if opts['pid_file']:
-        fp = open(opts['pid_file'], 'w')
+        mode = appendpid and 'a' or 'w'
+        fp = open(opts['pid_file'], mode)
         fp.write(str(os.getpid()) + '\n')
         fp.close()
 
     if opts['daemon_pipefds']:
-        rfd, wfd = [int(x) for x in opts['daemon_pipefds'].split(',')]
-        os.close(rfd)
+        lockpath = opts['daemon_pipefds']
         try:
             os.setsid()
         except AttributeError:
             pass
-        os.write(wfd, 'y')
-        os.close(wfd)
+        os.unlink(lockpath)
+        util.hidewindow()
         sys.stdout.flush()
         sys.stderr.flush()
 
@@ -625,6 +658,7 @@ class changeset_printer(object):
         self.header = {}
         self.hunk = {}
         self.lastheader = None
+        self.footer = None
 
     def flush(self, rev):
         if rev in self.header:
@@ -639,7 +673,11 @@ class changeset_printer(object):
             return 1
         return 0
 
-    def show(self, ctx, copies=(), **props):
+    def close(self):
+        if self.footer:
+            self.ui.write(self.footer)
+
+    def show(self, ctx, copies=None, **props):
         if self.buffered:
             self.ui.pushbuffer()
             self._show(ctx, copies, props)
@@ -745,14 +783,17 @@ class changeset_templater(changeset_printer):
     def __init__(self, ui, repo, patch, diffopts, mapfile, buffered):
         changeset_printer.__init__(self, ui, repo, patch, diffopts, buffered)
         formatnode = ui.debugflag and (lambda x: x) or (lambda x: x[:12])
+        defaulttempl = {
+            'parent': '{rev}:{node|formatnode} ',
+            'manifest': '{rev}:{node|formatnode}',
+            'file_copy': '{name} ({source})',
+            'extra': '{key}={value|stringescape}'
+            }
+        # filecopy is preserved for compatibility reasons
+        defaulttempl['filecopy'] = defaulttempl['file_copy']
         self.t = templater.templater(mapfile, {'formatnode': formatnode},
-                                     cache={
-                                         'parent': '{rev}:{node|formatnode} ',
-                                         'manifest': '{rev}:{node|formatnode}',
-                                         'filecopy': '{name} ({source})'})
-        # Cache mapping from rev to a tuple with tag date, tag
-        # distance and tag name
-        self._latesttagcache = {-1: (0, 0, 'null')}
+                                     cache=defaulttempl)
+        self.cache = {}
 
     def use_template(self, t):
         '''set template string to use'''
@@ -770,174 +811,29 @@ class changeset_templater(changeset_printer):
             return []
         return parents
 
-    def _latesttaginfo(self, rev):
-        '''return date, distance and name for the latest tag of rev'''
-        todo = [rev]
-        while todo:
-            rev = todo.pop()
-            if rev in self._latesttagcache:
-                continue
-            ctx = self.repo[rev]
-            tags = [t for t in ctx.tags() if self.repo.tagtype(t) == 'global']
-            if tags:
-                self._latesttagcache[rev] = ctx.date()[0], 0, ':'.join(sorted(tags))
-                continue
-            try:
-                # The tuples are laid out so the right one can be found by comparison.
-                pdate, pdist, ptag = max(
-                    self._latesttagcache[p.rev()] for p in ctx.parents())
-            except KeyError:
-                # Cache miss - recurse
-                todo.append(rev)
-                todo.extend(p.rev() for p in ctx.parents())
-                continue
-            self._latesttagcache[rev] = pdate, pdist + 1, ptag
-        return self._latesttagcache[rev]
-
     def _show(self, ctx, copies, props):
         '''show a single changeset or file revision'''
 
-        def showlist(name, values, plural=None, **args):
-            '''expand set of values.
-            name is name of key in template map.
-            values is list of strings or dicts.
-            plural is plural of name, if not simply name + 's'.
+        showlist = templatekw.showlist
 
-            expansion works like this, given name 'foo'.
-
-            if values is empty, expand 'no_foos'.
-
-            if 'foo' not in template map, return values as a string,
-            joined by space.
-
-            expand 'start_foos'.
-
-            for each value, expand 'foo'. if 'last_foo' in template
-            map, expand it instead of 'foo' for last key.
-
-            expand 'end_foos'.
-            '''
-            if plural: names = plural
-            else: names = name + 's'
-            if not values:
-                noname = 'no_' + names
-                if noname in self.t:
-                    yield self.t(noname, **args)
-                return
-            if name not in self.t:
-                if isinstance(values[0], str):
-                    yield ' '.join(values)
-                else:
-                    for v in values:
-                        yield dict(v, **args)
-                return
-            startname = 'start_' + names
-            if startname in self.t:
-                yield self.t(startname, **args)
-            vargs = args.copy()
-            def one(v, tag=name):
-                try:
-                    vargs.update(v)
-                except (AttributeError, ValueError):
-                    try:
-                        for a, b in v:
-                            vargs[a] = b
-                    except ValueError:
-                        vargs[name] = v
-                return self.t(tag, **vargs)
-            lastname = 'last_' + name
-            if lastname in self.t:
-                last = values.pop()
-            else:
-                last = None
-            for v in values:
-                yield one(v)
-            if last is not None:
-                yield one(last, tag=lastname)
-            endname = 'end_' + names
-            if endname in self.t:
-                yield self.t(endname, **args)
-
-        def showbranches(**args):
-            branch = ctx.branch()
-            if branch != 'default':
-                branch = encoding.tolocal(branch)
-                return showlist('branch', [branch], plural='branches', **args)
-
+        # showparents() behaviour depends on ui trace level which
+        # causes unexpected behaviours at templating level and makes
+        # it harder to extract it in a standalone function. Its
+        # behaviour cannot be changed so leave it here for now.
         def showparents(**args):
+            ctx = args['ctx']
             parents = [[('rev', p.rev()), ('node', p.hex())]
                        for p in self._meaningful_parentrevs(ctx)]
             return showlist('parent', parents, **args)
 
-        def showtags(**args):
-            return showlist('tag', ctx.tags(), **args)
-
-        def showextras(**args):
-            for key, value in sorted(ctx.extra().items()):
-                args = args.copy()
-                args.update(dict(key=key, value=value))
-                yield self.t('extra', **args)
-
-        def showcopies(**args):
-            c = [{'name': x[0], 'source': x[1]} for x in copies]
-            return showlist('file_copy', c, plural='file_copies', **args)
-
-        files = []
-        def getfiles():
-            if not files:
-                files[:] = self.repo.status(ctx.parents()[0].node(),
-                                            ctx.node())[:3]
-            return files
-        def showfiles(**args):
-            return showlist('file', ctx.files(), **args)
-        def showmods(**args):
-            return showlist('file_mod', getfiles()[0], **args)
-        def showadds(**args):
-            return showlist('file_add', getfiles()[1], **args)
-        def showdels(**args):
-            return showlist('file_del', getfiles()[2], **args)
-        def showmanifest(**args):
-            args = args.copy()
-            args.update(dict(rev=self.repo.manifest.rev(ctx.changeset()[0]),
-                             node=hex(ctx.changeset()[0])))
-            return self.t('manifest', **args)
-
-        def showdiffstat(**args):
-            diff = patch.diff(self.repo, ctx.parents()[0].node(), ctx.node())
-            files, adds, removes = 0, 0, 0
-            for i in patch.diffstatdata(util.iterlines(diff)):
-                files += 1
-                adds += i[1]
-                removes += i[2]
-            return '%s: +%s/-%s' % (files, adds, removes)
-
-        def showlatesttag(**args):
-            return self._latesttaginfo(ctx.rev())[2]
-        def showlatesttagdistance(**args):
-            return self._latesttaginfo(ctx.rev())[1]
-
-        defprops = {
-            'author': ctx.user(),
-            'branches': showbranches,
-            'date': ctx.date(),
-            'desc': ctx.description().strip(),
-            'file_adds': showadds,
-            'file_dels': showdels,
-            'file_mods': showmods,
-            'files': showfiles,
-            'file_copies': showcopies,
-            'manifest': showmanifest,
-            'node': ctx.hex(),
-            'parents': showparents,
-            'rev': ctx.rev(),
-            'tags': showtags,
-            'extras': showextras,
-            'diffstat': showdiffstat,
-            'latesttag': showlatesttag,
-            'latesttagdistance': showlatesttagdistance,
-            }
         props = props.copy()
-        props.update(defprops)
+        props.update(templatekw.keywords)
+        props['parents'] = showparents
+        props['templ'] = self.t
+        props['ctx'] = ctx
+        props['repo'] = self.repo
+        props['revcache'] = {'copies': copies}
+        props['cache'] = self.cache
 
         # find correct templates for current mode
 
@@ -948,7 +844,7 @@ class changeset_templater(changeset_printer):
             (self.ui.debugflag, 'debug'),
         ]
 
-        types = {'header': '', 'changeset': 'changeset'}
+        types = {'header': '', 'footer':'', 'changeset': 'changeset'}
         for mode, postfix  in tmplmodes:
             for type in types:
                 cur = postfix and ('%s_%s' % (type, postfix)) or type
@@ -969,6 +865,11 @@ class changeset_templater(changeset_printer):
             key = types['changeset']
             self.ui.write(templater.stringify(self.t(key, **props)))
             self.showpatch(ctx.node())
+
+            if types['footer']:
+                if not self.footer:
+                    self.footer = templater.stringify(self.t(types['footer'],
+                                                      **props))
 
         except KeyError, inst:
             msg = _("%s: no key named '%s'")
@@ -1016,13 +917,15 @@ def show_changeset(ui, repo, opts, buffered=False, matchfn=False):
         if not os.path.split(mapfile)[0]:
             mapname = (templater.templatepath('map-cmdline.' + mapfile)
                        or templater.templatepath(mapfile))
-            if mapname: mapfile = mapname
+            if mapname:
+                mapfile = mapname
 
     try:
         t = changeset_templater(ui, repo, patch, opts, mapfile, buffered)
     except SyntaxError, inst:
         raise util.Abort(inst.args[0])
-    if tmpl: t.use_template(tmpl)
+    if tmpl:
+        t.use_template(tmpl)
     return t
 
 def finddate(ui, repo, date):
@@ -1064,13 +967,13 @@ def walkchangerevs(repo, match, opts, prepare):
     def increasing_windows(start, end, windowsize=8, sizelimit=512):
         if start < end:
             while start < end:
-                yield start, min(windowsize, end-start)
+                yield start, min(windowsize, end - start)
                 start += windowsize
                 if windowsize < sizelimit:
                     windowsize *= 2
         else:
             while start > end:
-                yield start, min(windowsize, start-end-1)
+                yield start, min(windowsize, start - end - 1)
                 start -= windowsize
                 if windowsize < sizelimit:
                     windowsize *= 2
@@ -1127,7 +1030,8 @@ def walkchangerevs(repo, match, opts, prepare):
                     # A zero count may be a directory or deleted file, so
                     # try to find matching entries on the slow path.
                     if follow:
-                        raise util.Abort(_('cannot follow nonexistent file: "%s"') % file_)
+                        raise util.Abort(
+                            _('cannot follow nonexistent file: "%s"') % file_)
                     slowpath = True
                     break
                 else:
@@ -1161,7 +1065,7 @@ def walkchangerevs(repo, match, opts, prepare):
     class followfilter(object):
         def __init__(self, onlyfirst=False):
             self.startrev = nullrev
-            self.roots = []
+            self.roots = set()
             self.onlyfirst = onlyfirst
 
         def match(self, rev):
@@ -1179,18 +1083,18 @@ def walkchangerevs(repo, match, opts, prepare):
             if rev > self.startrev:
                 # forward: all descendants
                 if not self.roots:
-                    self.roots.append(self.startrev)
+                    self.roots.add(self.startrev)
                 for parent in realparents(rev):
                     if parent in self.roots:
-                        self.roots.append(rev)
+                        self.roots.add(rev)
                         return True
             else:
                 # backwards: all parents
                 if not self.roots:
-                    self.roots.extend(realparents(self.startrev))
+                    self.roots.update(realparents(self.startrev))
                 if rev in self.roots:
                     self.roots.remove(rev)
-                    self.roots.extend(realparents(rev))
+                    self.roots.update(realparents(rev))
                     return True
 
             return False
@@ -1201,7 +1105,7 @@ def walkchangerevs(repo, match, opts, prepare):
         rev = repo.changelog.rev(repo.lookup(rev))
         ff = followfilter()
         stop = min(revs[0], revs[-1])
-        for x in xrange(rev, stop-1, -1):
+        for x in xrange(rev, stop - 1, -1):
             if ff.match(x):
                 wanted.discard(x)
 
@@ -1216,7 +1120,7 @@ def walkchangerevs(repo, match, opts, prepare):
 
         for i, window in increasing_windows(0, len(revs)):
             change = util.cachefunc(repo.changectx)
-            nrevs = [rev for rev in revs[i:i+window] if want(rev)]
+            nrevs = [rev for rev in revs[i:i + window] if want(rev)]
             for rev in sorted(nrevs):
                 fns = fncache.get(rev)
                 ctx = change(rev)

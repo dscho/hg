@@ -154,7 +154,7 @@ def copies(repo, c1, c2, ca, checkdirs=False):
                 break # no merge needed, quit early
             c2 = ctx(of, m2[of])
             cr = related(oc, c2, ca.rev())
-            if of == f or of == c2.path(): # non-divergent
+            if cr and (of == f or of == c2.path()): # non-divergent
                 copy[f] = of
                 of = None
                 break
@@ -190,8 +190,10 @@ def copies(repo, c1, c2, ca, checkdirs=False):
         repo.ui.debug("  all copies found (* = to merge, ! = divergent):\n")
         for f in fullcopy:
             note = ""
-            if f in copy: note += "*"
-            if f in diverge2: note += "!"
+            if f in copy:
+                note += "*"
+            if f in diverge2:
+                note += "!"
             repo.ui.debug("   %s -> %s %s\n" % (f, fullcopy[f], note))
     del diverge2
 

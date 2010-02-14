@@ -21,14 +21,19 @@ static void _fix_newline(PyObject *hunk, PyObject *a, PyObject *b)
 	int hunksz = PyList_Size(hunk);
 	PyObject *s = PyList_GET_ITEM(hunk, hunksz-1);
 	char *l = PyString_AS_STRING(s);
-	int sz = PyString_GET_SIZE(s);
 	int alen = PyList_Size(a);
 	int blen = PyList_Size(b);
 	char c = l[0];
+	PyObject *hline;
+	int sz = PyString_GET_SIZE(s);
 
-	PyObject *hline = PyString_FromStringAndSize(l, sz-1);
+	if (sz > 1 && l[sz-2] == '\r')
+		/* tolerate CRLF in last line */
+		sz -= 1;
+	hline = PyString_FromStringAndSize(l, sz-1);
+
 	if (c == ' ' || c == '+') {
-		PyObject *rline = PyString_FromStringAndSize(l+1, sz-2);
+		PyObject *rline = PyString_FromStringAndSize(l + 1, sz - 2);
 		PyList_SetItem(b, blen-1, rline);
 	}
 	if (c == ' ' || c == '-') {
@@ -69,13 +74,13 @@ addlines(PyObject *self, PyObject *args)
 	if (!PyArg_ParseTuple(args, "OOiiOO", &fp, &hunk, &lena, &lenb, &a, &b))
 		return NULL;
 
-	while(1) {
+	while (1) {
 		todoa = lena - PyList_Size(a);
 		todob = lenb - PyList_Size(b);
 		num = todoa > todob ? todoa : todob;
 		if (num == 0)
 		    break;
-		for (i = 0 ; i < num ; i++) {
+		for (i = 0; i < num; i++) {
 			x = PyFile_GetLine(fp, 0);
 			s = PyString_AS_STRING(x);
 			c = *s;
@@ -130,10 +135,10 @@ testhunk(PyObject *self, PyObject *args)
 	if (alen > blen - bstart) {
 		return Py_BuildValue("l", -1);
 	}
-	for (i = 0 ; i < alen ; i++) {
+	for (i = 0; i < alen; i++) {
 		sa = PyString_AS_STRING(PyList_GET_ITEM(a, i));
 		sb = PyString_AS_STRING(PyList_GET_ITEM(b, i + bstart));
-		if (strcmp(sa+1, sb) != 0)
+		if (strcmp(sa + 1, sb) != 0)
 			return Py_BuildValue("l", -1);
 	}
 	return Py_BuildValue("l", 0);

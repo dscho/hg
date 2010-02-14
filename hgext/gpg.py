@@ -38,8 +38,10 @@ class gpg(object):
         finally:
             for f in (sigfile, datafile):
                 try:
-                    if f: os.unlink(f)
-                except: pass
+                    if f:
+                        os.unlink(f)
+                except:
+                    pass
         keys = []
         key, fingerprint = None, None
         err = ""
@@ -88,7 +90,7 @@ def sigwalk(repo):
             if not l:
                 continue
             yield (l.split(" ", 2), (context, ln))
-            ln +=1
+            ln += 1
 
     # read the heads
     fl = repo.file(".hgsigs")

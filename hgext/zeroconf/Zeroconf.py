@@ -560,7 +560,7 @@ class DNSIncoming(object):
 				#
 				#print "UNKNOWN TYPE = " + str(info[0])
 				#raise BadTypeInNameException
-				pass
+				self.offset += info[3]
 
 			if rec is not None:
 				self.answers.append(rec)
@@ -575,8 +575,7 @@ class DNSIncoming(object):
 
 	def readUTF(self, offset, len):
 		"""Reads a UTF-8 string of a given length from the packet"""
-		result = self.data[offset:offset+len].decode('utf-8')
-		return result
+		return self.data[offset:offset+len].decode('utf-8')
 
 	def readName(self):
 		"""Reads a domain name from the packet"""
@@ -1060,16 +1059,16 @@ class ServiceInfo(object):
 			for key in properties:
 				value = properties[key]
 				if value is None:
-					suffix = ''.encode('utf-8')
+					suffix = ''
 				elif isinstance(value, str):
-					suffix = value.encode('utf-8')
+					suffix = value
 				elif isinstance(value, int):
 					if value:
 						suffix = 'true'
 					else:
 						suffix = 'false'
 				else:
-					suffix = ''.encode('utf-8')
+					suffix = ''
 				list.append('='.join((key, suffix)))
 			for item in list:
 				result = ''.join((result, struct.pack('!c', chr(len(item))), item))
@@ -1571,3 +1570,5 @@ if __name__ == '__main__':
 	r.unregisterService(info)
 	print "   Unregister done."
 	r.close()
+
+# no-check-code

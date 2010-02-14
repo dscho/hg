@@ -120,6 +120,11 @@ We can have indented lists:
 (2) bar
 1) Another
 2) List
+
+Line blocks are also a form of list:
+
+This is the first line. The line continues here.
+This is the second line.
 ----------------------------------------------------------------------
 
 lists formatted to fit within 30 characters:
@@ -157,6 +162,13 @@ We can have indented lists:
 (2) bar
 1) Another
 2) List
+
+Line blocks are also a form of
+list:
+
+This is the first line. The
+line continues here.
+This is the second line.
 ----------------------------------------------------------------------
 
 options formatted to fit within 60 characters:
@@ -215,29 +227,70 @@ normal paragraph:
 
 fields formatted to fit within 60 characters:
 ----------------------------------------------------------------------
-Field lists give a simple two-column layout:
+a   First item.
+ab  Second item. Indentation and wrapping is handled
+    automatically.
 
-key           The whitespace following the key is
-              significant for the wrapping of this text.
-another key   More text. The indentation on the following
-              lines is not significant.
+Next list:
+
+small       The larger key below triggers full indentation
+            here.
+much too large
+            This key is big enough to get its own line.
 ----------------------------------------------------------------------
 
 fields formatted to fit within 30 characters:
 ----------------------------------------------------------------------
-Field lists give a simple two-
-column layout:
+a   First item.
+ab  Second item. Indentation
+    and wrapping is handled
+    automatically.
 
-key           The whitespace
-              following the
-              key is
-              significant for
-              the wrapping of
-              this text.
-another key   More text. The
-              indentation on
-              the following
-              lines is not
-              significant.
+Next list:
+
+small       The larger key
+            below triggers
+            full indentation
+            here.
+much too large
+            This key is big
+            enough to get its
+            own line.
+----------------------------------------------------------------------
+
+containers (normal) formatted to fit within 60 characters:
+----------------------------------------------------------------------
+Normal output.
+----------------------------------------------------------------------
+
+containers (verbose) formatted to fit within 60 characters:
+----------------------------------------------------------------------
+Normal output.
+
+Verbose output.
+----------------------------------------------------------------------
+['debug', 'debug']
+----------------------------------------------------------------------
+
+containers (debug) formatted to fit within 60 characters:
+----------------------------------------------------------------------
+Normal output.
+
+Initial debug output.
+----------------------------------------------------------------------
+['verbose']
+----------------------------------------------------------------------
+
+containers (verbose debug) formatted to fit within 60 characters:
+----------------------------------------------------------------------
+Normal output.
+
+Initial debug output.
+
+Verbose output.
+
+Debug output.
+----------------------------------------------------------------------
+[]
 ----------------------------------------------------------------------
 

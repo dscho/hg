@@ -145,7 +145,7 @@ from mercurial.node import short
 from mercurial import cmdutil, templater, util
 import re, time
 
-MySQLdb = None
+mysqldb = None
 
 def buglist(ids):
     return '(' + ','.join(map(str, ids)) + ')'
@@ -165,7 +165,7 @@ class bugzilla_2_16(object):
             self.ui.readconfig(usermap, sections=['usermap'])
         self.ui.note(_('connecting to %s:%s as %s, password %s\n') %
                      (host, db, user, '*' * len(passwd)))
-        self.conn = MySQLdb.connect(host=host, user=user, passwd=passwd,
+        self.conn = mysqldb.connect(host=host, user=user, passwd=passwd,
                                     db=db, connect_timeout=timeout)
         self.cursor = self.conn.cursor()
         self.longdesc_id = self.get_longdesc_id()
@@ -177,7 +177,7 @@ class bugzilla_2_16(object):
         self.ui.note(_('query: %s %s\n') % (args, kwargs))
         try:
             self.cursor.execute(*args, **kwargs)
-        except MySQLdb.MySQLError:
+        except mysqldb.MySQLError:
             self.ui.note(_('failed query: %s %s\n') % (args, kwargs))
             raise
 
@@ -297,7 +297,8 @@ class bugzilla_2_18(bugzilla_2_16):
 
     def __init__(self, ui):
         bugzilla_2_16.__init__(self, ui)
-        self.default_notify = "cd %(bzdir)s && perl -T contrib/sendbugmail.pl %(id)s %(user)s"
+        self.default_notify = \
+            "cd %(bzdir)s && perl -T contrib/sendbugmail.pl %(id)s %(user)s"
 
 class bugzilla_3_0(bugzilla_2_18):
     '''support for bugzilla 3.0 series.'''
@@ -369,7 +370,8 @@ class bugzilla(object):
                 break
             start = m.end()
             for id in bugzilla._split_re.split(m.group(1)):
-                if not id: continue
+                if not id:
+                    continue
                 ids.add(int(id))
         if ids:
             ids = self.filter_real_bug_ids(ids)
@@ -389,7 +391,7 @@ class bugzilla(object):
                 c = root.find('/')
                 if c == -1:
                     break
-                root = root[c+1:]
+                root = root[c + 1:]
                 count -= 1
             return root
 
@@ -417,9 +419,9 @@ def hook(ui, repo, hooktype, node=None, **kwargs):
     bugzilla bug id. only add a comment once per bug, so same change
     seen multiple times does not fill bug with duplicate data.'''
     try:
-        import MySQLdb as mysql
-        global MySQLdb
-        MySQLdb = mysql
+        import mysqldb as mysql
+        global mysqldb
+        mysqldb = mysql
     except ImportError, err:
         raise util.Abort(_('python mysql support not available: %s') % err)
 
@@ -434,6 +436,6 @@ def hook(ui, repo, hooktype, node=None, **kwargs):
             for id in ids:
                 bz.update(id, ctx)
             bz.notify(ids, util.email(ctx.user()))
-    except MySQLdb.MySQLError, err:
+    except mysqldb.MySQLError, err:
         raise util.Abort(_('database error: %s') % err[1])
 

@@ -77,8 +77,14 @@ class engine(object):
             raise SyntaxError(_("error expanding '%s%%%s'") % (key, format))
         lm = map.copy()
         for i in v:
-            lm.update(i)
-            yield self.process(format, lm)
+            if isinstance(i, dict):
+                lm.update(i)
+                yield self.process(format, lm)
+            else:
+                # v is not an iterable of dicts, this happen when 'key'
+                # has been fully expanded already and format is useless.
+                # If so, return the expanded value.
+                yield i
 
     def _filter(self, expr, get, map):
         if expr not in self.cache:
@@ -89,10 +95,10 @@ class engine(object):
             except KeyError, i:
                 raise SyntaxError(_("unknown filter '%s'") % i[0])
             def apply(get):
-                    x = get(val)
-                    for f in filters:
-                        x = f(x)
-                    return x
+                x = get(val)
+                for f in filters:
+                    x = f(x)
+                return x
             self.cache[expr] = apply
         return self.cache[expr](get)
 
@@ -238,7 +244,6 @@ def stylemap(styles, paths=None):
         styles = [styles]
 
     for style in styles:
-    	
         if not style:
             continue
         locations = [os.path.join(style, 'map'), 'map-' + style]

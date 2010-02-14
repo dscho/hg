@@ -127,7 +127,7 @@ class lazyparser(object):
         self.dataf = dataf
         self.s = struct.calcsize(indexformatng)
         self.datasize = size
-        self.l = size/self.s
+        self.l = size / self.s
         self.index = [None] * self.l
         self.map = {nullid: nullrev}
         self.allmap = 0
@@ -343,6 +343,8 @@ class revlogoldio(object):
         return index, nodemap, None
 
     def packentry(self, entry, node, version, rev):
+        if gettype(entry[0]):
+            raise RevlogError(_("index entry flags need RevlogNG"))
         e2 = (getoffset(entry[0]), entry[1], entry[3], entry[4],
               node(entry[5]), node(entry[6]), entry[7])
         return _pack(indexformatv0, *e2)
@@ -431,8 +433,8 @@ class revlog(object):
         self.index = []
 
         v = REVLOG_DEFAULT_VERSION
-        if hasattr(opener, "defversion"):
-            v = opener.defversion
+        if hasattr(opener, 'options') and 'defversion' in opener.options:
+            v = opener.options['defversion']
             if v & REVLOGNG:
                 v |= REVLOGNGINLINEDATA
 
@@ -534,26 +536,6 @@ class revlog(object):
 
         t = self.revision(self.node(rev))
         return len(t)
-
-        # Alternate implementation. The advantage to this code is it
-        # will be faster for a single revision. However, the results
-        # are not cached, so finding the size of every revision will
-        # be slower.
-        #
-        # if self.cache and self.cache[1] == rev:
-        #     return len(self.cache[2])
-        #
-        # base = self.base(rev)
-        # if self.cache and self.cache[1] >= base and self.cache[1] < rev:
-        #     base = self.cache[1]
-        #     text = self.cache[2]
-        # else:
-        #     text = self.revision(self.node(base))
-        #
-        # l = len(text)
-        # for x in xrange(base + 1, rev + 1):
-        #     l = mdiff.patchedsize(l, self._chunk(x))
-        # return l
 
     def reachable(self, node, stop=None):
         """return the set of all nodes ancestral to a given node, including
@@ -902,7 +884,7 @@ class revlog(object):
             try:
                 # hex(node)[:...]
                 l = len(id) // 2  # grab an even number of digits
-                bin_id = bin(id[:l*2])
+                bin_id = bin(id[:l * 2])
                 nl = [n for n in self.nodemap if n[:l] == bin_id]
                 nl = [n for n in nl if hex(n).startswith(id)]
                 if len(nl) > 0:
@@ -1137,13 +1119,27 @@ class revlog(object):
             self._cache = (node, curr, text)
         return node
 
+    def descendant(self, start, end):
+        for i in self.descendants(start):
+            if i == end:
+                return True
+            elif i > end:
+                break
+        return False
+
     def ancestor(self, a, b):
         """calculate the least common ancestor of nodes a and b"""
+
+        # fast path, check if it is a descendant
+        a, b = self.rev(a), self.rev(b)
+        start, end = sorted((a, b))
+        if self.descendant(start, end):
+            return self.node(start)
 
         def parents(rev):
             return [p for p in self.parentrevs(rev) if p != nullrev]
 
-        c = ancestor.ancestor(self.rev(a), self.rev(b), parents)
+        c = ancestor.ancestor(a, b, parents)
         if c is None:
             return nullid
 
@@ -1394,7 +1390,7 @@ class revlog(object):
         return (dd, di)
 
     def files(self):
-        res = [ self.indexfile ]
+        res = [self.indexfile]
         if not self._inline:
             res.append(self.datafile)
         return res
