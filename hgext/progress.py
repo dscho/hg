@@ -33,13 +33,12 @@ The following settings are available::
                  # (that is, min(width, term width) will be used)
   clear-complete = True # clear the progress bar after it's done
 
-Valid entries for the format field are topic, bar, number, unit, and item.
-item defaults to the last 20 characters of the item, but this can be
-changed by adding either -<num> which would take the last num characters,
-or +<num> for the first num characters.
+Valid entries for the format field are topic, bar, number, unit, and
+item. item defaults to the last 20 characters of the item, but this
+can be changed by adding either ``-<num>`` which would take the last
+num characters, or ``+<num>`` for the first num characters.
 """
 
-import math
 import sys
 import time
 
@@ -157,7 +156,8 @@ class progbar(object):
             if topic not in self.topics:
                 self.topics.append(topic)
             now = time.time()
-            if now - self.lastprint > 0.1 and topic == self.topics[-1]:
+            if (now - self.lastprint >= self.refresh
+                and topic == self.topics[-1]):
                 self.lastprint = now
                 self.show(topic, pos, item, unit, total)
         return orig(topic, pos, item=item, unit=unit, total=total)
