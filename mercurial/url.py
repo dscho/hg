@@ -51,10 +51,11 @@ def netlocunsplit(host, port, user=None, passwd=None):
     else:
         hostport = host
     if user:
+        quote = lambda s: urllib.quote(s, safe='')
         if passwd:
-            userpass = urllib.quote(user) + ':' + urllib.quote(passwd)
+            userpass = quote(user) + ':' + quote(passwd)
         else:
-            userpass = urllib.quote(user)
+            userpass = quote(user)
         return userpass + '@' + hostport
     return hostport
 
@@ -268,11 +269,11 @@ if has_https:
             ssl = socket.ssl(sock, key_file, cert_file)
             return httplib.FakeSocket(sock, ssl)
 
-        _GLOBAL_DEFAULT_TIMEOUT = object()
-
     try:
         _create_connection = socket.create_connection
     except AttributeError:
+        _GLOBAL_DEFAULT_TIMEOUT = object()
+
         def _create_connection(address, timeout=_GLOBAL_DEFAULT_TIMEOUT,
                                source_address=None):
             # lifted from Python 2.6
