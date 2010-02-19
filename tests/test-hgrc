@@ -33,10 +33,13 @@ echo "[ui]" > $HGRCPATH
 echo "debug=true" >> $HGRCPATH
 echo "fallbackencoding=ASCII" >> $HGRCPATH
 echo "quiet=true" >> $HGRCPATH
+echo "slash=true" >> $HGRCPATH
 echo "traceback=true" >> $HGRCPATH
 echo "verbose=true" >> $HGRCPATH
 echo "[defaults]" >> $HGRCPATH
 echo "identify=-n" >> $HGRCPATH
+echo "[alias]" >> $HGRCPATH
+echo "log=log -g" >> $HGRCPATH
 
 echo '% customized hgrc'
 hg showconfig | sed -e "s:$p:...:"

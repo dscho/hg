@@ -4,18 +4,18 @@ hg init
 echo a > a
 hg commit -A -ma
 
-echo a >> a
+echo b >> a
 hg commit -mb
 
-echo a >> a
+echo c >> a
 hg commit -mc
 
 hg up 1
-echo a >> a
+echo d >> a
 hg commit -md
 
 hg up 1
-echo a >> a
+echo e >> a
 hg commit -me
 
 hg up 1
@@ -24,6 +24,7 @@ hg merge
 
 hg up
 echo % should fail because \> 2 heads
+export HGMERGE=internal:other
 hg merge
 
 echo % should succeed
@@ -43,10 +44,17 @@ echo % should fail because 1 head
 hg merge
 
 hg up 3
-echo a >> a
+echo f >> a
 hg branch foobranch
 hg commit -mf
 echo % should fail because merge with other branch
 hg merge
+
+# Test for issue2043: ensure that 'merge -P' shows ancestors of 6 that
+# are not ancestors of 7, regardless of where their least common
+# ancestor is.
+echo % merge preview not affected by common ancestor
+hg up -q 7
+hg merge -q -P 6         # expect: 2, 4, 5, 6
 
 true
