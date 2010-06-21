@@ -7,7 +7,7 @@
 
 from i18n import _
 import osutil
-import os, sys, errno, stat, getpass, pwd, grp, fcntl
+import os, sys, errno, stat, getpass, pwd, grp
 
 posixfile = open
 nulldev = '/dev/null'
@@ -118,6 +118,7 @@ def samedevice(fpath1, fpath2):
     return st1.st_dev == st2.st_dev
 
 if sys.platform == 'darwin':
+    import fcntl # only needed on darwin, missing on jython
     def realpath(path):
         '''
         Returns the true, canonical file system path equivalent to the given
@@ -257,6 +258,12 @@ def groupname(gid=None):
         return grp.getgrgid(gid)[0]
     except KeyError:
         return str(gid)
+
+def groupmembers(name):
+    """Return the list of members of the group with the given
+    name, KeyError if the group does not exist.
+    """
+    return list(grp.getgrnam(name).gr_mem)
 
 def spawndetached(args):
     return os.spawnvp(os.P_NOWAIT | getattr(os, 'P_DETACH', 0),

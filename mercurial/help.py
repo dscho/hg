@@ -25,7 +25,7 @@ def moduledoc(file):
             break
 
     start = line[:3]
-    if start == '\"\"\"' or start == "\'\'\'":
+    if start == '"""' or start == "'''":
         line = line[3:]
         while line:
             if line.rstrip().endswith(start):
@@ -92,9 +92,12 @@ helptable = (
      loaddoc('revisions')),
     (['mrevs', 'multirevs'], _('Specifying Multiple Revisions'),
      loaddoc('multirevs')),
+    (['revsets'], _("Specifying Revision Sets"), loaddoc('revsets')),
     (['diffs'], _('Diff Formats'), loaddoc('diffs')),
     (['templating', 'templates'], _('Template Usage'),
      loaddoc('templates')),
     (['urls'], _('URL Paths'), loaddoc('urls')),
     (["extensions"], _("Using additional features"), extshelp),
+    (["hgweb"], _("Configuring hgweb"), loaddoc('hgweb')),
+    (["glossary"], _("Glossary"), loaddoc('glossary')),
 )

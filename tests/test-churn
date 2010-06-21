@@ -30,6 +30,8 @@ cd d
 hg churn e
 echo % churn all
 hg churn
+echo % churn excluding one dir
+hg churn -X e
 echo % churn up to rev 2
 hg churn -r :2
 cd ..
@@ -52,9 +54,18 @@ echo % churn with separated added/removed lines
 hg rm d/g/f2.txt
 hg ci -Am "removed d/g/f2.txt" -u user1 -d 14:00 d/g/f2.txt
 hg churn --diffstat
+echo % churn --diffstat with color
+hg --config extensions.color= churn --config color.mode=ansi \
+    --diffstat --color=always
 
 echo % changeset number churn
 hg churn -c
+
+echo 'with space = no-space' >> ../aliases
+echo a >> a
+hg commit -m a -u 'with space' -d 15:00
+echo % churn with space in alias
+hg churn --aliases ../aliases -r tip
 
 cd ..
 

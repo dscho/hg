@@ -8,8 +8,9 @@
 from node import hex, nullid, nullrev, short
 from i18n import _
 import os, sys, errno, re, glob, tempfile
-import mdiff, bdiff, util, templater, patch, error, encoding, templatekw
+import util, templater, patch, error, encoding, templatekw
 import match as _match
+import similar, revset
 
 revrangesep = ':'
 
@@ -110,32 +111,6 @@ def loglimit(opts):
         limit = None
     return limit
 
-def remoteui(src, opts):
-    'build a remote ui from ui or repo and opts'
-    if hasattr(src, 'baseui'): # looks like a repository
-        dst = src.baseui.copy() # drop repo-specific config
-        src = src.ui # copy target options from repo
-    else: # assume it's a global ui object
-        dst = src.copy() # keep all global options
-
-    # copy ssh-specific options
-    for o in 'ssh', 'remotecmd':
-        v = opts.get(o) or src.config('ui', o)
-        if v:
-            dst.setconfig("ui", o, v)
-
-    # copy bundle-specific options
-    r = src.config('bundle', 'mainreporoot')
-    if r:
-        dst.setconfig('bundle', 'mainreporoot', r)
-
-    # copy auth and http_proxy section settings
-    for sect in ('auth', 'http_proxy'):
-        for key, val in src.configitems(sect):
-            dst.setconfig(sect, key, val)
-
-    return dst
-
 def revpair(repo, revs):
     '''return pair of nodes, given list of revisions. second item can
     be None, meaning use working dir.'''
@@ -174,22 +149,36 @@ def revrange(repo, revs):
 
     seen, l = set(), []
     for spec in revs:
-        if revrangesep in spec:
-            start, end = spec.split(revrangesep, 1)
-            start = revfix(repo, start, 0)
-            end = revfix(repo, end, len(repo) - 1)
-            step = start > end and -1 or 1
-            for rev in xrange(start, end + step, step):
+        # attempt to parse old-style ranges first to deal with
+        # things like old-tag which contain query metacharacters
+        try:
+            if revrangesep in spec:
+                start, end = spec.split(revrangesep, 1)
+                start = revfix(repo, start, 0)
+                end = revfix(repo, end, len(repo) - 1)
+                step = start > end and -1 or 1
+                for rev in xrange(start, end + step, step):
+                    if rev in seen:
+                        continue
+                    seen.add(rev)
+                    l.append(rev)
+                continue
+            elif spec and spec in repo: # single unquoted rev
+                rev = revfix(repo, spec, None)
                 if rev in seen:
                     continue
                 seen.add(rev)
                 l.append(rev)
-        else:
-            rev = revfix(repo, spec, None)
-            if rev in seen:
                 continue
-            seen.add(rev)
-            l.append(rev)
+        except error.RepoLookupError:
+            pass
+
+        # fall through to new-style queries if old-style fails
+        m = revset.match(spec)
+        for r in m(repo, range(len(repo))):
+            if r not in seen:
+                l.append(r)
+        seen.update(l)
 
     return l
 
@@ -286,45 +275,6 @@ def matchall(repo):
 def matchfiles(repo, files):
     return _match.exact(repo.root, repo.getcwd(), files)
 
-def findrenames(repo, added, removed, threshold):
-    '''find renamed files -- yields (before, after, score) tuples'''
-    copies = {}
-    ctx = repo['.']
-    for r in removed:
-        if r not in ctx:
-            continue
-        fctx = ctx.filectx(r)
-
-        def score(text):
-            if not len(text):
-                return 0.0
-            if not fctx.cmp(text):
-                return 1.0
-            if threshold == 1.0:
-                return 0.0
-            orig = fctx.data()
-            # bdiff.blocks() returns blocks of matching lines
-            # count the number of bytes in each
-            equal = 0
-            alines = mdiff.splitnewlines(text)
-            matches = bdiff.blocks(text, orig)
-            for x1, x2, y1, y2 in matches:
-                for line in alines[x1:x2]:
-                    equal += len(line)
-
-            lengths = len(text) + len(orig)
-            return equal * 2.0 / lengths
-
-        for a in added:
-            bestscore = copies.get(a, (None, threshold))[1]
-            myscore = score(repo.wread(a))
-            if myscore >= bestscore:
-                copies[a] = (r, myscore)
-
-    for dest, v in copies.iteritems():
-        source, score = v
-        yield source, dest, score
-
 def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
     if dry_run is None:
         dry_run = opts.get('dry_run')
@@ -357,18 +307,26 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
             removed.append(abs)
         elif repo.dirstate[abs] == 'a':
             added.append(abs)
-    if not dry_run:
-        repo.remove(deleted)
-        repo.add(unknown)
+    copies = {}
     if similarity > 0:
-        for old, new, score in findrenames(repo, added + unknown,
-                                           removed + deleted, similarity):
+        for old, new, score in similar.findrenames(repo,
+                added + unknown, removed + deleted, similarity):
             if repo.ui.verbose or not m.exact(old) or not m.exact(new):
                 repo.ui.status(_('recording removal of %s as rename to %s '
                                  '(%d%% similar)\n') %
                                (m.rel(old), m.rel(new), score * 100))
-            if not dry_run:
-                repo.copy(old, new)
+            copies[new] = old
+
+    if not dry_run:
+        wctx = repo[None]
+        wlock = repo.wlock()
+        try:
+            wctx.remove(deleted)
+            wctx.add(unknown)
+            for new, old in copies.iteritems():
+                wctx.copy(old, new)
+        finally:
+            wlock.release()
 
 def copy(ui, repo, pats, opts, rename=False):
     # called with the repo lock held
@@ -379,15 +337,17 @@ def copy(ui, repo, pats, opts, rename=False):
     targets = {}
     after = opts.get("after")
     dryrun = opts.get("dry_run")
+    wctx = repo[None]
 
     def walkpat(pat):
         srcs = []
+        badstates = after and '?' or '?r'
         m = match(repo, [pat], opts, globbed=True)
         for abs in repo.walk(m):
             state = repo.dirstate[abs]
             rel = m.rel(abs)
             exact = m.exact(abs)
-            if state in '?r':
+            if state in badstates:
                 if exact and state == '?':
                     ui.warn(_('%s: not copying - file is not managed\n') % rel)
                 if exact and state == 'r':
@@ -427,6 +387,12 @@ def copy(ui, repo, pats, opts, rename=False):
 
         if after:
             if not exists:
+                if rename:
+                    ui.warn(_('%s: not recording move - %s does not exist\n') %
+                            (relsrc, reltarget))
+                else:
+                    ui.warn(_('%s: not recording copy - %s does not exist\n') %
+                            (relsrc, reltarget))
                 return
         elif not dryrun:
             try:
@@ -464,12 +430,12 @@ def copy(ui, repo, pats, opts, rename=False):
                               "data will be stored for %s.\n")
                             % (repo.pathto(origsrc, cwd), reltarget))
                 if repo.dirstate[abstarget] in '?r' and not dryrun:
-                    repo.add([abstarget])
+                    wctx.add([abstarget])
             elif not dryrun:
-                repo.copy(origsrc, abstarget)
+                wctx.copy(origsrc, abstarget)
 
         if rename and not dryrun:
-            repo.remove([abssrc], not after)
+            wctx.remove([abssrc], not after)
 
     # pat: ossep
     # dest ossep
@@ -573,7 +539,7 @@ def copy(ui, repo, pats, opts, rename=False):
     if errors:
         ui.warn(_('(consider using --after)\n'))
 
-    return errors
+    return errors != 0
 
 def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
     runargs=None, appendpid=False):
@@ -647,6 +613,70 @@ def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
     if runfn:
         return runfn()
 
+def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
+           opts=None):
+    '''export changesets as hg patches.'''
+
+    total = len(revs)
+    revwidth = max([len(str(rev)) for rev in revs])
+
+    def single(rev, seqno, fp):
+        ctx = repo[rev]
+        node = ctx.node()
+        parents = [p.node() for p in ctx.parents() if p]
+        branch = ctx.branch()
+        if switch_parent:
+            parents.reverse()
+        prev = (parents and parents[0]) or nullid
+
+        if not fp:
+            fp = make_file(repo, template, node, total=total, seqno=seqno,
+                           revwidth=revwidth, mode='ab')
+        if fp != sys.stdout and hasattr(fp, 'name'):
+            repo.ui.note("%s\n" % fp.name)
+
+        fp.write("# HG changeset patch\n")
+        fp.write("# User %s\n" % ctx.user())
+        fp.write("# Date %d %d\n" % ctx.date())
+        if branch and (branch != 'default'):
+            fp.write("# Branch %s\n" % branch)
+        fp.write("# Node ID %s\n" % hex(node))
+        fp.write("# Parent  %s\n" % hex(prev))
+        if len(parents) > 1:
+            fp.write("# Parent  %s\n" % hex(parents[1]))
+        fp.write(ctx.description().rstrip())
+        fp.write("\n\n")
+
+        for chunk in patch.diff(repo, prev, node, opts=opts):
+            fp.write(chunk)
+
+    for seqno, rev in enumerate(revs):
+        single(rev, seqno + 1, fp)
+
+def diffordiffstat(ui, repo, diffopts, node1, node2, match,
+                   changes=None, stat=False, fp=None):
+    '''show diff or diffstat.'''
+    if fp is None:
+        write = ui.write
+    else:
+        def write(s, **kw):
+            fp.write(s)
+
+    if stat:
+        diffopts.context = 0
+        width = 80
+        if not ui.plain():
+            width = util.termwidth()
+        chunks = patch.diff(repo, node1, node2, match, changes, diffopts)
+        for chunk, label in patch.diffstatui(util.iterlines(chunks),
+                                             width=width,
+                                             git=diffopts.git):
+            write(chunk, label=label)
+    else:
+        for chunk, label in patch.diffui(repo, node1, node2, match,
+                                         changes, diffopts):
+            write(chunk, label=label)
+
 class changeset_printer(object):
     '''show changeset information when templating not requested.'''
 
@@ -682,7 +712,7 @@ class changeset_printer(object):
         if self.buffered:
             self.ui.pushbuffer()
             self._show(ctx, copies, props)
-            self.hunk[ctx.rev()] = self.ui.popbuffer()
+            self.hunk[ctx.rev()] = self.ui.popbuffer(labeled=True)
         else:
             self._show(ctx, copies, props)
 
@@ -692,7 +722,8 @@ class changeset_printer(object):
         rev = ctx.rev()
 
         if self.ui.quiet:
-            self.ui.write("%d:%s\n" % (rev, short(changenode)))
+            self.ui.write("%d:%s\n" % (rev, short(changenode)),
+                          label='log.node')
             return
 
         log = self.repo.changelog
@@ -703,63 +734,77 @@ class changeset_printer(object):
         parents = [(p, hexfunc(log.node(p)))
                    for p in self._meaningful_parentrevs(log, rev)]
 
-        self.ui.write(_("changeset:   %d:%s\n") % (rev, hexfunc(changenode)))
+        self.ui.write(_("changeset:   %d:%s\n") % (rev, hexfunc(changenode)),
+                      label='log.changeset')
 
         branch = ctx.branch()
         # don't show the default branch name
         if branch != 'default':
             branch = encoding.tolocal(branch)
-            self.ui.write(_("branch:      %s\n") % branch)
+            self.ui.write(_("branch:      %s\n") % branch,
+                          label='log.branch')
         for tag in self.repo.nodetags(changenode):
-            self.ui.write(_("tag:         %s\n") % tag)
+            self.ui.write(_("tag:         %s\n") % tag,
+                          label='log.tag')
         for parent in parents:
-            self.ui.write(_("parent:      %d:%s\n") % parent)
+            self.ui.write(_("parent:      %d:%s\n") % parent,
+                          label='log.parent')
 
         if self.ui.debugflag:
             mnode = ctx.manifestnode()
             self.ui.write(_("manifest:    %d:%s\n") %
-                          (self.repo.manifest.rev(mnode), hex(mnode)))
-        self.ui.write(_("user:        %s\n") % ctx.user())
-        self.ui.write(_("date:        %s\n") % date)
+                          (self.repo.manifest.rev(mnode), hex(mnode)),
+                          label='ui.debug log.manifest')
+        self.ui.write(_("user:        %s\n") % ctx.user(),
+                      label='log.user')
+        self.ui.write(_("date:        %s\n") % date,
+                      label='log.date')
 
         if self.ui.debugflag:
             files = self.repo.status(log.parents(changenode)[0], changenode)[:3]
             for key, value in zip([_("files:"), _("files+:"), _("files-:")],
                                   files):
                 if value:
-                    self.ui.write("%-12s %s\n" % (key, " ".join(value)))
+                    self.ui.write("%-12s %s\n" % (key, " ".join(value)),
+                                  label='ui.debug log.files')
         elif ctx.files() and self.ui.verbose:
-            self.ui.write(_("files:       %s\n") % " ".join(ctx.files()))
+            self.ui.write(_("files:       %s\n") % " ".join(ctx.files()),
+                          label='ui.note log.files')
         if copies and self.ui.verbose:
             copies = ['%s (%s)' % c for c in copies]
-            self.ui.write(_("copies:      %s\n") % ' '.join(copies))
+            self.ui.write(_("copies:      %s\n") % ' '.join(copies),
+                          label='ui.note log.copies')
 
         extra = ctx.extra()
         if extra and self.ui.debugflag:
             for key, value in sorted(extra.items()):
                 self.ui.write(_("extra:       %s=%s\n")
-                              % (key, value.encode('string_escape')))
+                              % (key, value.encode('string_escape')),
+                              label='ui.debug log.extra')
 
         description = ctx.description().strip()
         if description:
             if self.ui.verbose:
-                self.ui.write(_("description:\n"))
-                self.ui.write(description)
+                self.ui.write(_("description:\n"),
+                              label='ui.note log.description')
+                self.ui.write(description,
+                              label='ui.note log.description')
                 self.ui.write("\n\n")
             else:
                 self.ui.write(_("summary:     %s\n") %
-                              description.splitlines()[0])
+                              description.splitlines()[0],
+                              label='log.summary')
         self.ui.write("\n")
 
         self.showpatch(changenode)
 
     def showpatch(self, node):
         if self.patch:
+            stat = self.diffopts.get('stat')
+            diffopts = patch.diffopts(self.ui, self.diffopts)
             prev = self.repo.changelog.parents(node)[0]
-            chunks = patch.diff(self.repo, prev, node, match=self.patch,
-                                opts=patch.diffopts(self.ui, self.diffopts))
-            for chunk in chunks:
-                self.ui.write(chunk)
+            diffordiffstat(self.ui, self.repo, diffopts, prev, node,
+                           match=self.patch, stat=stat)
             self.ui.write("\n")
 
     def _meaningful_parentrevs(self, log, rev):
@@ -876,7 +921,7 @@ class changeset_templater(changeset_printer):
             msg = _("%s: no key named '%s'")
             raise util.Abort(msg % (self.t.mapfile, inst.args[0]))
         except SyntaxError, inst:
-            raise util.Abort(_('%s: %s') % (self.t.mapfile, inst.args[0]))
+            raise util.Abort('%s: %s' % (self.t.mapfile, inst.args[0]))
 
 def show_changeset(ui, repo, opts, buffered=False, matchfn=False):
     """show one changeset using template or regular display.
@@ -891,7 +936,7 @@ def show_changeset(ui, repo, opts, buffered=False, matchfn=False):
     """
     # options
     patch = False
-    if opts.get('patch'):
+    if opts.get('patch') or opts.get('stat'):
         patch = matchfn or matchall(repo)
 
     tmpl = opts.get('template')
@@ -989,6 +1034,8 @@ def walkchangerevs(repo, match, opts, prepare):
     else:
         defrange = '-1:0'
     revs = revrange(repo, opts['rev'] or [defrange])
+    if not revs:
+        return []
     wanted = set()
     slowpath = match.anypats() or (match.files() and opts.get('removed'))
     fncache = {}
@@ -1044,7 +1091,7 @@ def walkchangerevs(repo, match, opts, prepare):
                     fncache.setdefault(rev, [])
                     fncache[rev].append(file_)
                     wanted.add(rev)
-                    if follow and copied:
+                    if copied:
                         copies.append(copied)
     if slowpath:
         if follow:

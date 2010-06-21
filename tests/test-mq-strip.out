@@ -37,7 +37,7 @@ date:        Thu Jan 01 00:00:00 1970 +0000
 summary:     e
 
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-saving bundle to 
+saved backup bundle to 
 % after update 4, strip 4
 changeset:   3:65bd5f99a4a3
 tag:         tip
@@ -55,7 +55,7 @@ date:        Thu Jan 01 00:00:00 1970 +0000
 summary:     e
 
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-saving bundle to 
+saved backup bundle to 
 % after update 4, strip 3
 changeset:   1:ef3a871183d7
 user:        test
@@ -69,7 +69,7 @@ user:        test
 date:        Thu Jan 01 00:00:00 1970 +0000
 summary:     b
 
-saving bundle to 
+saved backup bundle to 
 % after update 1, strip 4
 changeset:   1:ef3a871183d7
 user:        test
@@ -84,13 +84,7 @@ user:        test
 date:        Thu Jan 01 00:00:00 1970 +0000
 summary:     e
 
-saving bundle to 
-saving bundle to 
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 2 changesets with 2 changes to 1 files
+saved backup bundle to 
 % after update 4, strip 2
 changeset:   3:443431ffac4f
 tag:         tip
@@ -108,7 +102,7 @@ date:        Thu Jan 01 00:00:00 1970 +0000
 summary:     c
 
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-saving bundle to 
+saved backup bundle to 
 % after update 4, strip 1
 changeset:   0:9ab35a2d17cb
 tag:         tip
@@ -118,7 +112,7 @@ summary:     a
 
 0 files updated, 0 files merged, 1 files removed, 0 files unresolved
 % before update null, strip 4
-saving bundle to 
+saved backup bundle to 
 % after update null, strip 4
 changeset:   4:264128213d29
 tag:         tip
@@ -164,7 +158,7 @@ date:        Thu Jan 01 00:00:00 1970 +0000
 summary:     c
 
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-saving bundle to 
+saved backup bundle to 
 % after strip of merge parent
 changeset:   1:ef3a871183d7
 user:        test

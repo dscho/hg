@@ -24,50 +24,81 @@ from mercurial import revlog, transaction, node, util
 from mercurial import changegroup
 from mercurial.i18n import _
 
-def toposort(ui, rl):
 
-    children = {}
-    root = []
-    # build children and roots
+def postorder(start, edges):
+    result = []
+    visit = list(start)
+    finished = set()
+
+    while visit:
+        cur = visit[-1]
+        for p in edges[cur]:
+            if p not in finished:
+                visit.append(p)
+                break
+        else:
+            result.append(cur)
+            finished.add(cur)
+            visit.pop()
+
+    return result
+
+def toposort_reversepostorder(ui, rl):
+    # postorder of the reverse directed graph
+
+    # map rev to list of parent revs (p2 first)
+    parents = {}
+    heads = set()
     ui.status(_('reading revs\n'))
     try:
-        for i in rl:
-            ui.progress(_('reading'), i, total=len(rl))
-            children[i] = []
-            parents = [p for p in rl.parentrevs(i) if p != node.nullrev]
-            # in case of duplicate parents
-            if len(parents) == 2 and parents[0] == parents[1]:
-                del parents[1]
-            for p in parents:
-                assert p in children
-                children[p].append(i)
-
-            if len(parents) == 0:
-                root.append(i)
+        for rev in rl:
+            ui.progress(_('reading'), rev, total=len(rl))
+            (p1, p2) = rl.parentrevs(rev)
+            if p1 == p2 == node.nullrev:
+                parents[rev] = ()       # root node
+            elif p1 == p2 or p2 == node.nullrev:
+                parents[rev] = (p1,)    # normal node
+            else:
+                parents[rev] = (p2, p1) # merge node
+            heads.add(rev)
+            for p in parents[rev]:
+                heads.discard(p)
     finally:
-        ui.progress(_('reading'), None, total=len(rl))
+        ui.progress(_('reading'), None)
 
-    # XXX this is a reimplementation of the 'branchsort' topo sort
-    # algorithm in hgext.convert.convcmd... would be nice not to duplicate
-    # the algorithm
+    heads = list(heads)
+    heads.sort(reverse=True)
+
     ui.status(_('sorting revs\n'))
-    visit = root
-    ret = []
-    while visit:
-        i = visit.pop(0)
-        ret.append(i)
-        if i not in children:
-            # This only happens if some node's p1 == p2, which can
-            # happen in the manifest in certain circumstances.
-            continue
-        next = []
-        for c in children.pop(i):
-            parents_unseen = [p for p in rl.parentrevs(c)
-                              if p != node.nullrev and p in children]
-            if len(parents_unseen) == 0:
-                next.append(c)
-        visit = next + visit
-    return ret
+    return postorder(heads, parents)
+
+def toposort_postorderreverse(ui, rl):
+    # reverse-postorder of the reverse directed graph
+
+    children = {}
+    roots = set()
+    ui.status(_('reading revs\n'))
+    try:
+        for rev in rl:
+            ui.progress(_('reading'), rev, total=len(rl))
+            (p1, p2) = rl.parentrevs(rev)
+            if p1 == p2 == node.nullrev:
+                roots.add(rev)
+            children[rev] = []
+            if p1 != node.nullrev:
+                children[p1].append(rev)
+            if p2 != node.nullrev:
+                children[p2].append(rev)
+    finally:
+        ui.progress(_('reading'), None)
+
+    roots = list(roots)
+    roots.sort()
+
+    ui.status(_('sorting revs\n'))
+    result = postorder(roots, children)
+    result.reverse()
+    return result
 
 def writerevs(ui, r1, r2, order, tr):
 
@@ -89,7 +120,7 @@ def writerevs(ui, r1, r2, order, tr):
         chunkiter = changegroup.chunkiter(group)
         r2.addgroup(chunkiter, unlookup, tr)
     finally:
-        ui.progress(_('writing'), None, len(order))
+        ui.progress(_('writing'), None)
 
 def report(ui, r1, r2):
     def getsize(r):
@@ -118,9 +149,15 @@ def report(ui, r1, r2):
              % (shrink_percent, shrink_factor))
 
 def shrink(ui, repo, **opts):
+    """shrink a revlog by reordering revisions
+
+    Rewrites all the entries in some revlog of the current repository
+    (by default, the manifest log) to save space.
+
+    Different sort algorithms have different performance
+    characteristics.  Use ``--sort`` to select a sort algorithm so you
+    can determine which works best for your data.
     """
-    Shrink revlog by re-ordering revisions. Will operate on manifest for
-    the given repository if no other revlog is specified."""
 
     if not repo.local():
         raise util.Abort(_('not a local repository: %s') % repo.root)
@@ -139,6 +176,12 @@ def shrink(ui, repo, **opts):
             raise util.Abort(_('--revlog option must specify a revlog in %s, '
                                'not %s') % (store, indexfn))
 
+    sortname = opts['sort']
+    try:
+        toposort = globals()['toposort_' + sortname]
+    except KeyError:
+        raise util.Abort(_('no such toposort algorithm: %s') % sortname)
+
     if not os.path.exists(indexfn):
         raise util.Abort(_('no such file: %s') % indexfn)
     if '00changelog' in indexfn:
@@ -147,10 +190,7 @@ def shrink(ui, repo, **opts):
 
     ui.write(_('shrinking %s\n') % indexfn)
     prefix = os.path.basename(indexfn)[:-1]
-    (tmpfd, tmpindexfn) = tempfile.mkstemp(dir=os.path.dirname(indexfn),
-                                           prefix=prefix,
-                                           suffix='.i')
-    os.close(tmpfd)
+    tmpindexfn = util.mktempcopy(indexfn, emptyok=True)
 
     r1 = revlog.revlog(util.opener(os.getcwd(), audit=False), indexfn)
     r2 = revlog.revlog(util.opener(os.getcwd(), audit=False), tmpindexfn)
@@ -187,6 +227,15 @@ def shrink(ui, repo, **opts):
     try:
         try:
             order = toposort(ui, r1)
+
+            suboptimal = 0
+            for i in xrange(1, len(order)):
+                parents = [p for p in r1.parentrevs(order[i])
+                           if p != node.nullrev]
+                if parents and order[i - 1] not in parents:
+                    suboptimal += 1
+            ui.note(_('%d suboptimal nodes\n') % suboptimal)
+
             writerevs(ui, r1, r2, order, tr)
             report(ui, r1, r2)
             tr.close()
@@ -202,9 +251,6 @@ def shrink(ui, repo, **opts):
             # copy files
             util.os_link(indexfn, oldindexfn)
             ignoremissing(util.os_link)(datafn, olddatafn)
-
-            # mkstemp() creates files only readable by the owner
-            os.chmod(tmpindexfn, os.stat(indexfn).st_mode)
 
             # rename
             util.rename(tmpindexfn, indexfn)
@@ -234,6 +280,7 @@ cmdtable = {
     'shrink': (shrink,
                [('', 'revlog', '', _('index (.i) file of the revlog to shrink')),
                 ('n', 'dry-run', None, _('do not shrink, simulate only')),
+                ('', 'sort', 'reversepostorder', 'name of sort algorithm to use'),
                 ],
                _('hg shrink [--revlog PATH]'))
 }

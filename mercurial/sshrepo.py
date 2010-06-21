@@ -117,7 +117,7 @@ class sshrepository(repo.repository):
     def do_cmd(self, cmd, **args):
         self.ui.debug("sending %s command\n" % cmd)
         self.pipeo.write("%s\n" % cmd)
-        for k, v in args.iteritems():
+        for k, v in sorted(args.iteritems()):
             self.pipeo.write("%s %d\n" % (k, len(v)))
             self.pipeo.write(v)
         self.pipeo.flush()
@@ -217,6 +217,10 @@ class sshrepository(repo.repository):
         return self.do_cmd("changegroupsubset", bases=bases, heads=heads)
 
     def unbundle(self, cg, heads, source):
+        '''Send cg (a readable file-like object representing the
+        changegroup to push, typically a chunkbuffer object) to the
+        remote server as a bundle. Return an integer indicating the
+        result of the push (see localrepository.addchangegroup()).'''
         d = self.call("unbundle", heads=' '.join(map(hex, heads)))
         if d:
             # remote may send "unsynced changes"
@@ -242,6 +246,9 @@ class sshrepository(repo.repository):
             self.abort(error.ResponseError(_("unexpected response:"), r))
 
     def addchangegroup(self, cg, source, url):
+        '''Send a changegroup to the remote server.  Return an integer
+        similar to unbundle(). DEPRECATED, since it requires locking the
+        remote.'''
         d = self.call("addchangegroup")
         if d:
             self.abort(error.RepoError(_("push refused: %s") % d))
@@ -265,5 +272,22 @@ class sshrepository(repo.repository):
 
     def stream_out(self):
         return self.do_cmd('stream_out')
+
+    def pushkey(self, namespace, key, old, new):
+        if not self.capable('pushkey'):
+            return False
+        d = self.call("pushkey",
+                      namespace=namespace, key=key, old=old, new=new)
+        return bool(int(d))
+
+    def listkeys(self, namespace):
+        if not self.capable('pushkey'):
+            return {}
+        d = self.call("listkeys", namespace=namespace)
+        r = {}
+        for l in d.splitlines():
+            k, v = l.split('\t')
+            r[k.decode('string-escape')] = v.decode('string-escape')
+        return r
 
 instance = sshrepository

@@ -10,8 +10,8 @@ from i18n import _
 from lock import release
 import localrepo, bundlerepo, httprepo, sshrepo, statichttprepo
 import lock, util, extensions, error, encoding, node
-import merge as _merge
-import verify as _verify
+import merge as mergemod
+import verify as verifymod
 import errno, os, shutil
 
 def _local(path):
@@ -19,34 +19,45 @@ def _local(path):
     return (os.path.isfile(path) and bundlerepo or localrepo)
 
 def addbranchrevs(lrepo, repo, branches, revs):
-    if not branches:
+    hashbranch, branches = branches
+    if not hashbranch and not branches:
         return revs or None, revs and revs[0] or None
     revs = revs and list(revs) or []
     if not repo.capable('branchmap'):
-        revs.extend(branches)
+        if branches:
+            raise util.Abort(_("remote branch lookup not supported"))
+        revs.append(hashbranch)
         return revs, revs[0]
     branchmap = repo.branchmap()
-    for branch in branches:
-        if branch == '.':
+
+    def primary(butf8):
+        if butf8 == '.':
             if not lrepo or not lrepo.local():
                 raise util.Abort(_("dirstate branch not accessible"))
             butf8 = lrepo.dirstate.branch()
-            branch = encoding.tolocal(butf8)
-        else:
-            butf8 = encoding.fromlocal(branch)
         if butf8 in branchmap:
             revs.extend(node.hex(r) for r in reversed(branchmap[butf8]))
+            return True
         else:
-            revs.append(branch)
+            return False
+
+    for branch in branches:
+        butf8 = encoding.fromlocal(branch)
+        if not primary(butf8):
+            raise error.RepoLookupError(_("unknown branch '%s'") % branch)
+    if hashbranch:
+        butf8 = encoding.fromlocal(hashbranch)
+        if not primary(butf8):
+            revs.append(hashbranch)
     return revs, revs[0]
 
 def parseurl(url, branches=None):
-    '''parse url#branch, returning url, branches+[branch]'''
+    '''parse url#branch, returning (url, (branch, branches))'''
 
     if '#' not in url:
-        return url, branches or []
+        return url, (None, branches or [])
     url, branch = url.split('#', 1)
-    return url, (branches or []) + [branch]
+    return url, (branch, branches or [])
 
 schemes = {
     'bundle': bundlerepo,
@@ -279,6 +290,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
                 raise
 
             hardlink = None
+            num = 0
             for f in src_repo.store.copylist():
                 src = os.path.join(src_repo.sharedpath, f)
                 dst = os.path.join(dest_path, f)
@@ -289,7 +301,12 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
                     if dst.endswith('data'):
                         # lock to avoid premature writing to the target
                         dest_lock = lock.lock(os.path.join(dstbase, "lock"))
-                    hardlink = util.copyfiles(src, dst, hardlink)
+                    hardlink, n = util.copyfiles(src, dst, hardlink)
+                    num += n
+            if hardlink:
+                ui.debug("linked %d files\n" % num)
+            else:
+                ui.debug("copied %d files\n" % num)
 
             # we need to re-init the repo after manually copying the data
             # into it
@@ -361,7 +378,7 @@ def _showstats(repo, stats):
 
 def update(repo, node):
     """update the working directory to node, merging linear changes"""
-    stats = _merge.update(repo, node, False, False, None)
+    stats = mergemod.update(repo, node, False, False, None)
     _showstats(repo, stats)
     if stats[3]:
         repo.ui.status(_("use 'hg resolve' to retry unresolved file merges\n"))
@@ -372,14 +389,14 @@ _update = update
 
 def clean(repo, node, show_stats=True):
     """forcibly switch the working directory to node, clobbering changes"""
-    stats = _merge.update(repo, node, False, True, None)
+    stats = mergemod.update(repo, node, False, True, None)
     if show_stats:
         _showstats(repo, stats)
     return stats[3] > 0
 
 def merge(repo, node, force=None, remind=True):
     """branch merge with node, resolving changes"""
-    stats = _merge.update(repo, node, True, force, False)
+    stats = mergemod.update(repo, node, True, force, False)
     _showstats(repo, stats)
     if stats[3]:
         repo.ui.status(_("use 'hg resolve' to retry unresolved file merges "
@@ -390,8 +407,34 @@ def merge(repo, node, force=None, remind=True):
 
 def revert(repo, node, choose):
     """revert changes to revision in node without updating dirstate"""
-    return _merge.update(repo, node, False, True, choose)[3] > 0
+    return mergemod.update(repo, node, False, True, choose)[3] > 0
 
 def verify(repo):
     """verify the consistency of a repository"""
-    return _verify.verify(repo)
+    return verifymod.verify(repo)
+
+def remoteui(src, opts):
+    'build a remote ui from ui or repo and opts'
+    if hasattr(src, 'baseui'): # looks like a repository
+        dst = src.baseui.copy() # drop repo-specific config
+        src = src.ui # copy target options from repo
+    else: # assume it's a global ui object
+        dst = src.copy() # keep all global options
+
+    # copy ssh-specific options
+    for o in 'ssh', 'remotecmd':
+        v = opts.get(o) or src.config('ui', o)
+        if v:
+            dst.setconfig("ui", o, v)
+
+    # copy bundle-specific options
+    r = src.config('bundle', 'mainreporoot')
+    if r:
+        dst.setconfig('bundle', 'mainreporoot', r)
+
+    # copy auth and http_proxy section settings
+    for sect in ('auth', 'http_proxy'):
+        for key, val in src.configitems(sect):
+            dst.setconfig(sect, key, val)
+
+    return dst

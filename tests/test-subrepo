@@ -16,6 +16,7 @@ hg add .hgsub
 hg init s
 echo a > s/a
 hg -R s ci -Ams0
+hg sum
 hg ci -m1
 
 echo % add sub sub
@@ -24,7 +25,9 @@ hg init s/ss
 echo a > s/ss/a
 hg -R s add s/.hgsub
 hg -R s/ss add s/ss/a
+hg sum
 hg ci -m2
+hg sum
 
 echo % bump sub rev
 echo b > s/a
@@ -78,7 +81,7 @@ cat t/t
 
 echo % clone
 cd ..
-hg clone t tc
+hg clone t tc | sed 's|from .*/sub|from .../sub|g'
 cd tc
 hg debugsub
 
@@ -102,7 +105,8 @@ hg ci -m13
 echo % pull
 cd ../tc
 hg pull | sed 's/ .*sub/ ...sub/g'
-hg up # should pull t
+# should pull t
+hg up | sed 's|from .*/sub|from .../sub|g'
 cat t/t
 
 echo % bogus subrepo path aborts
@@ -214,7 +218,7 @@ echo a > repo/s/a
 hg -R repo/s ci -Am0
 echo s = s > repo/.hgsub
 hg -R repo ci -Am1
-hg clone repo repo2
+hg clone repo repo2 | sed 's|from .*/sub|from .../sub|g'
 hg -q -R repo2 pull -u
 echo 1 > repo2/s/a
 hg -R repo2/s ci -m2

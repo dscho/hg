@@ -16,7 +16,7 @@ map from a changeset hash to its hash in the source repository.
 from mercurial.i18n import _
 import os, tempfile
 from mercurial import bundlerepo, changegroup, cmdutil, hg, merge, match
-from mercurial import patch, revlog, util, error
+from mercurial import patch, revlog, util, error, discovery
 
 class transplantentry(object):
     def __init__(self, lnode, rnode):
@@ -341,7 +341,7 @@ class transplanter(object):
                 node = revlog.bin(line[10:])
             elif line.startswith('# Parent '):
                 parents.append(revlog.bin(line[9:]))
-            elif not line.startswith('#'):
+            elif not line.startswith('# '):
                 inmsg = True
                 message.append(line)
         return (node, user, date, '\n'.join(message), parents)
@@ -453,7 +453,7 @@ def transplant(ui, repo, *revs, **opts):
     transplanted, otherwise you will be prompted to select the
     changesets you want.
 
-    hg transplant --branch REVISION --all will rebase the selected
+    :hg:`transplant --branch REVISION --all` will rebase the selected
     branch (up to the named revision) onto your current working
     directory.
 
@@ -462,17 +462,18 @@ def transplant(ui, repo, *revs, **opts):
     of a merged transplant, and you can merge descendants of them
     normally instead of transplanting them.
 
-    If no merges or revisions are provided, hg transplant will start
-    an interactive changeset browser.
+    If no merges or revisions are provided, :hg:`transplant` will
+    start an interactive changeset browser.
 
     If a changeset application fails, you can fix the merge by hand
-    and then resume where you left off by calling hg transplant
-    --continue/-c.
+    and then resume where you left off by calling :hg:`transplant
+    --continue/-c`.
     '''
     def getremotechanges(repo, url):
         sourcerepo = ui.expandpath(url)
         source = hg.repository(ui, sourcerepo)
-        common, incoming, rheads = repo.findcommonincoming(source, force=True)
+        tmp = discovery.findcommonincoming(repo, source, force=True)
+        common, incoming, rheads = tmp
         if not incoming:
             return (source, None, None)
 
@@ -591,15 +592,20 @@ def transplant(ui, repo, *revs, **opts):
 cmdtable = {
     "transplant":
         (transplant,
-         [('s', 'source', '', _('pull patches from REPOSITORY')),
-          ('b', 'branch', [], _('pull patches from branch BRANCH')),
+         [('s', 'source', '',
+           _('pull patches from REPO'), _('REPO')),
+          ('b', 'branch', [],
+           _('pull patches from branch BRANCH'), _('BRANCH')),
           ('a', 'all', None, _('pull all changesets up to BRANCH')),
-          ('p', 'prune', [], _('skip over REV')),
-          ('m', 'merge', [], _('merge at REV')),
+          ('p', 'prune', [],
+           _('skip over REV'), _('REV')),
+          ('m', 'merge', [],
+           _('merge at REV'), _('REV')),
           ('', 'log', None, _('append transplant info to log message')),
           ('c', 'continue', None, _('continue last transplant session '
                                     'after repair')),
-          ('', 'filter', '', _('filter changesets through FILTER'))],
-         _('hg transplant [-s REPOSITORY] [-b BRANCH [-a]] [-p REV] '
+          ('', 'filter', '',
+           _('filter changesets through command'), _('CMD'))],
+         _('hg transplant [-s REPO] [-b BRANCH [-a]] [-p REV] '
            '[-m REV] [REV]...'))
 }

@@ -293,6 +293,7 @@ def filterpatch(ui, chunks):
                     _('&Quit, recording no changes'),
                     _('&?'))
             r = ui.promptchoice("%s %s" % (query, resps), choices)
+            ui.write("\n")
             if r == 7: # ?
                 doc = gettext(record.__doc__)
                 c = doc.find('::') + 2
@@ -359,10 +360,10 @@ def filterpatch(ui, chunks):
 def record(ui, repo, *pats, **opts):
     '''interactively select changes to commit
 
-    If a list of files is omitted, all changes reported by "hg status"
+    If a list of files is omitted, all changes reported by :hg:`status`
     will be candidates for recording.
 
-    See 'hg help dates' for a list of formats valid for -d/--date.
+    See :hg:`help dates` for a list of formats valid for -d/--date.
 
     You will be prompted for whether to record changes to each
     modified file, and for files with multiple changes, for each
@@ -389,7 +390,7 @@ def record(ui, repo, *pats, **opts):
 def qrecord(ui, repo, patch, *pats, **opts):
     '''interactively record a new patch
 
-    See 'hg help qnew' & 'hg help record' for more information and
+    See :hg:`help qnew` & :hg:`help record` for more information and
     usage.
     '''
 
@@ -526,7 +527,18 @@ def dorecord(ui, repo, commitfunc, *pats, **opts):
                 os.rmdir(backupdir)
             except OSError:
                 pass
-    return cmdutil.commit(ui, repo, recordfunc, pats, opts)
+
+    # wrap ui.write so diff output can be labeled/colorized
+    def wrapwrite(orig, *args, **kw):
+        label = kw.pop('label', '')
+        for chunk, l in patch.difflabel(lambda: args):
+            orig(chunk, label=label + l)
+    oldwrite = ui.write
+    extensions.wrapfunction(ui, 'write', wrapwrite)
+    try:
+        return cmdutil.commit(ui, repo, recordfunc, pats, opts)
+    finally:
+        ui.write = oldwrite
 
 cmdtable = {
     "record":
@@ -550,7 +562,7 @@ def uisetup(ui):
         (qrecord,
 
          # add qnew options, except '--force'
-         [opt for opt in mq.cmdtable['qnew'][1] if opt[1] != 'force'],
+         [opt for opt in mq.cmdtable['^qnew'][1] if opt[1] != 'force'],
 
          _('hg qrecord [OPTION]... PATCH [FILE]...')),
     }

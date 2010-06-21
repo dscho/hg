@@ -14,6 +14,10 @@ hg bookmark X
 echo % list bookmarks
 hg bookmarks
 
+echo % list bookmarks with color
+hg --config extensions.color= --config color.mode=ansi \
+    bookmarks --color=always
+
 echo a > a
 hg add a
 hg commit -m 0
@@ -78,7 +82,7 @@ echo % list bookmarks
 hg bookmarks
 
 echo % look up stripped bookmark name
-hg log -r 'x  y'
+hg log -r '"x  y"'
 
 echo % reject bookmark name with newline
 hg bookmark '

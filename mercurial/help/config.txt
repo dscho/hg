@@ -5,12 +5,13 @@ On Windows, these configuration files are read:
 
 - ``<repo>\.hg\hgrc``
 - ``%USERPROFILE%\.hgrc``
-- ``%USERPROFILE%\Mercurial.ini``
+- ``%USERPROFILE%\mercurial.ini``
 - ``%HOME%\.hgrc``
-- ``%HOME%\Mercurial.ini``
-- ``C:\Mercurial\Mercurial.ini``
-- ``HKEY_LOCAL_MACHINE\SOFTWARE\Mercurial``
-- ``<install-dir>\Mercurial.ini``
+- ``%HOME%\mercurial.ini``
+- ``C:\mercurial\mercurial.ini`` (unless regkey or hgrc.d\ or mercurial.ini found)
+- ``HKEY_LOCAL_MACHINE\SOFTWARE\Mercurial`` (unless hgrc.d\ or mercurial.ini found)
+- ``<hg.exe-dir>\hgrc.d\*.rc`` (unless mercurial.ini found)
+- ``<hg.exe-dir>\mercurial.ini``
 
 On Unix, these files are read:
 
@@ -21,6 +22,19 @@ On Unix, these files are read:
 - ``<install-root>/etc/mercurial/hgrc``
 - ``<install-root>/etc/mercurial/hgrc.d/*.rc``
 
+If there is a per-repository configuration file which is not owned by
+the active user, Mercurial will warn you that the file is skipped::
+
+  not trusting file <repo>/.hg/hgrc from untrusted user USER, group GROUP
+
+If this bothers you, the warning can be silenced (the file would still
+be ignored) or trust can be established. Use one of the following
+settings, the syntax is explained below:
+
+- ``ui.report_untrusted = False``
+- ``trusted.users = USER``
+- ``trusted.groups = GROUP``
+
 The configuration files for Mercurial use a simple ini-file format. A
 configuration file consists of sections, led by a ``[section]`` header
 and followed by ``name = value`` entries::
@@ -29,7 +43,7 @@ and followed by ``name = value`` entries::
   username = Firstname Lastname <firstname.lastname@example.net>
   verbose = True
 
-This above entries will be referred to as ``ui.username`` and
+The above entries will be referred to as ``ui.username`` and
 ``ui.verbose``, respectively. Please see the hgrc man page for a full
 description of the possible configuration values:
 

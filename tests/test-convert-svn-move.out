@@ -80,3 +80,44 @@ converting...
 644 @ dlink2
 644 @ dlink3
 % try updating
+% test convert progress bar
+
+scanning [ <=>                                                              ] 1
+scanning [  <=>                                                             ] 2
+scanning [   <=>                                                            ] 3
+scanning [    <=>                                                           ] 4
+                                                                                
+converting [                                                              ] 0/4
+retrieving file [==========>                                              ] 1/5
+retrieving file [=====================>                                   ] 2/5
+retrieving file [=================================>                       ] 3/5
+retrieving file [============================================>            ] 4/5
+retrieving file [========================================================>] 5/5
+                                                                                
+converting [==============>                                               ] 1/4
+scanning paths [                                                          ] 0/1
+                                                                                
+retrieving file [========================================================>] 1/1
+                                                                                
+converting [==============================>                               ] 2/4
+scanning paths [                                                          ] 0/2
+scanning paths [============================>                             ] 1/2
+                                                                                
+retrieving file [=============>                                           ] 1/4
+retrieving file [===========================>                             ] 2/4
+retrieving file [=========================================>               ] 3/4
+retrieving file [========================================================>] 4/4
+                                                                                
+converting [=============================================>                ] 3/4
+scanning paths [                                                          ] 0/1
+                                                                                
+retrieving file [========================================================>] 1/1
+                                                                                
+initializing destination hg-progress repository
+scanning source...
+sorting...
+converting...
+3 initial
+2 clobber symlink
+1 clobber1
+0 clobber2

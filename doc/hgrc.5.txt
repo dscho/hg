@@ -146,15 +146,29 @@ A line of the form ``%include file`` will include ``file`` into the
 current configuration file. The inclusion is recursive, which means
 that included files can include other files. Filenames are relative to
 the configuration file in which the ``%include`` directive is found.
+Environment variables and ``~user`` constructs are expanded in
+``file``. This lets you do something like::
+
+  %include ~/.hgrc.d/$HOST.rc
+
+to include a different configuration file on each computer you use.
 
 A line with ``%unset name`` will remove ``name`` from the current
 section, if it has been set previously.
 
 The values are either free-form text strings, lists of text strings,
-or Boolean values. Lists are split on whitespace and commas. Boolean
-values can be set to true using any of "1", "yes", "true", or "on" and
-to false using "0", "no", "false", or "off" (all case insensitive).
+or Boolean values. Boolean values can be set to true using any of "1",
+"yes", "true", or "on" and to false using "0", "no", "false", or "off"
+(all case insensitive).
 
+List values are separated by whitespace or comma, except when values are
+placed in double quotation marks::
+
+  allow_read = "John Doe, PhD", brian, betty
+
+Quotation marks can be escaped by prefixing them with a backslash. Only
+quotation marks at the beginning of a word is counted as a quotation
+(e.g., ``foo"bar baz`` is the list of ``foo"bar`` and ``baz``).
 
 Sections
 --------
@@ -280,24 +294,9 @@ the command.
    where the standard shell I/O redirection operators often have
    strange effects and may corrupt the contents of your files.
 
-The most common usage is for LF <-> CRLF translation on Windows. For
-this, use the "smart" converters which check for binary files::
-
-  [extensions]
-  hgext.win32text =
-  [encode]
-  ** = cleverencode:
-  [decode]
-  ** = cleverdecode:
-
-or if you only want to translate certain files::
-
-  [extensions]
-  hgext.win32text =
-  [encode]
-  **.txt = dumbencode:
-  [decode]
-  **.txt = dumbdecode:
+This filter mechanism is used internally by the ``eol`` extension to
+translate line ending characters between Windows (CRLF) and Unix (LF)
+format. We suggest you use the ``eol`` extension for convenience.
 
 
 ``defaults``
@@ -308,8 +307,8 @@ or if you only want to translate certain files::
 Use the ``[defaults]`` section to define command defaults, i.e. the
 default options/arguments to pass to the specified commands.
 
-The following example makes ``hg log`` run in verbose mode, and ``hg
-status`` show only the modified files, by default::
+The following example makes :hg:`log` run in verbose mode, and :hg:`hg
+status` show only the modified files, by default::
 
   [defaults]
   log = -v
@@ -486,7 +485,8 @@ Supported arguments:
   Default: ``$local $base $other``
 ``premerge``
   Attempt to run internal non-interactive 3-way merge tool before
-  launching external tool.
+  launching external tool.  Options are ``true``, ``false``, or ``keep``
+  to leave markers in the file if the premerge fails.
   Default: True
 ``binary``
   This tool can merge binary files. Defaults to False, unless tool
@@ -494,13 +494,21 @@ Supported arguments:
 ``symlink``
   This tool can merge symlinks. Defaults to False, even if tool was
   selected by file pattern match.
-``checkconflicts``
-  Check whether there are conflicts even though the tool reported
-  success.
-  Default: False
+``check``
+  A list of merge success-checking options:
+
+  ``changed``
+    Ask whether merge was successful when the merged file shows no changes.
+  ``conflicts``
+    Check whether there are conflicts even though the tool reported success.
+  ``prompt``
+    Always prompt for merge success, regardless of success reported by tool.
+
 ``checkchanged``
-  Check whether outputs were written even though the tool reported
-  success.
+  True is equivalent to ``check = changed``.
+  Default: False
+``checkconflicts``
+  True is equivalent to ``check = conflicts``.
   Default: False
 ``fixeol``
   Attempt to fix up EOL changes caused by the merge tool.
@@ -562,11 +570,19 @@ variables it is passed are listed with names of the form ``$HG_foo``.
 ``post-<command>``
   Run after successful invocations of the associated command. The
   contents of the command line are passed as ``$HG_ARGS`` and the result
-  code in ``$HG_RESULT``. Hook failure is ignored.
+  code in ``$HG_RESULT``. Parsed command line arguments are passed as 
+  ``$HG_PATS`` and ``$HG_OPTS``. These contain string representations of
+  the python data internally passed to <command>. ``$HG_OPTS`` is a 
+  dictionary of options (with unspecified options set to their defaults).
+  ``$HG_PATS`` is a list of arguments. Hook failure is ignored.
 ``pre-<command>``
   Run before executing the associated command. The contents of the
-  command line are passed as ``$HG_ARGS``. If the hook returns failure,
-  the command doesn't execute and Mercurial returns the failure
+  command line are passed as ``$HG_ARGS``. Parsed command line arguments
+  are passed as ``$HG_PATS`` and ``$HG_OPTS``. These contain string
+  representations of the data internally passed to <command>. ``$HG_OPTS``
+  is a  dictionary of options (with unspecified options set to their
+  defaults). ``$HG_PATS`` is a list of arguments. If the hook returns 
+  failure, the command doesn't execute and Mercurial returns the failure
   code.
 ``prechangegroup``
   Run before a changegroup is added via push, pull or unbundle. Exit
@@ -773,15 +789,20 @@ Controls generic server settings.
 
 ``trusted``
 """""""""""
-For security reasons, Mercurial will not use the settings in the
+
+Mercurial will not use the settings in the
 ``.hg/hgrc`` file from a repository if it doesn't belong to a trusted
-user or to a trusted group. The main exception is the web interface,
-which automatically uses some safe settings, since it's common to
-serve repositories from different users.
+user or to a trusted group, as various hgrc features allow arbitrary
+commands to be run. This issue is often encountered when configuring
+hooks or extensions for shared repositories or servers. However,
+the web interface will use some safe settings from the ``[web]``
+section.
 
 This section specifies what users and groups are trusted. The
 current user is always trusted. To trust everybody, list a user or a
-group with name ``*``.
+group with name ``*``. These settings must be placed in an
+*already-trusted file* to take effect, such as ``$HOME/.hgrc`` of the
+user or service running Mercurial.
 
 ``users``
   Comma-separated list of trusted users.
@@ -797,7 +818,7 @@ User interface controls.
 ``archivemeta``
     Whether to include the .hg_archival.txt file containing meta data
     (hashes for the repository base and for tip) in archives created
-    by the hg archive command or downloaded via hgweb.
+    by the :hg:`archive` command or downloaded via hgweb.
     Default is True.
 ``askusername``
     Whether to prompt for a username when committing. If True, and
@@ -876,7 +897,8 @@ merge-tools_ section.
     <fred@example.com>``. Default is ``$EMAIL`` or ``username@hostname``. If
     the username in hgrc is empty, it has to be specified manually or
     in a different hgrc file (e.g. ``$HOME/.hgrc``, if the admin set
-    ``username =``  in the system hgrc).
+    ``username =``  in the system hgrc). Environment variables in the
+    username are expanded.
 ``verbose``
     Increase the amount of output printed. True or False. Default is False.
 
@@ -907,20 +929,18 @@ Web interface configuration.
     push is not allowed. If the special value ``*``, any remote user can
     push, including unauthenticated users. Otherwise, the remote user
     must have been authenticated, and the authenticated user name must
-    be present in this list (separated by whitespace or ``,``). The
-    contents of the allow_push list are examined after the deny_push
-    list.
+    be present in this list. The contents of the allow_push list are
+    examined after the deny_push list.
 ``allow_read``
     If the user has not already been denied repository access due to
     the contents of deny_read, this list determines whether to grant
     repository access to the user. If this list is not empty, and the
-    user is unauthenticated or not present in the list (separated by
-    whitespace or ``,``), then access is denied for the user. If the
-    list is empty or not set, then access is permitted to all users by
-    default. Setting allow_read to the special value ``*`` is equivalent
-    to it not being set (i.e. access is permitted to all users). The
-    contents of the allow_read list are examined after the deny_read
-    list.
+    user is unauthenticated or not present in the list, then access is
+    denied for the user. If the list is empty or not set, then access
+    is permitted to all users by default. Setting allow_read to the
+    special value ``*`` is equivalent to it not being set (i.e. access
+    is permitted to all users). The contents of the allow_read list are
+    examined after the deny_read list.
 ``allowzip``
     (DEPRECATED) Whether to allow .zip downloading of repository
     revisions. Default is False. This feature creates temporary files.
@@ -955,17 +975,15 @@ Web interface configuration.
     Whether to deny pushing to the repository. If empty or not set,
     push is not denied. If the special value ``*``, all remote users are
     denied push. Otherwise, unauthenticated users are all denied, and
-    any authenticated user name present in this list (separated by
-    whitespace or ``,``) is also denied. The contents of the deny_push
-    list are examined before the allow_push list.
+    any authenticated user name present in this list is also denied. The
+    contents of the deny_push list are examined before the allow_push list.
 ``deny_read``
     Whether to deny reading/viewing of the repository. If this list is
     not empty, unauthenticated users are all denied, and any
-    authenticated user name present in this list (separated by
-    whitespace or ``,``) is also denied access to the repository. If set
-    to the special value ``*``, all remote users are denied access
-    (rarely needed ;). If deny_read is empty or not set, the
-    determination of repository access depends on the presence and
+    authenticated user name present in this list is also denied access to
+    the repository. If set to the special value ``*``, all remote users
+    are denied access (rarely needed ;). If deny_read is empty or not set,
+    the determination of repository access depends on the presence and
     content of the allow_read list (see description). If both
     deny_read and allow_read are empty or not set, then access is
     permitted to all users by default. If the repository is being
@@ -981,7 +999,7 @@ Web interface configuration.
     Textual description of the repository's purpose or contents.
     Default is "unknown".
 ``encoding``
-    Character encoding name.
+    Character encoding name. Default is the current locale charset.
     Example: "UTF-8"
 ``errorlog``
     Where to output the error log. Default is stderr.

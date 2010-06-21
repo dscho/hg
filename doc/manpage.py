@@ -45,14 +45,9 @@ by the command whatis or apropos.
 
 __docformat__ = 'reStructuredText'
 
-import sys
-import os
-import time
 import re
-from types import ListType
 
-import docutils
-from docutils import nodes, utils, writers, languages
+from docutils import nodes, writers, languages
 import roman
 
 FIELD_LIST_INDENT = 7
@@ -1103,12 +1098,5 @@ class Translator(nodes.NodeVisitor):
     def unimplemented_visit(self, node):
         raise NotImplementedError('visiting unimplemented node type: %s'
                                   % node.__class__.__name__)
-
-# The following part is taken from the Docutils rst2man.py script:
-if __name__ == "__main__":
-    from docutils.core import publish_cmdline, default_description
-    description = ("Generates plain unix manual documents.  " +
-                   default_description)
-    publish_cmdline(writer=Writer(), description=description)
 
 # vim: set fileencoding=utf-8 et ts=4 ai :

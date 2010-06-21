@@ -4,6 +4,7 @@ marked working directory as branch bar
 % branch shadowing
 abort: a branch of the same name already exists (use 'hg update' to switch to it)
 marked working directory as branch default
+created new head
 % there should be only one default branch head
 changeset:   3:bf1bc2f45e83
 tag:         tip
@@ -13,7 +14,6 @@ summary:     clear branch name
 
 0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 foo
-created new head
 0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 (branch merge, don't forget to commit)
 foo
@@ -62,7 +62,7 @@ foo
 default
 bar
 % test for invalid branch cache
-rolling back last transaction
+rolling back to revision 4 (undo commit)
 changeset:   4:4909a3732169
 branch:      foo
 tag:         tip
@@ -135,7 +135,6 @@ created new head
 0 files updated, 0 files merged, 1 files removed, 0 files unresolved
 marked working directory as branch test
 adding e
-created new head
 changeset:   4:3a1e01ed1df4
 branch:      test
 tag:         tip

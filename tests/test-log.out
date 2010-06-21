@@ -269,7 +269,7 @@ diff --git a/b1 b/b1
 +postm
 
 % log -r ""
-abort: 00changelog.i@: ambiguous identifier!
+hg: parse error: empty query
 % log -r <some unknown node id>
 abort: unknown revision '1000000000000000000000000000000000000000'!
 % log -k r1
@@ -279,6 +279,43 @@ date:        Thu Jan 01 00:00:01 1970 +0000
 summary:     r1
 
 % log -d -1
+% log -p -l2 --color=always
+[0;33mchangeset:   6:2404bbcab562[0m
+tag:         tip
+user:        test
+date:        Thu Jan 01 00:00:01 1970 +0000
+summary:     b1.1
+
+[0;1mdiff -r 302e9dd6890d -r 2404bbcab562 b1[0m
+[0;31;1m--- a/b1	Thu Jan 01 00:00:01 1970 +0000[0m
+[0;32;1m+++ b/b1	Thu Jan 01 00:00:01 1970 +0000[0m
+[0;35m@@ -1,1 +1,2 @@[0m
+ b1
+[0;32m+postm[0m
+
+[0;33mchangeset:   5:302e9dd6890d[0m
+parent:      3:e62f78d544b4
+parent:      4:ddb82e70d1a1
+user:        test
+date:        Thu Jan 01 00:00:01 1970 +0000
+summary:     m12
+
+[0;1mdiff -r e62f78d544b4 -r 302e9dd6890d b2[0m
+[0;31;1m--- /dev/null	Thu Jan 01 00:00:00 1970 +0000[0m
+[0;32;1m+++ b/b2	Thu Jan 01 00:00:01 1970 +0000[0m
+[0;35m@@ -0,0 +1,1 @@[0m
+[0;32m+b2[0m
+
+% log -r tip --stat
+changeset:   6:2404bbcab562
+tag:         tip
+user:        test
+date:        Thu Jan 01 00:00:01 1970 +0000
+summary:     b1.1
+
+ b1 |  1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
 adding a
 adding b
 changeset:   0:29a4c94f1924
@@ -296,4 +333,134 @@ changeset:   0:29a4c94f1924
 user:        User One <user1@example.org>
 date:        Thu Jan 01 00:00:00 1970 +0000
 summary:     a
+
+adding a
+marked working directory as branch test
+adding b
+0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+adding c
+1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+adding c
+% log -b default
+changeset:   2:c3a4f03cc9a7
+parent:      0:24427303d56f
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on default
+
+changeset:   0:24427303d56f
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on default
+
+% log -b test
+changeset:   3:f5d8de11c2e2
+branch:      test
+tag:         tip
+parent:      1:d32277701ccb
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on test
+
+changeset:   1:d32277701ccb
+branch:      test
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on test
+
+% log -b dummy
+abort: unknown revision 'dummy'!
+% log -b .
+changeset:   3:f5d8de11c2e2
+branch:      test
+tag:         tip
+parent:      1:d32277701ccb
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on test
+
+changeset:   1:d32277701ccb
+branch:      test
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on test
+
+% log -b default -b test
+changeset:   3:f5d8de11c2e2
+branch:      test
+tag:         tip
+parent:      1:d32277701ccb
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on test
+
+changeset:   2:c3a4f03cc9a7
+parent:      0:24427303d56f
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on default
+
+changeset:   1:d32277701ccb
+branch:      test
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on test
+
+changeset:   0:24427303d56f
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on default
+
+% log -b default -b .
+changeset:   3:f5d8de11c2e2
+branch:      test
+tag:         tip
+parent:      1:d32277701ccb
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on test
+
+changeset:   2:c3a4f03cc9a7
+parent:      0:24427303d56f
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on default
+
+changeset:   1:d32277701ccb
+branch:      test
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on test
+
+changeset:   0:24427303d56f
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on default
+
+% log -b . -b test
+changeset:   3:f5d8de11c2e2
+branch:      test
+tag:         tip
+parent:      1:d32277701ccb
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on test
+
+changeset:   1:d32277701ccb
+branch:      test
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on test
+
+% log -b 2
+changeset:   2:c3a4f03cc9a7
+parent:      0:24427303d56f
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on default
+
+changeset:   0:24427303d56f
+user:        test
+date:        Thu Jan 01 00:00:00 1970 +0000
+summary:     commit on default
 

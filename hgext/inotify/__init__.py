@@ -41,7 +41,7 @@ def reposetup(ui, repo):
         # to start an inotify server if it won't start.
         _inotifyon = True
 
-        def status(self, match, subrepos, ignored, clean, unknown=True):
+        def status(self, match, subrepos, ignored, clean, unknown):
             files = match.files()
             if '.' in files:
                 files = []
@@ -79,8 +79,11 @@ cmdtable = {
     '^inserve':
         (serve,
          [('d', 'daemon', None, _('run server in background')),
-          ('', 'daemon-pipefds', '', _('used internally by daemon mode')),
-          ('t', 'idle-timeout', '', _('minutes to sit idle before exiting')),
-          ('', 'pid-file', '', _('name of file to write process ID to'))],
+          ('', 'daemon-pipefds', '',
+           _('used internally by daemon mode'), _('NUM')),
+          ('t', 'idle-timeout', '',
+           _('minutes to sit idle before exiting'), _('NUM')),
+          ('', 'pid-file', '',
+           _('name of file to write process ID to'), _('FILE'))],
          _('hg inserve [OPTION]...')),
     }

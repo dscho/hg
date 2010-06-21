@@ -39,7 +39,7 @@ def relink(ui, repo, origin=None, **opts):
     if not hasattr(util, 'samefile') or not hasattr(util, 'samedevice'):
         raise util.Abort(_('hardlinks are not supported on this system'))
     src = hg.repository(
-        cmdutil.remoteui(repo, opts),
+        hg.remoteui(repo, opts),
         ui.expandpath(origin or 'default-relink', origin or 'default'))
     if not src.local():
         raise util.Abort('must specify local origin repository')
@@ -48,7 +48,7 @@ def relink(ui, repo, origin=None, **opts):
     try:
         remotelock = src.lock()
         try:
-            candidates = sorted(collect(src.store.path, ui))
+            candidates = sorted(collect(src, ui))
             targets = prune(candidates, src.store.path, repo.store.path, ui)
             do_relink(src.store.path, repo.store.path, targets, ui)
         finally:
@@ -59,16 +59,32 @@ def relink(ui, repo, origin=None, **opts):
 def collect(src, ui):
     seplen = len(os.path.sep)
     candidates = []
+    live = len(src['tip'].manifest())
+    # Your average repository has some files which were deleted before
+    # the tip revision. We account for that by assuming that there are
+    # 3 tracked files for every 2 live files as of the tip version of
+    # the repository.
+    #
+    # mozilla-central as of 2010-06-10 had a ratio of just over 7:5.
+    total = live * 3 // 2
+    src = src.store.path
+    pos = 0
+    ui.status(_("tip has %d files, estimated total number of files: %s\n")
+              % (live, total))
     for dirpath, dirnames, filenames in os.walk(src):
+        dirnames.sort()
         relpath = dirpath[len(src) + seplen:]
-        for filename in filenames:
+        for filename in sorted(filenames):
             if not filename[-2:] in ('.d', '.i'):
                 continue
             st = os.stat(os.path.join(dirpath, filename))
             if not stat.S_ISREG(st.st_mode):
                 continue
+            pos += 1
             candidates.append((os.path.join(relpath, filename), st))
+            ui.progress(_('collecting'), pos, filename, _('files'), total)
 
+    ui.progress(_('collecting'), None)
     ui.status(_('collected %d candidate storage files\n') % len(candidates))
     return candidates
 
@@ -90,7 +106,10 @@ def prune(candidates, src, dst, ui):
         return st
 
     targets = []
+    total = len(candidates)
+    pos = 0
     for fn, st in candidates:
+        pos += 1
         srcpath = os.path.join(src, fn)
         tgt = os.path.join(dst, fn)
         ts = linkfilter(srcpath, tgt, st)
@@ -98,7 +117,9 @@ def prune(candidates, src, dst, ui):
             ui.debug(_('not linkable: %s\n') % fn)
             continue
         targets.append((fn, ts.st_size))
+        ui.progress(_('pruning'), pos, fn, _(' files'), total)
 
+    ui.progress(_('pruning'), None)
     ui.status(_('pruned down to %d probably relinkable files\n') % len(targets))
     return targets
 
@@ -145,7 +166,7 @@ def do_relink(src, dst, files, ui):
         except OSError, inst:
             ui.warn('%s: %s\n' % (tgt, str(inst)))
 
-    ui.progress(_('relinking'), None, unit=_(' files'), total=total)
+    ui.progress(_('relinking'), None)
 
     ui.status(_('relinked %d files (%d bytes reclaimed)\n') %
               (relinked, savedbytes))

@@ -7,7 +7,7 @@
 
 from node import short
 from i18n import _
-import util, simplemerge, match
+import util, simplemerge, match, error
 import os, tempfile, re, filecmp
 
 def _toolstr(ui, tool, part, default=""):
@@ -15,6 +15,9 @@ def _toolstr(ui, tool, part, default=""):
 
 def _toolbool(ui, tool, part, default=False):
     return ui.configbool("merge-tools", tool + "." + part, default)
+
+def _toollist(ui, tool, part, default=[]):
+    return ui.configlist("merge-tools", tool + "." + part, default)
 
 _internal = ['internal:' + s
              for s in 'fail local other merge prompt dump'.split()]
@@ -176,7 +179,18 @@ def filemerge(repo, mynode, orig, fcd, fco, fca):
     ui.debug("my %s other %s ancestor %s\n" % (fcd, fco, fca))
 
     # do we attempt to simplemerge first?
-    if _toolbool(ui, tool, "premerge", not (binary or symlink)):
+    try:
+        premerge = _toolbool(ui, tool, "premerge", not (binary or symlink))
+    except error.ConfigError:
+        premerge = _toolstr(ui, tool, "premerge").lower()
+        valid = 'keep'.split()
+        if premerge not in valid:
+            _valid = ', '.join(["'" + v + "'" for v in valid])
+            raise error.ConfigError(_("%s.premerge not valid "
+                                      "('%s' is neither boolean nor %s)") %
+                                    (tool, premerge, _valid))
+
+    if premerge:
         r = simplemerge.simplemerge(ui, a, b, c, quiet=True)
         if not r:
             ui.debug(" premerge successful\n")
@@ -184,7 +198,8 @@ def filemerge(repo, mynode, orig, fcd, fco, fca):
             os.unlink(b)
             os.unlink(c)
             return 0
-        util.copyfile(back, a) # restore from backup and try again
+        if premerge != 'keep':
+            util.copyfile(back, a) # restore from backup and try again
 
     env = dict(HG_FILE=fd,
                HG_MY_NODE=short(mynode),
@@ -211,11 +226,20 @@ def filemerge(repo, mynode, orig, fcd, fco, fca):
             lambda x: '"%s"' % util.localpath(replace[x.group()[1:]]), args)
         r = util.system(toolpath + ' ' + args, cwd=repo.root, environ=env)
 
-    if not r and _toolbool(ui, tool, "checkconflicts"):
+    if not r and (_toolbool(ui, tool, "checkconflicts") or
+                  'conflicts' in _toollist(ui, tool, "check")):
         if re.match("^(<<<<<<< .*|=======|>>>>>>> .*)$", fcd.data()):
             r = 1
 
-    if not r and _toolbool(ui, tool, "checkchanged"):
+    checked = False
+    if 'prompt' in _toollist(ui, tool, "check"):
+        checked = True
+        if ui.promptchoice(_("was merge of '%s' successful (yn)?") % fd,
+                           (_("&Yes"), _("&No")), 1):
+            r = 1
+
+    if not r and not checked and (_toolbool(ui, tool, "checkchanged") or
+                                  'changed' in _toollist(ui, tool, "check")):
         if filecmp.cmp(repo.wjoin(fd), back):
             if ui.promptchoice(_(" output file %s appears unchanged\n"
                                  "was merge successful (yn)?") % fd,

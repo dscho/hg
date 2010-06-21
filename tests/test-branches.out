@@ -3,7 +3,6 @@ marked working directory as branch q
 reset working directory to branch a
 0 files updated, 0 files merged, 1 files removed, 0 files unresolved
 marked working directory as branch b
-created new head
 1 files updated, 0 files merged, 2 files removed, 0 files unresolved
 marked working directory as branch c
 abort: the name 'tip' is reserved
@@ -171,6 +170,7 @@ user:        test
 date:        Thu Jan 01 00:00:09 1970 +0000
 summary:     prune bad branch
 
+reopening closed branch head 12
 --- branch b is back in action
 b                             13:6ac12926b8c3
 a branch name much longer than the default justification used by branches 7:10ff5895aa57

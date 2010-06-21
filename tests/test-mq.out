@@ -32,6 +32,9 @@ preserving existing git patches upon qrefresh. If set to 'yes' or 'no', mq
 will override the [diff] section and always generate git or regular patches,
 possibly losing data in the second case.
 
+You will by default be managing a patch queue named "patches". You can create
+other, independent patch queues with the "hg qqueue" command.
+
 list of commands:
 
  qapplied     print the patches already applied
@@ -49,6 +52,7 @@ list of commands:
  qpop         pop the current patch off the stack
  qprev        print the name of the previous patch
  qpush        push the next patch onto the stack
+ qqueue       manage multiple patch queues
  qrefresh     update the current patch
  qrename      rename a patch
  qselect      set or print guarded patches to push
@@ -151,8 +155,10 @@ popping test2.patch
 now at: test.patch
 0 A test.patch: foo bar
 1 U test2.patch: 
+mq:     1 applied, 1 unapplied
 applying test2.patch
 now at: test2.patch
+mq:     2 applied
 % qapplied
 test.patch
 test2.patch
@@ -191,6 +197,32 @@ now at: test1b.patch
 popping test1b.patch
 now at: test.patch
 applying test1b.patch
+applying test2.patch
+now at: test2.patch
+% qpush --move
+popping test2.patch
+popping test1b.patch
+popping test.patch
+patch queue now empty
+applying test2.patch
+now at: test2.patch
+applying test1b.patch
+now at: test1b.patch
+applying test.patch
+now at: test.patch
+0 A test2.patch
+1 A test1b.patch
+2 A test.patch
+popping test.patch
+popping test1b.patch
+popping test2.patch
+patch queue now empty
+applying test.patch
+now at: test.patch
+applying test1b.patch
+now at: test1b.patch
+abort: patch bogus not in series
+abort: cannot push to a previous patch: test.patch
 applying test2.patch
 now at: test2.patch
 % pop, qapplied, qunapplied
@@ -306,7 +338,7 @@ qpush: test2.patch is already at the top
 % strip
 adding x
 0 files updated, 0 files merged, 1 files removed, 0 files unresolved
-saving bundle to 
+saved backup bundle to 
 adding changesets
 adding manifests
 adding file changes
@@ -317,7 +349,7 @@ added 1 changesets with 1 changes to 1 files
 abort: local changes found
 % --force strip with local changes
 0 files updated, 0 files merged, 1 files removed, 0 files unresolved
-saving bundle to 
+saved backup bundle to 
 % cd b; hg qrefresh
 adding a
 foo
@@ -357,8 +389,8 @@ errors during apply, please fix and refresh bar
 ? foo.rej
 % mq tags
 0 qparent
-1 qbase foo
-2 qtip bar tip
+1 foo qbase
+2 bar qtip tip
 % bad node in status
 popping bar
 now at: foo
@@ -399,11 +431,6 @@ copy to copy
 1 files updated, 0 files merged, 2 files removed, 0 files unresolved
 created new head
 2 files updated, 0 files merged, 1 files removed, 0 files unresolved
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 1 changesets with 1 changes to 1 files
 diff --git a/bar b/bar
 new file mode 100644
 --- /dev/null
@@ -429,11 +456,6 @@ diff --git a/foo b/baz
 % test file move chains in the slow path
 1 files updated, 0 files merged, 2 files removed, 0 files unresolved
 2 files updated, 0 files merged, 1 files removed, 0 files unresolved
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 1 changesets with 1 changes to 1 files
 diff --git a/foo b/bleh
 rename from foo
 rename to bleh
@@ -501,13 +523,7 @@ date:        Thu Jan 01 00:00:00 1970 +0000
 summary:     add foo
 
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-saving bundle to 
-saving bundle to 
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 1 changesets with 1 changes to 1 files
+saved backup bundle to 
 changeset:   1:20cbbe65cff7
 tag:         tip
 user:        test
@@ -577,10 +593,10 @@ diff -r 9ecee4f634e3 hello.txt
  hello
 +world
 changeset:   1:bf5fc3f07a0a
-tag:         qtip
-tag:         tip
 tag:         empty
 tag:         qbase
+tag:         qtip
+tag:         tip
 user:        test
 date:        Thu Jan 01 00:00:00 1970 +0000
 summary:     imported patch empty

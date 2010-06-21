@@ -364,7 +364,7 @@ def recordupdates(repo, action, branchmerge):
             repo.dirstate.normallookup(f)
         elif m == "g": # get
             if branchmerge:
-                repo.dirstate.normaldirty(f)
+                repo.dirstate.otherparent(f)
             else:
                 repo.dirstate.normal(f)
         elif m == "m": # merge
@@ -386,7 +386,8 @@ def recordupdates(repo, action, branchmerge):
                 # of that file some time in the past. Thus our
                 # merge will appear as a normal local file
                 # modification.
-                repo.dirstate.normallookup(fd)
+                if f2 == fd: # file not locally copied/moved
+                    repo.dirstate.normallookup(fd)
                 if move:
                     repo.dirstate.forget(f)
         elif m == "d": # directory rename
@@ -466,7 +467,8 @@ def update(repo, node, branchmerge, force, partial):
             raise util.Abort(_("outstanding uncommitted merges"))
         if branchmerge:
             if pa == p2:
-                raise util.Abort(_("can't merge with ancestor"))
+                raise util.Abort(_("merging with a working directory ancestor"
+                                   " has no effect"))
             elif pa == p1:
                 if p1.branch() != p2.branch():
                     fastforward = True
@@ -491,6 +493,7 @@ def update(repo, node, branchmerge, force, partial):
 
         ### calculate phase
         action = []
+        wc.status(unknown=True) # prime cache
         if not force:
             _checkunknown(wc, p2)
         if not util.checkcase(repo.path):
@@ -507,8 +510,8 @@ def update(repo, node, branchmerge, force, partial):
         stats = applyupdates(repo, action, wc, p2)
 
         if not partial:
-            recordupdates(repo, action, branchmerge)
             repo.dirstate.setparents(fp1, fp2)
+            recordupdates(repo, action, branchmerge)
             if not branchmerge and not fastforward:
                 repo.dirstate.setbranch(p2.branch())
     finally:

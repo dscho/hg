@@ -61,18 +61,22 @@ diff
 
 % Show debug commands if there are no other candidates
 debugancestor
+debugbuilddag
 debugcheckstate
 debugcommands
 debugcomplete
 debugconfig
+debugdag
 debugdata
 debugdate
 debugfsinfo
 debugindex
 debugindexdot
 debuginstall
+debugpushkey
 debugrebuildstate
 debugrename
+debugrevspec
 debugsetparents
 debugstate
 debugsub
@@ -143,7 +147,7 @@ root
 --traceback
 --verbose
 --version
---webdir-conf
+--web-conf
 -6
 -A
 -E
@@ -171,12 +175,12 @@ diff: rev, change, text, git, nodates, show-function, reverse, ignore-all-space,
 export: output, switch-parent, rev, text, git, nodates
 forget: include, exclude
 init: ssh, remotecmd
-log: follow, follow-first, date, copies, keyword, rev, removed, only-merges, user, only-branch, prune, patch, git, limit, no-merges, style, template, include, exclude
+log: follow, follow-first, date, copies, keyword, rev, removed, only-merges, user, only-branch, branch, prune, patch, git, limit, no-merges, stat, style, template, include, exclude
 merge: force, rev, preview
 pull: update, force, rev, branch, ssh, remotecmd
-push: force, rev, branch, ssh, remotecmd
+push: force, rev, branch, new-branch, ssh, remotecmd
 remove: after, force, include, exclude
-serve: accesslog, daemon, daemon-pipefds, errorlog, port, address, prefix, name, webdir-conf, pid-file, stdio, templates, style, ipv6, certificate
+serve: accesslog, daemon, daemon-pipefds, errorlog, port, address, prefix, name, web-conf, webdir-conf, pid-file, stdio, templates, style, ipv6, certificate
 status: all, modified, added, removed, deleted, clean, unknown, ignored, no-status, copies, print0, rev, change, include, exclude
 summary: remote
 update: clean, check, date, rev
@@ -190,17 +194,21 @@ bundle: force, rev, branch, base, all, type, ssh, remotecmd
 cat: output, rev, decode, include, exclude
 copy: after, force, include, exclude, dry-run
 debugancestor: 
+debugbuilddag: mergeable-file, appended-file, overwritten-file, new-file
 debugcheckstate: 
 debugcommands: 
 debugcomplete: options
+debugdag: tags, branches, dots, spaces
 debugdata: 
 debugdate: extended
 debugfsinfo: 
 debugindex: 
 debugindexdot: 
 debuginstall: 
+debugpushkey: 
 debugrebuildstate: rev
 debugrename: rev
+debugrevspec: 
 debugsetparents: 
 debugstate: nodates
 debugsub: rev
@@ -210,20 +218,20 @@ heads: rev, topo, active, closed, style, template
 help: 
 identify: rev, num, id, branch, tags
 import: strip, base, force, no-commit, exact, import-branch, message, logfile, date, user, similarity
-incoming: force, newest-first, bundle, rev, branch, patch, git, limit, no-merges, style, template, ssh, remotecmd
+incoming: force, newest-first, bundle, rev, branch, patch, git, limit, no-merges, stat, style, template, ssh, remotecmd
 locate: rev, print0, fullpath, include, exclude
 manifest: rev
-outgoing: force, rev, newest-first, branch, patch, git, limit, no-merges, style, template, ssh, remotecmd
+outgoing: force, rev, newest-first, branch, patch, git, limit, no-merges, stat, style, template, ssh, remotecmd
 parents: rev, style, template
 paths: 
 recover: 
 rename: after, force, include, exclude, dry-run
 resolve: all, list, mark, unmark, no-status, include, exclude
 revert: all, date, rev, no-backup, include, exclude, dry-run
-rollback: 
+rollback: dry-run
 root: 
 showconfig: untrusted
-tag: force, local, rev, remove, message, date, user
+tag: force, local, rev, remove, edit, message, date, user
 tags: 
 tip: patch, git, style, template
 unbundle: update

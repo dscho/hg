@@ -9,8 +9,8 @@
 '''command to display statistics about repository history'''
 
 from mercurial.i18n import _
-from mercurial import patch, cmdutil, util, templater
-import sys, os
+from mercurial import patch, cmdutil, util, templater, commands
+import os
 import time, datetime
 
 def maketemplater(ui, repo, tmpl):
@@ -48,7 +48,7 @@ def countrate(ui, repo, amap, *pats, **opts):
             tmpl.show(ctx)
             return ui.popbuffer()
 
-    state = {'count': 0, 'pct': 0}
+    state = {'count': 0}
     rate = {}
     df = False
     if opts.get('date'):
@@ -74,20 +74,13 @@ def countrate(ui, repo, amap, *pats, **opts):
             lines = changedlines(ui, repo, ctx1, ctx, fns)
             rate[key] = [r + l for r, l in zip(rate.get(key, (0, 0)), lines)]
 
-        if opts.get('progress'):
-            state['count'] += 1
-            newpct = int(100.0 * state['count'] / max(len(repo), 1))
-            if state['pct'] < newpct:
-                state['pct'] = newpct
-                ui.write("\r" + _("generating stats: %d%%") % state['pct'])
-                sys.stdout.flush()
+        state['count'] += 1
+        ui.progress(_('analyzing'), state['count'], total=len(repo))
 
     for ctx in cmdutil.walkchangerevs(repo, m, opts, prep):
         continue
 
-    if opts.get('progress'):
-        ui.write("\r")
-        sys.stdout.flush()
+    ui.progress(_('analyzing'), None)
 
     return rate
 
@@ -122,7 +115,7 @@ def churn(ui, repo, *pats, **opts):
     It is possible to map alternate email addresses to a main address
     by providing a file using the following format::
 
-      <alias email> <actual email>
+      <alias email> = <actual email>
 
     Such a file may be specified with the --aliases option, otherwise
     a .hgchurn file will be looked for in the working directory root.
@@ -136,9 +129,8 @@ def churn(ui, repo, *pats, **opts):
         aliases = repo.wjoin('.hgchurn')
     if aliases:
         for l in open(aliases, "r"):
-            l = l.strip()
-            alias, actual = l.split()
-            amap[alias] = actual
+            alias, actual = l.split('=' in l and '=' or None, 1)
+            amap[alias.strip()] = actual.strip()
 
     rate = countrate(ui, repo, amap, *pats, **opts).items()
     if not rate:
@@ -160,8 +152,10 @@ def churn(ui, repo, *pats, **opts):
         def format(name, (added, removed)):
             return "%s %15s %s%s\n" % (pad(name, maxname),
                                        '+%d/-%d' % (added, removed),
-                                       '+' * charnum(added),
-                                       '-' * charnum(removed))
+                                       ui.label('+' * charnum(added),
+                                                'diffstat.inserted'),
+                                       ui.label('-' * charnum(removed),
+                                                'diffstat.deleted'))
     else:
         width -= 6
         def format(name, count):
@@ -178,16 +172,19 @@ def churn(ui, repo, *pats, **opts):
 cmdtable = {
     "churn":
         (churn,
-         [('r', 'rev', [], _('count rate for the specified revision or range')),
-          ('d', 'date', '', _('count rate for revisions matching date spec')),
+         [('r', 'rev', [],
+           _('count rate for the specified revision or range'), _('REV')),
+          ('d', 'date', '',
+           _('count rate for revisions matching date spec'), _('DATE')),
           ('t', 'template', '{author|email}',
-           _('template to group changesets')),
+           _('template to group changesets'), _('TEMPLATE')),
           ('f', 'dateformat', '',
-              _('strftime-compatible format for grouping by date')),
+           _('strftime-compatible format for grouping by date'), _('FORMAT')),
           ('c', 'changesets', False, _('count rate by number of changesets')),
           ('s', 'sort', False, _('sort by key (default: sort by count)')),
           ('', 'diffstat', False, _('display added/removed lines separately')),
-          ('', 'aliases', '', _('file with email aliases')),
-          ('', 'progress', None, _('show progress'))],
-         _("hg churn [-d DATE] [-r REV] [--aliases FILE] [--progress] [FILE]")),
+          ('', 'aliases', '',
+           _('file with email aliases'), _('FILE')),
+          ] + commands.walkopts,
+         _("hg churn [-d DATE] [-r REV] [--aliases FILE] [FILE]")),
 }

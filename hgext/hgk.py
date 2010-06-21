@@ -17,7 +17,7 @@ which provides hooks for hgk to get information. hgk can be found in
 the contrib directory, and the extension is shipped in the hgext
 repository, and needs to be enabled.
 
-The hg view command will launch the hgk Tcl script. For this command
+The :hg:`view` command will launch the hgk Tcl script. For this command
 to work, hgk must be in your search path. Alternately, you can specify
 the path to hgk in your .hgrc file::
 
@@ -314,7 +314,8 @@ def view(ui, repo, *etc, **opts):
 cmdtable = {
     "^view":
         (view,
-         [('l', 'limit', '', _('limit number of changes displayed'))],
+         [('l', 'limit', '',
+           _('limit number of changes displayed'), _('NUM'))],
          _('hg view [-l LIMIT] [REVRANGE]')),
     "debug-diff-tree":
         (difftree,

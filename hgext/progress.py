@@ -114,7 +114,7 @@ class progbar(object):
             if tail:
                 used += len(tail) + 1
             progwidth = termwidth - used - 3
-            if total:
+            if total and pos <= total:
                 amt = pos * progwidth // total
                 bar = '=' * (amt - 1)
                 if amt > 0:
@@ -165,10 +165,10 @@ class progbar(object):
                 self.show(topic, pos, item, unit, total)
         return orig(topic, pos, item=item, unit=unit, total=total)
 
-    def write(self, orig, *args):
+    def write(self, orig, *args, **opts):
         if self.printed:
             self.clear()
-        return orig(*args)
+        return orig(*args, **opts)
 
 sharedprog = None
 

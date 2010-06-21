@@ -371,19 +371,10 @@ class svn_source(converter_source):
 
         return self.heads
 
-    def getfile(self, file, rev):
-        data, mode = self._getfile(file, rev)
-        self.modecache[(file, rev)] = mode
-        return data
-
-    def getmode(self, file, rev):
-        return self.modecache[(file, rev)]
-
     def getchanges(self, rev):
         if self._changescache and self._changescache[0] == rev:
             return self._changescache[1]
         self._changescache = None
-        self.modecache = {}
         (paths, parents) = self.paths[rev]
         if parents:
             files, self.removed, copies = self.expandpaths(rev, paths, parents)
@@ -612,9 +603,6 @@ class svn_source(converter_source):
 
     def expandpaths(self, rev, paths, parents):
         changed, removed = set(), set()
-        # Map of entrypath, revision for finding source of deleted
-        # revisions.
-        copyfrom = {}
         copies = {}
 
         new_module, revnum = self.revsplit(rev)[1:]
@@ -622,7 +610,9 @@ class svn_source(converter_source):
             self.module = new_module
             self.reparent(self.module)
 
-        for path, ent in paths:
+        for i, (path, ent) in enumerate(paths):
+            self.ui.progress(_('scanning paths'), i, item=path,
+                             total=len(paths))
             entrypath = self.getrelpath(path)
 
             kind = self._checkpath(entrypath, revnum)
@@ -652,10 +642,10 @@ class svn_source(converter_source):
                 elif fromkind == svn.core.svn_node_dir:
                     oroot = parentpath.strip('/')
                     nroot = path.strip('/')
-                    children = self._find_children(oroot, prevnum)
-                    children = [s.replace(oroot, nroot) for s in children]
-                    for child in children:
-                        childpath = self.getrelpath("/" + child, pmodule)
+                    children = self._iterfiles(oroot, prevnum)
+                    for childpath in children:
+                        childpath = childpath.replace(oroot, nroot)
+                        childpath = self.getrelpath("/" + childpath, pmodule)
                         if childpath:
                             removed.add(self.recode(childpath))
                 else:
@@ -674,18 +664,10 @@ class svn_source(converter_source):
                     if pkind == svn.core.svn_node_file:
                         removed.add(self.recode(entrypath))
 
-                children = sorted(self._find_children(path, revnum))
-                for child in children:
-                    # Can we move a child directory and its
-                    # parent in the same commit? (probably can). Could
-                    # cause problems if instead of revnum -1,
-                    # we have to look in (copyfrom_path, revnum - 1)
-                    entrypath = self.getrelpath("/" + child)
-                    if entrypath:
-                        # Need to filter out directories here...
-                        kind = self._checkpath(entrypath, revnum)
-                        if kind != svn.core.svn_node_dir:
-                            changed.add(self.recode(entrypath))
+                for childpath in self._iterfiles(path, revnum):
+                    childpath = self.getrelpath("/" + childpath)
+                    if childpath:
+                        changed.add(self.recode(childpath))
 
                 # Handle directory copies
                 if not ent.copyfrom_path or not parents:
@@ -698,19 +680,18 @@ class svn_source(converter_source):
                 copyfrompath = self.getrelpath(ent.copyfrom_path, pmodule)
                 if not copyfrompath:
                     continue
-                copyfrom[path] = ent
                 self.ui.debug("mark %s came from %s:%d\n"
                               % (path, copyfrompath, ent.copyfrom_rev))
-                children = self._find_children(ent.copyfrom_path, ent.copyfrom_rev)
-                children.sort()
-                for child in children:
-                    entrypath = self.getrelpath("/" + child, pmodule)
-                    if not entrypath:
+                children = self._iterfiles(ent.copyfrom_path, ent.copyfrom_rev)
+                for childpath in children:
+                    childpath = self.getrelpath("/" + childpath, pmodule)
+                    if not childpath:
                         continue
-                    copytopath = path + entrypath[len(copyfrompath):]
+                    copytopath = path + childpath[len(copyfrompath):]
                     copytopath = self.getrelpath(copytopath)
-                    copies[self.recode(copytopath)] = self.recode(entrypath)
+                    copies[self.recode(copytopath)] = self.recode(childpath)
 
+        self.ui.progress(_('scanning paths'), None)
         changed.update(removed)
         return (list(changed), removed, copies)
 
@@ -839,10 +820,10 @@ class svn_source(converter_source):
                 raise util.Abort(_('svn: branch has no revision %s') % to_revnum)
             raise
 
-    def _getfile(self, file, rev):
+    def getfile(self, file, rev):
         # TODO: ra.get_file transmits the whole file instead of diffs.
         if file in self.removed:
-            raise IOError()
+            raise IOError()         
         mode = ''
         try:
             new_module, revnum = self.revsplit(rev)[1:]
@@ -871,12 +852,14 @@ class svn_source(converter_source):
                 data = data[len(link_prefix):]
         return data, mode
 
-    def _find_children(self, path, revnum):
+    def _iterfiles(self, path, revnum):
+        """Enumerate all files in path at revnum, recursively."""
         path = path.strip('/')
         pool = Pool()
         rpath = '/'.join([self.baseurl, urllib.quote(path)]).strip('/')
-        return ['%s/%s' % (path, x) for x in
-                svn.client.ls(rpath, optrev(revnum), True, self.ctx, pool).keys()]
+        entries = svn.client.ls(rpath, optrev(revnum), True, self.ctx, pool)
+        return ((path + '/' + p) for p, e in entries.iteritems()
+                if e.kind == svn.core.svn_node_file)
 
     def getrelpath(self, path, module=None):
         if module is None:
@@ -1111,12 +1094,11 @@ class svn_sink(converter_sink, commandline):
         # Apply changes to working copy
         for f, v in files:
             try:
-                data = source.getfile(f, v)
+                data, mode = source.getfile(f, v)
             except IOError:
                 self.delete.append(f)
             else:
-                e = source.getmode(f, v)
-                self.putfile(f, e, data)
+                self.putfile(f, mode, data)
                 if f in copies:
                     self.copies.append([copies[f], f])
         files = [f[0] for f in files]

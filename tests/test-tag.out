@@ -49,9 +49,9 @@ abort: '\n' cannot be used in a tag name
 abort: ':' cannot be used in a tag name
 % cloning local tags
 changeset:   0:0acdaf898367
-tag:         foobar
 tag:         bleah
 tag:         bleah0
+tag:         foobar
 user:        test
 date:        Mon Jan 12 13:46:40 1970 +0000
 summary:     test
@@ -94,3 +94,9 @@ summary:     Removed tag gack, gorp
 f68b039e72eacbb2e68b0543e1f6e50990aa2bb5 localnewline
 0acdaf8983679e0aac16e811534eb49d7ee1f2b4 foobar0acdaf8983679e0aac16e811534eb49d7ee1f2b4 foobar
 6ae703d793c8b1f097116869275ecd97b2977a2b newline
+% tag and branch using same name
+marked working directory as branch tag-and-branch-same-name
+warning: tag tag-and-branch-same-name conflicts with existing branch name
+% test custom commit messages
+custom tag message
+second line

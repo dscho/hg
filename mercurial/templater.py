@@ -6,11 +6,29 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-import re, sys, os
+import sys, os
 import util, config, templatefilters
 
 path = ['templates', '../templates']
 stringify = templatefilters.stringify
+
+def _flatten(thing):
+    '''yield a single stream from a possibly nested set of iterators'''
+    if isinstance(thing, str):
+        yield thing
+    elif not hasattr(thing, '__iter__'):
+        if thing is not None:
+            yield str(thing)
+    else:
+        for i in thing:
+            if isinstance(i, str):
+                yield i
+            elif not hasattr(i, '__iter__'):
+                if i is not None:
+                    yield str(i)
+            elif i is not None:
+                for j in _flatten(i):
+                    yield j
 
 def parsestring(s, quoted=True):
     '''parse a string using simple c-like syntax.
@@ -42,97 +60,107 @@ class engine(object):
     filter uses function to transform value. syntax is
     {key|filter1|filter2|...}.'''
 
-    template_re = re.compile(r'{([\w\|%]+)}')
-
     def __init__(self, loader, filters={}, defaults={}):
-        self.loader = loader
-        self.filters = filters
-        self.defaults = defaults
-        self.cache = {}
+        self._loader = loader
+        self._filters = filters
+        self._defaults = defaults
+        self._cache = {}
 
-    def process(self, t, map):
-        '''Perform expansion. t is name of map element to expand. map contains
-        added elements for use during expansion. Is a generator.'''
-        tmpl = self.loader(t)
-        iters = [self._process(tmpl, map)]
-        while iters:
-            try:
-                item = iters[0].next()
-            except StopIteration:
-                iters.pop(0)
-                continue
-            if isinstance(item, str):
-                yield item
-            elif item is None:
-                yield ''
-            elif hasattr(item, '__iter__'):
-                iters.insert(0, iter(item))
-            else:
-                yield str(item)
+    def process(self, t, mapping):
+        '''Perform expansion. t is name of map element to expand.
+        mapping contains added elements for use during expansion. Is a
+        generator.'''
+        return _flatten(self._process(self._load(t), mapping))
 
-    def _format(self, expr, get, map):
-        key, format = expr.split('%')
-        v = get(key)
+    def _load(self, t):
+        '''load, parse, and cache a template'''
+        if t not in self._cache:
+            self._cache[t] = self._parse(self._loader(t))
+        return self._cache[t]
+
+    def _get(self, mapping, key):
+        v = mapping.get(key)
+        if v is None:
+            v = self._defaults.get(key, '')
+        if hasattr(v, '__call__'):
+            v = v(**mapping)
+        return v
+
+    def _filter(self, mapping, parts):
+        filters, val = parts
+        x = self._get(mapping, val)
+        for f in filters:
+            x = f(x)
+        return x
+
+    def _format(self, mapping, args):
+        key, parsed = args
+        v = self._get(mapping, key)
         if not hasattr(v, '__iter__'):
-            raise SyntaxError(_("error expanding '%s%%%s'") % (key, format))
-        lm = map.copy()
+            raise SyntaxError(_("error expanding '%s%%%s'")
+                              % (key, format))
+        lm = mapping.copy()
         for i in v:
             if isinstance(i, dict):
                 lm.update(i)
-                yield self.process(format, lm)
+                yield self._process(parsed, lm)
             else:
                 # v is not an iterable of dicts, this happen when 'key'
                 # has been fully expanded already and format is useless.
                 # If so, return the expanded value.
                 yield i
 
-    def _filter(self, expr, get, map):
-        if expr not in self.cache:
-            parts = expr.split('|')
-            val = parts[0]
-            try:
-                filters = [self.filters[f] for f in parts[1:]]
-            except KeyError, i:
-                raise SyntaxError(_("unknown filter '%s'") % i[0])
-            def apply(get):
-                x = get(val)
-                for f in filters:
-                    x = f(x)
-                return x
-            self.cache[expr] = apply
-        return self.cache[expr](get)
+    def _parse(self, tmpl):
+        '''preparse a template'''
+        parsed = []
+        pos, stop = 0, len(tmpl)
+        while pos < stop:
+            n = tmpl.find('{', pos)
+            if n < 0:
+                parsed.append((None, tmpl[pos:stop]))
+                break
+            if n > 0 and tmpl[n - 1] == '\\':
+                # escaped
+                parsed.append((None, tmpl[pos:n - 1] + "{"))
+                pos = n + 1
+                continue
+            if n > pos:
+                parsed.append((None, tmpl[pos:n]))
 
-    def _process(self, tmpl, map):
-        '''Render a template. Returns a generator.'''
-
-        def get(key):
-            v = map.get(key)
-            if v is None:
-                v = self.defaults.get(key, '')
-            if hasattr(v, '__call__'):
-                v = v(**map)
-            return v
-
-        while tmpl:
-            m = self.template_re.search(tmpl)
-            if not m:
-                yield tmpl
+            pos = n
+            n = tmpl.find('}', pos)
+            if n < 0:
+                # no closing
+                parsed.append((None, tmpl[pos:stop]))
                 break
 
-            start, end = m.span(0)
-            variants = m.groups()
-            expr = variants[0] or variants[1]
-
-            if start:
-                yield tmpl[:start]
-            tmpl = tmpl[end:]
+            expr = tmpl[pos + 1:n]
+            pos = n + 1
 
             if '%' in expr:
-                yield self._format(expr, get, map)
+                key, t = expr.split('%')
+                parsed.append((self._format, (key.strip(),
+                                              self._load(t.strip()))))
             elif '|' in expr:
-                yield self._filter(expr, get, map)
+                parts = expr.split('|')
+                val = parts[0].strip()
+                try:
+                    filters = [self._filters[f.strip()] for f in parts[1:]]
+                except KeyError, i:
+                    raise SyntaxError(_("unknown filter '%s'") % i[0])
+                parsed.append((self._filter, (filters, val)))
             else:
-                yield get(expr)
+                parsed.append((self._get, expr.strip()))
+
+        return parsed
+
+    def _process(self, parsed, mapping):
+        '''Render a template. Returns a generator.'''
+        for f, e in parsed:
+            if f:
+                yield f(mapping, e)
+            else:
+                yield e
 
 engines = {'default': engine}
 
@@ -188,14 +216,14 @@ class templater(object):
                               (self.map[t][1], inst.args[1]))
         return self.cache[t]
 
-    def __call__(self, t, **map):
+    def __call__(self, t, **mapping):
         ttype = t in self.map and self.map[t][0] or 'default'
         proc = self.engines.get(ttype)
         if proc is None:
             proc = engines[ttype](self.load, self.filters, self.defaults)
             self.engines[ttype] = proc
 
-        stream = proc.process(t, map)
+        stream = proc.process(t, mapping)
         if self.minchunk:
             stream = util.increasingchunks(stream, min=self.minchunk,
                                            max=self.maxchunk)

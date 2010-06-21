@@ -16,13 +16,7 @@ o  0: A
 
 % Rebasing B onto H
 3 files updated, 0 files merged, 2 files removed, 0 files unresolved
-saving bundle to 
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 5 changesets with 6 changes to 6 files (+1 heads)
-rebase completed
+saved backup bundle to 
 @  5: Collapsed revision
 |  * B
 |  * C
@@ -46,13 +40,7 @@ F
 H
 
 % Rebasing G onto H
-saving bundle to 
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 3 changesets with 3 changes to 3 files (+1 heads)
-rebase completed
+saved backup bundle to 
 @  6: Collapsed revision
 |  * E
 |  * G
@@ -95,13 +83,7 @@ o  0: A
 abort: unable to collapse, there is more than one external parent
 
 % Rebase and collapse - E onto H
-saving bundle to 
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 2 changesets with 3 changes to 3 files
-rebase completed
+saved backup bundle to 
 @    5: Collapsed revision
 |\   * E
 | |  * F
@@ -145,13 +127,7 @@ o  0: A
 
 % Rebase and collapse - E onto I
 merging E
-saving bundle to 
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 2 changesets with 3 changes to 3 files
-rebase completed
+saved backup bundle to 
 @    5: Collapsed revision
 |\   * E
 | |  * F
@@ -191,13 +167,7 @@ o  0: A
 
 
 % Rebase and collapse - B onto F
-saving bundle to 
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 2 changesets with 4 changes to 4 files
-rebase completed
+saved backup bundle to 
 @  2: Collapsed revision
 |  * B
 |  * C

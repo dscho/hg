@@ -7,12 +7,19 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import sys, re, glob
+import re, glob
+import optparse
 
 def repquote(m):
-    t = re.sub(r"\w", "x", m.group(2))
+    t = re.sub(r"\w", "x", m.group('text'))
     t = re.sub(r"[^\sx]", "o", t)
-    return m.group(1) + t + m.group(1)
+    return m.group('quote') + t + m.group('quote')
+
+def reppython(m):
+    comment = m.group('comment')
+    if comment:
+        return "#" * len(comment)
+    return repquote(m)
 
 def repcomment(m):
     return m.group(1) + "#" * len(m.group(2))
@@ -54,6 +61,7 @@ testpats = [
     (r'[^\n]\Z', "no trailing newline"),
     (r'export.*=', "don't export and assign at once"),
     ('^([^"\']|("[^"]*")|(\'[^\']*\'))*\\^', "^ must be quoted"),
+    (r'^source\b', "don't use 'source', use '.'"),
 ]
 
 testfilters = [
@@ -84,23 +92,29 @@ pypats = [
     (r'[\x80-\xff]', "non-ASCII character literal"),
     (r'("\')\.format\(', "str.format() not available in Python 2.4"),
     (r'^\s*with\s+', "with not available in Python 2.4"),
+    (r'(?<!def)\s+(any|all|format)\(',
+     "any/all/format not available in Python 2.4"),
     (r'if\s.*\selse', "if ... else form not available in Python 2.4"),
     (r'([\(\[]\s\S)|(\S\s[\)\]])', "gratuitous whitespace in () or []"),
 #    (r'\s\s=', "gratuitous whitespace before ="),
-    (r'[^>< ](\+=|-=|!=|<>|<=|>=|<<=|>>=)\S', "missing whitespace around operator"),
-    (r'[^>< ](\+=|-=|!=|<>|<=|>=|<<=|>>=)\s', "missing whitespace around operator"),
-    (r'\s(\+=|-=|!=|<>|<=|>=|<<=|>>=)\S', "missing whitespace around operator"),
-    (r'[^+=*!<>&| -](\s=|=\s)[^= ]', "wrong whitespace around ="),
+    (r'[^>< ](\+=|-=|!=|<>|<=|>=|<<=|>>=)\S',
+     "missing whitespace around operator"),
+    (r'[^>< ](\+=|-=|!=|<>|<=|>=|<<=|>>=)\s',
+     "missing whitespace around operator"),
+    (r'\s(\+=|-=|!=|<>|<=|>=|<<=|>>=)\S',
+     "missing whitespace around operator"),
+    (r'[^+=*!<>&| -](\s=|=\s)[^= ]',
+     "wrong whitespace around ="),
     (r'raise Exception', "don't raise generic exceptions"),
-    (r'ui\.(status|progress|write|note)\([\'\"]x', "unwrapped ui message"),
+    (r'ui\.(status|progress|write|note)\([\'\"]x',
+     "warning: unwrapped ui message"),
 ]
 
 pyfilters = [
-    (r"""(''')(([^']|\\'|'{1,2}(?!'))*)'''""", repquote),
-    (r'''(""")(([^"]|\\"|"{1,2}(?!"))*)"""''', repquote),
-    (r'''(?<!")(")(([^"\n]|\\")+)"(?!")''', repquote),
-    (r"""(?<!')(')(([^'\n]|\\')+)'(?!')""", repquote),
-    (r"( *)(#([^\n]*\S)?)", repcomment),
+    (r"""(?msx)(?P<comment>\#.*?$)|
+         ((?P<quote>('''|\"\"\"|(?<!')'(?!')|(?<!")"(?!")))
+          (?P<text>(([^\\]|\\.)*?))
+          (?P=quote))""", reppython),
 ]
 
 cpats = [
@@ -123,7 +137,7 @@ cpats = [
 
 cfilters = [
     (r'(/\*)(((\*(?!/))|[^*])*)\*/', repccomment),
-    (r'''(?<!")(")(([^"]|\\")+"(?!"))''', repquote),
+    (r'''(?P<quote>(?<!")")(?P<text>([^"]|\\")+)"(?!")''', repquote),
     (r'''(#\s*include\s+<)([^>]+)>''', repinclude),
     (r'(\()([^)]+\))', repcallspaces),
 ]
@@ -134,12 +148,42 @@ checks = [
     ('c', r'.*\.c$', cfilters, cpats),
 ]
 
-if len(sys.argv) == 1:
-    check = glob.glob("*")
-else:
-    check = sys.argv[1:]
+class norepeatlogger(object):
+    def __init__(self):
+        self._lastseen = None
 
-for f in check:
+    def log(self, fname, lineno, line, msg):
+        """print error related a to given line of a given file.
+
+        The faulty line will also be printed but only once in the case
+        of multiple errors.
+
+        :fname: filename
+        :lineno: line number
+        :line: actual content of the line
+        :msg: error message
+        """
+        msgid = fname, lineno, line
+        if msgid != self._lastseen:
+            print "%s:%d:" % (fname, lineno)
+            print " > %s" % line
+            self._lastseen = msgid
+        print " " + msg
+
+_defaultlogger = norepeatlogger()
+
+def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False):
+    """checks style and portability of a given file
+
+    :f: filepath
+    :logfunc: function used to report error
+              logfunc(filename, linenumber, linecontent, errormessage)
+    :maxerr: number of error to display before arborting.
+             Set to None (default) to report all errors
+
+    return True if no error is found, False otherwise.
+    """
+    result = True
     for name, match, filters, pats in checks:
         fc = 0
         if not re.match(match, f):
@@ -154,16 +198,34 @@ for f in check:
         for n, l in z:
             if "check-code" + "-ignore" in l[0]:
                 continue
-            lc = 0
             for p, msg in pats:
+                if not warnings and msg.startswith("warning"):
+                    continue
                 if re.search(p, l[1]):
-                    if not lc:
-                        print "%s:%d:" % (f, n + 1)
-                        print " > %s" % l[0]
-                    print " %s" % msg
-                    lc += 1
+                    logfunc(f, n + 1, l[0], msg)
                     fc += 1
-            if fc == 15:
+                    result = False
+            if maxerr is not None and fc >= maxerr:
                 print " (too many errors, giving up)"
                 break
         break
+    return result
+
+
+if __name__ == "__main__":
+    parser = optparse.OptionParser("%prog [options] [files]")
+    parser.add_option("-w", "--warnings", action="store_true",
+                      help="include warning-level checks")
+    parser.add_option("-p", "--per-file", type="int",
+                      help="max warnings per file")
+
+    parser.set_defaults(per_file=15, warnings=False)
+    (options, args) = parser.parse_args()
+
+    if len(args) == 0:
+        check = glob.glob("*")
+    else:
+        check = args
+
+    for f in check:
+        checkfile(f, maxerr=options.per_file, warnings=options.warnings)

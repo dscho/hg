@@ -10,27 +10,31 @@ import os
 from mercurial import ui, hg, hook, error, encoding, templater
 from common import get_mtime, ErrorResponse, permhooks
 from common import HTTP_OK, HTTP_BAD_REQUEST, HTTP_NOT_FOUND, HTTP_SERVER_ERROR
-from common import HTTP_UNAUTHORIZED, HTTP_METHOD_NOT_ALLOWED
 from request import wsgirequest
 import webcommands, protocol, webutil
 
 perms = {
     'changegroup': 'pull',
     'changegroupsubset': 'pull',
-    'unbundle': 'push',
     'stream_out': 'pull',
+    'listkeys': 'pull',
+    'unbundle': 'push',
+    'pushkey': 'push',
 }
 
 class hgweb(object):
-    def __init__(self, repo, name=None):
+    def __init__(self, repo, name=None, baseui=None):
         if isinstance(repo, str):
-            u = ui.ui()
-            u.setconfig('ui', 'report_untrusted', 'off')
-            u.setconfig('ui', 'interactive', 'off')
+            if baseui:
+                u = baseui.copy()
+            else:
+                u = ui.ui()
             self.repo = hg.repository(u, repo)
         else:
             self.repo = repo
 
+        self.repo.ui.setconfig('ui', 'report_untrusted', 'off')
+        self.repo.ui.setconfig('ui', 'interactive', 'off')
         hook.redirect(True)
         self.mtime = -1
         self.reponame = name

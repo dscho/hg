@@ -5,7 +5,10 @@ cat <<EOF >> $HGRCPATH
 keyword =
 mq =
 notify =
+record =
 transplant =
+[ui]
+interactive = true
 EOF
 
 # demo before [keyword] files are set up
@@ -21,7 +24,7 @@ hg --quiet kwdemo "Branch = {branches}"
 
 cat <<EOF >> $HGRCPATH
 [keyword]
-* =
+** =
 b = ignore
 [hooks]
 commit=
@@ -139,12 +142,42 @@ hg -v kwexpand
 echo % compare changenodes in a c
 cat a c
 
-echo % qinit -c
-hg qinit -c
+echo % record chunk
+python -c \
+'l=open("a").readlines();l.insert(1,"foo\n");l.append("bar\n");open("a","w").writelines(l);'
+hg record -d '1 10' -m rectest<<EOF
+y
+y
+n
+EOF
+echo
+hg identify
+hg status
+echo % cat modified file
+cat a
+hg diff | grep -v 'b/a'
+hg rollback
+
+echo % record file
+echo foo > msg
+# do not use "hg record -m" here!
+hg record -l msg -d '1 11'<<EOF
+y
+y
+y
+EOF
+echo % a should be clean
+hg status -A a
+rm msg
+hg rollback
+hg update -C
+
+echo % init --mq
+hg init --mq
 echo % qimport
 hg qimport -r tip -n mqtest.diff
-echo % qcommit
-hg qcommit -mqtest
+echo % commit --mq
+hg commit --mq -m mqtest
 echo % keywords should not be expanded in patch
 cat .hg/patches/mqtest.diff
 echo % qpop
@@ -153,6 +186,10 @@ echo % qgoto - should imply qpush
 hg qgoto mqtest.diff
 echo % cat
 cat c
+echo % hg cat
+hg cat c
+echo % keyword should not be expanded in filelog
+hg --config 'extensions.keyword=!' cat c
 echo % qpop and move on
 hg qpop
 

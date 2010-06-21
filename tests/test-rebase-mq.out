@@ -1,5 +1,5 @@
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-@  3 P1 tags: qtip tip f2.patch
+@  3 P1 tags: f2.patch qtip tip
 |
 o  2 P0 tags: f.patch qbase
 |
@@ -21,20 +21,14 @@ merging f failed!
 abort: fix unresolved conflicts with hg resolve then run hg rebase --continue
 
 % Fix the 1st conflict
-merging f
 warning: conflicts during merge.
 merging f failed!
 abort: fix unresolved conflicts with hg resolve then run hg rebase --continue
+merging f
 
 % Fix the 2nd conflict
-saving bundle to 
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 2 changesets with 2 changes to 1 files
-rebase completed
-@  3 P1 tags: qtip tip f2.patch
+saved backup bundle to 
+@  3 P1 tags: f2.patch qtip tip
 |
 o  2 P0 tags: f.patch qbase
 |
@@ -107,7 +101,6 @@ diff -r x p
 +mq2
 
 % Rebase the applied mq patches
-saving bundle to 
 % And the patches are correct
 % Git patch
 # HG changeset patch

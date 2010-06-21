@@ -13,13 +13,7 @@ o  0:c1
 
 % Rebase with no arguments - single revision in source branch
 1 files updated, 0 files merged, 2 files removed, 0 files unresolved
-saving bundle to 
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 3 changesets with 3 changes to 3 files
-rebase completed
+saved backup bundle to 
 @  4:l1
 |
 o  3:r2
@@ -45,13 +39,7 @@ o  0:c1
 
 % Rebase with no arguments - single revision in target branch
 2 files updated, 0 files merged, 1 files removed, 0 files unresolved
-saving bundle to 
-adding branch
-adding changesets
-adding manifests
-adding file changes
-added 3 changesets with 3 changes to 3 files
-rebase completed
+saved backup bundle to 
 @  4:l2
 |
 o  3:l1

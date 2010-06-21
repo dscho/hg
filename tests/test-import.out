@@ -182,7 +182,7 @@ parent: 0
 applying ../patch1
 applying ../patch2
 applied 1d4bd90af0e4
-rolling back last transaction
+rolling back to revision 1 (undo commit)
 parent: 1
 % hg import in a subdirectory
 requesting all changes
@@ -279,7 +279,7 @@ bb
 % test paths outside repo root
 applying patch from stdin
 abort: ../outside/foo not under root
-% test import with similarity (issue295)
+% test import with similarity and git and strip (issue295 et al.)
 adding a
 applying ../rename.diff
 patching file a

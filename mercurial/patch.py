@@ -6,11 +6,12 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+import cStringIO, email.Parser, os, re
+import tempfile, zlib
+
 from i18n import _
 from node import hex, nullid, short
 import base85, cmdutil, mdiff, util, diffhelpers, copies
-import cStringIO, email.Parser, os, re
-import sys, tempfile, zlib
 
 gitre = re.compile('diff --git a/(.*) b/(.*)')
 
@@ -302,6 +303,9 @@ class patchmeta(object):
         isexec = mode & 0100
         self.mode = (islink, isexec)
 
+    def __repr__(self):
+        return "<patchmeta %s %r>" % (self.op, self.path)
+
 def readgitpatch(lr):
     """extract git-style metadata about patches from <patchname>"""
 
@@ -343,8 +347,6 @@ def readgitpatch(lr):
                 gp.path = line[8:]
             elif line.startswith('deleted file'):
                 gp.op = 'DELETE'
-                # is the deleted file a symlink?
-                gp.setmode(int(line[-6:], 8))
             elif line.startswith('new file mode '):
                 gp.op = 'ADD'
                 gp.setmode(int(line[-6:], 8))
@@ -524,17 +526,6 @@ class patchfile(object):
                         yield "\n\ No newline at end of file\n"
 
         self.writelines(fname, rejlines())
-
-    def write(self, dest=None):
-        if not self.dirty:
-            return
-        if not dest:
-            dest = self.fname
-        self.writelines(dest, self.lines)
-
-    def close(self):
-        self.write()
-        self.write_rej()
 
     def apply(self, h):
         if not h.complete():
@@ -905,24 +896,25 @@ def parsefilename(str):
             return s
     return s[:i]
 
-def selectfile(afile_orig, bfile_orig, hunk, strip):
-    def pathstrip(path, count=1):
-        pathlen = len(path)
-        i = 0
-        if count == 0:
-            return '', path.rstrip()
-        while count > 0:
-            i = path.find('/', i)
-            if i == -1:
-                raise PatchError(_("unable to strip away %d dirs from %s") %
-                                 (count, path))
+def pathstrip(path, strip):
+    pathlen = len(path)
+    i = 0
+    if strip == 0:
+        return '', path.rstrip()
+    count = strip
+    while count > 0:
+        i = path.find('/', i)
+        if i == -1:
+            raise PatchError(_("unable to strip away %d of %d dirs from %s") %
+                             (count, strip, path))
+        i += 1
+        # consume '//' in the path
+        while i < pathlen - 1 and path[i] == '/':
             i += 1
-            # consume '//' in the path
-            while i < pathlen - 1 and path[i] == '/':
-                i += 1
-            count -= 1
-        return path[:i].lstrip(), path[i:].rstrip()
+        count -= 1
+    return path[:i].lstrip(), path[i:].rstrip()
 
+def selectfile(afile_orig, bfile_orig, hunk, strip):
     nulla = afile_orig == "/dev/null"
     nullb = bfile_orig == "/dev/null"
     abase, afile = pathstrip(afile_orig, strip)
@@ -1125,9 +1117,9 @@ def iterhunks(ui, fp, sourcefile=None):
     if (empty is None and not gitworkdone) or empty:
         raise NoHunks
 
+
 def applydiff(ui, fp, changed, strip=1, sourcefile=None, eolmode='strict'):
-    """
-    Reads a patch from fp and tries to apply it.
+    """Reads a patch from fp and tries to apply it.
 
     The dict 'changed' is filled in with all of the filenames changed
     by the patch. Returns 0 for a clean patch, -1 if any rejects were
@@ -1136,25 +1128,36 @@ def applydiff(ui, fp, changed, strip=1, sourcefile=None, eolmode='strict'):
     If 'eolmode' is 'strict', the patch content and patched file are
     read in binary mode. Otherwise, line endings are ignored when
     patching then normalized according to 'eolmode'.
+
+    Callers probably want to call 'updatedir' after this to apply
+    certain categories of changes not done by this function.
     """
+    return _applydiff(
+        ui, fp, patchfile, copyfile,
+        changed, strip=strip, sourcefile=sourcefile, eolmode=eolmode)
+
+
+def _applydiff(ui, fp, patcher, copyfn, changed, strip=1,
+               sourcefile=None, eolmode='strict'):
     rejects = 0
     err = 0
     current_file = None
-    gitpatches = None
-    opener = util.opener(os.getcwd())
+    cwd = os.getcwd()
+    opener = util.opener(cwd)
 
     def closefile():
         if not current_file:
             return 0
-        current_file.close()
+        if current_file.dirty:
+            current_file.writelines(current_file.fname, current_file.lines)
+        current_file.write_rej()
         return len(current_file.rej)
 
     for state, values in iterhunks(ui, fp, sourcefile):
         if state == 'hunk':
             if not current_file:
                 continue
-            current_hunk = values
-            ret = current_file.apply(current_hunk)
+            ret = current_file.apply(values)
             if ret >= 0:
                 changed.setdefault(current_file.fname, None)
                 if ret > 0:
@@ -1164,24 +1167,25 @@ def applydiff(ui, fp, changed, strip=1, sourcefile=None, eolmode='strict'):
             afile, bfile, first_hunk = values
             try:
                 if sourcefile:
-                    current_file = patchfile(ui, sourcefile, opener,
-                                             eolmode=eolmode)
+                    current_file = patcher(ui, sourcefile, opener,
+                                           eolmode=eolmode)
                 else:
                     current_file, missing = selectfile(afile, bfile,
                                                        first_hunk, strip)
-                    current_file = patchfile(ui, current_file, opener,
-                                             missing, eolmode)
+                    current_file = patcher(ui, current_file, opener,
+                                           missing=missing, eolmode=eolmode)
             except PatchError, err:
                 ui.warn(str(err) + '\n')
-                current_file, current_hunk = None, None
+                current_file = None
                 rejects += 1
                 continue
         elif state == 'git':
-            gitpatches = values
-            cwd = os.getcwd()
-            for gp in gitpatches:
+            for gp in values:
+                gp.path = pathstrip(gp.path, strip - 1)[1]
+                if gp.oldpath:
+                    gp.oldpath = pathstrip(gp.oldpath, strip - 1)[1]
                 if gp.op in ('COPY', 'RENAME'):
-                    copyfile(gp.oldpath, gp.path, cwd)
+                    copyfn(gp.oldpath, gp.path, cwd)
                 changed[gp.path] = gp
         else:
             raise util.Abort(_('unsupported parser state: %s') % state)
@@ -1191,20 +1195,6 @@ def applydiff(ui, fp, changed, strip=1, sourcefile=None, eolmode='strict'):
     if rejects:
         return -1
     return err
-
-def diffopts(ui, opts=None, untrusted=False):
-    def get(key, name=None, getter=ui.configbool):
-        return ((opts and opts.get(key)) or
-                getter('diff', name or key, None, untrusted=untrusted))
-    return mdiff.diffopts(
-        text=opts and opts.get('text'),
-        git=get('git'),
-        nodates=get('nodates'),
-        showfunc=get('show_function', 'showfunc'),
-        ignorews=get('ignore_all_space', 'ignorews'),
-        ignorewsamount=get('ignore_space_change', 'ignorewsamount'),
-        ignoreblanklines=get('ignore_blank_lines', 'ignoreblanklines'),
-        context=get('unified', getter=ui.config))
 
 def updatedir(ui, repo, patches, similarity=0):
     '''Update dirstate after patch application according to metadata'''
@@ -1227,10 +1217,13 @@ def updatedir(ui, repo, patches, similarity=0):
             copies.append((gp.oldpath, gp.path))
         elif gp.op == 'DELETE':
             removes.add(gp.path)
+
+    wctx = repo[None]
     for src, dst in copies:
-        repo.copy(src, dst)
+        wctx.copy(src, dst)
     if (not similarity) and removes:
-        repo.remove(sorted(removes), True)
+        wctx.remove(sorted(removes), True)
+
     for f in patches:
         gp = patches[f]
         if gp and gp.mode:
@@ -1240,8 +1233,7 @@ def updatedir(ui, repo, patches, similarity=0):
             if gp.op == 'ADD' and not os.path.exists(dst):
                 flags = (isexec and 'x' or '') + (islink and 'l' or '')
                 repo.wwrite(gp.path, '', flags)
-            elif gp.op != 'DELETE':
-                util.set_flags(dst, islink, isexec)
+            util.set_flags(dst, islink, isexec)
     cmdutil.addremove(repo, cfiles, similarity=similarity)
     files = patches.keys()
     files.extend([r for r in removes if r not in files])
@@ -1337,6 +1329,10 @@ def patch(patchname, ui, strip=1, cwd=None, files=None, eolmode='strict'):
             try:
                 return internalpatch(patchname, ui, strip, cwd, files, eolmode)
             except NoHunks:
+                ui.warn(_('internal patcher failed\n'
+                          'please report details to '
+                          'http://mercurial.selenic.com/bts/\n'
+                          'or mercurial@selenic.com\n'))
                 patcher = (util.find_exe('gpatch') or util.find_exe('patch')
                            or 'patch')
                 ui.debug('no valid hunks found; trying with %r instead\n' %
@@ -1392,6 +1388,20 @@ def b85diff(to, tn):
 
 class GitDiffRequired(Exception):
     pass
+
+def diffopts(ui, opts=None, untrusted=False):
+    def get(key, name=None, getter=ui.configbool):
+        return ((opts and opts.get(key)) or
+                getter('diff', name or key, None, untrusted=untrusted))
+    return mdiff.diffopts(
+        text=opts and opts.get('text'),
+        git=get('git'),
+        nodates=get('nodates'),
+        showfunc=get('show_function', 'showfunc'),
+        ignorews=get('ignore_all_space', 'ignorews'),
+        ignorewsamount=get('ignore_space_change', 'ignorewsamount'),
+        ignoreblanklines=get('ignore_blank_lines', 'ignoreblanklines'),
+        context=get('unified', getter=ui.config))
 
 def diff(repo, node1=None, node2=None, match=None, changes=None, opts=None,
          losedatafn=None):
@@ -1464,6 +1474,43 @@ def diff(repo, node1=None, node2=None, match=None, changes=None, opts=None,
             return difffn(opts.copy(git=True), None)
     else:
         return difffn(opts, None)
+
+def difflabel(func, *args, **kw):
+    '''yields 2-tuples of (output, label) based on the output of func()'''
+    prefixes = [('diff', 'diff.diffline'),
+                ('copy', 'diff.extended'),
+                ('rename', 'diff.extended'),
+                ('old', 'diff.extended'),
+                ('new', 'diff.extended'),
+                ('deleted', 'diff.extended'),
+                ('---', 'diff.file_a'),
+                ('+++', 'diff.file_b'),
+                ('@@', 'diff.hunk'),
+                ('-', 'diff.deleted'),
+                ('+', 'diff.inserted')]
+
+    for chunk in func(*args, **kw):
+        lines = chunk.split('\n')
+        for i, line in enumerate(lines):
+            if i != 0:
+                yield ('\n', '')
+            stripline = line
+            if line and line[0] in '+-':
+                # highlight trailing whitespace, but only in changed lines
+                stripline = line.rstrip()
+            for prefix, label in prefixes:
+                if stripline.startswith(prefix):
+                    yield (stripline, label)
+                    break
+            else:
+                yield (line, '')
+            if line != stripline:
+                yield (line[len(stripline):], 'diff.trailingwhitespace')
+
+def diffui(*args, **kw):
+    '''like diff(), but yields 2-tuples of (output, label) for ui.write()'''
+    return difflabel(diff, *args, **kw)
+
 
 def _addmodehdr(header, omode, nmode):
     if omode != nmode:
@@ -1568,47 +1615,6 @@ def trydiff(repo, revs, ctx1, ctx2, modified, added, removed,
             if text:
                 yield text
 
-def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
-           opts=None):
-    '''export changesets as hg patches.'''
-
-    total = len(revs)
-    revwidth = max([len(str(rev)) for rev in revs])
-
-    def single(rev, seqno, fp):
-        ctx = repo[rev]
-        node = ctx.node()
-        parents = [p.node() for p in ctx.parents() if p]
-        branch = ctx.branch()
-        if switch_parent:
-            parents.reverse()
-        prev = (parents and parents[0]) or nullid
-
-        if not fp:
-            fp = cmdutil.make_file(repo, template, node, total=total,
-                                   seqno=seqno, revwidth=revwidth,
-                                   mode='ab')
-        if fp != sys.stdout and hasattr(fp, 'name'):
-            repo.ui.note("%s\n" % fp.name)
-
-        fp.write("# HG changeset patch\n")
-        fp.write("# User %s\n" % ctx.user())
-        fp.write("# Date %d %d\n" % ctx.date())
-        if branch and (branch != 'default'):
-            fp.write("# Branch %s\n" % branch)
-        fp.write("# Node ID %s\n" % hex(node))
-        fp.write("# Parent  %s\n" % hex(prev))
-        if len(parents) > 1:
-            fp.write("# Parent  %s\n" % hex(parents[1]))
-        fp.write(ctx.description().rstrip())
-        fp.write("\n\n")
-
-        for chunk in diff(repo, prev, node, opts=opts):
-            fp.write(chunk)
-
-    for seqno, rev in enumerate(revs):
-        single(rev, seqno + 1, fp)
-
 def diffstatdata(lines):
     filename, adds, removes = None, 0, 0
     for line in lines:
@@ -1676,3 +1682,22 @@ def diffstat(lines, width=80, git=False):
                       % (len(stats), totaladds, totalremoves))
 
     return ''.join(output)
+
+def diffstatui(*args, **kw):
+    '''like diffstat(), but yields 2-tuples of (output, label) for
+    ui.write()
+    '''
+
+    for line in diffstat(*args, **kw).splitlines():
+        if line and line[-1] in '+-':
+            name, graph = line.rsplit(' ', 1)
+            yield (name + ' ', '')
+            m = re.search(r'\++', graph)
+            if m:
+                yield (m.group(0), 'diffstat.inserted')
+            m = re.search(r'-+', graph)
+            if m:
+                yield (m.group(0), 'diffstat.deleted')
+        else:
+            yield (line, '')
+        yield ('\n', '')

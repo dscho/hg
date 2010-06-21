@@ -7,7 +7,7 @@ do_push()
 
     echo "Pushing as user $user"
     echo 'hgrc = """'
-    sed -e 1,2d b/.hg/hgrc
+    sed -e 1,2d b/.hg/hgrc | grep -v fakegroups.py
     echo '"""'
     if test -f acl.config; then
 	echo 'acl.config = """'
@@ -22,6 +22,30 @@ do_push()
     hg --cwd b rollback
     hg --cwd b --quiet tip
     echo
+}
+
+init_config()
+{
+cat > fakegroups.py <<EOF
+from hgext import acl
+def fakegetusers(ui, group):
+    try:
+        return acl._getusersorig(ui, group)
+    except:
+        return ["fred", "betty"]
+acl._getusersorig = acl._getusers
+acl._getusers = fakegetusers
+EOF
+
+rm -f acl.config
+cat > $config <<EOF
+[hooks]
+pretxnchangegroup.acl = python:hgext.acl.hook
+[acl]
+sources = push
+[extensions]
+f=$PWD/fakegroups.py
+EOF
 }
 
 hg init a
@@ -111,3 +135,42 @@ echo '[hooks]' >> acl.config
 echo 'changegroup.acl = false' >> acl.config
 do_push barney
 
+# asterisk
+
+init_config
+
+echo 'asterisk test'
+echo '[acl.allow]' >> $config
+echo "** = fred" >> $config
+echo "fred is always allowed"
+do_push fred
+
+echo '[acl.deny]' >> $config
+echo "foo/Bar/** = *" >> $config
+echo "no one is allowed inside foo/Bar/"
+do_push fred
+
+# Groups
+
+init_config
+
+echo 'OS-level groups'
+echo '[acl.allow]' >> $config
+echo "** = @group1" >> $config
+echo "@group1 is always allowed"
+do_push fred
+
+echo '[acl.deny]' >> $config
+echo "foo/Bar/** = @group1" >> $config
+echo "@group is allowed inside anything but foo/Bar/"
+do_push fred
+
+echo 'Invalid group'
+# Disable the fakegroups trick to get real failures
+grep -v fakegroups $config > config.tmp
+mv config.tmp $config
+echo '[acl.allow]' >> $config
+echo "** = @unlikelytoexist" >> $config
+do_push fred 2>&1 | grep unlikelytoexist
+
+true

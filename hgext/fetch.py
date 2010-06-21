@@ -28,7 +28,7 @@ def fetch(ui, repo, source='default', **opts):
     parent, with local changes as the second. To switch the merge
     order, use --switch-parent.
 
-    See 'hg help dates' for a list of formats valid for -d/--date.
+    See :hg:`help dates` for a list of formats valid for -d/--date.
     '''
 
     date = opts.get('date')
@@ -61,7 +61,7 @@ def fetch(ui, repo, source='default', **opts):
             raise util.Abort(_('multiple heads in this branch '
                                '(use "hg heads ." and "hg merge" to merge)'))
 
-        other = hg.repository(cmdutil.remoteui(repo, opts),
+        other = hg.repository(hg.remoteui(repo, opts),
                               ui.expandpath(source))
         ui.status(_('pulling from %s\n') %
                   url.hidepassword(ui.expandpath(source)))
@@ -138,7 +138,8 @@ def fetch(ui, repo, source='default', **opts):
 cmdtable = {
     'fetch':
         (fetch,
-        [('r', 'rev', [], _('a specific revision you would like to pull')),
+        [('r', 'rev', [],
+          _('a specific revision you would like to pull'), _('REV')),
          ('e', 'edit', None, _('edit commit message')),
          ('', 'force-editor', None, _('edit commit message (DEPRECATED)')),
          ('', 'switch-parent', None, _('switch parents when merging')),

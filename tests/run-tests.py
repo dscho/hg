@@ -46,9 +46,8 @@ import difflib
 import errno
 import optparse
 import os
-import signal
-import subprocess
 import shutil
+import subprocess
 import signal
 import sys
 import tempfile
@@ -70,6 +69,9 @@ SKIPPED_STATUS = 80
 SKIPPED_PREFIX = 'skipped: '
 FAILED_PREFIX  = 'hghave check failed: '
 PYTHON = sys.executable
+IMPL_PATH = 'PYTHONPATH'
+if 'java' in sys.platform:
+    IMPL_PATH = 'JYTHONPATH'
 
 requiredtools = ["python", "diff", "grep", "unzip", "gunzip", "bunzip2", "sed"]
 
@@ -81,34 +83,43 @@ defaults = {
 
 def parseargs():
     parser = optparse.OptionParser("%prog [options] [tests]")
+
+    # keep these sorted
+    parser.add_option("--blacklist", action="append",
+        help="skip tests listed in the specified blacklist file")
     parser.add_option("-C", "--annotate", action="store_true",
         help="output files annotated with coverage")
     parser.add_option("--child", type="int",
         help="run as child process, summary to given fd")
     parser.add_option("-c", "--cover", action="store_true",
         help="print a test coverage report")
+    parser.add_option("-d", "--debug", action="store_true",
+        help="debug mode: write output of test scripts to console"
+             " rather than capturing and diff'ing it (disables timeout)")
     parser.add_option("-f", "--first", action="store_true",
         help="exit on the first test failure")
+    parser.add_option("--inotify", action="store_true",
+        help="enable inotify extension when running tests")
     parser.add_option("-i", "--interactive", action="store_true",
         help="prompt to accept changed output")
     parser.add_option("-j", "--jobs", type="int",
         help="number of jobs to run in parallel"
              " (default: $%s or %d)" % defaults['jobs'])
-    parser.add_option("-k", "--keywords",
-        help="run tests matching keywords")
     parser.add_option("--keep-tmpdir", action="store_true",
         help="keep temporary directory after running tests")
-    parser.add_option("--tmpdir", type="string",
-        help="run tests in the given temporary directory"
-             " (implies --keep-tmpdir)")
-    parser.add_option("-d", "--debug", action="store_true",
-        help="debug mode: write output of test scripts to console"
-             " rather than capturing and diff'ing it (disables timeout)")
-    parser.add_option("-R", "--restart", action="store_true",
-        help="restart at last error")
+    parser.add_option("-k", "--keywords",
+        help="run tests matching keywords")
+    parser.add_option("-l", "--local", action="store_true",
+        help="shortcut for --with-hg=<testdir>/../hg")
+    parser.add_option("-n", "--nodiff", action="store_true",
+        help="skip showing test changes")
     parser.add_option("-p", "--port", type="int",
         help="port on which servers should listen"
              " (default: $%s or %d)" % defaults['port'])
+    parser.add_option("--pure", action="store_true",
+        help="use pure Python code instead of C extensions")
+    parser.add_option("-R", "--restart", action="store_true",
+        help="restart at last error")
     parser.add_option("-r", "--retest", action="store_true",
         help="retest failed tests")
     parser.add_option("-S", "--noskips", action="store_true",
@@ -116,29 +127,28 @@ def parseargs():
     parser.add_option("-t", "--timeout", type="int",
         help="kill errant tests after TIMEOUT seconds"
              " (default: $%s or %d)" % defaults['timeout'])
+    parser.add_option("--tmpdir", type="string",
+        help="run tests in the given temporary directory"
+             " (implies --keep-tmpdir)")
     parser.add_option("-v", "--verbose", action="store_true",
         help="output verbose messages")
-    parser.add_option("-n", "--nodiff", action="store_true",
-        help="skip showing test changes")
+    parser.add_option("--view", type="string",
+        help="external diff viewer")
     parser.add_option("--with-hg", type="string",
         metavar="HG",
         help="test using specified hg script rather than a "
              "temporary installation")
-    parser.add_option("--local", action="store_true",
-        help="shortcut for --with-hg=<testdir>/../hg")
-    parser.add_option("--pure", action="store_true",
-        help="use pure Python code instead of C extensions")
     parser.add_option("-3", "--py3k-warnings", action="store_true",
         help="enable Py3k warnings on Python 2.6+")
-    parser.add_option("--inotify", action="store_true",
-        help="enable inotify extension when running tests")
-    parser.add_option("--blacklist", action="append",
-        help="skip tests listed in the specified blacklist file")
 
     for option, default in defaults.items():
         defaults[option] = int(os.environ.get(*default))
     parser.set_defaults(**defaults)
     (options, args) = parser.parse_args()
+
+    # jython is always pure
+    if 'java' in sys.platform or '__pypy__' in sys.modules:
+        options.pure = True
 
     if options.with_hg:
         if not (os.path.isfile(options.with_hg) and
@@ -565,6 +575,7 @@ def runone(options, test, skips, fails):
     mark = '.'
 
     skipped = (ret == SKIPPED_STATUS)
+
     # If we're not in --debug mode and reference output file exists,
     # check test output against it.
     if options.debug:
@@ -575,6 +586,13 @@ def runone(options, test, skips, fails):
         f.close()
     else:
         refout = []
+
+    if (ret != 0 or out != refout) and not skipped and not options.debug:
+        # Save errors to a file for diagnosis
+        f = open(err, "wb")
+        for line in out:
+            f.write(line)
+        f.close()
 
     if skipped:
         mark = 's'
@@ -597,7 +615,10 @@ def runone(options, test, skips, fails):
         else:
             fail("output changed")
         if not options.nodiff:
-            showdiff(refout, out, ref, err)
+            if options.view:
+                os.system("%s %s %s" % (options.view, ref, err))
+            else:
+                showdiff(refout, out, ref, err)
         ret = 1
     elif ret:
         mark = '!'
@@ -606,13 +627,6 @@ def runone(options, test, skips, fails):
     if not options.verbose:
         sys.stdout.write(mark)
         sys.stdout.flush()
-
-    if ret != 0 and not skipped and not options.debug:
-        # Save errors to a file for diagnosis
-        f = open(err, "wb")
-        for line in out:
-            f.write(line)
-        f.close()
 
     killdaemons()
 
@@ -843,6 +857,7 @@ def main():
     os.environ["EMAIL"] = "Foo Bar <foo.bar@example.com>"
     os.environ['CDPATH'] = ''
     os.environ['COLUMNS'] = '80'
+    os.environ['GREP_OPTIONS'] = ''
     os.environ['http_proxy'] = ''
 
     # unset env related to hooks
@@ -914,10 +929,10 @@ def main():
         # it, in case external libraries are only available via current
         # PYTHONPATH.  (In particular, the Subversion bindings on OS X
         # are in /opt/subversion.)
-        oldpypath = os.environ.get('PYTHONPATH')
+        oldpypath = os.environ.get(IMPL_PATH)
         if oldpypath:
             pypath.append(oldpypath)
-        os.environ['PYTHONPATH'] = os.pathsep.join(pypath)
+        os.environ[IMPL_PATH] = os.pathsep.join(pypath)
 
     COVERAGE_FILE = os.path.join(TESTDIR, ".coverage")
 
@@ -938,7 +953,7 @@ def main():
     vlog("# Using TESTDIR", TESTDIR)
     vlog("# Using HGTMP", HGTMP)
     vlog("# Using PATH", os.environ["PATH"])
-    vlog("# Using PYTHONPATH", os.environ["PYTHONPATH"])
+    vlog("# Using", IMPL_PATH, os.environ[IMPL_PATH])
 
     try:
         if len(tests) > 1 and options.jobs > 1:

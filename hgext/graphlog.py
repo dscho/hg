@@ -18,7 +18,7 @@ from mercurial.commands import templateopts
 from mercurial.i18n import _
 from mercurial.node import nullrev
 from mercurial import bundlerepo, changegroup, cmdutil, commands, extensions
-from mercurial import hg, url, util, graphmod
+from mercurial import hg, url, util, graphmod, discovery
 
 ASCIIDATA = 'ASC'
 
@@ -279,11 +279,11 @@ def goutgoing(ui, repo, dest=None, **opts):
     dest = ui.expandpath(dest or 'default-push', dest or 'default')
     dest, branches = hg.parseurl(dest, opts.get('branch'))
     revs, checkout = hg.addbranchrevs(repo, repo, branches, opts.get('rev'))
-    other = hg.repository(cmdutil.remoteui(ui, opts), dest)
+    other = hg.repository(hg.remoteui(ui, opts), dest)
     if revs:
         revs = [repo.lookup(rev) for rev in revs]
     ui.status(_('comparing with %s\n') % url.hidepassword(dest))
-    o = repo.findoutgoing(other, force=opts.get('force'))
+    o = discovery.findoutgoing(repo, other, force=opts.get('force'))
     if not o:
         ui.status(_("no changes found\n"))
         return
@@ -306,12 +306,13 @@ def gincoming(ui, repo, source="default", **opts):
 
     check_unsupported_flags(opts)
     source, branches = hg.parseurl(ui.expandpath(source), opts.get('branch'))
-    other = hg.repository(cmdutil.remoteui(repo, opts), source)
+    other = hg.repository(hg.remoteui(repo, opts), source)
     revs, checkout = hg.addbranchrevs(repo, other, branches, opts.get('rev'))
     ui.status(_('comparing with %s\n') % url.hidepassword(source))
     if revs:
         revs = [other.lookup(rev) for rev in revs]
-    incoming = repo.findincoming(other, heads=revs, force=opts["force"])
+    incoming = discovery.findincoming(repo, other, heads=revs,
+                                      force=opts["force"])
     if not incoming:
         try:
             os.unlink(opts["bundle"])
@@ -369,9 +370,11 @@ def _wrapcmd(ui, cmd, table, wrapfn):
 cmdtable = {
     "glog":
         (graphlog,
-         [('l', 'limit', '', _('limit number of changes displayed')),
+         [('l', 'limit', '',
+           _('limit number of changes displayed'), _('NUM')),
           ('p', 'patch', False, _('show patch')),
-          ('r', 'rev', [], _('show the specified revision or range')),
+          ('r', 'rev', [],
+           _('show the specified revision or range'), _('REV')),
          ] + templateopts,
          _('hg glog [OPTION]... [FILE]')),
 }

@@ -2,10 +2,25 @@
 adding a
 % add first sub
 adding a
+parent: 0:f7b1eb17ad24 tip
+ 0
+branch: default
+commit: 1 added, 1 subrepos
+update: (current)
 committing subrepository s
 % add sub sub
+parent: 1:7cf8cfea66e4 tip
+ 1
+branch: default
+commit: 1 subrepos
+update: (current)
 committing subrepository s
-committing subrepository ss
+committing subrepository s/ss
+parent: 2:df30734270ae tip
+ 2
+branch: default
+commit: (clean)
+update: (current)
 % bump sub rev
 committing subrepository s
 % leave sub dirty
@@ -108,19 +123,19 @@ t3
 >>>>>>> other
 % clone
 updating to branch default
-pulling subrepo s
+pulling subrepo s from .../sub/t/s
 requesting all changes
 adding changesets
 adding manifests
 adding file changes
 added 4 changesets with 5 changes to 3 files
-pulling subrepo ss
+pulling subrepo s/ss from .../sub/t/s/ss
 requesting all changes
 adding changesets
 adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files
-pulling subrepo t
+pulling subrepo t from .../sub/t/t
 requesting all changes
 adding changesets
 adding manifests
@@ -136,13 +151,13 @@ path t
 % push
 committing subrepository t
 pushing ...sub/t
-pushing ...subrepo ss
+pushing ...sub/t/s/ss
 searching for changes
 no changes found
-pushing ...subrepo s
+pushing ...sub/t/s
 searching for changes
 no changes found
-pushing ...subrepo t
+pushing ...sub/t/t
 searching for changes
 adding changesets
 adding manifests
@@ -157,23 +172,23 @@ added 1 changesets with 1 changes to 1 files
 committing subrepository s
 abort: push creates new remote heads on branch 'default'!
 pushing ...sub/t
-pushing ...subrepo ss
+pushing ...sub/t/s/ss
 searching for changes
 no changes found
-pushing ...subrepo s
+pushing ...sub/t/s
 searching for changes
 (did you forget to merge? use push -f to force)
 pushing ...sub/t
-pushing ...subrepo ss
+pushing ...sub/t/s/ss
 searching for changes
 no changes found
-pushing ...subrepo s
+pushing ...sub/t/s
 searching for changes
 adding changesets
 adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files (+1 heads)
-pushing ...subrepo t
+pushing ...sub/t/t
 searching for changes
 no changes found
 searching for changes
@@ -192,7 +207,7 @@ adding manifests
 adding file changes
 added 1 changesets with 1 changes to 1 files
 (run 'hg update' to get a working copy)
-pulling subrepo t
+pulling subrepo t from .../sub/t/t
 searching for changes
 adding changesets
 adding manifests
@@ -207,13 +222,11 @@ adding a
 marked working directory as branch br
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 adding b
-created new head
 1 files updated, 0 files merged, 1 files removed, 0 files unresolved
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 (branch merge, don't forget to commit)
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 adding c
-created new head
 1 files updated, 0 files merged, 1 files removed, 0 files unresolved
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 (branch merge, don't forget to commit)
@@ -226,7 +239,6 @@ adding b
 committing subrepository s
 1 files updated, 0 files merged, 1 files removed, 0 files unresolved
 adding c
-created new head
 2 files updated, 0 files merged, 1 files removed, 0 files unresolved
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 (branch merge, don't forget to commit)
@@ -234,7 +246,6 @@ created new head
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 adding d
 committing subrepository s
-created new head
 2 files updated, 0 files merged, 1 files removed, 0 files unresolved
 1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 adding e
@@ -260,13 +271,13 @@ updating to branch default
 [paths]
 default = $HGTMP/test-subrepo/sub/mercurial/nested_absolute
 [paths]
-default = $HGTMP/test-subrepo/sub/mercurial/main/../nested_relative
+default = $HGTMP/test-subrepo/sub/mercurial/nested_relative
 % issue 1977
 adding a
 adding .hgsub
 committing subrepository s
 updating to branch default
-pulling subrepo s
+pulling subrepo s from .../sub/repo/s
 requesting all changes
 adding changesets
 adding manifests

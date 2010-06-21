@@ -118,6 +118,13 @@ hg log -k r1
 echo '% log -d -1'
 hg log -d -1
 
+echo '% log -p -l2 --color=always'
+hg --config extensions.color= --config color.mode=ansi \
+    log -p -l2 --color=always
+
+echo '% log -r tip --stat'
+hg log -r tip --stat
+
 cd ..
 
 hg init usertest
@@ -131,5 +138,47 @@ hg ci -A -m "b" -u "User Two <user2@example.org>"
 hg log -u "User One <user1@example.org>"
 hg log -u "user1" -u "user2"
 hg log -u "user3"
+
+cd ..
+
+hg init branches
+cd branches
+
+echo a > a
+hg ci -A -m "commit on default"
+hg branch test
+echo b > b
+hg ci -A -m "commit on test"
+
+hg up default
+echo c > c
+hg ci -A -m "commit on default"
+hg up test
+echo c > c
+hg ci -A -m "commit on test"
+
+echo '% log -b default'
+hg log -b default
+
+echo '% log -b test'
+hg log -b test
+
+echo '% log -b dummy'
+hg log -b dummy
+
+echo '% log -b .'
+hg log -b .
+
+echo '% log -b default -b test'
+hg log -b default -b test
+
+echo '% log -b default -b .'
+hg log -b default -b .
+
+echo '% log -b . -b test'
+hg log -b . -b test
+
+echo '% log -b 2'
+hg log -b 2
 
 exit 0

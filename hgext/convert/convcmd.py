@@ -72,6 +72,25 @@ def convertsink(ui, path, type):
             ui.note(_("convert: %s\n") % inst)
     raise util.Abort(_('%s: unknown repository type') % path)
 
+class progresssource(object):
+    def __init__(self, ui, source, filecount):
+        self.ui = ui
+        self.source = source
+        self.filecount = filecount
+        self.retrieved = 0
+
+    def getfile(self, file, rev):
+        self.retrieved += 1
+        self.ui.progress(_('retrieving file'), self.retrieved,
+                         item=file, total=self.filecount)
+        return self.source.getfile(file, rev)
+
+    def lookuprev(self, rev):
+        return self.source.lookuprev(rev)
+
+    def close(self):
+        self.ui.progress(_('retrieving file'), None)
+
 class converter(object):
     def __init__(self, ui, source, dest, revmapfile, opts):
 
@@ -111,11 +130,13 @@ class converter(object):
             if n in known or n in self.map:
                 continue
             known.add(n)
+            self.ui.progress(_('scanning'), len(known), unit=_('revisions'))
             commit = self.cachecommit(n)
             parents[n] = []
             for p in commit.parents:
                 parents[n].append(p)
                 visit.append(p)
+        self.ui.progress(_('scanning'), None)
 
         return parents
 
@@ -302,8 +323,10 @@ class converter(object):
             parents = [self.map.get(p, p) for p in parents]
         except KeyError:
             parents = [b[0] for b in pbranches]
+        source = progresssource(self.ui, self.source, len(files))
         newnode = self.dest.putcommit(files, copies, parents, commit,
-                                      self.source, self.map)
+                                      source, self.map)
+        source.close()
         self.source.converted(rev, newnode)
         self.map[rev] = newnode
 
@@ -321,7 +344,7 @@ class converter(object):
             c = None
 
             self.ui.status(_("converting...\n"))
-            for c in t:
+            for i, c in enumerate(t):                
                 num -= 1
                 desc = self.commitcache[c].desc
                 if "\n" in desc:
@@ -331,7 +354,10 @@ class converter(object):
                 # 'utf-8'
                 self.ui.status("%d %s\n" % (num, recode(desc)))
                 self.ui.note(_("source: %s\n") % recode(c))
+                self.ui.progress(_('converting'), i, unit=_('revisions'),
+                                 total=len(t))
                 self.copy(c)
+            self.ui.progress(_('converting'), None)
 
             tags = self.source.gettags()
             ctags = {}
