@@ -250,6 +250,7 @@ class queue(object):
         self.ui = ui
         self.applied_dirty = 0
         self.series_dirty = 0
+        self.added = []
         self.series_path = "series"
         self.status_path = "status"
         self.guards_path = "guards"
@@ -1017,7 +1018,7 @@ class queue(object):
                             _("cannot push to a previous patch: %s") % patch)
                     self.ui.warn(
                         _('qpush: %s is already at the top\n') % patch)
-                    return
+                    return 0
                 pushable, reason = self.pushable(patch)
                 if not pushable:
                     if reason:
@@ -1046,10 +1047,12 @@ class queue(object):
 
             if move:
                 try:
-                    del self.full_series[self.full_series.index(patch, start)]
+                    index = self.series.index(patch, start)
+                    fullpatch = self.full_series[index]
+                    del self.full_series[index]
                 except ValueError:
                     raise util.Abort(_("patch '%s' not found") % patch)
-                self.full_series.insert(start, patch)
+                self.full_series.insert(start, fullpatch)
                 self.parse_series()
                 self.series_dirty = 1
 
@@ -1620,7 +1623,7 @@ class queue(object):
         if (len(files) > 1 or len(rev) > 1) and patchname:
             raise util.Abort(_('option "-n" not valid when importing multiple '
                                'patches'))
-        added = []
+        self.added = []
         if rev:
             # If mq patches are applied, we can only import revisions
             # that form a linear path to qbase.
@@ -1670,10 +1673,11 @@ class queue(object):
                 se = statusentry(n, patchname)
                 self.applied.insert(0, se)
 
-                added.append(patchname)
+                self.added.append(patchname)
                 patchname = None
             self.parse_series()
             self.applied_dirty = 1
+            self.series_dirty = True
 
         for i, filename in enumerate(files):
             if existing:
@@ -1707,13 +1711,10 @@ class queue(object):
                 index = self.full_series_end() + i
                 self.full_series[index:index] = [patchname]
             self.parse_series()
+            self.series_dirty = True
             self.ui.warn(_("adding %s to series file\n") % patchname)
-            added.append(patchname)
+            self.added.append(patchname)
             patchname = None
-        self.series_dirty = 1
-        qrepo = self.qrepo()
-        if qrepo:
-            qrepo[None].add(added)
 
 def delete(ui, repo, *patches, **opts):
     """remove patches from queue
@@ -1803,10 +1804,15 @@ def qimport(ui, repo, *filename, **opts):
     using the --name flag.
     """
     q = repo.mq
-    q.qimport(repo, filename, patchname=opts['name'],
+    try:
+        q.qimport(repo, filename, patchname=opts['name'],
               existing=opts['existing'], force=opts['force'], rev=opts['rev'],
               git=opts['git'])
-    q.save_dirty()
+    finally:
+        q.save_dirty()
+        qrepo = q.qrepo()
+        if qrepo:
+            qrepo[None].add(q.added)
 
     if opts.get('push') and not opts.get('rev'):
         return q.push(repo, None)

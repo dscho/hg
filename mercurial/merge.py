@@ -23,15 +23,13 @@ class mergestate(object):
     def _read(self):
         self._state = {}
         try:
-            localnode = None
             f = self._repo.opener("merge/state")
             for i, l in enumerate(f):
                 if i == 0:
-                    localnode = l[:-1]
+                    self._local = bin(l[:-1])
                 else:
                     bits = l[:-1].split("\0")
                     self._state[bits[0]] = bits[1:]
-            self._local = bin(localnode)
         except IOError, err:
             if err.errno != errno.ENOENT:
                 raise
@@ -184,7 +182,9 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
             rflags = fmerge(f, f, f)
             a = ma.get(f, nullid)
             if n == m2[f] or m2[f] == a: # same or local newer
-                if m1.flags(f) != rflags:
+                # is file locally modified or flags need changing?
+                # dirstate flags may need to be made current
+                if m1.flags(f) != rflags or n[20:]:
                     act("update permissions", "e", f, rflags)
             elif n == a: # remote newer
                 act("remote is newer", "g", f, rflags)
@@ -244,8 +244,13 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
 def actionkey(a):
     return a[1] == 'r' and -1 or 0, a
 
-def applyupdates(repo, action, wctx, mctx):
-    "apply the merge action list to the working directory"
+def applyupdates(repo, action, wctx, mctx, actx):
+    """apply the merge action list to the working directory
+
+    wctx is the working copy context
+    mctx is the context to be merged into the working copy
+    actx is the context of the common ancestor
+    """
 
     updated, merged, removed, unresolved = 0, 0, 0, 0
     ms = mergestate(repo)
@@ -265,7 +270,7 @@ def applyupdates(repo, action, wctx, mctx):
             repo.ui.debug("preserving %s for resolve of %s\n" % (f, fd))
             fcl = wctx[f]
             fco = mctx[f2]
-            fca = fcl.ancestor(fco) or repo.filectx(f, fileid=nullrev)
+            fca = fcl.ancestor(fco, actx) or repo.filectx(f, fileid=nullrev)
             ms.add(fcl, fco, fca, fd, flags)
             if f != fd and move:
                 moves.append(f)
@@ -507,7 +512,7 @@ def update(repo, node, branchmerge, force, partial):
         if not partial:
             repo.hook('preupdate', throw=True, parent1=xp1, parent2=xp2)
 
-        stats = applyupdates(repo, action, wc, p2)
+        stats = applyupdates(repo, action, wc, p2, pa)
 
         if not partial:
             repo.dirstate.setparents(fp1, fp2)

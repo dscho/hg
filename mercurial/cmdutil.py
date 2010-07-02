@@ -905,7 +905,9 @@ class changeset_templater(changeset_printer):
                 if self.buffered:
                     self.header[ctx.rev()] = h
                 else:
-                    self.ui.write(h)
+                    if self.lastheader != h:
+                        self.lastheader = h
+                        self.ui.write(h)
 
             # write changeset metadata, then patch if requested
             key = types['changeset']

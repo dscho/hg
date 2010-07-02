@@ -198,3 +198,25 @@ hg: parse error: ancestor wants two arguments
 4
 2
 5
+% log 'not 0 and 0:2'
+1
+2
+% log 'not 1 and 0:2'
+0
+2
+% log 'not 2 and 0:2'
+0
+1
+% log '(1 and 2)::'
+% log '(1 and 2):'
+% log '(1 and 2):3'
+% log 'sort(head(), -rev)'
+9
+7
+6
+5
+4
+3
+2
+1
+0
