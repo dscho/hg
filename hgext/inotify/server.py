@@ -332,18 +332,21 @@ class socketlistener(object):
         self.repowatcher = repowatcher
         self.sock = socket.socket(socket.AF_UNIX)
         self.sockpath = join(root, '.hg/inotify.sock')
-        self.realsockpath = None
+
+        self.realsockpath = self.sockpath
+        if os.path.islink(self.sockpath):
+            if os.path.exists(self.sockpath):
+                self.realsockpath = os.readlink(self.sockpath)
+            else:
+                raise util.Abort('inotify-server: cannot start: '
+                                '.hg/inotify.sock is a broken symlink')
         try:
-            self.sock.bind(self.sockpath)
+            self.sock.bind(self.realsockpath)
         except socket.error, err:
-            if err[0] == errno.EADDRINUSE:
+            if err.args[0] == errno.EADDRINUSE:
                 raise AlreadyStartedException(_('cannot start: socket is '
                                                 'already bound'))
-            if err[0] == "AF_UNIX path too long":
-                if os.path.islink(self.sockpath) and \
-                        not os.path.exists(self.sockpath):
-                    raise util.Abort('inotify-server: cannot start: '
-                                    '.hg/inotify.sock is a broken symlink')
+            if err.args[0] == "AF_UNIX path too long":
                 tempdir = tempfile.mkdtemp(prefix="hg-inotify-")
                 self.realsockpath = os.path.join(tempdir, "inotify.sock")
                 try:
@@ -437,7 +440,7 @@ class socketlistener(object):
             finally:
                 sock.shutdown(socket.SHUT_WR)
         except socket.error, err:
-            if err[0] != errno.EPIPE:
+            if err.args[0] != errno.EPIPE:
                 raise
 
 if sys.platform == 'linux2':
@@ -484,5 +487,6 @@ def start(ui, dirstate, root, opts):
 
     appendpid = ui.configbool('inotify', 'appendpid', False)
 
+    ui.debug('starting inotify server: %s\n' % ' '.join(runargs))
     cmdutil.service(opts, initfn=service.init, runfn=service.run,
                     logfile=logfile, runargs=runargs, appendpid=appendpid)

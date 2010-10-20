@@ -7,7 +7,7 @@
 
 """recreates hardlinks between repository clones"""
 
-from mercurial import cmdutil, hg, util
+from mercurial import hg, util
 from mercurial.i18n import _
 import os, stat
 
@@ -117,7 +117,7 @@ def prune(candidates, src, dst, ui):
             ui.debug(_('not linkable: %s\n') % fn)
             continue
         targets.append((fn, ts.st_size))
-        ui.progress(_('pruning'), pos, fn, _(' files'), total)
+        ui.progress(_('pruning'), pos, fn, _('files'), total)
 
     ui.progress(_('pruning'), None)
     ui.status(_('pruned down to %d probably relinkable files\n') % len(targets))
@@ -160,7 +160,7 @@ def do_relink(src, dst, files, ui):
             continue
         try:
             relinkfile(source, tgt)
-            ui.progress(_('relinking'), pos, f, _(' files'), total)
+            ui.progress(_('relinking'), pos, f, _('files'), total)
             relinked += 1
             savedbytes += sz
         except OSError, inst:

@@ -7,12 +7,12 @@
 
 import errno, os, re, xml.dom.minidom, shutil, urlparse, posixpath
 from i18n import _
-import config, util, node, error
+import config, util, node, error, cmdutil
 hg = None
 
 nullstate = ('', '', 'empty')
 
-def state(ctx):
+def state(ctx, ui):
     """return a state dict, mapping subrepo paths configured in .hgsub
     to tuple: (source from .hgsub, revision from .hgsubstate, kind
     (key in types dict))
@@ -26,6 +26,9 @@ def state(ctx):
 
     if '.hgsub' in ctx:
         read('.hgsub')
+
+    for path, src in ui.configitems('subpaths'):
+        p.set('subpaths', path, src, ui.configsource('subpaths', path))
 
     rev = {}
     if '.hgsubstate' in ctx:
@@ -45,6 +48,21 @@ def state(ctx):
                 raise util.Abort(_('missing ] in subrepo source'))
             kind, src = src.split(']', 1)
             kind = kind[1:]
+
+        for pattern, repl in p.items('subpaths'):
+            # Turn r'C:\foo\bar' into r'C:\\foo\\bar' since re.sub
+            # does a string decode.
+            repl = repl.encode('string-escape')
+            # However, we still want to allow back references to go
+            # through unharmed, so we turn r'\\1' into r'\1'. Again,
+            # extra escapes are needed because re.sub string decodes.
+            repl = re.sub(r'\\\\([0-9]+)', r'\\\1', repl)
+            try:
+                src = re.sub(pattern, repl, src, 1)
+            except re.error, e:
+                raise util.Abort(_("bad subrepository pattern in %s: %s")
+                                 % (p.source('subpaths', pattern), e))
+
         state[path] = (src.strip(), rev.get(path, ''), kind)
 
     return state
@@ -136,35 +154,56 @@ def submerge(repo, wctx, mctx, actx):
     # record merged .hgsubstate
     writestate(repo, sm)
 
-def relpath(sub):
+def reporelpath(repo):
+    """return path to this (sub)repo as seen from outermost repo"""
+    parent = repo
+    while hasattr(parent, '_subparent'):
+        parent = parent._subparent
+    return repo.root[len(parent.root)+1:]
+
+def subrelpath(sub):
     """return path to this subrepo as seen from outermost repo"""
     if not hasattr(sub, '_repo'):
         return sub._path
-    parent = sub._repo
-    while hasattr(parent, '_subparent'):
-        parent = parent._subparent
-    return sub._repo.root[len(parent.root)+1:]
+    return reporelpath(sub._repo)
 
-def _abssource(repo, push=False):
-    """return pull/push path of repo - either based on parent repo
-    .hgsub info or on the subrepos own config"""
+def _abssource(repo, push=False, abort=True):
+    """return pull/push path of repo - either based on parent repo .hgsub info
+    or on the top repo config. Abort or return None if no source found."""
     if hasattr(repo, '_subparent'):
         source = repo._subsource
         if source.startswith('/') or '://' in source:
             return source
-        parent = _abssource(repo._subparent, push)
-        if '://' in parent:
-            if parent[-1] == '/':
-                parent = parent[:-1]
-            r = urlparse.urlparse(parent + '/' + source)
-            r = urlparse.urlunparse((r[0], r[1],
-                                     posixpath.normpath(r[2]),
-                                     r[3], r[4], r[5]))
-            return r
-        return posixpath.normpath(os.path.join(parent, repo._subsource))
-    if push and repo.ui.config('paths', 'default-push'):
-        return repo.ui.config('paths', 'default-push', repo.root)
-    return repo.ui.config('paths', 'default', repo.root)
+        parent = _abssource(repo._subparent, push, abort=False)
+        if parent:
+            if '://' in parent:
+                if parent[-1] == '/':
+                    parent = parent[:-1]
+                r = urlparse.urlparse(parent + '/' + source)
+                r = urlparse.urlunparse((r[0], r[1],
+                                         posixpath.normpath(r[2]),
+                                         r[3], r[4], r[5]))
+                return r
+            else: # plain file system path
+                return posixpath.normpath(os.path.join(parent, repo._subsource))
+    else: # recursion reached top repo
+        if push and repo.ui.config('paths', 'default-push'):
+            return repo.ui.config('paths', 'default-push')
+        if repo.ui.config('paths', 'default'):
+            return repo.ui.config('paths', 'default')
+    if abort:
+        raise util.Abort(_("default path for subrepository %s not found") %
+            reporelpath(repo))
+
+def itersubrepos(ctx1, ctx2):
+    """find subrepos in ctx1 or ctx2"""
+    # Create a (subpath, ctx) mapping where we prefer subpaths from
+    # ctx1. The subpaths from ctx2 are important when the .hgsub file
+    # has been modified (in ctx2) but not yet committed (in ctx1).
+    subpaths = dict.fromkeys(ctx2.substate, ctx2)
+    subpaths.update(dict.fromkeys(ctx1.substate, ctx1))
+    for subpath, ctx in sorted(subpaths.iteritems()):
+        yield subpath, ctx.sub(subpath)
 
 def subrepo(ctx, path):
     """return instance of the right subrepo class for subrepo in path"""
@@ -182,22 +221,88 @@ def subrepo(ctx, path):
         raise util.Abort(_('unknown subrepo type %s') % state[2])
     return types[state[2]](ctx, path, state[:2])
 
-# subrepo classes need to implement the following methods:
-# __init__(self, ctx, path, state)
-# dirty(self): returns true if the dirstate of the subrepo
-#   does not match current stored state
-# commit(self, text, user, date): commit the current changes
-#   to the subrepo with the given log message. Use given
-#   user and date if possible. Return the new state of the subrepo.
-# remove(self): remove the subrepo (should verify the dirstate
-#   is not dirty first)
-# get(self, state): run whatever commands are needed to put the
-#   subrepo into this state
-# merge(self, state): merge currently-saved state with the new state.
-# push(self, force): perform whatever action is analogous to 'hg push'
-#   This may be a no-op on some systems.
+# subrepo classes need to implement the following abstract class:
 
-class hgsubrepo(object):
+class abstractsubrepo(object):
+
+    def dirty(self):
+        """returns true if the dirstate of the subrepo does not match
+        current stored state
+        """
+        raise NotImplementedError
+
+    def checknested(self, path):
+        """check if path is a subrepository within this repository"""
+        return False
+
+    def commit(self, text, user, date):
+        """commit the current changes to the subrepo with the given
+        log message. Use given user and date if possible. Return the
+        new state of the subrepo.
+        """
+        raise NotImplementedError
+
+    def remove(self):
+        """remove the subrepo
+
+        (should verify the dirstate is not dirty first)
+        """
+        raise NotImplementedError
+
+    def get(self, state):
+        """run whatever commands are needed to put the subrepo into
+        this state
+        """
+        raise NotImplementedError
+
+    def merge(self, state):
+        """merge currently-saved state with the new state."""
+        raise NotImplementedError
+
+    def push(self, force):
+        """perform whatever action is analogous to 'hg push'
+
+        This may be a no-op on some systems.
+        """
+        raise NotImplementedError
+
+    def add(self, ui, match, dryrun, prefix):
+        return []
+
+    def status(self, rev2, **opts):
+        return [], [], [], [], [], [], []
+
+    def diff(self, diffopts, node2, match, prefix, **opts):
+        pass
+
+    def outgoing(self, ui, dest, opts):
+        return 1
+
+    def incoming(self, ui, source, opts):
+        return 1
+
+    def files(self):
+        """return filename iterator"""
+        raise NotImplementedError
+
+    def filedata(self, name):
+        """return file data"""
+        raise NotImplementedError
+
+    def fileflags(self, name):
+        """return file flags"""
+        return ''
+
+    def archive(self, archiver, prefix):
+        for name in self.files():
+            flags = self.fileflags(name)
+            mode = 'x' in flags and 0755 or 0644
+            symlink = 'l' in flags
+            archiver.addfile(os.path.join(prefix, self._path, name),
+                             mode, symlink, self.filedata(name))
+
+
+class hgsubrepo(abstractsubrepo):
     def __init__(self, ctx, path, state):
         self._path = path
         self._state = state
@@ -216,15 +321,55 @@ class hgsubrepo(object):
             fp.write('[paths]\n')
 
             def addpathconfig(key, value):
-                fp.write('%s = %s\n' % (key, value))
-                self._repo.ui.setconfig('paths', key, value)
+                if value:
+                    fp.write('%s = %s\n' % (key, value))
+                    self._repo.ui.setconfig('paths', key, value)
 
-            defpath = _abssource(self._repo)
-            defpushpath = _abssource(self._repo, True)
+            defpath = _abssource(self._repo, abort=False)
+            defpushpath = _abssource(self._repo, True, abort=False)
             addpathconfig('default', defpath)
             if defpath != defpushpath:
                 addpathconfig('default-push', defpushpath)
             fp.close()
+
+    def add(self, ui, match, dryrun, prefix):
+        return cmdutil.add(ui, self._repo, match, dryrun, True,
+                           os.path.join(prefix, self._path))
+
+    def status(self, rev2, **opts):
+        try:
+            rev1 = self._state[1]
+            ctx1 = self._repo[rev1]
+            ctx2 = self._repo[rev2]
+            return self._repo.status(ctx1, ctx2, **opts)
+        except error.RepoLookupError, inst:
+            self._repo.ui.warn(_('warning: error "%s" in subrepository "%s"\n')
+                               % (inst, subrelpath(self)))
+            return [], [], [], [], [], [], []
+
+    def diff(self, diffopts, node2, match, prefix, **opts):
+        try:
+            node1 = node.bin(self._state[1])
+            # We currently expect node2 to come from substate and be
+            # in hex format
+            if node2 is not None:
+                node2 = node.bin(node2)
+            cmdutil.diffordiffstat(self._repo.ui, self._repo, diffopts,
+                                   node1, node2, match,
+                                   prefix=os.path.join(prefix, self._path),
+                                   listsubrepos=True, **opts)
+        except error.RepoLookupError, inst:
+            self._repo.ui.warn(_('warning: error "%s" in subrepository "%s"\n')
+                               % (inst, subrelpath(self)))
+
+    def archive(self, archiver, prefix):
+        abstractsubrepo.archive(self, archiver, prefix)
+
+        rev = self._state[1]
+        ctx = self._repo[rev]
+        for subpath in ctx.substate:
+            s = subrepo(ctx, subpath)
+            s.archive(archiver, os.path.join(prefix, self._path))
 
     def dirty(self):
         r = self._state[1]
@@ -235,8 +380,11 @@ class hgsubrepo(object):
             return True
         return w.dirty() # working directory changed
 
+    def checknested(self, path):
+        return self._repo._checknested(self._repo.wjoin(path))
+
     def commit(self, text, user, date):
-        self._repo.ui.debug("committing subrepo %s\n" % relpath(self))
+        self._repo.ui.debug("committing subrepo %s\n" % subrelpath(self))
         n = self._repo.commit(text, user, date)
         if not n:
             return self._repo['.'].hex() # different version checked out
@@ -245,7 +393,7 @@ class hgsubrepo(object):
     def remove(self):
         # we can't fully delete the repository as it may contain
         # local-only history
-        self._repo.ui.note(_('removing subrepo %s\n') % relpath(self))
+        self._repo.ui.note(_('removing subrepo %s\n') % subrelpath(self))
         hg.clean(self._repo, node.nullid, False)
 
     def _get(self, state):
@@ -256,7 +404,7 @@ class hgsubrepo(object):
             self._repo._subsource = source
             srcurl = _abssource(self._repo)
             self._repo.ui.status(_('pulling subrepo %s from %s\n')
-                                 % (relpath(self), srcurl))
+                                 % (subrelpath(self), srcurl))
             other = hg.repository(self._repo.ui, srcurl)
             self._repo.pull(other)
 
@@ -272,12 +420,12 @@ class hgsubrepo(object):
         dst = self._repo[state[1]]
         anc = dst.ancestor(cur)
         if anc == cur:
-            self._repo.ui.debug("updating subrepo %s\n" % relpath(self))
+            self._repo.ui.debug("updating subrepo %s\n" % subrelpath(self))
             hg.update(self._repo, state[1])
         elif anc == dst:
-            self._repo.ui.debug("skipping subrepo %s\n" % relpath(self))
+            self._repo.ui.debug("skipping subrepo %s\n" % subrelpath(self))
         else:
-            self._repo.ui.debug("merging subrepo %s\n" % relpath(self))
+            self._repo.ui.debug("merging subrepo %s\n" % subrelpath(self))
             hg.merge(self._repo, state[1], remind=False)
 
     def push(self, force):
@@ -290,19 +438,40 @@ class hgsubrepo(object):
 
         dsturl = _abssource(self._repo, True)
         self._repo.ui.status(_('pushing subrepo %s to %s\n') %
-            (relpath(self), dsturl))
+            (subrelpath(self), dsturl))
         other = hg.repository(self._repo.ui, dsturl)
         return self._repo.push(other, force)
 
-class svnsubrepo(object):
+    def outgoing(self, ui, dest, opts):
+        return hg.outgoing(ui, self._repo, _abssource(self._repo, True), opts)
+
+    def incoming(self, ui, source, opts):
+        return hg.incoming(ui, self._repo, _abssource(self._repo, False), opts)
+
+    def files(self):
+        rev = self._state[1]
+        ctx = self._repo[rev]
+        return ctx.manifest()
+
+    def filedata(self, name):
+        rev = self._state[1]
+        return self._repo[rev][name].data()
+
+    def fileflags(self, name):
+        rev = self._state[1]
+        ctx = self._repo[rev]
+        return ctx.flags(name)
+
+
+class svnsubrepo(abstractsubrepo):
     def __init__(self, ctx, path, state):
         self._path = path
         self._state = state
         self._ctx = ctx
         self._ui = ctx._repo.ui
 
-    def _svncommand(self, commands):
-        path = os.path.join(self._ctx._repo.origroot, self._path)
+    def _svncommand(self, commands, filename=''):
+        path = os.path.join(self._ctx._repo.origroot, self._path, filename)
         cmd = ['svn'] + commands + [path]
         cmd = [util.shellquote(arg) for arg in cmd]
         cmd = util.quotecommand(' '.join(cmd))
@@ -365,7 +534,7 @@ class svnsubrepo(object):
             raise util.Abort(_('cannot commit svn externals'))
         commitinfo = self._svncommand(['commit', '-m', text])
         self._ui.status(commitinfo)
-        newrev = re.search('Committed revision ([\d]+).', commitinfo)
+        newrev = re.search('Committed revision ([0-9]+).', commitinfo)
         if not newrev:
             raise util.Abort(commitinfo.splitlines()[-1])
         newrev = newrev.groups()[0]
@@ -382,7 +551,7 @@ class svnsubrepo(object):
 
     def get(self, state):
         status = self._svncommand(['checkout', state[0], '--revision', state[1]])
-        if not re.search('Checked out revision [\d]+.', status):
+        if not re.search('Checked out revision [0-9]+.', status):
             raise util.Abort(status.splitlines()[-1])
         self._ui.status(status)
 
@@ -395,6 +564,15 @@ class svnsubrepo(object):
     def push(self, force):
         # push is a no-op for SVN
         return True
+
+    def files(self):
+        output = self._svncommand(['list'])
+        # This works because svn forbids \n in filenames.
+        return output.splitlines()
+
+    def filedata(self, name):
+        return self._svncommand(['cat'], name)
+
 
 types = {
     'hg': hgsubrepo,

@@ -16,7 +16,7 @@ Branch
     a remote repository, since new heads may be created by these
     operations. Note that the term branch can also be used informally
     to describe a development process in which certain development is
-    done independently of other development.This is sometimes done
+    done independently of other development. This is sometimes done
     explicitly with a named branch, but it can also be done locally,
     using bookmarks or clones and anonymous branches.
 
@@ -94,8 +94,8 @@ Changeset, child
 
 Changeset id
     A SHA-1 hash that uniquely identifies a changeset. It may be
-    represented as either a "long" 40-byte hexadecimal string, or a
-    "short" 12-byte hexadecimal string.
+    represented as either a "long" 40 hexadecimal digit string, or a
+    "short" 12 hexadecimal digit string.
 
 Changeset, merge
     A changeset with two parents. This occurs when a merge is

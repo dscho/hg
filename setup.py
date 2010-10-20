@@ -9,6 +9,17 @@ import sys
 if not hasattr(sys, 'version_info') or sys.version_info < (2, 4, 0, 'final'):
     raise SystemExit("Mercurial requires Python 2.4 or later.")
 
+if sys.version_info[0] >= 3:
+    def b(s):
+        '''A helper function to emulate 2.6+ bytes literals using string
+        literals.'''
+        return s.encode('latin1')
+else:
+    def b(s):
+        '''A helper function to emulate 2.6+ bytes literals using string
+        literals.'''
+        return s
+
 # Solaris Python packaging brain damage
 try:
     import hashlib
@@ -41,9 +52,11 @@ from distutils.dist import Distribution
 from distutils.command.build import build
 from distutils.command.build_ext import build_ext
 from distutils.command.build_py import build_py
+from distutils.command.install_scripts import install_scripts
 from distutils.spawn import spawn, find_executable
 from distutils.ccompiler import new_compiler
 from distutils.errors import CCompilerError
+from distutils.sysconfig import get_python_inc
 
 scripts = ['hg']
 if os.name == 'nt':
@@ -114,8 +127,8 @@ def runcmd(cmd, env):
     # fine, we don't want to load it anyway.  Python may warn about
     # a missing __init__.py in mercurial/locale, we also ignore that.
     err = [e for e in err.splitlines()
-           if not e.startswith('Not trusting file') \
-              and not e.startswith('warning: Not importing')]
+           if not e.startswith(b('Not trusting file')) \
+              and not e.startswith(b('warning: Not importing'))]
     if err:
         return ''
     return out
@@ -204,6 +217,7 @@ class hgbuildmo(build):
             self.mkpath(join('mercurial', modir))
             self.make_file([pofile], mobuildfile, spawn, (cmd,))
 
+
 # Insert hgbuildmo first so that files in mercurial/locale/ are found
 # when build_py is run next.
 build.sub_commands.insert(0, ('build_mo', None))
@@ -218,7 +232,7 @@ class hgbuildext(build_ext):
         try:
             build_ext.build_extension(self, ext)
         except CCompilerError:
-            if not hasattr(ext, 'optional') or not ext.optional:
+            if not getattr(ext, 'optional', False):
                 raise
             log.warn("Failed to build optional extension '%s' (skipping)",
                      ext.name)
@@ -235,6 +249,9 @@ class hgbuildpy(build_py):
                 if ext.name.startswith("mercurial."):
                     self.py_modules.append("mercurial.pure.%s" % ext.name[10:])
             self.distribution.ext_modules = []
+        else:
+            if not os.path.exists(os.path.join(get_python_inc(), 'Python.h')):
+                raise SystemExit("Python headers are required to build Mercurial")
 
     def find_modules(self):
         modules = build_py.find_modules(self)
@@ -245,9 +262,52 @@ class hgbuildpy(build_py):
             else:
                 yield module
 
+class hginstallscripts(install_scripts):
+    '''
+    This is a specialization of install_scripts that replaces the @LIBDIR@ with
+    the configured directory for modules. If possible, the path is made relative
+    to the directory for scripts.
+    '''
+
+    def initialize_options(self):
+        install_scripts.initialize_options(self)
+
+        self.install_lib = None
+
+    def finalize_options(self):
+        install_scripts.finalize_options(self)
+        self.set_undefined_options('install',
+                                   ('install_lib', 'install_lib'))
+
+    def run(self):
+        install_scripts.run(self)
+
+        if (os.path.splitdrive(self.install_dir)[0] !=
+            os.path.splitdrive(self.install_lib)[0]):
+            # can't make relative paths from one drive to another, so use an
+            # absolute path instead
+            libdir = self.install_lib
+        else:
+            common = os.path.commonprefix((self.install_dir, self.install_lib))
+            rest = self.install_dir[len(common):]
+            uplevel = len([n for n in os.path.split(rest) if n])
+
+            libdir =  uplevel * ('..' + os.sep) + self.install_lib[len(common):]
+
+        for outfile in self.outfiles:
+            data = open(outfile, 'rb').read()
+
+            # skip binary files
+            if '\0' in data:
+                continue
+
+            data = data.replace('@LIBDIR@', libdir.encode('string_escape'))
+            open(outfile, 'wb').write(data)
+
 cmdclass = {'build_mo': hgbuildmo,
             'build_ext': hgbuildext,
-            'build_py': hgbuildpy}
+            'build_py': hgbuildpy,
+            'install_scripts': hginstallscripts}
 
 packages = ['mercurial', 'mercurial.hgweb', 'hgext', 'hgext.convert',
             'hgext.highlight', 'hgext.zeroconf']
@@ -275,7 +335,8 @@ if sys.platform == 'linux2' and os.uname()[2] > '2.6':
     cc = new_compiler()
     if hasfunction(cc, 'inotify_add_watch'):
         inotify = Extension('hgext.inotify.linux._inotify',
-                            ['hgext/inotify/linux/_inotify.c'])
+                            ['hgext/inotify/linux/_inotify.c'],
+                            ['mercurial'])
         inotify.optional = True
         extmodules.append(inotify)
         packages.extend(['hgext.inotify', 'hgext.inotify.linux'])

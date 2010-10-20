@@ -6,7 +6,7 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-import os, sys, atexit, signal, pdb, socket, errno, shlex, time
+import os, sys, atexit, signal, pdb, socket, errno, shlex, time, traceback, re
 import util, commands, hg, fancyopts, extensions, hook, error
 import cmdutil, encoding
 import ui as uimod
@@ -23,6 +23,8 @@ def dispatch(args):
             u.setconfig('ui', 'traceback', 'on')
     except util.Abort, inst:
         sys.stderr.write(_("abort: %s\n") % inst)
+        if inst.hint:
+            sys.stderr.write("(%s)\n" % inst.hint)
         return -1
     except error.ParseError, inst:
         if len(inst.args) > 1:
@@ -49,6 +51,8 @@ def _runcatch(ui, args):
         try:
             # enter the debugger before command execution
             if '--debugger' in args:
+                ui.warn(_("entering debugger - "
+                        "type c to continue starting hg or h for help\n"))
                 pdb.set_trace()
             try:
                 return _dispatch(ui, args)
@@ -57,6 +61,7 @@ def _runcatch(ui, args):
         except:
             # enter the debugger when we hit an exception
             if '--debugger' in args:
+                traceback.print_exc()
                 pdb.post_mortem(sys.exc_info()[2])
             ui.traceback()
             raise
@@ -113,6 +118,8 @@ def _runcatch(ui, args):
             commands.help_(ui, 'shortlist')
     except util.Abort, inst:
         ui.warn(_("abort: %s\n") % inst)
+        if inst.hint:
+            ui.warn(_("(%s)\n") % inst.hint)
     except ImportError, inst:
         ui.warn(_("abort: %s!\n") % inst)
         m = str(inst).split()[-1]
@@ -183,6 +190,7 @@ def aliasargs(fn):
 class cmdalias(object):
     def __init__(self, name, definition, cmdtable):
         self.name = self.cmd = name
+        self.cmdname = ''
         self.definition = definition
         self.args = []
         self.opts = []
@@ -209,9 +217,39 @@ class cmdalias(object):
 
             return
 
+        if self.definition.startswith('!'):
+            self.shell = True
+            def fn(ui, *args):
+                env = {'HG_ARGS': ' '.join((self.name,) + args)}
+                def _checkvar(m):
+                    if int(m.groups()[0]) <= len(args):
+                        return m.group()
+                    else:
+                        return ''
+                cmd = re.sub(r'\$(\d+)', _checkvar, self.definition[1:])
+                replace = dict((str(i + 1), arg) for i, arg in enumerate(args))
+                replace['0'] = self.name
+                replace['@'] = ' '.join(args)
+                cmd = util.interpolate(r'\$', replace, cmd)
+                return util.system(cmd, environ=env)
+            self.fn = fn
+            return
+
         args = shlex.split(self.definition)
-        cmd = args.pop(0)
+        self.cmdname = cmd = args.pop(0)
         args = map(util.expandpath, args)
+
+        for invalidarg in ("--cwd", "-R", "--repository", "--repo"):
+            if _earlygetopt([invalidarg], args):
+                def fn(ui, *args):
+                    ui.warn(_("error in definition for alias '%s': %s may only "
+                              "be given on the command line\n")
+                            % (self.name, invalidarg))
+                    return 1
+
+                self.fn = fn
+                self.badalias = True
+                return
 
         try:
             tableentry = cmdutil.findcmd(cmd, cmdtable, False)[1]
@@ -250,9 +288,18 @@ class cmdalias(object):
 
     def __call__(self, ui, *args, **opts):
         if self.shadows:
-            ui.debug("alias '%s' shadows command\n" % self.name)
+            ui.debug("alias '%s' shadows command '%s'\n" %
+                     (self.name, self.cmdname))
 
-        return util.checksignature(self.fn)(ui, *args, **opts)
+        if self.definition.startswith('!'):
+            return self.fn(ui, *args, **opts)
+        else:
+            try:
+                util.checksignature(self.fn)(ui, *args, **opts)
+            except error.SignatureError:
+                args = ' '.join([self.cmdname] + self.args)
+                ui.debug("alias '%s' expands to '%s'\n" % (self.name, args))
+                raise
 
 def addaliases(ui, cmdtable):
     # aliases are processed after extensions have been loaded, so they
@@ -358,18 +405,11 @@ def runcommand(lui, repo, cmd, fullargs, ui, options, d, cmdpats, cmdoptions):
               result=ret, pats=cmdpats, opts=cmdoptions)
     return ret
 
-_loaded = set()
-def _dispatch(ui, args):
-    # read --config before doing anything else
-    # (e.g. to change trust settings for reading .hg/hgrc)
-    _parseconfig(ui, _earlygetopt(['--config'], args))
+def _getlocal(ui, rpath):
+    """Return (path, local ui object) for the given target path.
 
-    # check for cwd
-    cwd = _earlygetopt(['--cwd'], args)
-    if cwd:
-        os.chdir(cwd[-1])
-
-    # read the local repository .hgrc into a local ui object
+    Takes paths in [cwd]/.hg/hgrc into account."
+    """
     try:
         wd = os.getcwd()
     except OSError, e:
@@ -379,18 +419,73 @@ def _dispatch(ui, args):
     if not path:
         lui = ui
     else:
-        try:
-            lui = ui.copy()
-            lui.readconfig(os.path.join(path, ".hg", "hgrc"))
-        except IOError:
-            pass
+        lui = ui.copy()
+        lui.readconfig(os.path.join(path, ".hg", "hgrc"), path)
 
-    # now we can expand paths, even ones in .hg/hgrc
-    rpath = _earlygetopt(["-R", "--repository", "--repo"], args)
     if rpath:
         path = lui.expandpath(rpath[-1])
         lui = ui.copy()
-        lui.readconfig(os.path.join(path, ".hg", "hgrc"))
+        lui.readconfig(os.path.join(path, ".hg", "hgrc"), path)
+
+    return path, lui
+
+def _checkshellalias(ui, args):
+    cwd = os.getcwd()
+    norepo = commands.norepo
+    options = {}
+
+    try:
+        args = fancyopts.fancyopts(args, commands.globalopts, options)
+    except fancyopts.getopt.GetoptError:
+        return
+
+    if not args:
+        return
+
+    _parseconfig(ui, options['config'])
+    if options['cwd']:
+        os.chdir(options['cwd'])
+
+    path, lui = _getlocal(ui, [options['repository']])
+
+    cmdtable = commands.table.copy()
+    addaliases(lui, cmdtable)
+
+    cmd = args[0]
+    try:
+        aliases, entry = cmdutil.findcmd(cmd, cmdtable, lui.config("ui", "strict"))
+    except error.UnknownCommand:
+        commands.norepo = norepo
+        os.chdir(cwd)
+        return
+
+    cmd = aliases[0]
+    fn = entry[0]
+
+    if cmd and hasattr(fn, 'shell'):
+        d = lambda: fn(ui, *args[1:])
+        return lambda: runcommand(lui, None, cmd, args[:1], ui, options, d, [], {})
+
+    commands.norepo = norepo
+    os.chdir(cwd)
+
+_loaded = set()
+def _dispatch(ui, args):
+    shellaliasfn = _checkshellalias(ui, args)
+    if shellaliasfn:
+        return shellaliasfn()
+
+    # read --config before doing anything else
+    # (e.g. to change trust settings for reading .hg/hgrc)
+    _parseconfig(ui, _earlygetopt(['--config'], args))
+
+    # check for cwd
+    cwd = _earlygetopt(['--cwd'], args)
+    if cwd:
+        os.chdir(cwd[-1])
+
+    rpath = _earlygetopt(["-R", "--repository", "--repo"], args)
+    path, lui = _getlocal(ui, rpath)
 
     # Configure extensions in phases: uisetup, extsetup, cmdtable, and
     # reposetup. Programs like TortoiseHg will call _dispatch several
@@ -489,6 +584,8 @@ def _dispatch(ui, args):
     elif rpath:
         ui.warn(_("warning: --repository ignored\n"))
 
+    msg = ' '.join(' ' in a and repr(a) or a for a in fullargs)
+    ui.log("command", msg + "\n")
     d = lambda: util.checksignature(func)(ui, *args, **cmdoptions)
     return runcommand(lui, repo, cmd, fullargs, ui, options, d,
                       cmdpats, cmdoptions)

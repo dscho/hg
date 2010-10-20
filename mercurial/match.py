@@ -11,7 +11,7 @@ from i18n import _
 
 class match(object):
     def __init__(self, root, cwd, patterns, include=[], exclude=[],
-                 default='glob', exact=False):
+                 default='glob', exact=False, auditor=None):
         """build an object to match a set of file patterns
 
         arguments:
@@ -39,14 +39,16 @@ class match(object):
         self._anypats = bool(include or exclude)
 
         if include:
-            im = _buildmatch(_normalize(include, 'glob', root, cwd), '(?:/|$)')
+            im = _buildmatch(_normalize(include, 'glob', root, cwd, auditor),
+                             '(?:/|$)')
         if exclude:
-            em = _buildmatch(_normalize(exclude, 'glob', root, cwd), '(?:/|$)')
+            em = _buildmatch(_normalize(exclude, 'glob', root, cwd, auditor),
+                             '(?:/|$)')
         if exact:
             self._files = patterns
             pm = self.exact
         elif patterns:
-            pats = _normalize(patterns, default, root, cwd)
+            pats = _normalize(patterns, default, root, cwd, auditor)
             self._files = _roots(pats)
             self._anypats = self._anypats or _anypats(pats)
             pm = _buildmatch(pats, '$')
@@ -107,6 +109,49 @@ class exact(match):
 class always(match):
     def __init__(self, root, cwd):
         match.__init__(self, root, cwd, [])
+
+class narrowmatcher(match):
+    """Adapt a matcher to work on a subdirectory only.
+
+    The paths are remapped to remove/insert the path as needed:
+
+    >>> m1 = match('root', '', ['a.txt', 'sub/b.txt'])
+    >>> m2 = narrowmatcher('sub', m1)
+    >>> bool(m2('a.txt'))
+    False
+    >>> bool(m2('b.txt'))
+    True
+    >>> bool(m2.matchfn('a.txt'))
+    False
+    >>> bool(m2.matchfn('b.txt'))
+    True
+    >>> m2.files()
+    ['b.txt']
+    >>> m2.exact('b.txt')
+    True
+    >>> m2.rel('b.txt')
+    'b.txt'
+    >>> def bad(f, msg):
+    ...     print "%s: %s" % (f, msg)
+    >>> m1.bad = bad
+    >>> m2.bad('x.txt', 'No such file')
+    sub/x.txt: No such file
+    """
+
+    def __init__(self, path, matcher):
+        self._root = matcher._root
+        self._cwd = matcher._cwd
+        self._path = path
+        self._matcher = matcher
+
+        self._files = [f[len(path) + 1:] for f in matcher._files
+                       if f.startswith(path + "/")]
+        self._anypats = matcher._anypats
+        self.matchfn = lambda fn: matcher.matchfn(self._path + "/" + fn)
+        self._fmap = set(self._files)
+
+    def bad(self, f, msg):
+        self._matcher.bad(self._path + "/" + f, msg)
 
 def patkind(pat):
     return _patsplit(pat, None)[0]
@@ -218,11 +263,11 @@ def _buildmatch(pats, tail):
                 raise util.Abort(_("invalid pattern (%s): %s") % (k, p))
         raise util.Abort(_("invalid pattern"))
 
-def _normalize(names, default, root, cwd):
+def _normalize(names, default, root, cwd, auditor):
     pats = []
     for kind, name in [_patsplit(p, default) for p in names]:
         if kind in ('glob', 'relpath'):
-            name = util.canonpath(root, cwd, name)
+            name = util.canonpath(root, cwd, name, auditor)
         elif kind in ('relglob', 'path'):
             name = util.normpath(name)
 

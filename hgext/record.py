@@ -10,7 +10,7 @@
 from mercurial.i18n import gettext, _
 from mercurial import cmdutil, commands, extensions, hg, mdiff, patch
 from mercurial import util
-import copy, cStringIO, errno, operator, os, re, tempfile
+import copy, cStringIO, errno, os, re, tempfile
 
 lines_re = re.compile(r'@@ -(\d+),(\d+) \+(\d+),(\d+) @@\s*(.*)')
 
@@ -97,7 +97,7 @@ class header(object):
             if h.startswith('---'):
                 fp.write(_('%d hunks, %d lines changed\n') %
                          (len(self.hunks),
-                          sum([h.added + h.removed for h in self.hunks])))
+                          sum([max(h.added, h.removed) for h in self.hunks])))
                 break
             fp.write(h)
 
@@ -186,7 +186,8 @@ def parsepatch(fp):
             self.hunk = []
             self.stream = []
 
-        def addrange(self, (fromstart, fromend, tostart, toend, proc)):
+        def addrange(self, limits):
+            fromstart, fromend, tostart, toend, proc = limits
             self.fromline = int(fromstart)
             self.toline = int(tostart)
             self.proc = proc
@@ -354,8 +355,8 @@ def filterpatch(ui, chunks):
                 applied[chunk.filename()].append(chunk)
             else:
                 fixoffset += chunk.removed - chunk.added
-    return reduce(operator.add, [h for h in applied.itervalues()
-                                 if h[0].special() or len(h) > 1], [])
+    return sum([h for h in applied.itervalues()
+               if h[0].special() or len(h) > 1], [])
 
 def record(ui, repo, *pats, **opts):
     '''interactively select changes to commit
@@ -485,7 +486,8 @@ def dorecord(ui, repo, commitfunc, *pats, **opts):
 
             # 3a. apply filtered patch to clean repo  (clean)
             if backups:
-                hg.revert(repo, repo.dirstate.parents()[0], backups.has_key)
+                hg.revert(repo, repo.dirstate.parents()[0],
+                          lambda key: key in backups)
 
             # 3b. (apply)
             if dopatch:
@@ -495,13 +497,9 @@ def dorecord(ui, repo, commitfunc, *pats, **opts):
                     pfiles = {}
                     patch.internalpatch(fp, ui, 1, repo.root, files=pfiles,
                                         eolmode=None)
-                    patch.updatedir(ui, repo, pfiles)
+                    cmdutil.updatedir(ui, repo, pfiles)
                 except patch.PatchError, err:
-                    s = str(err)
-                    if s:
-                        raise util.Abort(s)
-                    else:
-                        raise util.Abort(_('patch failed to apply'))
+                    raise util.Abort(str(err))
             del fp
 
             # 4. We prepared working directory according to filtered patch.

@@ -62,6 +62,11 @@ Default effects may be overridden from your configuration file::
 
   bookmarks.current = green
 
+  branches.active = none
+  branches.closed = black bold
+  branches.current = green
+  branches.inactive = none
+
 The color extension will try to detect whether to use ANSI codes or
 Win32 console APIs, unless it is made explicit::
 
@@ -72,9 +77,9 @@ Any value other than 'ansi', 'win32', or 'auto' will disable color.
 
 '''
 
-import os, sys
+import os
 
-from mercurial import commands, dispatch, extensions, ui as uimod
+from mercurial import commands, dispatch, extensions, ui as uimod, util
 from mercurial.i18n import _
 
 # start and stop parameters for effects
@@ -87,6 +92,10 @@ _effects = {'none': 0, 'black': 30, 'red': 31, 'green': 32, 'yellow': 33,
             'cyan_background': 46, 'white_background': 47}
 
 _styles = {'grep.match': 'red bold',
+           'branches.active': 'none',
+           'branches.closed': 'black bold',
+           'branches.current': 'green',
+           'branches.inactive': 'none',
            'diff.changed': 'white',
            'diff.deleted': 'red',
            'diff.diffline': 'bold',
@@ -200,9 +209,12 @@ def uisetup(ui):
     elif mode != 'ansi':
         return
     def colorcmd(orig, ui_, opts, cmd, cmdfunc):
-        if (opts['color'] == 'always' or
-            (opts['color'] == 'auto' and (os.environ.get('TERM') != 'dumb'
-                                          and ui_.formatted()))):
+        coloropt = opts['color']
+        auto = coloropt == 'auto'
+        always = util.parsebool(coloropt)
+        if (always or
+            (always is None and
+             (auto and (os.environ.get('TERM') != 'dumb' and ui_.formatted())))):
             colorui._colormode = mode
             colorui.__bases__ = (ui_.__class__,)
             ui_.__class__ = colorui
@@ -211,44 +223,51 @@ def uisetup(ui):
         return orig(ui_, opts, cmd, cmdfunc)
     extensions.wrapfunction(dispatch, '_runcommand', colorcmd)
 
-commands.globalopts.append(('', 'color', 'auto',
-                            _("when to colorize (always, auto, or never)"),
-                            _('TYPE')))
+def extsetup(ui):
+    commands.globalopts.append(
+        ('', 'color', 'auto',
+         _("when to colorize (boolean, always, auto, or never)"),
+         _('TYPE')))
 
 try:
-    import re, pywintypes
-    from win32console import *
+    import re, pywintypes, win32console as win32c
 
     # http://msdn.microsoft.com/en-us/library/ms682088%28VS.85%29.aspx
     w32effects = {
         'none': -1,
         'black': 0,
-        'red': FOREGROUND_RED,
-        'green': FOREGROUND_GREEN,
-        'yellow': FOREGROUND_RED | FOREGROUND_GREEN,
-        'blue': FOREGROUND_BLUE,
-        'magenta': FOREGROUND_BLUE | FOREGROUND_RED,
-        'cyan': FOREGROUND_BLUE | FOREGROUND_GREEN,
-        'white': FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE,
-        'bold': FOREGROUND_INTENSITY,
-        'black_background': 0x100,              # unused value > 0x0f
-        'red_background': BACKGROUND_RED,
-        'green_background': BACKGROUND_GREEN,
-        'yellow_background': BACKGROUND_RED | BACKGROUND_GREEN,
-        'blue_background': BACKGROUND_BLUE,
-        'purple_background': BACKGROUND_BLUE | BACKGROUND_RED,
-        'cyan_background': BACKGROUND_BLUE | BACKGROUND_GREEN,
-        'white_background': BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE,
-        'bold_background': BACKGROUND_INTENSITY,
-        'underline': COMMON_LVB_UNDERSCORE,     # double-byte charsets only
-        'inverse': COMMON_LVB_REVERSE_VIDEO,    # double-byte charsets only
+        'red': win32c.FOREGROUND_RED,
+        'green': win32c.FOREGROUND_GREEN,
+        'yellow': win32c.FOREGROUND_RED | win32c.FOREGROUND_GREEN,
+        'blue': win32c.FOREGROUND_BLUE,
+        'magenta': win32c.FOREGROUND_BLUE | win32c.FOREGROUND_RED,
+        'cyan': win32c.FOREGROUND_BLUE | win32c.FOREGROUND_GREEN,
+        'white': (win32c.FOREGROUND_RED | win32c.FOREGROUND_GREEN |
+                  win32c.FOREGROUND_BLUE),
+        'bold': win32c.FOREGROUND_INTENSITY,
+        'black_background': 0x100,                  # unused value > 0x0f
+        'red_background': win32c.BACKGROUND_RED,
+        'green_background': win32c.BACKGROUND_GREEN,
+        'yellow_background': win32c.BACKGROUND_RED | win32c.BACKGROUND_GREEN,
+        'blue_background': win32c.BACKGROUND_BLUE,
+        'purple_background': win32c.BACKGROUND_BLUE | win32c.BACKGROUND_RED,
+        'cyan_background': win32c.BACKGROUND_BLUE | win32c.BACKGROUND_GREEN,
+        'white_background': (win32c.BACKGROUND_RED | win32c.BACKGROUND_GREEN |
+                             win32c.BACKGROUND_BLUE),
+        'bold_background': win32c.BACKGROUND_INTENSITY,
+        'underline': win32c.COMMON_LVB_UNDERSCORE,  # double-byte charsets only
+        'inverse': win32c.COMMON_LVB_REVERSE_VIDEO, # double-byte charsets only
     }
 
-    passthrough = set([FOREGROUND_INTENSITY, BACKGROUND_INTENSITY,
-                       COMMON_LVB_UNDERSCORE, COMMON_LVB_REVERSE_VIDEO])
+    passthrough = set([win32c.FOREGROUND_INTENSITY,
+                       win32c.BACKGROUND_INTENSITY,
+                       win32c.COMMON_LVB_UNDERSCORE,
+                       win32c.COMMON_LVB_REVERSE_VIDEO])
 
-    stdout = GetStdHandle(STD_OUTPUT_HANDLE)
     try:
+        stdout = win32c.GetStdHandle(win32c.STD_OUTPUT_HANDLE)
+        if stdout is None:
+            raise ImportError()
         origattr = stdout.GetConsoleScreenBufferInfo()['Attributes']
     except pywintypes.error:
         # stdout may be defined but not support

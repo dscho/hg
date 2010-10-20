@@ -12,7 +12,7 @@ import util
 import cStringIO, os, stat, tarfile, time, zipfile
 import zlib, gzip
 
-def tidyprefix(dest, prefix, suffixes):
+def tidyprefix(dest, kind, prefix):
     '''choose prefix to use for names in archive.  make sure prefix is
     safe for consumers.'''
 
@@ -23,7 +23,7 @@ def tidyprefix(dest, prefix, suffixes):
             raise ValueError('dest must be string if no prefix')
         prefix = os.path.basename(dest)
         lower = prefix.lower()
-        for sfx in suffixes:
+        for sfx in exts.get(kind, []):
             if lower.endswith(sfx):
                 prefix = prefix[:-len(sfx)]
                 break
@@ -34,6 +34,20 @@ def tidyprefix(dest, prefix, suffixes):
     if prefix.startswith('../') or os.path.isabs(lpfx) or '/../' in prefix:
         raise util.Abort(_('archive prefix contains illegal components'))
     return prefix
+
+exts = {
+    'tar': ['.tar'],
+    'tbz2': ['.tbz2', '.tar.bz2'],
+    'tgz': ['.tgz', '.tar.gz'],
+    'zip': ['.zip'],
+    }
+
+def guesskind(dest):
+    for kind, extensions in exts.iteritems():
+        if util.any(dest.endswith(ext) for ext in extensions):
+            return kind
+    return None
+
 
 class tarit(object):
     '''write archive to tar file or stream.  can write uncompressed,
@@ -66,9 +80,7 @@ class tarit(object):
             if fname:
                 self.fileobj.write(fname + '\000')
 
-    def __init__(self, dest, prefix, mtime, kind=''):
-        self.prefix = tidyprefix(dest, prefix, ['.tar', '.tar.bz2', '.tar.gz',
-                                                '.tgz', '.tbz2'])
+    def __init__(self, dest, mtime, kind=''):
         self.mtime = mtime
 
         def taropen(name, mode, fileobj=None):
@@ -90,7 +102,7 @@ class tarit(object):
             self.z = taropen(name='', mode='w|', fileobj=dest)
 
     def addfile(self, name, mode, islink, data):
-        i = tarfile.TarInfo(self.prefix + name)
+        i = tarfile.TarInfo(name)
         i.mtime = self.mtime
         i.size = len(data)
         if islink:
@@ -129,8 +141,7 @@ class zipit(object):
     '''write archive to zip file or stream.  can write uncompressed,
     or compressed with deflate.'''
 
-    def __init__(self, dest, prefix, mtime, compress=True):
-        self.prefix = tidyprefix(dest, prefix, ('.zip',))
+    def __init__(self, dest, mtime, compress=True):
         if not isinstance(dest, str):
             try:
                 dest.tell()
@@ -149,7 +160,7 @@ class zipit(object):
         self.date_time = time.gmtime(mtime)[:6]
 
     def addfile(self, name, mode, islink, data):
-        i = zipfile.ZipInfo(self.prefix + name, self.date_time)
+        i = zipfile.ZipInfo(name, self.date_time)
         i.compress_type = self.z.compression
         # unzip will not honor unix file modes unless file creator is
         # set to unix (id 3).
@@ -167,9 +178,7 @@ class zipit(object):
 class fileit(object):
     '''write archive as files in directory.'''
 
-    def __init__(self, name, prefix, mtime):
-        if prefix:
-            raise util.Abort(_('cannot give prefix when archiving to files'))
+    def __init__(self, name, mtime):
         self.basedir = name
         self.opener = util.opener(self.basedir)
 
@@ -189,14 +198,14 @@ class fileit(object):
 archivers = {
     'files': fileit,
     'tar': tarit,
-    'tbz2': lambda name, prefix, mtime: tarit(name, prefix, mtime, 'bz2'),
-    'tgz': lambda name, prefix, mtime: tarit(name, prefix, mtime, 'gz'),
-    'uzip': lambda name, prefix, mtime: zipit(name, prefix, mtime, False),
+    'tbz2': lambda name, mtime: tarit(name, mtime, 'bz2'),
+    'tgz': lambda name, mtime: tarit(name, mtime, 'gz'),
+    'uzip': lambda name, mtime: zipit(name, mtime, False),
     'zip': zipit,
     }
 
 def archive(repo, dest, node, kind, decode=True, matchfn=None,
-            prefix=None, mtime=None):
+            prefix=None, mtime=None, subrepos=False):
     '''create archive of repo as it was at node.
 
     dest can be name of directory, name of archive file, or file
@@ -211,24 +220,30 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
 
     prefix is name of path to put before every archive member.'''
 
+    if kind == 'files':
+        if prefix:
+            raise util.Abort(_('cannot give prefix when archiving to files'))
+    else:
+        prefix = tidyprefix(dest, kind, prefix)
+
     def write(name, mode, islink, getdata):
         if matchfn and not matchfn(name):
             return
         data = getdata()
         if decode:
             data = repo.wwritedata(name, data)
-        archiver.addfile(name, mode, islink, data)
+        archiver.addfile(prefix + name, mode, islink, data)
 
     if kind not in archivers:
         raise util.Abort(_("unknown archive type '%s'") % kind)
 
     ctx = repo[node]
-    archiver = archivers[kind](dest, prefix, mtime or ctx.date()[0])
+    archiver = archivers[kind](dest, mtime or ctx.date()[0])
 
     if repo.ui.configbool("ui", "archivemeta", True):
         def metadata():
             base = 'repo: %s\nnode: %s\nbranch: %s\n' % (
-                hex(repo.changelog.node(0)), hex(node), ctx.branch())
+                repo[0].hex(), hex(node), ctx.branch())
 
             tags = ''.join('tag: %s\n' % t for t in ctx.tags()
                            if repo.tagtype(t) == 'global')
@@ -248,4 +263,10 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
     for f in ctx:
         ff = ctx.flags(f)
         write(f, 'x' in ff and 0755 or 0644, 'l' in ff, ctx[f].data)
+
+    if subrepos:
+        for subpath in ctx.substate:
+            sub = ctx.sub(subpath)
+            sub.archive(archiver, prefix)
+
     archiver.done()

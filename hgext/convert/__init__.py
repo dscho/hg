@@ -70,10 +70,10 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     updated on each commit copied, so :hg:`convert` can be interrupted
     and can be run repeatedly to copy new commits.
 
-    The username mapping file is a simple text file that maps each
-    source commit author to a destination commit author. It is handy
-    for source SCMs that use unix logins to identify authors (eg:
-    CVS). One line per author mapping and the line format is::
+    The authormap is a simple text file that maps each source commit
+    author to a destination commit author. It is handy for source SCMs
+    that use unix logins to identify authors (eg: CVS). One line per
+    author mapping and the line format is::
 
       source author = destination author
 
@@ -89,7 +89,7 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
 
       rename path/to/source path/to/destination
 
-    Comment lines start with ``#``. A specificed path matches if it
+    Comment lines start with ``#``. A specified path matches if it
     equals the full relative name of a file or one of its parent
     directories. The ``include`` or ``exclude`` directive with the
     longest matching path applies, so line order does not matter.
@@ -99,8 +99,8 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     exclusion of all other files and directories not explicitly
     included. The ``exclude`` directive causes files or directories to
     be omitted. The ``rename`` directive renames a file or directory if
-    is converted. To rename from a subdirectory into the root of the
-    repository, use ``.`` as the path to rename to.
+    it is converted. To rename from a subdirectory into the root of
+    the repository, use ``.`` as the path to rename to.
 
     The splicemap is a file that allows insertion of synthetic
     history, letting you specify the parents of a revision. This is
@@ -136,7 +136,7 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     repository from "default" to a named branch.
 
     Mercurial Source
-    ----------------
+    ''''''''''''''''
 
     --config convert.hg.ignoreerrors=False    (boolean)
         ignore integrity errors when reading. Use it to fix Mercurial
@@ -149,7 +149,7 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
         convert start revision and its descendants
 
     CVS Source
-    ----------
+    ''''''''''
 
     CVS source will use a sandbox (i.e. a checked-out copy) from CVS
     to indicate the starting point of what will be converted. Direct
@@ -197,7 +197,7 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     the command help for more details.
 
     Subversion Source
-    -----------------
+    '''''''''''''''''
 
     Subversion source detects classical trunk/branches/tags layouts.
     By default, the supplied "svn://repo/path/" source URL is
@@ -225,7 +225,7 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
         specify start Subversion revision.
 
     Perforce Source
-    ---------------
+    '''''''''''''''
 
     The Perforce (P4) importer can be given a p4 depot path or a
     client specification as source. It will convert all files in the
@@ -241,7 +241,7 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
         specify initial Perforce revision.
 
     Mercurial Destination
-    ---------------------
+    '''''''''''''''''''''
 
     --config convert.hg.clonebranches=False   (boolean)
         dispatch source branches in separate clones.
@@ -274,16 +274,19 @@ commands.norepo += " convert debugsvnlog debugcvsps"
 cmdtable = {
     "convert":
         (convert,
-         [('A', 'authors', '',
-           _('username mapping filename'), _('FILE')),
-          ('d', 'dest-type', '',
-           _('destination repository type'), _('TYPE')),
-          ('', 'filemap', '',
-           _('remap file names using contents of file'), _('FILE')),
-          ('r', 'rev', '',
-           _('import up to target revision REV'), _('REV')),
+         [('', 'authors', '',
+           _('username mapping filename (DEPRECATED, use --authormap instead)'),
+           _('FILE')),
           ('s', 'source-type', '',
            _('source repository type'), _('TYPE')),
+          ('d', 'dest-type', '',
+           _('destination repository type'), _('TYPE')),
+          ('r', 'rev', '',
+           _('import up to target revision REV'), _('REV')),
+          ('A', 'authormap', '',
+           _('remap usernames using this file'), _('FILE')),
+          ('', 'filemap', '',
+           _('remap file names using contents of file'), _('FILE')),
           ('', 'splicemap', '',
            _('splice synthesized history into place'), _('FILE')),
           ('', 'branchmap', '',

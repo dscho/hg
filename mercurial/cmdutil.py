@@ -9,8 +9,8 @@ from node import hex, nullid, nullrev, short
 from i18n import _
 import os, sys, errno, re, glob, tempfile
 import util, templater, patch, error, encoding, templatekw
-import match as _match
-import similar, revset
+import match as matchmod
+import similar, revset, subrepo
 
 revrangesep = ':'
 
@@ -111,33 +111,28 @@ def loglimit(opts):
         limit = None
     return limit
 
+def revsingle(repo, revspec, default='.'):
+    if not revspec:
+        return repo[default]
+
+    l = revrange(repo, [revspec])
+    if len(l) < 1:
+        raise util.Abort(_('empty revision set'))
+    return repo[l[-1]]
+
 def revpair(repo, revs):
-    '''return pair of nodes, given list of revisions. second item can
-    be None, meaning use working dir.'''
-
-    def revfix(repo, val, defval):
-        if not val and val != 0 and defval is not None:
-            val = defval
-        return repo.lookup(val)
-
     if not revs:
         return repo.dirstate.parents()[0], None
-    end = None
-    if len(revs) == 1:
-        if revrangesep in revs[0]:
-            start, end = revs[0].split(revrangesep, 1)
-            start = revfix(repo, start, 0)
-            end = revfix(repo, end, len(repo) - 1)
-        else:
-            start = revfix(repo, revs[0], None)
-    elif len(revs) == 2:
-        if revrangesep in revs[0] or revrangesep in revs[1]:
-            raise util.Abort(_('too many revisions specified'))
-        start = revfix(repo, revs[0], None)
-        end = revfix(repo, revs[1], None)
-    else:
-        raise util.Abort(_('too many revisions specified'))
-    return start, end
+
+    l = revrange(repo, revs)
+
+    if len(l) == 0:
+        return repo.dirstate.parents()[0], None
+
+    if len(l) == 1:
+        return repo.lookup(l[0]), None
+
+    return repo.lookup(l[0]), repo.lookup(l[-1])
 
 def revrange(repo, revs):
     """Yield revision as strings from a list of revision specifications."""
@@ -247,7 +242,7 @@ def expandpats(pats):
         return list(pats)
     ret = []
     for p in pats:
-        kind, name = _match._patsplit(p, None)
+        kind, name = matchmod._patsplit(p, None)
         if kind is None:
             try:
                 globbed = glob.glob(name)
@@ -262,18 +257,19 @@ def expandpats(pats):
 def match(repo, pats=[], opts={}, globbed=False, default='relpath'):
     if not globbed and default == 'relpath':
         pats = expandpats(pats or [])
-    m = _match.match(repo.root, repo.getcwd(), pats,
-                    opts.get('include'), opts.get('exclude'), default)
+    m = matchmod.match(repo.root, repo.getcwd(), pats,
+                       opts.get('include'), opts.get('exclude'), default,
+                       auditor=repo.auditor)
     def badfn(f, msg):
         repo.ui.warn("%s: %s\n" % (m.rel(f), msg))
     m.bad = badfn
     return m
 
 def matchall(repo):
-    return _match.always(repo.root, repo.getcwd())
+    return matchmod.always(repo.root, repo.getcwd())
 
 def matchfiles(repo, files):
-    return _match.exact(repo.root, repo.getcwd(), files)
+    return matchmod.exact(repo.root, repo.getcwd(), files)
 
 def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
     if dry_run is None:
@@ -297,7 +293,7 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
             unknown.append(abs)
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('adding %s\n') % ((pats and rel) or abs))
-        elif repo.dirstate[abs] != 'r' and (not good or not util.lexists(target)
+        elif repo.dirstate[abs] != 'r' and (not good or not os.path.lexists(target)
             or (os.path.isdir(target) and not os.path.islink(target))):
             deleted.append(abs)
             if repo.ui.verbose or not exact:
@@ -327,6 +323,49 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
                 wctx.copy(old, new)
         finally:
             wlock.release()
+
+def updatedir(ui, repo, patches, similarity=0):
+    '''Update dirstate after patch application according to metadata'''
+    if not patches:
+        return
+    copies = []
+    removes = set()
+    cfiles = patches.keys()
+    cwd = repo.getcwd()
+    if cwd:
+        cfiles = [util.pathto(repo.root, cwd, f) for f in patches.keys()]
+    for f in patches:
+        gp = patches[f]
+        if not gp:
+            continue
+        if gp.op == 'RENAME':
+            copies.append((gp.oldpath, gp.path))
+            removes.add(gp.oldpath)
+        elif gp.op == 'COPY':
+            copies.append((gp.oldpath, gp.path))
+        elif gp.op == 'DELETE':
+            removes.add(gp.path)
+
+    wctx = repo[None]
+    for src, dst in copies:
+        wctx.copy(src, dst)
+    if (not similarity) and removes:
+        wctx.remove(sorted(removes), True)
+
+    for f in patches:
+        gp = patches[f]
+        if gp and gp.mode:
+            islink, isexec = gp.mode
+            dst = repo.wjoin(gp.path)
+            # patch won't create empty files
+            if gp.op == 'ADD' and not os.path.lexists(dst):
+                flags = (isexec and 'x' or '') + (islink and 'l' or '')
+                repo.wwrite(gp.path, '', flags)
+            util.set_flags(dst, islink, isexec)
+    addremove(repo, cfiles, similarity=similarity)
+    files = patches.keys()
+    files.extend([r for r in removes if r not in files])
+    return sorted(files)
 
 def copy(ui, repo, pats, opts, rename=False):
     # called with the repo lock held
@@ -464,7 +503,7 @@ def copy(ui, repo, pats, opts, rename=False):
     # srcs: list of (hgsep, hgsep, ossep, bool)
     # return: function that takes hgsep and returns ossep
     def targetpathafterfn(pat, dest, srcs):
-        if _match.patkind(pat):
+        if matchmod.patkind(pat):
             # a mercurial pattern
             res = lambda p: os.path.join(dest,
                                          os.path.basename(util.localpath(p)))
@@ -477,7 +516,7 @@ def copy(ui, repo, pats, opts, rename=False):
                     score = 0
                     for s in srcs:
                         t = os.path.join(dest, util.localpath(s[0])[striplen:])
-                        if os.path.exists(t):
+                        if os.path.lexists(t):
                             score += 1
                     return score
 
@@ -512,7 +551,7 @@ def copy(ui, repo, pats, opts, rename=False):
     dest = pats.pop()
     destdirexists = os.path.isdir(dest) and not os.path.islink(dest)
     if not destdirexists:
-        if len(pats) > 1 or _match.patkind(pats[0]):
+        if len(pats) > 1 or matchmod.patkind(pats[0]):
             raise util.Abort(_('with multiple sources, destination must be an '
                                'existing directory'))
         if util.endswithsep(dest):
@@ -638,7 +677,7 @@ def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
         fp.write("# HG changeset patch\n")
         fp.write("# User %s\n" % ctx.user())
         fp.write("# Date %d %d\n" % ctx.date())
-        if branch and (branch != 'default'):
+        if branch and branch != 'default':
             fp.write("# Branch %s\n" % branch)
         fp.write("# Node ID %s\n" % hex(node))
         fp.write("# Parent  %s\n" % hex(prev))
@@ -654,7 +693,8 @@ def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
         single(rev, seqno + 1, fp)
 
 def diffordiffstat(ui, repo, diffopts, node1, node2, match,
-                   changes=None, stat=False, fp=None):
+                   changes=None, stat=False, fp=None, prefix='',
+                   listsubrepos=False):
     '''show diff or diffstat.'''
     if fp is None:
         write = ui.write
@@ -666,16 +706,27 @@ def diffordiffstat(ui, repo, diffopts, node1, node2, match,
         diffopts = diffopts.copy(context=0)
         width = 80
         if not ui.plain():
-            width = util.termwidth()
-        chunks = patch.diff(repo, node1, node2, match, changes, diffopts)
+            width = ui.termwidth()
+        chunks = patch.diff(repo, node1, node2, match, changes, diffopts,
+                            prefix=prefix)
         for chunk, label in patch.diffstatui(util.iterlines(chunks),
                                              width=width,
                                              git=diffopts.git):
             write(chunk, label=label)
     else:
         for chunk, label in patch.diffui(repo, node1, node2, match,
-                                         changes, diffopts):
+                                         changes, diffopts, prefix=prefix):
             write(chunk, label=label)
+
+    if listsubrepos:
+        ctx1 = repo[node1]
+        ctx2 = repo[node2]
+        for subpath, sub in subrepo.itersubrepos(ctx1, ctx2):
+            if node2 is not None:
+                node2 = ctx2.substate[subpath][1]
+            submatch = matchmod.narrowmatcher(subpath, match)
+            sub.diff(diffopts, node2, submatch, changes=changes,
+                     stat=stat, fp=fp, prefix=prefix)
 
 class changeset_printer(object):
     '''show changeset information when templating not requested.'''
@@ -1052,36 +1103,53 @@ def walkchangerevs(repo, match, opts, prepare):
     fncache = {}
     change = util.cachefunc(repo.changectx)
 
+    # First step is to fill wanted, the set of revisions that we want to yield.
+    # When it does not induce extra cost, we also fill fncache for revisions in
+    # wanted: a cache of filenames that were changed (ctx.files()) and that
+    # match the file filtering conditions.
+
     if not slowpath and not match.files():
         # No files, no patterns.  Display all revs.
         wanted = set(revs)
     copies = []
 
     if not slowpath:
-        # Only files, no patterns.  Check the history of each file.
-        def filerevgen(filelog, node):
+        # We only have to read through the filelog to find wanted revisions
+
+        minrev, maxrev = min(revs), max(revs)
+        def filerevgen(filelog, last):
+            """
+            Only files, no patterns.  Check the history of each file.
+
+            Examines filelog entries within minrev, maxrev linkrev range
+            Returns an iterator yielding (linkrev, parentlinkrevs, copied)
+            tuples in backwards order
+            """
             cl_count = len(repo)
-            if node is None:
-                last = len(filelog) - 1
-            else:
-                last = filelog.rev(node)
-            for i, window in increasing_windows(last, nullrev):
-                revs = []
-                for j in xrange(i - window, i + 1):
-                    n = filelog.node(j)
-                    revs.append((filelog.linkrev(j),
-                                 follow and filelog.renamed(n)))
-                for rev in reversed(revs):
-                    # only yield rev for which we have the changelog, it can
-                    # happen while doing "hg log" during a pull or commit
-                    if rev[0] < cl_count:
-                        yield rev
+            revs = []
+            for j in xrange(0, last + 1):
+                linkrev = filelog.linkrev(j)
+                if linkrev < minrev:
+                    continue
+                # only yield rev for which we have the changelog, it can
+                # happen while doing "hg log" during a pull or commit
+                if linkrev > maxrev or linkrev >= cl_count:
+                    break
+
+                parentlinkrevs = []
+                for p in filelog.parentrevs(j):
+                    if p != nullrev:
+                        parentlinkrevs.append(filelog.linkrev(p))
+                n = filelog.node(j)
+                revs.append((linkrev, parentlinkrevs,
+                             follow and filelog.renamed(n)))
+
+            return reversed(revs)
         def iterfiles():
             for filename in match.files():
                 yield filename, None
             for filename_node in copies:
                 yield filename_node
-        minrev, maxrev = min(revs), max(revs)
         for file_, node in iterfiles():
             filelog = repo.file(file_)
             if not len(filelog):
@@ -1095,31 +1163,43 @@ def walkchangerevs(repo, match, opts, prepare):
                     break
                 else:
                     continue
-            for rev, copied in filerevgen(filelog, node):
-                if rev <= maxrev:
-                    if rev < minrev:
-                        break
-                    fncache.setdefault(rev, [])
-                    fncache[rev].append(file_)
-                    wanted.add(rev)
-                    if copied:
-                        copies.append(copied)
+
+            if node is None:
+                last = len(filelog) - 1
+            else:
+                last = filelog.rev(node)
+
+
+            # keep track of all ancestors of the file
+            ancestors = set([filelog.linkrev(last)])
+
+            # iterate from latest to oldest revision
+            for rev, flparentlinkrevs, copied in filerevgen(filelog, last):
+                if rev not in ancestors:
+                    continue
+                # XXX insert 1327 fix here
+                if flparentlinkrevs:
+                    ancestors.update(flparentlinkrevs)
+
+                fncache.setdefault(rev, []).append(file_)
+                wanted.add(rev)
+                if copied:
+                    copies.append(copied)
     if slowpath:
+        # We have to read the changelog to match filenames against
+        # changed files
+
         if follow:
             raise util.Abort(_('can only follow copies/renames for explicit '
                                'filenames'))
 
         # The slow path checks files modified in every changeset.
-        def changerevgen():
-            for i, window in increasing_windows(len(repo) - 1, nullrev):
-                for j in xrange(i - window, i + 1):
-                    yield change(j)
-
-        for ctx in changerevgen():
+        for i in sorted(revs):
+            ctx = change(i)
             matches = filter(match, ctx.files())
             if matches:
-                fncache[ctx.rev()] = matches
-                wanted.add(ctx.rev())
+                fncache[i] = matches
+                wanted.add(i)
 
     class followfilter(object):
         def __init__(self, onlyfirst=False):
@@ -1168,6 +1248,8 @@ def walkchangerevs(repo, match, opts, prepare):
             if ff.match(x):
                 wanted.discard(x)
 
+    # Now that wanted is correctly initialized, we can iterate over the
+    # revision range, yielding only revisions in wanted.
     def iterate():
         if follow and not match.files():
             ff = followfilter(onlyfirst=opts.get('follow_first'))
@@ -1178,7 +1260,6 @@ def walkchangerevs(repo, match, opts, prepare):
                 return rev in wanted
 
         for i, window in increasing_windows(0, len(revs)):
-            change = util.cachefunc(repo.changectx)
             nrevs = [rev for rev in revs[i:i + window] if want(rev)]
             for rev in sorted(nrevs):
                 fns = fncache.get(rev)
@@ -1193,6 +1274,35 @@ def walkchangerevs(repo, match, opts, prepare):
             for rev in nrevs:
                 yield change(rev)
     return iterate()
+
+def add(ui, repo, match, dryrun, listsubrepos, prefix):
+    join = lambda f: os.path.join(prefix, f)
+    bad = []
+    oldbad = match.bad
+    match.bad = lambda x, y: bad.append(x) or oldbad(x, y)
+    names = []
+    wctx = repo[None]
+    for f in repo.walk(match):
+        exact = match.exact(f)
+        if exact or f not in repo.dirstate:
+            names.append(f)
+            if ui.verbose or not exact:
+                ui.status(_('adding %s\n') % match.rel(join(f)))
+
+    if listsubrepos:
+        for subpath in wctx.substate:
+            sub = wctx.sub(subpath)
+            try:
+                submatch = matchmod.narrowmatcher(subpath, match)
+                bad.extend(sub.add(ui, submatch, dryrun, prefix))
+            except error.LookupError:
+                ui.status(_("skipping missing subrepository: %s\n")
+                               % join(subpath))
+
+    if not dryrun:
+        rejected = wctx.add(names, prefix)
+        bad.extend(f for f in rejected if f in match.files())
+    return bad
 
 def commit(ui, repo, commitfunc, pats, opts):
     '''commit the specified files or all outstanding changes'''

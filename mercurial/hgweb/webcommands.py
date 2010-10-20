@@ -13,6 +13,8 @@ from mercurial.util import binary
 from common import paritygen, staticfile, get_contact, ErrorResponse
 from common import HTTP_OK, HTTP_FORBIDDEN, HTTP_NOT_FOUND
 from mercurial import graphmod
+from mercurial import help as helpmod
+from mercurial.i18n import _
 
 # __all__ is populated with the allowed commands. Be sure to add to it if
 # you're adding a new command, or the new command won't work.
@@ -20,7 +22,7 @@ from mercurial import graphmod
 __all__ = [
    'log', 'rawfile', 'file', 'changelog', 'shortlog', 'changeset', 'rev',
    'manifest', 'tags', 'branches', 'summary', 'filediff', 'diff', 'annotate',
-   'filelog', 'archive', 'static', 'graph',
+   'filelog', 'archive', 'static', 'graph', 'help',
 ]
 
 def log(web, req, tmpl):
@@ -116,12 +118,11 @@ def _search(web, req, tmpl):
     morevars['rev'] = query
 
     def changelist(**map):
-        cl = web.repo.changelog
         count = 0
         qw = query.lower().split()
 
         def revgen():
-            for i in xrange(len(cl) - 1, 0, -100):
+            for i in xrange(len(web.repo) - 1, 0, -100):
                 l = []
                 for j in xrange(max(0, i - 100), i + 1):
                     ctx = web.repo[j]
@@ -164,10 +165,10 @@ def _search(web, req, tmpl):
             if count >= revcount:
                 break
 
-    cl = web.repo.changelog
+    tip = web.repo['tip']
     parity = paritygen(web.stripecount)
 
-    return tmpl('search', query=query, node=hex(cl.tip()),
+    return tmpl('search', query=query, node=tip.hex(),
                 entries=changelist, archives=web.archivelist("tip"),
                 morevars=morevars, lessvars=lessvars)
 
@@ -224,8 +225,7 @@ def changelog(web, req, tmpl, shortlog=False):
     morevars = copy.copy(tmpl.defaults['sessionvars'])
     morevars['revcount'] = revcount * 2
 
-    cl = web.repo.changelog
-    count = len(cl)
+    count = len(web.repo)
     pos = ctx.rev()
     start = max(0, pos - revcount + 1)
     end = min(count, start + revcount)
@@ -385,7 +385,6 @@ def tags(web, req, tmpl):
                 latestentry=lambda **x: entries(True, 1, **x))
 
 def branches(web, req, tmpl):
-    b = web.repo.branchtags()
     tips = (web.repo[n] for t, n in web.repo.branchtags().iteritems())
     heads = web.repo.heads()
     parity = paritygen(web.stripecount)
@@ -467,19 +466,19 @@ def summary(web, req, tmpl):
 
         yield l
 
-    cl = web.repo.changelog
-    count = len(cl)
+    tip = web.repo['tip']
+    count = len(web.repo)
     start = max(0, count - web.maxchanges)
     end = min(count, start + web.maxchanges)
 
     return tmpl("summary",
                 desc=web.config("web", "description", "unknown"),
                 owner=get_contact(web.config) or "unknown",
-                lastchange=cl.read(cl.tip())[2],
+                lastchange=tip.date(),
                 tags=tagentries,
                 branches=branches,
                 shortlog=changelist,
-                node=hex(cl.tip()),
+                node=tip.hex(),
                 archives=web.archivelist("tip"))
 
 def filediff(web, req, tmpl):
@@ -727,3 +726,58 @@ def graph(web, req, tmpl):
                 lessvars=lessvars, morevars=morevars, downrev=downrev,
                 canvasheight=canvasheight, jsdata=data, bg_height=bg_height,
                 node=revnode_hex, changenav=changenav)
+
+def _getdoc(e):
+    doc = e[0].__doc__
+    if doc:
+        doc = doc.split('\n')[0]
+    else:
+        doc = _('(no help text available)')
+    return doc
+
+def help(web, req, tmpl):
+    from mercurial import commands # avoid cycle
+
+    topicname = req.form.get('node', [None])[0]
+    if not topicname:
+        topic = []
+
+        def topics(**map):
+            for entries, summary, _ in helpmod.helptable:
+                entries = sorted(entries, key=len)
+                yield {'topic': entries[-1], 'summary': summary}
+
+        early, other = [], []
+        primary = lambda s: s.split('|')[0]
+        for c, e in commands.table.iteritems():
+            doc = _getdoc(e)
+            if 'DEPRECATED' in doc or c.startswith('debug'):
+                continue
+            cmd = primary(c)
+            if cmd.startswith('^'):
+                early.append((cmd[1:], doc))
+            else:
+                other.append((cmd, doc))
+
+        early.sort()
+        other.sort()
+
+        def earlycommands(**map):
+            for c, doc in early:
+                yield {'topic': c, 'summary': doc}
+
+        def othercommands(**map):
+            for c, doc in other:
+                yield {'topic': c, 'summary': doc}
+
+        return tmpl('helptopics', topics=topics, earlycommands=earlycommands,
+                    othercommands=othercommands, title='Index')
+
+    u = webutil.wsgiui()
+    u.pushbuffer()
+    try:
+        commands.help_(u, topicname)
+    except error.UnknownCommand:
+        raise ErrorResponse(HTTP_NOT_FOUND)
+    doc = u.popbuffer()
+    return tmpl('help', topic=topicname, doc=doc)

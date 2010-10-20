@@ -17,7 +17,7 @@ from i18n import _
 import error, osutil, encoding
 import errno, re, shutil, sys, tempfile, traceback
 import os, stat, time, calendar, textwrap, unicodedata, signal
-import imp
+import imp, socket
 
 # Python compatibility
 
@@ -38,9 +38,15 @@ def _fastsha1(s):
 
 import __builtin__
 
-def fakebuffer(sliceable, offset=0):
-    return sliceable[offset:]
-if not hasattr(__builtin__, 'buffer'):
+if sys.version_info[0] < 3:
+    def fakebuffer(sliceable, offset=0):
+        return sliceable[offset:]
+else:
+    def fakebuffer(sliceable, offset=0):
+        return memoryview(sliceable)[offset:]
+try:
+    buffer
+except NameError:
     __builtin__.buffer = fakebuffer
 
 import subprocess
@@ -286,7 +292,7 @@ def pathto(root, n1, n2):
     b.reverse()
     return os.sep.join((['..'] * len(a)) + b) or '.'
 
-def canonpath(root, cwd, myname):
+def canonpath(root, cwd, myname, auditor=None):
     """return the canonical path of myname, given cwd and root"""
     if endswithsep(root):
         rootsep = root
@@ -296,10 +302,11 @@ def canonpath(root, cwd, myname):
     if not os.path.isabs(name):
         name = os.path.join(root, cwd, name)
     name = os.path.normpath(name)
-    audit_path = path_auditor(root)
+    if auditor is None:
+        auditor = path_auditor(root)
     if name != rootsep and name.startswith(rootsep):
         name = name[len(rootsep):]
-        audit_path(name)
+        auditor(name)
         return pconvert(name)
     elif name == root:
         return ''
@@ -323,7 +330,7 @@ def canonpath(root, cwd, myname):
                     return ''
                 rel.reverse()
                 name = os.path.join(*rel)
-                audit_path(name)
+                auditor(name)
                 return pconvert(name)
             dirname, basename = os.path.split(name)
             rel.append(basename)
@@ -425,15 +432,6 @@ def checksignature(func):
 
     return check
 
-# os.path.lexists is not available on python2.3
-def lexists(filename):
-    "test whether a file with this name exists. does not follow symlinks"
-    try:
-        os.lstat(filename)
-    except:
-        return False
-    return True
-
 def unlink(f):
     """unlink and remove the directory if it is empty"""
     os.unlink(f)
@@ -494,12 +492,15 @@ class path_auditor(object):
     - starts at the root of a windows drive
     - contains ".."
     - traverses a symlink (e.g. a/symlink_here/b)
-    - inside a nested repository'''
+    - inside a nested repository (a callback can be used to approve
+      some nested repositories, e.g., subrepositories)
+    '''
 
-    def __init__(self, root):
+    def __init__(self, root, callback=None):
         self.audited = set()
         self.auditeddir = set()
         self.root = root
+        self.callback = callback
 
     def __call__(self, path):
         if path in self.audited:
@@ -532,8 +533,9 @@ class path_auditor(object):
                                 (path, prefix))
                 elif (stat.S_ISDIR(st.st_mode) and
                       os.path.isdir(os.path.join(curpath, '.hg'))):
-                    raise Abort(_('path %r is inside repo %r') %
-                                (path, prefix))
+                    if not self.callback or not self.callback(curpath):
+                        raise Abort(_('path %r is inside repo %r') %
+                                    (path, prefix))
         parts.pop()
         prefixes = []
         while parts:
@@ -714,10 +716,6 @@ def checklink(path):
     except (OSError, AttributeError):
         return False
 
-def needbinarypatch():
-    """return True if patches should be applied in binary mode by default."""
-    return os.name == 'nt'
-
 def endswithsep(path):
     '''Check path ends with os.sep or os.altsep.'''
     return path.endswith(os.sep) or os.altsep and path.endswith(os.altsep)
@@ -838,9 +836,9 @@ class opener(object):
     def __init__(self, base, audit=True):
         self.base = base
         if audit:
-            self.audit_path = path_auditor(base)
+            self.auditor = path_auditor(base)
         else:
-            self.audit_path = always
+            self.auditor = always
         self.createmode = None
 
     @propertycache
@@ -853,7 +851,7 @@ class opener(object):
         os.chmod(name, self.createmode & 0666)
 
     def __call__(self, path, mode="r", text=False, atomictemp=False):
-        self.audit_path(path)
+        self.auditor(path)
         f = os.path.join(self.base, path)
 
         if not text and "b" not in mode:
@@ -878,7 +876,7 @@ class opener(object):
         return fp
 
     def symlink(self, src, dst):
-        self.audit_path(dst)
+        self.auditor(dst)
         linkname = os.path.join(self.base, dst)
         try:
             os.unlink(linkname)
@@ -908,7 +906,17 @@ class chunkbuffer(object):
     def __init__(self, in_iter):
         """in_iter is the iterator that's iterating over the input chunks.
         targetsize is how big a buffer to try to maintain."""
-        self.iter = iter(in_iter)
+        def splitbig(chunks):
+            for chunk in chunks:
+                if len(chunk) > 2**20:
+                    pos = 0
+                    while pos < len(chunk):
+                        end = pos + 2 ** 18
+                        yield chunk[pos:end]
+                        pos = end
+                else:
+                    yield chunk
+        self.iter = splitbig(in_iter)
         self._queue = []
 
     def read(self, l):
@@ -938,7 +946,6 @@ class chunkbuffer(object):
                 buf += chunk
 
         return buf
-
 
 def filechunkiter(f, size=65536, limit=None):
     """Create a generator that produces the data in the file size
@@ -1058,7 +1065,7 @@ def parsedate(date, formats=None, defaults=None):
             else:
                 break
         else:
-            raise Abort(_('invalid date: %r ') % date)
+            raise Abort(_('invalid date: %r') % date)
     # validate explicit (probably user-specified) date and
     # time zone offset. values must fit in signed 32 bits for
     # current 32-bit linux runtimes. timezones go from UTC-12
@@ -1306,9 +1313,7 @@ class MBTextWrapper(textwrap.TextWrapper):
 
 #### naming convention of above implementation follows 'textwrap' module
 
-def wrap(line, width=None, initindent='', hangindent=''):
-    if width is None:
-        width = termwidth() - 2
+def wrap(line, width, initindent='', hangindent=''):
     maxindent = max(len(hangindent), len(initindent))
     if width <= maxindent:
         # adjust for weird terminal size
@@ -1386,10 +1391,44 @@ except NameError:
                 return False
         return True
 
-def termwidth():
-    if 'COLUMNS' in os.environ:
-        try:
-            return int(os.environ['COLUMNS'])
-        except ValueError:
-            pass
-    return termwidth_()
+def interpolate(prefix, mapping, s, fn=None):
+    """Return the result of interpolating items in the mapping into string s.
+
+    prefix is a single character string, or a two character string with
+    a backslash as the first character if the prefix needs to be escaped in
+    a regular expression.
+
+    fn is an optional function that will be applied to the replacement text
+    just before replacement.
+    """
+    fn = fn or (lambda s: s)
+    r = re.compile(r'%s(%s)' % (prefix, '|'.join(mapping.keys())))
+    return r.sub(lambda x: fn(mapping[x.group()[1:]]), s)
+
+def getport(port):
+    """Return the port for a given network service.
+
+    If port is an integer, it's returned as is. If it's a string, it's
+    looked up using socket.getservbyname(). If there's no matching
+    service, util.Abort is raised.
+    """
+    try:
+        return int(port)
+    except ValueError:
+        pass
+
+    try:
+        return socket.getservbyname(port)
+    except socket.error:
+        raise Abort(_("no port number associated with service '%s'") % port)
+
+_booleans = {'1': True, 'yes': True, 'true': True, 'on': True, 'always': True,
+             '0': False, 'no': False, 'false': False, 'off': False,
+             'never': False}
+
+def parsebool(s):
+    """Parse s into a boolean.
+
+    If s is not a valid boolean, returns None.
+    """
+    return _booleans.get(s.lower(), None)

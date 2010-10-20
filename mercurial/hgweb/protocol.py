@@ -5,221 +5,71 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import cStringIO, zlib, tempfile, errno, os, sys, urllib, copy
-from mercurial import util, streamclone, pushkey
-from mercurial.node import bin, hex
-from mercurial import changegroup as changegroupmod
-from common import ErrorResponse, HTTP_OK, HTTP_NOT_FOUND, HTTP_SERVER_ERROR
-
-# __all__ is populated with the allowed commands. Be sure to add to it if
-# you're adding a new command, or the new command won't work.
-
-__all__ = [
-   'lookup', 'heads', 'branches', 'between', 'changegroup',
-   'changegroupsubset', 'capabilities', 'unbundle', 'stream_out',
-   'branchmap', 'pushkey', 'listkeys'
-]
+import cStringIO, zlib, sys, urllib
+from mercurial import util, wireproto
+from common import HTTP_OK
 
 HGTYPE = 'application/mercurial-0.1'
-basecaps = 'lookup changegroupsubset branchmap pushkey'.split()
 
-def lookup(repo, req):
-    try:
-        r = hex(repo.lookup(req.form['key'][0]))
-        success = 1
-    except Exception, inst:
-        r = str(inst)
-        success = 0
-    resp = "%s %s\n" % (success, r)
-    req.respond(HTTP_OK, HGTYPE, length=len(resp))
-    yield resp
-
-def heads(repo, req):
-    resp = " ".join(map(hex, repo.heads())) + "\n"
-    req.respond(HTTP_OK, HGTYPE, length=len(resp))
-    yield resp
-
-def branchmap(repo, req):
-    branches = repo.branchmap()
-    heads = []
-    for branch, nodes in branches.iteritems():
-        branchname = urllib.quote(branch)
-        branchnodes = [hex(node) for node in nodes]
-        heads.append('%s %s' % (branchname, ' '.join(branchnodes)))
-    resp = '\n'.join(heads)
-    req.respond(HTTP_OK, HGTYPE, length=len(resp))
-    yield resp
-
-def branches(repo, req):
-    nodes = []
-    if 'nodes' in req.form:
-        nodes = map(bin, req.form['nodes'][0].split(" "))
-    resp = cStringIO.StringIO()
-    for b in repo.branches(nodes):
-        resp.write(" ".join(map(hex, b)) + "\n")
-    resp = resp.getvalue()
-    req.respond(HTTP_OK, HGTYPE, length=len(resp))
-    yield resp
-
-def between(repo, req):
-    pairs = [map(bin, p.split("-"))
-             for p in req.form['pairs'][0].split(" ")]
-    resp = ''.join(" ".join(map(hex, b)) + "\n" for b in repo.between(pairs))
-    req.respond(HTTP_OK, HGTYPE, length=len(resp))
-    yield resp
-
-def changegroup(repo, req):
-    req.respond(HTTP_OK, HGTYPE)
-    nodes = []
-
-    if 'roots' in req.form:
-        nodes = map(bin, req.form['roots'][0].split(" "))
-
-    z = zlib.compressobj()
-    f = repo.changegroup(nodes, 'serve')
-    while 1:
-        chunk = f.read(4096)
-        if not chunk:
-            break
-        yield z.compress(chunk)
-
-    yield z.flush()
-
-def changegroupsubset(repo, req):
-    req.respond(HTTP_OK, HGTYPE)
-    bases = []
-    heads = []
-
-    if 'bases' in req.form:
-        bases = [bin(x) for x in req.form['bases'][0].split(' ')]
-    if 'heads' in req.form:
-        heads = [bin(x) for x in req.form['heads'][0].split(' ')]
-
-    z = zlib.compressobj()
-    f = repo.changegroupsubset(bases, heads, 'serve')
-    while 1:
-        chunk = f.read(4096)
-        if not chunk:
-            break
-        yield z.compress(chunk)
-
-    yield z.flush()
-
-def capabilities(repo, req):
-    caps = copy.copy(basecaps)
-    if streamclone.allowed(repo.ui):
-        caps.append('stream=%d' % repo.changelog.version)
-    if changegroupmod.bundlepriority:
-        caps.append('unbundle=%s' % ','.join(changegroupmod.bundlepriority))
-    rsp = ' '.join(caps)
-    req.respond(HTTP_OK, HGTYPE, length=len(rsp))
-    yield rsp
-
-def unbundle(repo, req):
-
-    proto = req.env.get('wsgi.url_scheme') or 'http'
-    their_heads = req.form['heads'][0].split(' ')
-
-    def check_heads():
-        heads = map(hex, repo.heads())
-        return their_heads == [hex('force')] or their_heads == heads
-
-    # fail early if possible
-    if not check_heads():
-        req.drain()
-        raise ErrorResponse(HTTP_OK, 'unsynced changes')
-
-    # do not lock repo until all changegroup data is
-    # streamed. save to temporary file.
-
-    fd, tempname = tempfile.mkstemp(prefix='hg-unbundle-')
-    fp = os.fdopen(fd, 'wb+')
-    try:
-        length = int(req.env['CONTENT_LENGTH'])
-        for s in util.filechunkiter(req, limit=length):
+class webproto(object):
+    def __init__(self, req):
+        self.req = req
+        self.response = ''
+    def getargs(self, args):
+        data = {}
+        keys = args.split()
+        for k in keys:
+            if k == '*':
+                star = {}
+                for key in self.req.form.keys():
+                    if key not in keys:
+                        star[key] = self.req.form[key][0]
+                data['*'] = star
+            else:
+                data[k] = self.req.form[k][0]
+        return [data[k] for k in keys]
+    def getfile(self, fp):
+        length = int(self.req.env['CONTENT_LENGTH'])
+        for s in util.filechunkiter(self.req, limit=length):
             fp.write(s)
+    def redirect(self):
+        self.oldio = sys.stdout, sys.stderr
+        sys.stderr = sys.stdout = cStringIO.StringIO()
+    def groupchunks(self, cg):
+        z = zlib.compressobj()
+        while 1:
+            chunk = cg.read(4096)
+            if not chunk:
+                break
+            yield z.compress(chunk)
+        yield z.flush()
+    def _client(self):
+        return 'remote:%s:%s:%s' % (
+            self.req.env.get('wsgi.url_scheme') or 'http',
+            urllib.quote(self.req.env.get('REMOTE_HOST', '')),
+            urllib.quote(self.req.env.get('REMOTE_USER', '')))
 
-        try:
-            lock = repo.lock()
-            try:
-                if not check_heads():
-                    raise ErrorResponse(HTTP_OK, 'unsynced changes')
+def iscmd(cmd):
+    return cmd in wireproto.commands
 
-                fp.seek(0)
-                header = fp.read(6)
-                if header.startswith('HG') and not header.startswith('HG10'):
-                    raise ValueError('unknown bundle version')
-                elif header not in changegroupmod.bundletypes:
-                    raise ValueError('unknown bundle compression type')
-                gen = changegroupmod.unbundle(header, fp)
-
-                # send addchangegroup output to client
-
-                oldio = sys.stdout, sys.stderr
-                sys.stderr = sys.stdout = cStringIO.StringIO()
-
-                try:
-                    url = 'remote:%s:%s:%s' % (
-                          proto,
-                          urllib.quote(req.env.get('REMOTE_HOST', '')),
-                          urllib.quote(req.env.get('REMOTE_USER', '')))
-                    try:
-                        ret = repo.addchangegroup(gen, 'serve', url, lock=lock)
-                    except util.Abort, inst:
-                        sys.stdout.write("abort: %s\n" % inst)
-                        ret = 0
-                finally:
-                    val = sys.stdout.getvalue()
-                    sys.stdout, sys.stderr = oldio
-                req.respond(HTTP_OK, HGTYPE)
-                return '%d\n%s' % (ret, val),
-            finally:
-                lock.release()
-        except ValueError, inst:
-            raise ErrorResponse(HTTP_OK, inst)
-        except (OSError, IOError), inst:
-            error = getattr(inst, 'strerror', 'Unknown error')
-            if not isinstance(error, str):
-                error = 'Error: %s' % str(error)
-            if inst.errno == errno.ENOENT:
-                code = HTTP_NOT_FOUND
-            else:
-                code = HTTP_SERVER_ERROR
-            filename = getattr(inst, 'filename', '')
-            # Don't send our filesystem layout to the client
-            if filename and filename.startswith(repo.root):
-                filename = filename[len(repo.root)+1:]
-                text = '%s: %s' % (error, filename)
-            else:
-                text = error.replace(repo.root + os.path.sep, '')
-            raise ErrorResponse(code, text)
-    finally:
-        fp.close()
-        os.unlink(tempname)
-
-def stream_out(repo, req):
-    req.respond(HTTP_OK, HGTYPE)
-    try:
-        for chunk in streamclone.stream_out(repo):
-            yield chunk
-    except streamclone.StreamException, inst:
-        yield str(inst)
-
-def pushkey(repo, req):
-    namespace = req.form['namespace'][0]
-    key = req.form['key'][0]
-    old = req.form['old'][0]
-    new = req.form['new'][0]
-
-    r = repo.pushkey(namespace, key, old, new)
-    r = '%d\n' % int(r)
-    req.respond(HTTP_OK, HGTYPE, length=len(r))
-    yield r
-
-def listkeys(repo, req):
-    namespace = req.form['namespace'][0]
-    d = repo.listkeys(namespace).items()
-    t = '\n'.join(['%s\t%s' % (k.encode('string-escape'),
-                               v.encode('string-escape')) for k, v in d])
-    req.respond(HTTP_OK, HGTYPE, length=len(t))
-    yield t
+def call(repo, req, cmd):
+    p = webproto(req)
+    rsp = wireproto.dispatch(repo, p, cmd)
+    if isinstance(rsp, str):
+        req.respond(HTTP_OK, HGTYPE, length=len(rsp))
+        return [rsp]
+    elif isinstance(rsp, wireproto.streamres):
+        req.respond(HTTP_OK, HGTYPE)
+        return rsp.gen
+    elif isinstance(rsp, wireproto.pushres):
+        val = sys.stdout.getvalue()
+        sys.stdout, sys.stderr = p.oldio
+        req.respond(HTTP_OK, HGTYPE)
+        return ['%d\n%s' % (rsp.res, val)]
+    elif isinstance(rsp, wireproto.pusherr):
+        # drain the incoming bundle
+        req.drain()
+        sys.stdout, sys.stderr = p.oldio
+        rsp = '0\n%s\n' % rsp.res
+        req.respond(HTTP_OK, HGTYPE, length=len(rsp))
+        return [rsp]

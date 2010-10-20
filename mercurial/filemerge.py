@@ -54,7 +54,17 @@ def _picktool(repo, ui, path, binary, symlink):
             return True
         return False
 
-    # HGMERGE takes precedence
+    # forcemerge comes from command line arguments, highest priority
+    force = ui.config('ui', 'forcemerge')
+    if force:
+        toolpath = _findtool(ui, force)
+        if toolpath:
+            return (force, '"' + toolpath + '"')
+        else:
+            # mimic HGMERGE if given tool not found
+            return (force, force)
+
+    # HGMERGE takes next precedence
     hgmerge = os.environ.get("HGMERGE")
     if hgmerge:
         return (hgmerge, hgmerge)
@@ -135,7 +145,7 @@ def filemerge(repo, mynode, orig, fcd, fco, fca):
         except IOError:
             return False
 
-    if not fco.cmp(fcd.data()): # files identical?
+    if not fco.cmp(fcd): # files identical?
         return None
 
     ui = repo.ui
@@ -219,8 +229,8 @@ def filemerge(repo, mynode, orig, fcd, fco, fca):
         if "$output" in args:
             out, a = a, back # read input from backup, write to original
         replace = dict(local=a, base=b, other=c, output=out)
-        args = re.sub("\$(local|base|other|output)",
-            lambda x: '"%s"' % util.localpath(replace[x.group()[1:]]), args)
+        args = util.interpolate(r'\$', replace, args,
+                                lambda s: '"%s"' % util.localpath(s))
         r = util.system(toolpath + ' ' + args, cwd=repo.root, environ=env)
 
     if not r and (_toolbool(ui, tool, "checkconflicts") or

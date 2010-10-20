@@ -28,6 +28,8 @@ keywords are usually available for templating a log-like command:
 :branches: String. The name of the branch on which the changeset was
     committed. Will be empty if the branch name was default.
 
+:children: List of strings. The children of the changeset.
+
 :date: Date information. The date when the changeset was committed.
 
 :desc: String. The text of the changeset description.
@@ -50,8 +52,8 @@ keywords are usually available for templating a log-like command:
 
 :file_dels: List of strings. Files removed by this changeset.
 
-:node: String. The changeset identification hash, as a 40-character
-    hexadecimal string.
+:node: String. The changeset identification hash, as a 40 hexadecimal
+    digit string.
 
 :parents: List of strings. The parents of the changeset.
 
@@ -104,6 +106,9 @@ List of filters:
 :escape: Any text. Replaces the special XML/XHTML characters "&", "<"
     and ">" with XML entities.
 
+:hex: Any text. Convert a binary Mercurial node identifier into
+    its long hexadecimal representation.
+
 :fill68: Any text. Wraps the text to fit in 68 columns.
 
 :fill76: Any text. Wraps the text to fit in 76 columns.
@@ -136,7 +141,7 @@ List of filters:
     specified in RFC 3339: "2009-08-18T13:00:13+02:00".
 
 :short: Changeset hash. Returns the short form of a changeset hash,
-    i.e. a 12-byte hexadecimal string.
+    i.e. a 12 hexadecimal digit string.
 
 :shortdate: Date. Returns a date like "2006-09-18".
 

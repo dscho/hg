@@ -33,9 +33,19 @@ class filemapper(object):
     def parse(self, path):
         errs = 0
         def check(name, mapping, listname):
+            if not name:
+                self.ui.warn(_('%s:%d: path to %s is missing\n') %
+                             (lex.infile, lex.lineno, listname))
+                return 1
             if name in mapping:
                 self.ui.warn(_('%s:%d: %r already in %s list\n') %
                              (lex.infile, lex.lineno, name, listname))
+                return 1
+            if (name.startswith('/') or
+                name.endswith('/') or
+                '//' in name):
+                self.ui.warn(_('%s:%d: superfluous / in %s %r\n') %
+                             (lex.infile, lex.lineno, listname, name))
                 return 1
             return 0
         lex = shlex.shlex(open(path), path, True)
@@ -298,7 +308,9 @@ class filemap_source(converter_source):
 
         self.origparents[rev] = parents
 
-        if len(mparents) < 2 and not self.wanted(rev, wp):
+        closed = 'close' in self.commits[rev].extra
+
+        if len(mparents) < 2 and not closed and not self.wanted(rev, wp):
             # We don't want this revision.
             # Update our state and tell the convert process to map this
             # revision to the same revision its parent as mapped to.

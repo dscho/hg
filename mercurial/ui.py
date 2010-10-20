@@ -9,9 +9,6 @@ from i18n import _
 import errno, getpass, os, socket, sys, tempfile, traceback
 import config, util, error
 
-_booleans = {'1': True, 'yes': True, 'true': True, 'on': True,
-             '0': False, 'no': False, 'false': False, 'off': False}
-
 class ui(object):
     def __init__(self, src=None):
         self._buffers = []
@@ -100,33 +97,46 @@ class ui(object):
             root = os.path.expanduser('~')
         self.fixconfig(root=root)
 
-    def fixconfig(self, root=None):
-        # translate paths relative to root (or home) into absolute paths
-        root = root or os.getcwd()
-        for c in self._tcfg, self._ucfg, self._ocfg:
-            for n, p in c.items('paths'):
-                if p and "://" not in p and not os.path.isabs(p):
-                    c.set("paths", n, os.path.normpath(os.path.join(root, p)))
+    def fixconfig(self, root=None, section=None):
+        if section in (None, 'paths'):
+            # expand vars and ~
+            # translate paths relative to root (or home) into absolute paths
+            root = root or os.getcwd()
+            for c in self._tcfg, self._ucfg, self._ocfg:
+                for n, p in c.items('paths'):
+                    if not p:
+                        continue
+                    if '%%' in p:
+                        self.warn(_("(deprecated '%%' in path %s=%s from %s)\n")
+                                  % (n, p, self.configsource('paths', n)))
+                        p = p.replace('%%', '%')
+                    p = util.expandpath(p)
+                    if '://' not in p and not os.path.isabs(p):
+                        p = os.path.normpath(os.path.join(root, p))
+                    c.set("paths", n, p)
 
-        # update ui options
-        self.debugflag = self.configbool('ui', 'debug')
-        self.verbose = self.debugflag or self.configbool('ui', 'verbose')
-        self.quiet = not self.debugflag and self.configbool('ui', 'quiet')
-        if self.verbose and self.quiet:
-            self.quiet = self.verbose = False
-        self._reportuntrusted = self.configbool("ui", "report_untrusted", True)
-        self.tracebackflag = self.configbool('ui', 'traceback', False)
+        if section in (None, 'ui'):
+            # update ui options
+            self.debugflag = self.configbool('ui', 'debug')
+            self.verbose = self.debugflag or self.configbool('ui', 'verbose')
+            self.quiet = not self.debugflag and self.configbool('ui', 'quiet')
+            if self.verbose and self.quiet:
+                self.quiet = self.verbose = False
+            self._reportuntrusted = self.configbool("ui", "report_untrusted",
+                                        True)
+            self.tracebackflag = self.configbool('ui', 'traceback', False)
 
-        # update trust information
-        self._trustusers.update(self.configlist('trusted', 'users'))
-        self._trustgroups.update(self.configlist('trusted', 'groups'))
+        if section in (None, 'trusted'):
+            # update trust information
+            self._trustusers.update(self.configlist('trusted', 'users'))
+            self._trustgroups.update(self.configlist('trusted', 'groups'))
 
     def setconfig(self, section, name, value, overlay=True):
         if overlay:
             self._ocfg.set(section, name, value)
         self._tcfg.set(section, name, value)
         self._ucfg.set(section, name, value)
-        self.fixconfig()
+        self.fixconfig(section=section)
 
     def _data(self, untrusted):
         return untrusted and self._ucfg or self._tcfg
@@ -149,10 +159,11 @@ class ui(object):
             return default
         if isinstance(v, bool):
             return v
-        if v.lower() not in _booleans:
+        b = util.parsebool(v)
+        if b is None:
             raise error.ConfigError(_("%s.%s not a boolean ('%s')")
                                     % (section, name, v))
-        return _booleans[v.lower()]
+        return b
 
     def configlist(self, section, name, default=None, untrusted=False):
         """Return a list of comma/space separated strings"""
@@ -220,7 +231,7 @@ class ui(object):
         def _configlist(s):
             s = s.rstrip(' ,')
             if not s:
-                return None
+                return []
             parser, parts, offset = _parse_plain, [''], 0
             while parser:
                 parser, parts, offset = parser(parts, s, offset)
@@ -302,24 +313,14 @@ class ui(object):
             user = util.shortuser(user)
         return user
 
-    def _path(self, loc):
-        p = self.config('paths', loc)
-        if p:
-            if '%%' in p:
-                self.warn(_("(deprecated '%%' in path %s=%s from %s)\n") %
-                          (loc, p, self.configsource('paths', loc)))
-                p = p.replace('%%', '%')
-            p = util.expandpath(p)
-        return p
-
     def expandpath(self, loc, default=None):
         """Return repository location relative to cwd or from [paths]"""
         if "://" in loc or os.path.isdir(os.path.join(loc, '.hg')):
             return loc
 
-        path = self._path(loc)
+        path = self.config('paths', loc)
         if not path and default is not None:
-            path = self._path(default)
+            path = self.config('paths', default)
         return path or loc
 
     def pushbuffer(self):
@@ -404,6 +405,16 @@ class ui(object):
                 return False
 
         return i
+
+    def termwidth(self):
+        '''how wide is the terminal in columns?
+        '''
+        if 'COLUMNS' in os.environ:
+            try:
+                return int(os.environ['COLUMNS'])
+            except ValueError:
+                pass
+        return util.termwidth()
 
     def formatted(self):
         '''should formatted output be used?
@@ -592,6 +603,15 @@ class ui(object):
                      % (topic, item, pos, total, unit, pct))
         else:
             self.debug('%s:%s %s%s\n' % (topic, item, pos, unit))
+
+    def log(self, service, message):
+        '''hook for logging facility extensions
+
+        service should be a readily-identifiable subsystem, which will
+        allow filtering.
+        message should be a newline-terminated string to log.
+        '''
+        pass
 
     def label(self, msg, label):
         '''style msg based on supplied label

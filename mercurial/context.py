@@ -75,7 +75,7 @@ class changectx(object):
 
     @propertycache
     def substate(self):
-        return subrepo.state(self)
+        return subrepo.state(self, self._repo.ui)
 
     def __contains__(self, key):
         return key in self._manifest
@@ -352,12 +352,16 @@ class filectx(object):
     def size(self):
         return self._filelog.size(self._filerev)
 
-    def cmp(self, text):
-        """compare text with stored file revision
+    def cmp(self, fctx):
+        """compare with other file context
 
-        returns True if text is different than what is stored.
+        returns True if different than fctx.
         """
-        return self._filelog.cmp(self._filenode, text)
+        if (fctx._filerev is None and self._repo._encodefilterpats
+            or self.size() == fctx.size()):
+            return self._filelog.cmp(self._filenode, fctx.data())
+
+        return True
 
     def renamed(self):
         """check if file was actually renamed in this changeset revision
@@ -769,7 +773,8 @@ class workingctx(changectx):
                 self.modified() or self.added() or self.removed() or
                 (missing and self.deleted()))
 
-    def add(self, list):
+    def add(self, list, prefix=""):
+        join = lambda f: os.path.join(prefix, f)
         wlock = self._repo.wlock()
         ui, ds = self._repo.ui, self._repo.dirstate
         try:
@@ -779,7 +784,7 @@ class workingctx(changectx):
                 try:
                     st = os.lstat(p)
                 except:
-                    ui.warn(_("%s does not exist!\n") % f)
+                    ui.warn(_("%s does not exist!\n") % join(f))
                     rejected.append(f)
                     continue
                 if st.st_size > 10000000:
@@ -787,13 +792,13 @@ class workingctx(changectx):
                               "to manage this file\n"
                               "(use 'hg revert %s' to cancel the "
                               "pending addition)\n")
-                              % (f, 3 * st.st_size // 1000000, f))
+                              % (f, 3 * st.st_size // 1000000, join(f)))
                 if not (stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode)):
                     ui.warn(_("%s not added: only files and symlinks "
-                              "supported currently\n") % f)
+                              "supported currently\n") % join(f))
                     rejected.append(p)
                 elif ds[f] in 'amn':
-                    ui.warn(_("%s already tracked!\n") % f)
+                    ui.warn(_("%s already tracked!\n") % join(f))
                 elif ds[f] == 'r':
                     ds.normallookup(f)
                 else:
@@ -935,12 +940,14 @@ class workingfilectx(filectx):
                 raise
             return (t, tz)
 
-    def cmp(self, text):
-        """compare text with disk content
+    def cmp(self, fctx):
+        """compare with other file context
 
-        returns True if text is different than what is on disk.
+        returns True if different than fctx.
         """
-        return self._repo.wread(self._path) != text
+        # fctx should be a filectx (not a wfctx)
+        # invert comparison to reuse the same code path
+        return fctx.cmp(self)
 
 class memctx(object):
     """Use memctx to perform in-memory commits via localrepo.commitctx().

@@ -14,12 +14,14 @@ class mergestate(object):
     '''track 3-way merge state of individual files'''
     def __init__(self, repo):
         self._repo = repo
+        self._dirty = False
         self._read()
     def reset(self, node=None):
         self._state = {}
         if node:
             self._local = node
         shutil.rmtree(self._repo.join("merge"), True)
+        self._dirty = False
     def _read(self):
         self._state = {}
         try:
@@ -33,17 +35,20 @@ class mergestate(object):
         except IOError, err:
             if err.errno != errno.ENOENT:
                 raise
-    def _write(self):
-        f = self._repo.opener("merge/state", "w")
-        f.write(hex(self._local) + "\n")
-        for d, v in self._state.iteritems():
-            f.write("\0".join([d] + v) + "\n")
+        self._dirty = False
+    def commit(self):
+        if self._dirty:
+            f = self._repo.opener("merge/state", "w")
+            f.write(hex(self._local) + "\n")
+            for d, v in self._state.iteritems():
+                f.write("\0".join([d] + v) + "\n")
+            self._dirty = False
     def add(self, fcl, fco, fca, fd, flags):
         hash = util.sha1(fcl.path()).hexdigest()
         self._repo.opener("merge/" + hash, "w").write(fcl.data())
         self._state[fd] = ['u', hash, fcl.path(), fca.path(),
                            hex(fca.filenode()), fco.path(), flags]
-        self._write()
+        self._dirty = True
     def __contains__(self, dfile):
         return dfile in self._state
     def __getitem__(self, dfile):
@@ -55,7 +60,7 @@ class mergestate(object):
             yield f
     def mark(self, dfile, state):
         self._state[dfile][0] = state
-        self._write()
+        self._dirty = True
     def resolve(self, dfile, wctx, octx):
         if self[dfile] == 'r':
             return 0
@@ -73,7 +78,7 @@ class mergestate(object):
 def _checkunknown(wctx, mctx):
     "check for collisions between unknown files and files in mctx"
     for f in wctx.unknown():
-        if f in mctx and mctx[f].cmp(wctx[f].data()):
+        if f in mctx and mctx[f].cmp(wctx[f]):
             raise util.Abort(_("untracked file in working directory differs"
                                " from file in requested revision: '%s'") % f)
 
@@ -117,7 +122,7 @@ def _forgetremoved(wctx, mctx, branchmerge):
 
 def manifestmerge(repo, p1, p2, pa, overwrite, partial):
     """
-    Merge p1 and p2 with ancestor ma and generate merge action list
+    Merge p1 and p2 with ancestor pa and generate merge action list
 
     overwrite = whether we clobber working files
     partial = function to filter file lists
@@ -271,7 +276,10 @@ def applyupdates(repo, action, wctx, mctx, actx):
             fcl = wctx[f]
             fco = mctx[f2]
             if mctx == actx: # backwards, use working dir parent as ancestor
-                fca = fcl.parents()[0]
+                if fcl.parents():
+                    fca = fcl.parents()[0]
+                else:
+                    fca = repo.filectx(f, fileid=nullrev)
             else:
                 fca = fcl.ancestor(fco, actx)
             if not fca:
@@ -282,7 +290,7 @@ def applyupdates(repo, action, wctx, mctx, actx):
 
     # remove renamed files after safely stored
     for f in moves:
-        if util.lexists(repo.wjoin(f)):
+        if os.path.lexists(repo.wjoin(f)):
             repo.ui.debug("removing %s\n" % f)
             os.unlink(repo.wjoin(f))
 
@@ -291,7 +299,8 @@ def applyupdates(repo, action, wctx, mctx, actx):
     numupdates = len(action)
     for i, a in enumerate(action):
         f, m = a[:2]
-        u.progress(_('updating'), i + 1, item=f, total=numupdates, unit='files')
+        u.progress(_('updating'), i + 1, item=f, total=numupdates,
+                   unit=_('files'))
         if f and f[0] == "/":
             continue
         if m == "r": # remove
@@ -320,7 +329,7 @@ def applyupdates(repo, action, wctx, mctx, actx):
                 else:
                     merged += 1
             util.set_flags(repo.wjoin(fd), 'l' in flags, 'x' in flags)
-            if f != fd and move and util.lexists(repo.wjoin(f)):
+            if f != fd and move and os.path.lexists(repo.wjoin(f)):
                 repo.ui.debug("removing %s\n" % f)
                 os.unlink(repo.wjoin(f))
         elif m == "g": # get
@@ -346,13 +355,15 @@ def applyupdates(repo, action, wctx, mctx, actx):
             updated += 1
         elif m == "dr": # divergent renames
             fl = a[2]
-            repo.ui.warn(_("warning: detected divergent renames of %s to:\n") % f)
+            repo.ui.warn(_("note: possible conflict - %s was renamed "
+                           "multiple times to:\n") % f)
             for nf in fl:
                 repo.ui.warn(" %s\n" % nf)
         elif m == "e": # exec
             flags = a[2]
             util.set_flags(repo.wjoin(f), 'l' in flags, 'x' in flags)
-    u.progress(_('updating'), None, total=numupdates, unit='files')
+    ms.commit()
+    u.progress(_('updating'), None, total=numupdates, unit=_('files'))
 
     return updated, merged, removed, unresolved
 
@@ -433,7 +444,7 @@ def update(repo, node, branchmerge, force, partial):
     the parent rev to the target rev (linear, on the same named
     branch, or on another named branch).
 
-    This logic is tested by test-update-branches.
+    This logic is tested by test-update-branches.t.
 
     -c  -C  dirty  rev  |  linear   same  cross
      n   n    n     n   |    ok     (1)     x
@@ -493,11 +504,11 @@ def update(repo, node, branchmerge, force, partial):
             if pa == p1 or pa == p2: # linear
                 pass # all good
             elif wc.files() or wc.deleted():
-                raise util.Abort(_("crosses branches (use 'hg merge' to merge "
-                                 "or use 'hg update -C' to discard changes)"))
+                raise util.Abort(_("crosses branches (merge branches or use"
+                                   " --clean to discard changes)"))
             elif onode is None:
-                raise util.Abort(_("crosses branches (use 'hg merge' or use "
-                                   "'hg update -c')"))
+                raise util.Abort(_("crosses branches (merge branches or use"
+                                   " --check to force update)"))
             else:
                 # Allow jumping branches if clean and specific rev given
                 overwrite = True

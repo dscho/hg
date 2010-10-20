@@ -11,14 +11,18 @@ from node import nullrev, short
 from i18n import _
 import os
 
-def _bundle(repo, bases, heads, node, suffix, extranodes=None):
+def _bundle(repo, bases, heads, node, suffix, extranodes=None, compress=True):
     """create a bundle with the specified revisions as a backup"""
     cg = repo.changegroupsubset(bases, heads, 'strip', extranodes)
     backupdir = repo.join("strip-backup")
     if not os.path.isdir(backupdir):
         os.mkdir(backupdir)
     name = os.path.join(backupdir, "%s-%s.hg" % (short(node), suffix))
-    return changegroup.writebundle(cg, name, "HG10BZ")
+    if compress:
+        bundletype = "HG10BZ"
+    else:
+        bundletype = "HG10UN"
+    return changegroup.writebundle(cg, name, bundletype)
 
 def _collectfiles(repo, striprev):
     """find out the filelogs affected by the strip"""
@@ -31,7 +35,7 @@ def _collectfiles(repo, striprev):
 
 def _collectextranodes(repo, files, link):
     """return the nodes that have to be saved before the strip"""
-    def collectone(revlog):
+    def collectone(cl, revlog):
         extra = []
         startrev = count = len(revlog)
         # find the truncation point of the revlog
@@ -53,12 +57,12 @@ def _collectextranodes(repo, files, link):
 
     extranodes = {}
     cl = repo.changelog
-    extra = collectone(repo.manifest)
+    extra = collectone(cl, repo.manifest)
     if extra:
         extranodes[1] = extra
     for fname in files:
         f = repo.file(fname)
-        extra = collectone(f)
+        extra = collectone(cl, f)
         if extra:
             extranodes[fname] = extra
 
@@ -68,6 +72,8 @@ def strip(ui, repo, node, backup="all"):
     cl = repo.changelog
     # TODO delete the undo files, and handle undo of merge sets
     striprev = cl.rev(node)
+
+    keeppartialbundle = backup == 'strip'
 
     # Some revisions with rev > striprev may not be descendants of striprev.
     # We have to find these revisions and put them in a bundle, so that
@@ -110,8 +116,9 @@ def strip(ui, repo, node, backup="all"):
         backupfile = _bundle(repo, [node], cl.heads(), node, 'backup')
         repo.ui.status(_("saved backup bundle to %s\n") % backupfile)
     if saveheads or extranodes:
+        # do not compress partial bundle if we remove it from disk later
         chgrpfile = _bundle(repo, savebases, saveheads, node, 'temp',
-                            extranodes)
+                            extranodes=extranodes, compress=keeppartialbundle)
 
     mfst = repo.manifest
 
@@ -146,7 +153,7 @@ def strip(ui, repo, node, backup="all"):
             if not repo.ui.verbose:
                 repo.ui.popbuffer()
             f.close()
-            if backup != "strip":
+            if not keeppartialbundle:
                 os.unlink(chgrpfile)
     except:
         if backupfile:

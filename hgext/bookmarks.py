@@ -29,8 +29,9 @@ branching.
 '''
 
 from mercurial.i18n import _
-from mercurial.node import nullid, nullrev, hex, short
+from mercurial.node import nullid, nullrev, bin, hex, short
 from mercurial import util, commands, repair, extensions, pushkey, hg, url
+from mercurial import revset
 import os
 
 def write(repo):
@@ -102,6 +103,10 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False, rename=No
     directory's parent revision with the given name. If you specify
     a revision using -r REV (where REV may be an existing bookmark),
     the bookmark is assigned to that revision.
+
+    Bookmarks can be pushed and pulled between repositories (see :hg:`help
+    push` and :hg:`help pull`). This requires the bookmark extension to be
+    enabled for both the local and remote repositories.
     '''
     hexfn = ui.debugflag and hex or short
     marks = repo._bookmarks
@@ -224,15 +229,13 @@ def reposetup(ui, repo):
             in the .hg/bookmarks file.
             Read the file and return a (name=>nodeid) dictionary
             '''
-            self._loadingbookmarks = True
             try:
                 bookmarks = {}
                 for line in self.opener('bookmarks'):
                     sha, refspec = line.strip().split(' ', 1)
-                    bookmarks[refspec] = super(bookmark_repo, self).lookup(sha)
+                    bookmarks[refspec] = self.changelog.lookup(sha)
             except:
                 pass
-            self._loadingbookmarks = False
             return bookmarks
 
         @util.propertycache
@@ -259,9 +262,8 @@ def reposetup(ui, repo):
             return super(bookmark_repo, self).rollback(*args)
 
         def lookup(self, key):
-            if not getattr(self, '_loadingbookmarks', False):
-                if key in self._bookmarks:
-                    key = self._bookmarks[key]
+            if key in self._bookmarks:
+                key = self._bookmarks[key]
             return super(bookmark_repo, self).lookup(key)
 
         def _bookmarksupdate(self, parents, node):
@@ -302,7 +304,7 @@ def reposetup(ui, repo):
 
             self.ui.debug("checking for updated bookmarks\n")
             rb = remote.listkeys('bookmarks')
-            changes = 0
+            changed = False
             for k in rb.keys():
                 if k in self._bookmarks:
                     nr, nl = rb[k], self._bookmarks[k]
@@ -313,12 +315,12 @@ def reposetup(ui, repo):
                             continue
                         if cr in cl.descendants():
                             self._bookmarks[k] = cr.node()
-                            changes += 1
+                            changed = True
                             self.ui.status(_("updating bookmark %s\n") % k)
                         else:
                             self.ui.warn(_("not updating divergent"
                                            " bookmark %s\n") % k)
-            if changes:
+            if changed:
                 write(repo)
 
             return result
@@ -360,8 +362,7 @@ def reposetup(ui, repo):
         def _findtags(self):
             """Merge bookmarks with normal tags"""
             (tags, tagtypes) = super(bookmark_repo, self)._findtags()
-            if not getattr(self, '_loadingbookmarks', False):
-                tags.update(self._bookmarks)
+            tags.update(self._bookmarks)
             return (tags, tagtypes)
 
         if hasattr(repo, 'invalidate'):
@@ -473,7 +474,7 @@ def diffbookmarks(ui, repo, remote):
     lmarks = repo.listkeys('bookmarks')
     rmarks = remote.listkeys('bookmarks')
 
-    diff = set(rmarks) - set(lmarks)
+    diff = sorted(set(rmarks) - set(lmarks))
     for k in diff:
         ui.write("   %-25s %s\n" % (k, rmarks[k][:12]))
 
@@ -508,10 +509,12 @@ def uisetup(ui):
 
     entry = extensions.wrapcommand(commands.table, 'pull', pull)
     entry[1].append(('B', 'bookmark', [],
-                     _("bookmark to import")))
+                     _("bookmark to import"),
+                     _('BOOKMARK')))
     entry = extensions.wrapcommand(commands.table, 'push', push)
     entry[1].append(('B', 'bookmark', [],
-                     _("bookmark to export")))
+                     _("bookmark to export"),
+                     _('BOOKMARK')))
     entry = extensions.wrapcommand(commands.table, 'incoming', incoming)
     entry[1].append(('B', 'bookmarks', False,
                      _("compare bookmark")))
@@ -533,6 +536,26 @@ def updatecurbookmark(orig, ui, repo, *args, **opts):
         rev = args[0]
     setcurrent(repo, rev)
     return res
+
+def bmrevset(repo, subset, x):
+    args = revset.getargs(x, 0, 1, _('bookmark takes one or no arguments'))
+    if args:
+        bm = revset.getstring(args[0],
+                              _('the argument to bookmark must be a string'))
+        bmrev = listbookmarks(repo).get(bm, None)
+        if bmrev:
+            bmrev = repo.changelog.rev(bin(bmrev))
+        return [r for r in subset if r == bmrev]
+    bms = set([repo.changelog.rev(bin(r)) for r in listbookmarks(repo).values()])
+    return [r for r in subset if r in bms]
+revset.symbols['bookmark'] = bmrevset
+
+def revsetdoc():
+    doc = help.loaddoc('revsets')()
+    doc += _('\nAdded by the bookmarks extension:\n\n'
+           '``bookmark([name])``\n'
+           '  The named bookmark or all bookmarks.\n')
+    return doc
 
 cmdtable = {
     "bookmarks":

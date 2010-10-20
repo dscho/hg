@@ -14,7 +14,7 @@ For more information:
 http://mercurial.selenic.com/wiki/RebaseExtension
 '''
 
-from mercurial import hg, util, repair, merge, cmdutil, commands, error
+from mercurial import hg, util, repair, merge, cmdutil, commands
 from mercurial import extensions, ancestor, copies, patch
 from mercurial.commands import templateopts
 from mercurial.node import nullrev
@@ -148,9 +148,14 @@ def rebase(ui, repo, **opts):
             targetancestors = set(repo.changelog.ancestors(target))
             targetancestors.add(target)
 
-        for rev in sorted(state):
+        sortedstate = sorted(state)
+        total = len(sortedstate)
+        pos = 0
+        for rev in sortedstate:
+            pos += 1
             if state[rev] == -1:
-                ui.debug("rebasing %d:%s\n" % (rev, repo[rev]))
+                ui.progress(_("rebasing"), pos, ("%d:%s" % (rev, repo[rev])),
+                            _('changesets'), total)
                 storestatus(repo, originalwd, target, state, collapsef, keepf,
                                                     keepbranchesf, external)
                 p1, p2 = defineparents(repo, rev, target, state,
@@ -179,6 +184,7 @@ def rebase(ui, repo, **opts):
                         skipped.add(rev)
                     state[rev] = p1
 
+        ui.progress(_('rebasing'), None)
         ui.note(_('rebase merging completed\n'))
 
         if collapsef and not keepopen:

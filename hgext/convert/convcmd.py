@@ -112,8 +112,8 @@ class converter(object):
         if authorfile and os.path.exists(authorfile):
             self.readauthormap(authorfile)
         # Extend/Override with new author map if necessary
-        if opts.get('authors'):
-            self.readauthormap(opts.get('authors'))
+        if opts.get('authormap'):
+            self.readauthormap(opts.get('authormap'))
             self.authorfile = self.dest.authorfile()
 
         self.splicemap = mapfile(ui, opts.get('splicemap'))
@@ -344,14 +344,14 @@ class converter(object):
             c = None
 
             self.ui.status(_("converting...\n"))
-            for i, c in enumerate(t):                
+            for i, c in enumerate(t):
                 num -= 1
                 desc = self.commitcache[c].desc
                 if "\n" in desc:
                     desc = desc.splitlines()[0]
                 # convert log message to local encoding without using
-                # tolocal() because encoding.encoding conver() use it as
-                # 'utf-8'
+                # tolocal() because the encoding.encoding convert()
+                # uses is 'utf-8'
                 self.ui.status("%d %s\n" % (num, recode(desc)))
                 self.ui.note(_("source: %s\n") % recode(c))
                 self.ui.progress(_('converting'), i, unit=_('revisions'),
@@ -391,6 +391,10 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     global orig_encoding
     orig_encoding = encoding.encoding
     encoding.encoding = 'UTF-8'
+
+    # support --authors as an alias for --authormap
+    if not opts.get('authormap'):
+        opts['authormap'] = opts.get('authors')
 
     if not dest:
         dest = hg.defaultdest(src) + "-hg"

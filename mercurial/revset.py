@@ -7,12 +7,12 @@
 
 import re
 import parser, util, error, discovery
-import match as _match
+import match as matchmod
 from i18n import _
 
 elements = {
     "(": (20, ("group", 1, ")"), ("func", 1, ")")),
-    "-": (19, ("negate", 19), ("minus", 19)),
+    "-": (5, ("negate", 19), ("minus", 5)),
     "::": (17, ("dagrangepre", 17), ("dagrange", 17),
            ("dagrangepost", 17)),
     "..": (17, ("dagrangepre", 17), ("dagrange", 17),
@@ -48,7 +48,14 @@ def tokenize(program):
             pos += 1 # skip ahead
         elif c in "():,-|&+!": # handle simple operators
             yield (c, None, pos)
-        elif c in '"\'': # handle quoted strings
+        elif (c in '"\'' or c == 'r' and
+              program[pos:pos + 2] in ("r'", 'r"')): # handle quoted strings
+            if c == 'r':
+                pos += 1
+                c = program[pos]
+                decode = lambda x: x
+            else:
+                decode = lambda x: x.decode('string-escape')
             pos += 1
             s = pos
             while pos < l: # find closing quote
@@ -57,7 +64,7 @@ def tokenize(program):
                     pos += 2
                     continue
                 if d == c:
-                    yield ('string', program[s:pos].decode('string-escape'), s)
+                    yield ('string', decode(program[s:pos]), s)
                     break
                 pos += 1
             else:
@@ -166,24 +173,41 @@ def func(repo, subset, a, b):
 
 # functions
 
+def node(repo, subset, x):
+    l = getargs(x, 1, 1, _("id requires one argument"))
+    n = getstring(l[0], _("id requires a string"))
+    if len(n) == 40:
+        rn = repo[n].rev()
+    else:
+        rn = repo.changelog.rev(repo.changelog._partialmatch(n))
+    return [r for r in subset if r == rn]
+
+def rev(repo, subset, x):
+    l = getargs(x, 1, 1, _("rev requires one argument"))
+    try:
+        l = int(getstring(l[0], _("rev requires a number")))
+    except ValueError:
+        raise error.ParseError(_("rev expects a number"))
+    return [r for r in subset if r == l]
+
 def p1(repo, subset, x):
     ps = set()
     cl = repo.changelog
-    for r in getset(repo, subset, x):
+    for r in getset(repo, range(len(repo)), x):
         ps.add(cl.parentrevs(r)[0])
     return [r for r in subset if r in ps]
 
 def p2(repo, subset, x):
     ps = set()
     cl = repo.changelog
-    for r in getset(repo, subset, x):
+    for r in getset(repo, range(len(repo)), x):
         ps.add(cl.parentrevs(r)[1])
     return [r for r in subset if r in ps]
 
 def parents(repo, subset, x):
     ps = set()
     cl = repo.changelog
-    for r in getset(repo, subset, x):
+    for r in getset(repo, range(len(repo)), x):
         ps.update(cl.parentrevs(r))
     return [r for r in subset if r in ps]
 
@@ -195,10 +219,18 @@ def maxrev(repo, subset, x):
             return [m]
     return []
 
+def minrev(repo, subset, x):
+    s = getset(repo, subset, x)
+    if s:
+        m = min(s)
+        if m in subset:
+            return [m]
+    return []
+
 def limit(repo, subset, x):
-    l = getargs(x, 2, 2, _("limit wants two arguments"))
+    l = getargs(x, 2, 2, _("limit requires two arguments"))
     try:
-        lim = int(getstring(l[1], _("limit wants a number")))
+        lim = int(getstring(l[1], _("limit requires a number")))
     except ValueError:
         raise error.ParseError(_("limit expects a number"))
     return getset(repo, subset, l[0])[:lim]
@@ -206,7 +238,7 @@ def limit(repo, subset, x):
 def children(repo, subset, x):
     cs = set()
     cl = repo.changelog
-    s = set(getset(repo, subset, x))
+    s = set(getset(repo, range(len(repo)), x))
     for r in xrange(0, len(repo)):
         for p in cl.parentrevs(r):
             if p in s:
@@ -222,7 +254,7 @@ def branch(repo, subset, x):
     return [r for r in subset if r in s or repo[r].branch() in b]
 
 def ancestor(repo, subset, x):
-    l = getargs(x, 2, 2, _("ancestor wants two arguments"))
+    l = getargs(x, 2, 2, _("ancestor requires two arguments"))
     r = range(len(repo))
     a = getset(repo, r, l[0])
     b = getset(repo, r, l[1])
@@ -253,12 +285,12 @@ def follow(repo, subset, x):
     return [r for r in subset if r in s]
 
 def date(repo, subset, x):
-    ds = getstring(x, _("date wants a string"))
+    ds = getstring(x, _("date requires a string"))
     dm = util.matchdate(ds)
     return [r for r in subset if dm(repo[r].date()[0])]
 
 def keyword(repo, subset, x):
-    kw = getstring(x, _("keyword wants a string")).lower()
+    kw = getstring(x, _("keyword requires a string")).lower()
     l = []
     for r in subset:
         c = repo[r]
@@ -269,7 +301,7 @@ def keyword(repo, subset, x):
 
 def grep(repo, subset, x):
     try:
-        gr = re.compile(getstring(x, _("grep wants a string")))
+        gr = re.compile(getstring(x, _("grep requires a string")))
     except re.error, e:
         raise error.ParseError(_('invalid match pattern: %s') % e)
     l = []
@@ -282,12 +314,12 @@ def grep(repo, subset, x):
     return l
 
 def author(repo, subset, x):
-    n = getstring(x, _("author wants a string")).lower()
+    n = getstring(x, _("author requires a string")).lower()
     return [r for r in subset if n in repo[r].user().lower()]
 
 def hasfile(repo, subset, x):
-    pat = getstring(x, _("file wants a pattern"))
-    m = _match.match(repo.root, repo.getcwd(), [pat])
+    pat = getstring(x, _("file requires a pattern"))
+    m = matchmod.match(repo.root, repo.getcwd(), [pat])
     s = []
     for r in subset:
         for f in repo[r].files():
@@ -297,8 +329,8 @@ def hasfile(repo, subset, x):
     return s
 
 def contains(repo, subset, x):
-    pat = getstring(x, _("contains wants a pattern"))
-    m = _match.match(repo.root, repo.getcwd(), [pat])
+    pat = getstring(x, _("contains requires a pattern"))
+    m = matchmod.match(repo.root, repo.getcwd(), [pat])
     s = []
     if m.files() == [pat]:
         for r in subset:
@@ -314,7 +346,7 @@ def contains(repo, subset, x):
     return s
 
 def checkstatus(repo, subset, pat, field):
-    m = _match.match(repo.root, repo.getcwd(), [pat])
+    m = matchmod.match(repo.root, repo.getcwd(), [pat])
     s = []
     fast = (m.files() == [pat])
     for r in subset:
@@ -341,15 +373,15 @@ def checkstatus(repo, subset, pat, field):
     return s
 
 def modifies(repo, subset, x):
-    pat = getstring(x, _("modifies wants a pattern"))
+    pat = getstring(x, _("modifies requires a pattern"))
     return checkstatus(repo, subset, pat, 0)
 
 def adds(repo, subset, x):
-    pat = getstring(x, _("adds wants a pattern"))
+    pat = getstring(x, _("adds requires a pattern"))
     return checkstatus(repo, subset, pat, 1)
 
 def removes(repo, subset, x):
-    pat = getstring(x, _("removes wants a pattern"))
+    pat = getstring(x, _("removes requires a pattern"))
     return checkstatus(repo, subset, pat, 2)
 
 def merge(repo, subset, x):
@@ -373,8 +405,14 @@ def reverse(repo, subset, x):
     l.reverse()
     return l
 
+def present(repo, subset, x):
+    try:
+        return getset(repo, subset, x)
+    except error.RepoLookupError:
+        return []
+
 def sort(repo, subset, x):
-    l = getargs(x, 1, 2, _("sort wants one or two arguments"))
+    l = getargs(x, 1, 2, _("sort requires one or two arguments"))
     keys = "rev"
     if len(l) == 2:
         keys = getstring(l[1], _("sort spec must be a string"))
@@ -431,8 +469,8 @@ def roots(repo, subset, x):
 
 def outgoing(repo, subset, x):
     import hg # avoid start-up nasties
-    l = getargs(x, 0, 1, _("outgoing wants a repository path"))
-    dest = l and getstring(l[0], _("outgoing wants a repository path")) or ''
+    l = getargs(x, 0, 1, _("outgoing requires a repository path"))
+    dest = l and getstring(l[0], _("outgoing requires a repository path")) or ''
     dest = repo.ui.expandpath(dest or 'default-push', dest or 'default')
     dest, branches = hg.parseurl(dest)
     revs, checkout = hg.addbranchrevs(repo, repo, branches, [])
@@ -446,10 +484,15 @@ def outgoing(repo, subset, x):
     o = set([cl.rev(r) for r in repo.changelog.nodesbetween(o, revs)[0]])
     return [r for r in subset if r in o]
 
-def tagged(repo, subset, x):
-    getargs(x, 0, 0, _("tagged takes no arguments"))
+def tag(repo, subset, x):
+    args = getargs(x, 0, 1, _("tag takes one or no arguments"))
     cl = repo.changelog
-    s = set([cl.rev(n) for t, n in repo.tagslist() if t != 'tip'])
+    if args:
+        tn = getstring(args[0],
+                       _('the argument to tag must be a string'))
+        s = set([cl.rev(n) for t, n in repo.tagslist() if t == tn])
+    else:
+        s = set([cl.rev(n) for t, n in repo.tagslist() if t != 'tip'])
     return [r for r in subset if r in s]
 
 symbols = {
@@ -472,17 +515,22 @@ symbols = {
     "keyword": keyword,
     "limit": limit,
     "max": maxrev,
+    "min": minrev,
     "merge": merge,
     "modifies": modifies,
+    "id": node,
     "outgoing": outgoing,
     "p1": p1,
     "p2": p2,
     "parents": parents,
+    "present": present,
     "removes": removes,
     "reverse": reverse,
+    "rev": rev,
     "roots": roots,
     "sort": sort,
-    "tagged": tagged,
+    "tag": tag,
+    "tagged": tag,
     "user": author,
 }
 
@@ -549,9 +597,9 @@ def optimize(x, small):
     elif op == 'func':
         f = getstring(x[1], _("not a symbol"))
         wa, ta = optimize(x[2], small)
-        if f in "grep date user author keyword branch file":
+        if f in "grep date user author keyword branch file outgoing":
             w = 10 # slow
-        elif f in "modifies adds removes outgoing":
+        elif f in "modifies adds removes":
             w = 30 # slower
         elif f == "contains":
             w = 100 # very slow

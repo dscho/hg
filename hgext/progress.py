@@ -51,7 +51,8 @@ def spacejoin(*args):
     return ' '.join(s for s in args if s)
 
 def shouldprint(ui):
-    return sys.stderr.isatty() or ui.configbool('progress', 'assume-tty')
+    return (getattr(sys.stderr, 'isatty', None) and
+            (sys.stderr.isatty() or ui.configbool('progress', 'assume-tty')))
 
 class progbar(object):
     def __init__(self, ui):
@@ -155,7 +156,7 @@ class progbar(object):
         sys.stderr.flush()
 
     def width(self):
-        tw = util.termwidth()
+        tw = self.ui.termwidth()
         return min(int(self.ui.config('progress', 'width', default=tw)), tw)
 
     def progress(self, topic, pos, item='', unit='', total=None):

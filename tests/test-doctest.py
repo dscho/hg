@@ -10,6 +10,9 @@ doctest.testmod(mercurial.changelog)
 import mercurial.dagparser
 doctest.testmod(mercurial.dagparser, optionflags=doctest.NORMALIZE_WHITESPACE)
 
+import mercurial.match
+doctest.testmod(mercurial.match)
+
 import mercurial.url
 doctest.testmod(mercurial.url)
 

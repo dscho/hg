@@ -13,16 +13,16 @@ were part of the actual repository.
 
 from node import nullid
 from i18n import _
-import os, struct, bz2, zlib, tempfile, shutil
-import changegroup, util, mdiff
+import os, struct, tempfile, shutil
+import changegroup, util, mdiff, discovery
 import localrepo, changelog, manifest, filelog, revlog, error
 
 class bundlerevlog(revlog.revlog):
-    def __init__(self, opener, indexfile, bundlefile,
+    def __init__(self, opener, indexfile, bundle,
                  linkmapper=None):
         # How it works:
         # to retrieve a revision, we need to know the offset of
-        # the revision in the bundlefile (an opened file).
+        # the revision in the bundle (an unbundle object).
         #
         # We store this offset in the index (start), to differentiate a
         # rev in the bundle and from a rev in the revlog, we check
@@ -30,11 +30,14 @@ class bundlerevlog(revlog.revlog):
         # (it is bigger since we store the node to which the delta is)
         #
         revlog.revlog.__init__(self, opener, indexfile)
-        self.bundlefile = bundlefile
+        self.bundle = bundle
         self.basemap = {}
         def chunkpositer():
-            for chunk in changegroup.chunkiter(bundlefile):
-                pos = bundlefile.tell()
+            while 1:
+                chunk = bundle.chunk()
+                if not chunk:
+                    break
+                pos = bundle.tell()
                 yield chunk, pos - len(chunk)
         n = len(self)
         prev = None
@@ -68,7 +71,7 @@ class bundlerevlog(revlog.revlog):
             prev = node
             n += 1
 
-    def bundle(self, rev):
+    def inbundle(self, rev):
         """is rev from the bundle"""
         if rev < 0:
             return False
@@ -79,19 +82,19 @@ class bundlerevlog(revlog.revlog):
         # Warning: in case of bundle, the diff is against bundlebase,
         # not against rev - 1
         # XXX: could use some caching
-        if not self.bundle(rev):
+        if not self.inbundle(rev):
             return revlog.revlog._chunk(self, rev)
-        self.bundlefile.seek(self.start(rev))
-        return self.bundlefile.read(self.length(rev))
+        self.bundle.seek(self.start(rev))
+        return self.bundle.read(self.length(rev))
 
     def revdiff(self, rev1, rev2):
         """return or calculate a delta between two revisions"""
-        if self.bundle(rev1) and self.bundle(rev2):
+        if self.inbundle(rev1) and self.inbundle(rev2):
             # hot path for bundle
             revb = self.rev(self.bundlebase(rev2))
             if revb == rev1:
                 return self._chunk(rev2)
-        elif not self.bundle(rev1) and not self.bundle(rev2):
+        elif not self.inbundle(rev1) and not self.inbundle(rev2):
             return revlog.revlog.revdiff(self, rev1, rev2)
 
         return mdiff.textdiff(self.revision(self.node(rev1)),
@@ -107,7 +110,7 @@ class bundlerevlog(revlog.revlog):
         iter_node = node
         rev = self.rev(iter_node)
         # reconstruct the revision if it is from a changegroup
-        while self.bundle(rev):
+        while self.inbundle(rev):
             if self._cache and self._cache[0] == iter_node:
                 text = self._cache[2]
                 break
@@ -139,20 +142,20 @@ class bundlerevlog(revlog.revlog):
         raise NotImplementedError
 
 class bundlechangelog(bundlerevlog, changelog.changelog):
-    def __init__(self, opener, bundlefile):
+    def __init__(self, opener, bundle):
         changelog.changelog.__init__(self, opener)
-        bundlerevlog.__init__(self, opener, self.indexfile, bundlefile)
+        bundlerevlog.__init__(self, opener, self.indexfile, bundle)
 
 class bundlemanifest(bundlerevlog, manifest.manifest):
-    def __init__(self, opener, bundlefile, linkmapper):
+    def __init__(self, opener, bundle, linkmapper):
         manifest.manifest.__init__(self, opener)
-        bundlerevlog.__init__(self, opener, self.indexfile, bundlefile,
+        bundlerevlog.__init__(self, opener, self.indexfile, bundle,
                               linkmapper)
 
 class bundlefilelog(bundlerevlog, filelog.filelog):
-    def __init__(self, opener, path, bundlefile, linkmapper):
+    def __init__(self, opener, path, bundle, linkmapper):
         filelog.filelog.__init__(self, opener, path)
-        bundlerevlog.__init__(self, opener, self.indexfile, bundlefile,
+        bundlerevlog.__init__(self, opener, self.indexfile, bundle,
                               linkmapper)
 
 class bundlerepository(localrepo.localrepository):
@@ -171,58 +174,41 @@ class bundlerepository(localrepo.localrepository):
             self._url = 'bundle:' + bundlename
 
         self.tempfile = None
-        self.bundlefile = open(bundlename, "rb")
-        header = self.bundlefile.read(6)
-        if not header.startswith("HG"):
-            raise util.Abort(_("%s: not a Mercurial bundle file") % bundlename)
-        elif not header.startswith("HG10"):
-            raise util.Abort(_("%s: unknown bundle version") % bundlename)
-        elif (header == "HG10BZ") or (header == "HG10GZ"):
+        f = open(bundlename, "rb")
+        self.bundle = changegroup.readbundle(f, bundlename)
+        if self.bundle.compressed():
             fdtemp, temp = tempfile.mkstemp(prefix="hg-bundle-",
                                             suffix=".hg10un", dir=self.path)
             self.tempfile = temp
             fptemp = os.fdopen(fdtemp, 'wb')
-            def generator(f):
-                if header == "HG10BZ":
-                    zd = bz2.BZ2Decompressor()
-                    zd.decompress("BZ")
-                elif header == "HG10GZ":
-                    zd = zlib.decompressobj()
-                for chunk in f:
-                    yield zd.decompress(chunk)
-            gen = generator(util.filechunkiter(self.bundlefile, 4096))
 
             try:
                 fptemp.write("HG10UN")
-                for chunk in gen:
+                while 1:
+                    chunk = self.bundle.read(2**18)
+                    if not chunk:
+                        break
                     fptemp.write(chunk)
             finally:
                 fptemp.close()
-                self.bundlefile.close()
 
-            self.bundlefile = open(self.tempfile, "rb")
-            # seek right after the header
-            self.bundlefile.seek(6)
-        elif header == "HG10UN":
-            # nothing to do
-            pass
-        else:
-            raise util.Abort(_("%s: unknown bundle compression type")
-                             % bundlename)
+            f = open(self.tempfile, "rb")
+            self.bundle = changegroup.readbundle(f, bundlename)
+
         # dict with the mapping 'filename' -> position in the bundle
         self.bundlefilespos = {}
 
     @util.propertycache
     def changelog(self):
-        c = bundlechangelog(self.sopener, self.bundlefile)
-        self.manstart = self.bundlefile.tell()
+        c = bundlechangelog(self.sopener, self.bundle)
+        self.manstart = self.bundle.tell()
         return c
 
     @util.propertycache
     def manifest(self):
-        self.bundlefile.seek(self.manstart)
-        m = bundlemanifest(self.sopener, self.bundlefile, self.changelog.rev)
-        self.filestart = self.bundlefile.tell()
+        self.bundle.seek(self.manstart)
+        m = bundlemanifest(self.sopener, self.bundle, self.changelog.rev)
+        self.filestart = self.bundle.tell()
         return m
 
     @util.propertycache
@@ -240,33 +226,32 @@ class bundlerepository(localrepo.localrepository):
 
     def file(self, f):
         if not self.bundlefilespos:
-            self.bundlefile.seek(self.filestart)
+            self.bundle.seek(self.filestart)
             while 1:
-                chunk = changegroup.getchunk(self.bundlefile)
+                chunk = self.bundle.chunk()
                 if not chunk:
                     break
-                self.bundlefilespos[chunk] = self.bundlefile.tell()
-                for c in changegroup.chunkiter(self.bundlefile):
-                    pass
+                self.bundlefilespos[chunk] = self.bundle.tell()
+                while 1:
+                    c = self.bundle.chunk()
+                    if not c:
+                        break
 
         if f[0] == '/':
             f = f[1:]
         if f in self.bundlefilespos:
-            self.bundlefile.seek(self.bundlefilespos[f])
-            return bundlefilelog(self.sopener, f, self.bundlefile,
+            self.bundle.seek(self.bundlefilespos[f])
+            return bundlefilelog(self.sopener, f, self.bundle,
                                  self.changelog.rev)
         else:
             return filelog.filelog(self.sopener, f)
 
     def close(self):
         """Close assigned bundle file immediately."""
-        self.bundlefile.close()
+        self.bundle.close()
 
     def __del__(self):
-        bundlefile = getattr(self, 'bundlefile', None)
-        if bundlefile and not bundlefile.closed:
-            bundlefile.close()
-        tempfile = getattr(self, 'tempfile', None)
+        del self.bundle
         if tempfile is not None:
             os.unlink(tempfile)
         if self._tempparent:
@@ -303,3 +288,35 @@ def instance(ui, path, create):
     else:
         repopath, bundlename = parentpath, path
     return bundlerepository(ui, repopath, bundlename)
+
+def getremotechanges(ui, repo, other, revs=None, bundlename=None, force=False):
+    tmp = discovery.findcommonincoming(repo, other, heads=revs, force=force)
+    common, incoming, rheads = tmp
+    if not incoming:
+        try:
+            os.unlink(bundlename)
+        except:
+            pass
+        return other, None, None
+
+    bundle = None
+    if bundlename or not other.local():
+        # create a bundle (uncompressed if other repo is not local)
+
+        if revs is None and other.capable('changegroupsubset'):
+            revs = rheads
+
+        if revs is None:
+            cg = other.changegroup(incoming, "incoming")
+        else:
+            cg = other.changegroupsubset(incoming, revs, 'incoming')
+        bundletype = other.local() and "HG10BZ" or "HG10UN"
+        fname = bundle = changegroup.writebundle(cg, bundlename, bundletype)
+        # keep written bundle?
+        if bundlename:
+            bundle = None
+        if not other.local():
+            # use the created uncompressed bundlerepo
+            other = bundlerepository(ui, repo.root, fname)
+    return (other, incoming, bundle)
+
