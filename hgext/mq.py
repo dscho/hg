@@ -654,9 +654,11 @@ class queue(object):
 
             message = ph.message
             if not message:
+                # The commit message should not be translated
                 message = "imported patch %s\n" % patchname
             else:
                 if list:
+                    # The commit message should not be translated
                     message.append("\nimported patch %s" % patchname)
                 message = '\n'.join(message)
 
@@ -690,7 +692,7 @@ class queue(object):
             n = repo.commit(message, ph.user, ph.date, match=match, force=True)
 
             if n is None:
-                raise util.Abort(_("repo commit failed"))
+                raise util.Abort(_("repository commit failed"))
 
             if update_status:
                 self.applied.append(statusentry(n, patchname))
@@ -819,7 +821,11 @@ class queue(object):
         diffopts = self.diffopts({'git': opts.get('git')})
         self.check_reserved_name(patchfn)
         if os.path.exists(self.join(patchfn)):
-            raise util.Abort(_('patch "%s" already exists') % patchfn)
+            if os.path.isdir(self.join(patchfn)):
+                raise util.Abort(_('"%s" already exists as a directory')
+                                 % patchfn)
+            else:
+                raise util.Abort(_('patch "%s" already exists') % patchfn)
         if opts.get('include') or opts.get('exclude') or pats:
             match = cmdutil.match(repo, pats, opts)
             # detect missing files in pats
@@ -837,8 +843,12 @@ class queue(object):
         insert = self.full_series_end()
         wlock = repo.wlock()
         try:
-            # if patch file write fails, abort early
-            p = self.opener(patchfn, "w")
+            try:
+                # if patch file write fails, abort early
+                p = self.opener(patchfn, "w")
+            except IOError, e:
+                raise util.Abort(_('cannot write patch "%s": %s')
+                                 % (patchfn, e.strerror))
             try:
                 if self.plainmode:
                     if user:
@@ -1542,7 +1552,7 @@ class queue(object):
             self.ui.warn(_("saved queue repository parents: %s %s\n") %
                          (short(qpp[0]), short(qpp[1])))
             if qupdate:
-                self.ui.status(_("queue directory updating\n"))
+                self.ui.status(_("updating queue directory\n"))
                 r = self.qrepo()
                 if not r:
                     self.ui.warn(_("Unable to load queue repository\n"))
@@ -2398,7 +2408,7 @@ def rename(ui, repo, patch, name=None, **opts):
         os.makedirs(destdir)
     util.rename(q.join(patch), absdest)
     r = q.qrepo()
-    if r:
+    if r and patch in r.dirstate:
         wctx = r[None]
         wlock = r.wlock()
         try:

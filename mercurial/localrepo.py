@@ -981,7 +981,7 @@ class localrepository(repo.repository):
         """
 
         tr = lock = None
-        removed = ctx.removed()
+        removed = list(ctx.removed())
         p1, p2 = ctx.p1(), ctx.p2()
         m1 = p1.manifest().copy()
         m2 = p2.manifest()
@@ -1272,7 +1272,7 @@ class localrepository(repo.repository):
                 self.ui.status(_("no changes found\n"))
                 return 0
 
-            if fetch == [nullid]:
+            if heads is None and fetch == [nullid]:
                 self.ui.status(_("requesting all changes\n"))
             elif heads is None and remote.capable('changegroupsubset'):
                 # issue1320, avoid a race if remote changed after discovery

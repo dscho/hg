@@ -390,8 +390,20 @@ and now for something completely different
   ** = cleverdecode:
   [encode]
   ** = cleverencode:
-  $ echo
-  
+
+Trigger deprecation warning:
+
+  $ hg id -t
+  win32text is deprecated: http://mercurial.selenic.com/wiki/Win32TextExtension
+  tip
+
+Disable warning:
+
+  $ echo '[win32text]' >> .hg/hgrc
+  $ echo 'warn = no' >> .hg/hgrc
+  $ hg id -t
+  tip
+
   $ rm f3 f4.bat bin
   $ hg co -C 2>&1 | python -c 'import sys, os; sys.stdout.write(sys.stdin.read().replace(os.getcwd(), "...."))'
   WARNING: f4.bat already has CRLF line endings

@@ -1157,19 +1157,34 @@ class revlog(object):
     def _addrevision(self, node, text, transaction, link, p1, p2,
                      cachedelta, ifh, dfh):
 
-        def buildtext(cachedelta):
-            if text is not None:
-                return text
+        btext = [text]
+        def buildtext():
+            if btext[0] is not None:
+                return btext[0]
             # flush any pending writes here so we can read it in revision
             if dfh:
                 dfh.flush()
             ifh.flush()
             basetext = self.revision(self.node(cachedelta[0]))
-            patchedtext = mdiff.patch(basetext, cachedelta[1])
-            chk = hash(patchedtext, p1, p2)
+            btext[0] = mdiff.patch(basetext, cachedelta[1])
+            chk = hash(btext[0], p1, p2)
             if chk != node:
                 raise RevlogError(_("consistency error in delta"))
-            return patchedtext
+            return btext[0]
+
+        def builddelta(rev):
+            # can we use the cached delta?
+            if cachedelta and cachedelta[0] == rev:
+                delta = cachedelta[1]
+            else:
+                t = buildtext()
+                ptext = self.revision(self.node(rev))
+                delta = mdiff.textdiff(ptext, t)
+            data = compress(delta)
+            l = len(data[1]) + len(data[0])
+            base = self.base(rev)
+            dist = l + offset - self.start(base)
+            return dist, l, data, base
 
         curr = len(self)
         prev = curr - 1
@@ -1177,28 +1192,17 @@ class revlog(object):
         offset = self.end(prev)
         flags = 0
         d = None
-
-        if self._parentdelta:
-            deltarev, deltanode = self.rev(p1), p1
-            flags = REVIDX_PARENTDELTA
-        else:
-            deltarev, deltanode = prev, self.node(prev)
+        p1r, p2r = self.rev(p1), self.rev(p2)
 
         # should we try to build a delta?
-        if deltarev != nullrev:
-            # can we use the cached delta?
-            if cachedelta:
-                cacherev, d = cachedelta
-                if cacherev != deltarev:
-                    text = buildtext(cachedelta)
-                    d = None
-            if d is None:
-                ptext = self.revision(deltanode)
-                d = mdiff.textdiff(ptext, text)
-            data = compress(d)
-            l = len(data[1]) + len(data[0])
-            base = self.base(deltarev)
-            dist = l + offset - self.start(base)
+        if prev != nullrev:
+            d = builddelta(prev)
+            if self._parentdelta and prev != p1r:
+                d2 = builddelta(p1r)
+                if d2 < d:
+                    d = d2
+                    flags = REVIDX_PARENTDELTA
+            dist, l, data, base = d
 
         # full versions are inserted when the needed deltas
         # become comparable to the uncompressed text
@@ -1210,13 +1214,13 @@ class revlog(object):
             textlen = len(text)
         if (d is None or dist > textlen * 2 or
             (self.flags(base) & REVIDX_PUNCHED_FLAG)):
-            text = buildtext(cachedelta)
+            text = buildtext()
             data = compress(text)
             l = len(data[1]) + len(data[0])
             base = curr
 
         e = (offset_type(offset, flags), l, textlen,
-             base, link, self.rev(p1), self.rev(p2), node)
+             base, link, p1r, p2r, node)
         self.index.insert(-1, e)
         self.nodemap[node] = curr
 

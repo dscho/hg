@@ -187,6 +187,8 @@ def _abssource(repo, push=False, abort=True):
             else: # plain file system path
                 return posixpath.normpath(os.path.join(parent, repo._subsource))
     else: # recursion reached top repo
+        if hasattr(repo, '_subtoppath'):
+            return repo._subtoppath
         if push and repo.ui.config('paths', 'default-push'):
             return repo.ui.config('paths', 'default-push')
         if repo.ui.config('paths', 'default'):
@@ -490,8 +492,8 @@ class svnsubrepo(abstractsubrepo):
         doc = xml.dom.minidom.parseString(output)
         entries = doc.getElementsByTagName('entry')
         if not entries:
-            return 0
-        return int(entries[0].getAttribute('revision') or 0)
+            return '0'
+        return str(entries[0].getAttribute('revision')) or '0'
 
     def _wcchanged(self):
         """Return (changes, extchanges) where changes is True

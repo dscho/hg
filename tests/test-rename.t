@@ -25,6 +25,17 @@ rename a single file
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ rm d2/c
 
+rename a single file using absolute paths
+
+  $ hg rename `pwd`/d1/d11/a1 `pwd`/d2/c
+  $ hg status -C
+  A d2/c
+    d1/d11/a1
+  R d1/d11/a1
+  $ hg update -C
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ rm d2/c
+
 rename --after a single file
 
   $ mv d1/d11/a1 d2/c
@@ -418,7 +429,7 @@ do not copy more than one source file to the same destination file
   4 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ rm -rf d3
 
-move a whole subtree with \"hg rename .\"
+move a whole subtree with "hg rename ."
 
   $ mkdir d3
   $ (cd d1; hg rename . ../d3)
@@ -443,7 +454,7 @@ move a whole subtree with \"hg rename .\"
   4 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ rm -rf d3
 
-move a whole subtree with \"hg rename --after .\"
+move a whole subtree with "hg rename --after ."
 
   $ mkdir d3
   $ mv d1/* d3
@@ -469,7 +480,7 @@ move a whole subtree with \"hg rename --after .\"
   4 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ rm -rf d3
 
-move the parent tree with \"hg rename ..\"
+move the parent tree with "hg rename .."
 
   $ (cd d1/d11; hg rename .. ../../d3)
   moving ../a to ../../d3/a

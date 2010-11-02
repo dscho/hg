@@ -79,7 +79,11 @@ def loaddoc(topic):
                 break
 
         path = os.path.join(docdir, topic + ".txt")
-        return gettext(open(path).read())
+        doc = gettext(open(path).read())
+        for rewriter in helphooks.get(topic, []):
+            doc = rewriter(topic, doc)
+        return doc
+
     return loader
 
 helptable = [
@@ -92,13 +96,22 @@ helptable = [
      loaddoc('revisions')),
     (['mrevs', 'multirevs'], _('Specifying Multiple Revisions'),
      loaddoc('multirevs')),
-    (['revsets'], _("Specifying Revision Sets"), loaddoc('revsets')),
+    (['revset', 'revsets'], _("Specifying Revision Sets"), loaddoc('revsets')),
     (['diffs'], _('Diff Formats'), loaddoc('diffs')),
     (['merge-tools'], _('Merge Tools'), loaddoc('merge-tools')),
     (['templating', 'templates'], _('Template Usage'),
      loaddoc('templates')),
     (['urls'], _('URL Paths'), loaddoc('urls')),
     (["extensions"], _("Using additional features"), extshelp),
+    (["subrepo", "subrepos"], _("Subrepositories"), loaddoc('subrepos')),
     (["hgweb"], _("Configuring hgweb"), loaddoc('hgweb')),
     (["glossary"], _("Glossary"), loaddoc('glossary')),
 ]
+
+# Map topics to lists of callable taking the current topic help and
+# returning the updated version
+helphooks = {
+}
+
+def addtopichook(topic, rewriter):
+    helphooks.setdefault(topic, []).append(rewriter)

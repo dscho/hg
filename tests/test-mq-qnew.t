@@ -23,7 +23,9 @@
   >     hg qinit -c
   > 
   >     echo '% qnew with name containing slash'
+  >     hg qnew foo/
   >     hg qnew foo/bar.patch
+  >     hg qnew foo
   >     hg qseries
   >     hg qpop
   >     hg qdelete foo/bar.patch
@@ -105,6 +107,8 @@ plain headers
   abort: "foo#bar" cannot be used as the name of a patch
   abort: "foo:bar" cannot be used as the name of a patch
   % qnew with name containing slash
+  abort: cannot write patch "foo/": Is a directory
+  abort: "foo" already exists as a directory
   foo/bar.patch
   popping foo/bar.patch
   patch queue now empty
@@ -168,6 +172,8 @@ hg headers
   abort: "foo#bar" cannot be used as the name of a patch
   abort: "foo:bar" cannot be used as the name of a patch
   % qnew with name containing slash
+  abort: cannot write patch "foo/": Is a directory
+  abort: "foo" already exists as a directory
   foo/bar.patch
   popping foo/bar.patch
   patch queue now empty

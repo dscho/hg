@@ -131,9 +131,9 @@ class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
                 raise util.Abort(_('http authorization required'))
 
             self.ui.write(_("http authorization required\n"))
-            self.ui.status(_("realm: %s\n") % realm)
+            self.ui.write(_("realm: %s\n") % realm)
             if user:
-                self.ui.status(_("user: %s\n") % user)
+                self.ui.write(_("user: %s\n") % user)
             else:
                 user = self.ui.prompt(_("user:"), default=None)
 
@@ -540,8 +540,8 @@ if has_https:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.connect((self.host, self.port))
                 if _generic_proxytunnel(self):
-                    self.sock = _ssl_wrap_socket(self.sock, self.cert_file,
-                                                 self.key_file)
+                    self.sock = _ssl_wrap_socket(self.sock, self.key_file,
+                            self.cert_file)
             else:
                 BetterHTTPS.connect(self)
 

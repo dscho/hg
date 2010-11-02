@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 from pprint import pprint
 from mercurial import minirst
 
@@ -214,3 +212,15 @@ admonitions = """
 """
 
 debugformat('admonitions', admonitions, 30)
+
+comments = """
+Some text.
+
+.. A comment
+
+   .. An indented comment
+
+   Some indented text.
+"""
+
+debugformat('comments', comments, 30)

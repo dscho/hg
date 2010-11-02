@@ -114,6 +114,7 @@ Short help:
    templating   Template Usage
    urls         URL Paths
    extensions   Using additional features
+   subrepos     Subrepositories
    hgweb        Configuring hgweb
    glossary     Glossary
   
@@ -185,6 +186,7 @@ Short help:
    templating   Template Usage
    urls         URL Paths
    extensions   Using additional features
+   subrepos     Subrepositories
    hgweb        Configuring hgweb
    glossary     Glossary
 
@@ -192,8 +194,9 @@ Test short command list with verbose option
 
   $ hg -v help shortlist
   Mercurial Distributed SCM (version *) (glob)
+  (see http://mercurial.selenic.com for more information)
   
-  Copyright (C) 2005-2010 Matt Mackall <mpm@selenic.com> and others
+  Copyright (C) 2005-2010 Matt Mackall and others
   This is free software; see the source for copying conditions. There is NO
   warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   
@@ -344,8 +347,9 @@ Test help option with version option
 
   $ hg add -h --version
   Mercurial Distributed SCM (version *) (glob)
+  (see http://mercurial.selenic.com for more information)
   
-  Copyright (C) 2005-2010 Matt Mackall <mpm@selenic.com> and others
+  Copyright (C) 2005-2010 Matt Mackall and others
   This is free software; see the source for copying conditions. There is NO
   warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   
@@ -708,6 +712,7 @@ Test that default list of commands omits extension commands
    templating   Template Usage
    urls         URL Paths
    extensions   Using additional features
+   subrepos     Subrepositories
    hgweb        Configuring hgweb
    glossary     Glossary
   
@@ -756,3 +761,30 @@ Test a help topic
       The reserved name "." indicates the working directory parent. If no
       working directory is checked out, it is equivalent to null. If an
       uncommitted merge is in progress, "." is the revision of the first parent.
+
+Test help hooks
+
+  $ cat > helphook1.py <<EOF
+  > from mercurial import help
+  > 
+  > def rewrite(topic, doc):
+  >     return doc + '\nhelphook1\n'
+  > 
+  > def extsetup(ui):
+  >     help.addtopichook('revsets', rewrite)
+  > EOF
+  $ cat > helphook2.py <<EOF
+  > from mercurial import help
+  > 
+  > def rewrite(topic, doc):
+  >     return doc + '\nhelphook2\n'
+  > 
+  > def extsetup(ui):
+  >     help.addtopichook('revsets', rewrite)
+  > EOF
+  $ echo '[extensions]' >> $HGRCPATH
+  $ echo "helphook1 = `pwd`/helphook1.py" >> $HGRCPATH
+  $ echo "helphook2 = `pwd`/helphook2.py" >> $HGRCPATH
+  $ hg help revsets | grep helphook
+      helphook1
+      helphook2

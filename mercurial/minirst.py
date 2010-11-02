@@ -248,7 +248,7 @@ def findsections(blocks):
         # +------------------------------+
         if (block['type'] == 'paragraph' and
             len(block['lines']) == 2 and
-            len(block['lines'][0]) == len(block['lines'][1]) and
+            encoding.colwidth(block['lines'][0]) == len(block['lines'][1]) and
             _sectionre.match(block['lines'][1])):
             block['underline'] = block['lines'][1][0]
             block['type'] = 'section'
@@ -290,6 +290,17 @@ def addmargins(blocks):
         else:
             blocks.insert(i, dict(lines=[''], indent=0, type='margin'))
             i += 2
+    return blocks
+
+def prunecomments(blocks):
+    """Remove comments."""
+    i = 0
+    while i < len(blocks):
+        b = blocks[i]
+        if b['type'] == 'paragraph' and b['lines'][0].startswith('.. '):
+            del blocks[i]
+        else:
+            i += 1
     return blocks
 
 _admonitionre = re.compile(r"\.\. (admonition|attention|caution|danger|"
@@ -347,7 +358,7 @@ def formatblock(block, width):
         indent += '  '
         return indent + ('\n' + indent).join(block['lines'])
     if block['type'] == 'section':
-        underline = len(block['lines'][0]) * block['underline']
+        underline = encoding.colwidth(block['lines'][0]) * block['underline']
         return "%s%s\n%s%s" % (indent, block['lines'][0],indent, underline)
     if block['type'] == 'definition':
         term = indent + block['lines'][0]
@@ -405,6 +416,7 @@ def format(text, width, indent=0, keep=None):
     blocks = hgrole(blocks)
     blocks = splitparagraphs(blocks)
     blocks = updatefieldlists(blocks)
+    blocks = prunecomments(blocks)
     blocks = addmargins(blocks)
     blocks = findadmonitions(blocks)
     text = '\n'.join(formatblock(b, width) for b in blocks)
@@ -432,6 +444,7 @@ if __name__ == "__main__":
     blocks = debug(splitparagraphs, blocks)
     blocks = debug(updatefieldlists, blocks)
     blocks = debug(findsections, blocks)
+    blocks = debug(prunecomments, blocks)
     blocks = debug(addmargins, blocks)
     blocks = debug(findadmonitions, blocks)
     print '\n'.join(formatblock(b, 30) for b in blocks)

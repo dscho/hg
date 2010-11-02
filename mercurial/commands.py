@@ -278,7 +278,11 @@ def backout(ui, repo, node=None, rev=None, **opts):
     revert_opts['no_backup'] = None
     revert(ui, repo, **revert_opts)
     if not opts.get('merge') and op1 != node:
-        return hg.update(repo, op1)
+        try:
+            ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
+            return hg.update(repo, op1)
+        finally:
+            ui.setconfig('ui', 'forcemerge', '')
 
     commit_opts = opts.copy()
     commit_opts['addremove'] = False
@@ -295,7 +299,11 @@ def backout(ui, repo, node=None, rev=None, **opts):
         hg.clean(repo, op1, show_stats=False)
         ui.status(_('merging with changeset %s\n')
                   % nice(repo.changelog.tip()))
-        return hg.merge(repo, hex(repo.changelog.tip()))
+        try:
+            ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
+            return hg.merge(repo, hex(repo.changelog.tip()))
+        finally:
+            ui.setconfig('ui', 'forcemerge', '')
     return 0
 
 def bisect(ui, repo, rev=None, extra=None, command=None,
@@ -1252,26 +1260,43 @@ def debugdate(ui, date, range=None, **opts):
         m = util.matchdate(range)
         ui.write("match: %s\n" % m(d[0]))
 
-def debugindex(ui, repo, file_):
+def debugindex(ui, repo, file_, **opts):
     """dump the contents of an index file"""
     r = None
     if repo:
         filelog = repo.file(file_)
         if len(filelog):
             r = filelog
+
+    format = opts.get('format', 0)
+    if format not in (0, 1):
+        raise util.abort("unknown format %d" % format)
+
     if not r:
         r = revlog.revlog(util.opener(os.getcwd(), audit=False), file_)
-    ui.write("   rev    offset  length   base linkrev"
-             " nodeid       p1           p2\n")
+
+    if format == 0:
+        ui.write("   rev    offset  length   base linkrev"
+                 " nodeid       p1           p2\n")
+    elif format == 1:
+        ui.write("   rev flag   offset   length"
+                 "     size   base   link     p1     p2       nodeid\n")
+
     for i in r:
         node = r.node(i)
-        try:
-            pp = r.parents(node)
-        except:
-            pp = [nullid, nullid]
-        ui.write("% 6d % 9d % 7d % 6d % 7d %s %s %s\n" % (
-                i, r.start(i), r.length(i), r.base(i), r.linkrev(i),
-            short(node), short(pp[0]), short(pp[1])))
+        if format == 0:
+            try:
+                pp = r.parents(node)
+            except:
+                pp = [nullid, nullid]
+            ui.write("% 6d % 9d % 7d % 6d % 7d %s %s %s\n" % (
+                    i, r.start(i), r.length(i), r.base(i), r.linkrev(i),
+                    short(node), short(pp[0]), short(pp[1])))
+        elif format == 1:
+            pr = r.parentrevs(i)
+            ui.write("% 6d %04x % 8d % 8d % 8d % 6d % 6d % 6d % 6d %s\n" % (
+                    i, r.flags(i), r.start(i), r.length(i), r.rawsize(i),
+                    r.base(i), r.linkrev(i), pr[0], pr[1], short(node)))
 
 def debugindexdot(ui, repo, file_):
     """dump an index DAG as a graphviz dot file"""
@@ -1369,7 +1394,7 @@ def debuginstall(ui):
                        " file)\n"))
         else:
             ui.write(_(" Internal patcher failure, please report this error"
-                       " to http://mercurial.selenic.com/bts/\n"))
+                       " to http://mercurial.selenic.com/wiki/BugTracker\n"))
     problems += patchproblems
 
     os.unlink(fa)
@@ -2021,6 +2046,8 @@ def help_(ui, name=None, with_version=False, unknowncmd=False):
         ui.write(_('use "hg help extensions" for information on enabling '
                    'extensions\n'))
 
+    help.addtopichook('revsets', revset.makedoc)
+
     if name and name != 'shortlist':
         i = None
         if unknowncmd:
@@ -2438,7 +2465,7 @@ def log(ui, repo, *pats, **opts):
     ancestors or descendants of the starting revision. --follow-first
     only follows the first parent of merge revisions.
 
-    If no revision range is specified, the default is tip:0 unless
+    If no revision range is specified, the default is ``tip:0`` unless
     --follow is set, in which case the working directory parent is
     used as the starting revision. You can specify a revision set for
     log, see :hg:`help revsets` for more information.
@@ -2487,7 +2514,8 @@ def log(ui, repo, *pats, **opts):
             return
         if df and not df(ctx.date()[0]):
             return
-        if opts['user'] and not [k for k in opts['user'] if k in ctx.user()]:
+        if opts['user'] and not [k for k in opts['user']
+                                 if k.lower() in ctx.user().lower()]:
             return
         if opts.get('keyword'):
             for k in [kw.lower() for kw in opts['keyword']]:
@@ -2774,7 +2802,11 @@ def pull(ui, repo, source="default", **opts):
     modheads = repo.pull(other, heads=revs, force=opts.get('force'))
     if checkout:
         checkout = str(repo.changelog.rev(other.lookup(checkout)))
-    return postincoming(ui, repo, modheads, opts.get('update'), checkout)
+    repo._subtoppath = source
+    try:
+        return postincoming(ui, repo, modheads, opts.get('update'), checkout)
+    finally:
+        del repo._subtoppath
 
 def push(ui, repo, dest=None, **opts):
     """push changes to the specified destination
@@ -2813,13 +2845,16 @@ def push(ui, repo, dest=None, **opts):
     if revs:
         revs = [repo.lookup(rev) for rev in revs]
 
-    # push subrepos depth-first for coherent ordering
-    c = repo['']
-    subs = c.substate # only repos that are committed
-    for s in sorted(subs):
-        if not c.sub(s).push(opts.get('force')):
-            return False
-
+    repo._subtoppath = dest
+    try:
+        # push subrepos depth-first for coherent ordering
+        c = repo['']
+        subs = c.substate # only repos that are committed
+        for s in sorted(subs):
+            if not c.sub(s).push(opts.get('force')):
+                return False
+    finally:
+        del repo._subtoppath
     r = repo.push(other, opts.get('force'), revs=revs,
                   newbranch=opts.get('new_branch'))
     return r == 0
@@ -2943,7 +2978,7 @@ def resolve(ui, repo, *pats, **opts):
 
     The resolve command can be used in the following ways:
 
-    - :hg:`resolve [--tool] FILE...`: attempt to re-merge the specified
+    - :hg:`resolve [--tool TOOL] FILE...`: attempt to re-merge the specified
       files, discarding any previous merge attempts. Re-merging is not
       performed for files already marked as resolved. Use ``--all/-a``
       to selects all unresolved files. ``--tool`` can be used to specify
@@ -3854,7 +3889,8 @@ def version_(ui):
     ui.write(_("Mercurial Distributed SCM (version %s)\n")
              % util.version())
     ui.status(_(
-        "\nCopyright (C) 2005-2010 Matt Mackall <mpm@selenic.com> and others\n"
+        "(see http://mercurial.selenic.com for more information)\n"
+        "\nCopyright (C) 2005-2010 Matt Mackall and others\n"
         "This is free software; see the source for copying conditions. "
         "There is NO\nwarranty; "
         "not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
@@ -4005,6 +4041,8 @@ table = {
            _('merge with old dirstate parent after backout')),
           ('', 'parent', '',
            _('parent to choose when backing out merge'), _('REV')),
+          ('t', 'tool', '',
+           _('specify merge tool')),
           ('r', 'rev', '',
            _('revision to backout'), _('REV')),
          ] + walkopts + commitopts + commitopts2,
@@ -4118,7 +4156,9 @@ table = {
          _('[-e] DATE [RANGE]')),
     "debugdata": (debugdata, [], _('FILE REV')),
     "debugfsinfo": (debugfsinfo, [], _('[PATH]')),
-    "debugindex": (debugindex, [], _('FILE')),
+    "debugindex": (debugindex,
+                   [('f', 'format', 0, _('revlog format'), _('FORMAT'))],
+                   _('FILE')),
     "debugindexdot": (debugindexdot, [], _('FILE')),
     "debuginstall": (debuginstall, [], ''),
     "debugpushkey": (debugpushkey, [], _('REPO NAMESPACE [KEY OLD NEW]')),

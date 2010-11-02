@@ -469,7 +469,7 @@ def push(oldpush, ui, repo, dest=None, **opts):
     return result
 
 def diffbookmarks(ui, repo, remote):
-    ui.status(_("searching for changes\n"))
+    ui.status(_("searching for changed bookmarks\n"))
 
     lmarks = repo.listkeys('bookmarks')
     rmarks = remote.listkeys('bookmarks')
@@ -479,7 +479,7 @@ def diffbookmarks(ui, repo, remote):
         ui.write("   %-25s %s\n" % (k, rmarks[k][:12]))
 
     if len(diff) <= 0:
-        ui.status(_("no changes found\n"))
+        ui.status(_("no changed bookmarks found\n"))
         return 1
     return 0
 
@@ -538,9 +538,14 @@ def updatecurbookmark(orig, ui, repo, *args, **opts):
     return res
 
 def bmrevset(repo, subset, x):
+    """``bookmark([name])``
+    The named bookmark or all bookmarks.
+    """
+    # i18n: "bookmark" is a keyword
     args = revset.getargs(x, 0, 1, _('bookmark takes one or no arguments'))
     if args:
         bm = revset.getstring(args[0],
+                              # i18n: "bookmark" is a keyword
                               _('the argument to bookmark must be a string'))
         bmrev = listbookmarks(repo).get(bm, None)
         if bmrev:
@@ -548,14 +553,9 @@ def bmrevset(repo, subset, x):
         return [r for r in subset if r == bmrev]
     bms = set([repo.changelog.rev(bin(r)) for r in listbookmarks(repo).values()])
     return [r for r in subset if r in bms]
-revset.symbols['bookmark'] = bmrevset
 
-def revsetdoc():
-    doc = help.loaddoc('revsets')()
-    doc += _('\nAdded by the bookmarks extension:\n\n'
-           '``bookmark([name])``\n'
-           '  The named bookmark or all bookmarks.\n')
-    return doc
+def extsetup(ui):
+    revset.symbols['bookmark'] = bmrevset
 
 cmdtable = {
     "bookmarks":
@@ -568,3 +568,6 @@ cmdtable = {
 }
 
 colortable = {'bookmarks.current': 'green'}
+
+# tell hggettext to extract docstrings from these functions:
+i18nfunctions = [bmrevset]

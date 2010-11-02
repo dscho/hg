@@ -34,7 +34,7 @@ hg.1.gendoc.txt: $(GENDOC)
 MANIFEST: man html
 # tracked files are already in the main MANIFEST
 	$(RM) $@
-	for i in $(MAN) $(HTML) hg.1.gendoc.txt; do \
+	for i in $(MAN) $(HTML); do \
 	  echo "doc/$$i" >> $@ ; \
 	done
 
@@ -46,4 +46,4 @@ install: man
 	done
 
 clean:
-	$(RM) $(MAN) $(MAN:%=%.html) *.[0-9].gendoc.txt MANIFEST
+	$(RM) $(MAN) $(HTML) hg.1.gendoc.txt MANIFEST
