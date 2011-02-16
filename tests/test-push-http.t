@@ -1,5 +1,4 @@
 
-  $ cp "$TESTDIR"/printenv.py .
   $ hg init test
   $ cd test
   $ echo a > a
@@ -53,7 +52,7 @@ expect success
 
   $ echo 'allow_push = *' >> .hg/hgrc
   $ echo '[hooks]' >> .hg/hgrc
-  $ echo 'changegroup = python ../printenv.py changegroup 0' >> .hg/hgrc
+  $ echo 'changegroup = python "$TESTDIR"/printenv.py changegroup 0' >> .hg/hgrc
   $ req
   pushing to http://localhost:$HGPORT/
   searching for changes
@@ -61,7 +60,7 @@ expect success
   remote: adding manifests
   remote: adding file changes
   remote: added 1 changesets with 1 changes to 1 files
-  remote: changegroup hook: HG_NODE=ba677d0156c1196c1a699fa53f390dcfc3ce3872 HG_SOURCE=serve HG_URL=remote:http 
+  remote: changegroup hook: HG_NODE=ba677d0156c1196c1a699fa53f390dcfc3ce3872 HG_SOURCE=serve HG_URL=remote:http:*:  (glob)
   % serve errors
   $ hg rollback
   rolling back to revision 0 (undo serve)

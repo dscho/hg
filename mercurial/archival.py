@@ -8,7 +8,7 @@
 from i18n import _
 from node import hex
 import cmdutil
-import util
+import util, encoding
 import cStringIO, os, stat, tarfile, time, zipfile
 import zlib, gzip
 
@@ -84,6 +84,7 @@ class tarit(object):
 
     def __init__(self, dest, mtime, kind=''):
         self.mtime = mtime
+        self.fileobj = None
 
         def taropen(name, mode, fileobj=None):
             if kind == 'gz':
@@ -93,8 +94,10 @@ class tarit(object):
                 gzfileobj = self.GzipFileWithTime(name, mode + 'b',
                                                   zlib.Z_BEST_COMPRESSION,
                                                   fileobj, timestamp=mtime)
+                self.fileobj = gzfileobj
                 return tarfile.TarFile.taropen(name, mode, gzfileobj)
             else:
+                self.fileobj = fileobj
                 return tarfile.open(name, mode + kind, fileobj)
 
         if isinstance(dest, str):
@@ -120,6 +123,8 @@ class tarit(object):
 
     def done(self):
         self.z.close()
+        if self.fileobj:
+            self.fileobj.close()
 
 class tellable(object):
     '''provide tell method for zipfile.ZipFile when writing to http
@@ -245,7 +250,7 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
     if repo.ui.configbool("ui", "archivemeta", True):
         def metadata():
             base = 'repo: %s\nnode: %s\nbranch: %s\n' % (
-                repo[0].hex(), hex(node), ctx.branch())
+                repo[0].hex(), hex(node), encoding.fromlocal(ctx.branch()))
 
             tags = ''.join('tag: %s\n' % t for t in ctx.tags()
                            if repo.tagtype(t) == 'global')
@@ -262,13 +267,18 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
 
         write('.hg_archival.txt', 0644, False, metadata)
 
-    for f in ctx:
+    total = len(ctx.manifest())
+    repo.ui.progress(_('archiving'), 0, unit=_('files'), total=total)
+    for i, f in enumerate(ctx):
         ff = ctx.flags(f)
         write(f, 'x' in ff and 0755 or 0644, 'l' in ff, ctx[f].data)
+        repo.ui.progress(_('archiving'), i + 1, item=f,
+                         unit=_('files'), total=total)
+    repo.ui.progress(_('archiving'), None)
 
     if subrepos:
         for subpath in ctx.substate:
             sub = ctx.sub(subpath)
-            sub.archive(archiver, prefix)
+            sub.archive(repo.ui, archiver, prefix)
 
     archiver.done()

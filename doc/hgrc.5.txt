@@ -330,8 +330,8 @@ to the aliases of the commands defined.
 ``diff``
 """"""""
 
-Settings used when displaying diffs. They are all Boolean and
-defaults to False.
+Settings used when displaying diffs. Everything except for ``unified`` is a
+Boolean and defaults to False.
 
 ``git``
     Use git extended diff format.
@@ -345,6 +345,8 @@ defaults to False.
     Ignore changes in the amount of white space.
 ``ignoreblanklines``
     Ignore changes whose lines are all blank.
+``unified``
+    Number of lines of context to show.
 
 ``email``
 """""""""
@@ -727,8 +729,8 @@ Configuration for extensions that need to send email messages.
 ``port``
     Optional. Port to connect to on mail server. Default: 25.
 ``tls``
-    Optional. Whether to connect to mail server using TLS. True or
-    False. Default: False.
+    Optional. Method to enable TLS when connecting to mail server: starttls,
+    smtps or none. Default: none.
 ``username``
     Optional. User name for authenticating with the SMTP server.
     Default: none.
@@ -876,6 +878,11 @@ User interface controls.
     be prompted to enter a username. If no username is entered, the
     default ``USER@HOST`` is used instead.
     Default is False.
+``commitsubrepos``
+    Whether to commit modified subrepositories when committing the
+    parent repository. If False and one subrepository has uncommitted
+    changes, abort the commit.
+    Default is True.
 ``debug``
     Print debugging information. True or False. Default is False.
 ``editor``

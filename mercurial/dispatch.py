@@ -221,15 +221,20 @@ class cmdalias(object):
             def fn(ui, *args):
                 env = {'HG_ARGS': ' '.join((self.name,) + args)}
                 def _checkvar(m):
-                    if int(m.groups()[0]) <= len(args):
+                    if m.groups()[0] == '$':
+                        return m.group()
+                    elif int(m.groups()[0]) <= len(args):
                         return m.group()
                     else:
+                        ui.debug(_("No argument found for substitution"
+                                   "of %i variable in alias '%s' definition.")
+                                 % (int(m.groups()[0]), self.name))
                         return ''
-                cmd = re.sub(r'\$(\d+)', _checkvar, self.definition[1:])
+                cmd = re.sub(r'\$(\d+|\$)', _checkvar, self.definition[1:])
                 replace = dict((str(i + 1), arg) for i, arg in enumerate(args))
                 replace['0'] = self.name
                 replace['@'] = ' '.join(args)
-                cmd = util.interpolate(r'\$', replace, cmd)
+                cmd = util.interpolate(r'\$', replace, cmd, escape_prefix=True)
                 return util.system(cmd, environ=env)
             self.fn = fn
             return
@@ -290,7 +295,7 @@ class cmdalias(object):
             ui.debug("alias '%s' shadows command '%s'\n" %
                      (self.name, self.cmdname))
 
-        if self.definition.startswith('!'):
+        if hasattr(self, 'shell'):
             return self.fn(ui, *args, **opts)
         else:
             try:
@@ -589,8 +594,12 @@ def _dispatch(ui, args):
     msg = ' '.join(' ' in a and repr(a) or a for a in fullargs)
     ui.log("command", msg + "\n")
     d = lambda: util.checksignature(func)(ui, *args, **cmdoptions)
-    return runcommand(lui, repo, cmd, fullargs, ui, options, d,
-                      cmdpats, cmdoptions)
+    try:
+        return runcommand(lui, repo, cmd, fullargs, ui, options, d,
+                          cmdpats, cmdoptions)
+    finally:
+        if repo:
+            repo.close()
 
 def _runcommand(ui, options, cmd, cmdfunc):
     def checkargs():

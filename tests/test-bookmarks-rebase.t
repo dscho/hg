@@ -31,8 +31,8 @@ initialize repository
 bookmark list
 
   $ hg bookmark
-   * two                       3:2ae46b1d99a7
      one                       1:925d80f479bb
+   * two                       3:2ae46b1d99a7
 
 rebase
 
@@ -41,9 +41,8 @@ rebase
 
   $ hg log
   changeset:   3:9163974d1cb5
-  tag:         one
+  bookmark:    two
   tag:         tip
-  tag:         two
   parent:      1:925d80f479bb
   parent:      2:db815d6d32e6
   user:        test
@@ -57,6 +56,7 @@ rebase
   summary:     2
   
   changeset:   1:925d80f479bb
+  bookmark:    one
   user:        test
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     1

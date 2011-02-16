@@ -1,12 +1,9 @@
 # simple script to be used in hooks
-# copy it to the current directory when the test starts:
-#
-#     cp "$TESTDIR"/printenv.py .
 #
 # put something like this in the repo .hg/hgrc:
 #
 #     [hooks]
-#     changegroup = python ../printenv.py <hookname> [exit] [output]
+#     changegroup = python "$TESTDIR"/printenv.py <hookname> [exit] [output]
 #
 #   - <hookname> is a mandatory argument (e.g. "changegroup")
 #   - [exit] is the exit code of the hook (default: 0)
@@ -38,13 +35,6 @@ if len(sys.argv) > 2:
 env = [k for k, v in os.environ.iteritems()
        if k.startswith("HG_") and v]
 env.sort()
-
-# edit the variable part of the variable
-url = os.environ.get("HG_URL", "")
-if url.startswith("file:"):
-    os.environ["HG_URL"] = "file:"
-elif url.startswith("remote:http"):
-    os.environ["HG_URL"] = "remote:http"
 
 out.write("%s hook: " % name)
 for v in env:

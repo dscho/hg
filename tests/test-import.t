@@ -437,6 +437,13 @@ Test fuzziness (ambiguous patch location, fuzz=2)
   $ hg revert -a
   reverting a
 
+
+import with --no-commit should have written .hg/last-message.txt
+
+  $ cat .hg/last-message.txt
+  change (no-eol)
+
+
 test fuzziness with eol=auto
 
   $ hg --config patch.eol=auto import --no-commit -v tip.patch

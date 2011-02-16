@@ -13,7 +13,7 @@
 
 from i18n import _
 import os, errno
-import error
+import error, util
 
 def active(func):
     def _active(self, *args, **kwds):
@@ -27,18 +27,22 @@ def _playback(journal, report, opener, entries, unlink=True):
     for f, o, ignore in entries:
         if o or not unlink:
             try:
-                opener(f, 'a').truncate(o)
+                fp = opener(f, 'a')
+                fp.truncate(o)
+                fp.close()
             except IOError:
                 report(_("failed to truncate %s\n") % f)
                 raise
         else:
             try:
-                fn = opener(f).name
-                os.unlink(fn)
+                fp = opener(f)
+                fn = fp.name
+                fp.close()
+                util.unlink(fn)
             except (IOError, OSError), inst:
                 if inst.errno != errno.ENOENT:
                     raise
-    os.unlink(journal)
+    util.unlink(journal)
 
 class transaction(object):
     def __init__(self, report, opener, journal, after=None, createmode=None):
@@ -52,7 +56,7 @@ class transaction(object):
         self.journal = journal
         self._queue = []
 
-        self.file = open(self.journal, "w")
+        self.file = util.posixfile(self.journal, "w")
         if createmode is not None:
             os.chmod(self.journal, createmode & 0666)
 
@@ -133,7 +137,7 @@ class transaction(object):
         if self.after:
             self.after()
         if os.path.isfile(self.journal):
-            os.unlink(self.journal)
+            util.unlink(self.journal)
         self.journal = None
 
     @active
@@ -151,7 +155,7 @@ class transaction(object):
         try:
             if not self.entries:
                 if self.journal:
-                    os.unlink(self.journal)
+                    util.unlink(self.journal)
                 return
 
             self.report(_("transaction abort!\n"))
@@ -169,7 +173,10 @@ class transaction(object):
 def rollback(opener, file, report):
     entries = []
 
-    for l in open(file).readlines():
+    fp = util.posixfile(file)
+    lines = fp.readlines()
+    fp.close()
+    for l in lines:
         f, o = l.split('\0')
         entries.append((f, int(o), None))
 

@@ -8,6 +8,7 @@
 # GNU General Public License version 2 or any later version.
 
 import re, glob, os, sys
+import keyword
 import optparse
 
 def repquote(m):
@@ -64,6 +65,7 @@ testpats = [
     ('^([^"\']|("[^"]*")|(\'[^\']*\'))*\\^', "^ must be quoted"),
     (r'^source\b', "don't use 'source', use '.'"),
     (r'touch -d', "don't use 'touch -d', use 'touch -t' instead"),
+    (r'ls\s+[^|-]+\s+-', "options to 'ls' must come before filenames"),
 ]
 
 testfilters = [
@@ -117,8 +119,8 @@ pypats = [
     (r'^\s*(if|while|def|class|except|try)\s[^[]*:\s*[^\]#\s]+',
      "linebreak after :"),
     (r'class\s[^(]:', "old-style class, use class foo(object)"),
-    (r'^\s+del\(', "del isn't a function"),
-    (r'^\s+except\(', "except isn't a function"),
+    (r'\b(%s)\(' % '|'.join(keyword.kwlist),
+     "Python keyword is not a function"),
     (r',]', "unneeded trailing ',' in list"),
 #    (r'class\s[A-Z][^\(]*\((?!Exception)',
 #     "don't capitalize non-exception classes"),
@@ -127,11 +129,15 @@ pypats = [
     (r'[\x80-\xff]', "non-ASCII character literal"),
     (r'("\')\.format\(', "str.format() not available in Python 2.4"),
     (r'^\s*with\s+', "with not available in Python 2.4"),
+    (r'^\s*except.* as .*:', "except as not available in Python 2.4"),
+    (r'^\s*os\.path\.relpath', "relpath not available in Python 2.4"),
     (r'(?<!def)\s+(any|all|format)\(',
      "any/all/format not available in Python 2.4"),
     (r'(?<!def)\s+(callable)\(',
      "callable not available in Python 3, use hasattr(f, '__call__')"),
     (r'if\s.*\selse', "if ... else form not available in Python 2.4"),
+    (r'^\s*(%s)\s\s' % '|'.join(keyword.kwlist),
+     "gratuitous whitespace after Python keyword"),
     (r'([\(\[]\s\S)|(\S\s[\)\]])', "gratuitous whitespace in () or []"),
 #    (r'\s\s=', "gratuitous whitespace before ="),
     (r'[^>< ](\+=|-=|!=|<>|<=|>=|<<=|>>=)\S',
@@ -145,6 +151,9 @@ pypats = [
     (r'raise Exception', "don't raise generic exceptions"),
     (r'ui\.(status|progress|write|note|warn)\([\'\"]x',
      "warning: unwrapped ui message"),
+    (r' is\s+(not\s+)?["\'0-9-]', "object comparison with literal"),
+    (r' [=!]=\s+(True|False|None)',
+     "comparison with singleton, use 'is' or 'is not' instead"),
 ]
 
 pyfilters = [
@@ -239,7 +248,9 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
         fc = 0
         if not re.match(match, f):
             continue
-        pre = post = open(f).read()
+        fp = open(f)
+        pre = post = fp.read()
+        fp.close()
         if "no-" + "check-code" in pre:
             break
         for p, r in filters:

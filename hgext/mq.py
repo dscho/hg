@@ -86,6 +86,8 @@ class patchheader(object):
         parent = None
         format = None
         subject = None
+        branch = None
+        nodeid = None
         diffstart = 0
 
         for line in file(pf):
@@ -106,6 +108,10 @@ class patchheader(object):
                     date = line[7:]
                 elif line.startswith("# Parent "):
                     parent = line[9:]
+                elif line.startswith("# Branch "):
+                    branch = line[9:]
+                elif line.startswith("# Node ID "):
+                    nodeid = line[10:]
                 elif not line.startswith("# ") and line:
                     message.append(line)
                     format = None
@@ -134,6 +140,9 @@ class patchheader(object):
 
         eatdiff(message)
         eatdiff(comments)
+        # Remember the exact starting line of the patch diffs before consuming
+        # empty lines, for external use by TortoiseHg and others
+        self.diffstartline = len(comments)
         eatempty(message)
         eatempty(comments)
 
@@ -147,6 +156,9 @@ class patchheader(object):
         self.user = user
         self.date = date
         self.parent = parent
+        # nodeid and branch are for external use by TortoiseHg and others
+        self.nodeid = nodeid
+        self.branch = branch
         self.haspatch = diffstart > 1
         self.plainmode = plainmode
 
@@ -239,6 +251,7 @@ class queue(object):
         try:
             fh = open(os.path.join(path, 'patches.queue'))
             cur = fh.read().rstrip()
+            fh.close()
             if not cur:
                 curpath = os.path.join(path, 'patches')
             else:
@@ -793,6 +806,19 @@ class queue(object):
             return top, patch
         return None, None
 
+    def check_substate(self, repo):
+        '''return list of subrepos at a different revision than substate.
+        Abort if any subrepos have uncommitted changes.'''
+        inclsubs = []
+        wctx = repo[None]
+        for s in wctx.substate:
+            if wctx.sub(s).dirty(True):
+                raise util.Abort(
+                    _("uncommitted changes in subrepository %s") % s)
+            elif wctx.sub(s).dirty():
+                inclsubs.append(s)
+        return inclsubs
+
     def check_localchanges(self, repo, force=False, refresh=True):
         m, a, r, d = repo.status()[:4]
         if (m or a or r or d) and not force:
@@ -826,16 +852,23 @@ class queue(object):
                                  % patchfn)
             else:
                 raise util.Abort(_('patch "%s" already exists') % patchfn)
+
+        inclsubs = self.check_substate(repo)
+        if inclsubs:
+            inclsubs.append('.hgsubstate')
         if opts.get('include') or opts.get('exclude') or pats:
+            if inclsubs:
+                pats = list(pats or []) + inclsubs
             match = cmdutil.match(repo, pats, opts)
             # detect missing files in pats
             def badfn(f, msg):
-                raise util.Abort('%s: %s' % (f, msg))
+                if f != '.hgsubstate': # .hgsubstate is auto-created
+                    raise util.Abort('%s: %s' % (f, msg))
             match.bad = badfn
             m, a, r, d = repo.status(match=match)[:4]
         else:
             m, a, r, d = self.check_localchanges(repo, force=True)
-            match = cmdutil.matchfiles(repo, m + a + r)
+            match = cmdutil.matchfiles(repo, m + a + r + inclsubs)
         if len(repo[None].parents()) > 1:
             raise util.Abort(_('cannot manage merge changesets'))
         commitfiles = m + a + r
@@ -1006,7 +1039,7 @@ class queue(object):
         raise util.Abort(_("patch %s not in series") % patch)
 
     def push(self, repo, patch=None, force=False, list=False,
-             mergeq=None, all=False, move=False):
+             mergeq=None, all=False, move=False, exact=False):
         diffopts = self.diffopts()
         wlock = repo.wlock()
         try:
@@ -1015,7 +1048,7 @@ class queue(object):
                 heads += ls
             if not heads:
                 heads = [nullid]
-            if repo.dirstate.parents()[0] not in heads:
+            if repo.dirstate.parents()[0] not in heads and not exact:
                 self.ui.status(_("(working directory not at a head)\n"))
 
             if not self.series:
@@ -1064,9 +1097,21 @@ class queue(object):
             if not force:
                 self.check_localchanges(repo)
 
+            if exact:
+                if move:
+                    raise util.Abort(_("cannot use --exact and --move together"))
+                if self.applied:
+                    raise util.Abort(_("cannot push --exact with applied patches"))
+                root = self.series[start]
+                target = patchheader(self.join(root), self.plainmode).parent
+                if not target:
+                    raise util.Abort(_("%s does not have a parent recorded" % root))
+                if not repo[target] == repo['.']:
+                    hg.update(repo, target)
+
             if move:
                 if not patch:
-                    raise  util.Abort(_("please specify the patch to move"))
+                    raise util.Abort(_("please specify the patch to move"))
                 for i, rpn in enumerate(self.full_series[start:]):
                     # strip markers for patch guards
                     if self.guard_re.split(rpn, 1)[0] == patch:
@@ -1104,7 +1149,7 @@ class queue(object):
                 for f in all_files:
                     if f not in repo.dirstate:
                         try:
-                            util.unlink(repo.wjoin(f))
+                            util.unlinkpath(repo.wjoin(f))
                         except OSError, inst:
                             if inst.errno != errno.ENOENT:
                                 raise
@@ -1198,7 +1243,7 @@ class queue(object):
                     raise util.Abort(_("deletions found between repo revs"))
                 for f in a:
                     try:
-                        util.unlink(repo.wjoin(f))
+                        util.unlinkpath(repo.wjoin(f))
                     except OSError, e:
                         if e.errno != errno.ENOENT:
                             raise
@@ -1249,6 +1294,8 @@ class queue(object):
             if repo.changelog.heads(top) != [top]:
                 raise util.Abort(_("cannot refresh a revision with children"))
 
+            inclsubs = self.check_substate(repo)
+
             cparents = repo.changelog.parents(top)
             patchparent = self.qparents(repo, top)
             ph = patchheader(self.join(patchfn), self.plainmode)
@@ -1272,10 +1319,10 @@ class queue(object):
             # and then commit.
             #
             # this should really read:
-            #   mm, dd, aa, aa2 = repo.status(tip, patchparent)[:4]
+            #   mm, dd, aa = repo.status(top, patchparent)[:3]
             # but we do it backwards to take advantage of manifest/chlog
             # caching against the next repo.status call
-            mm, aa, dd, aa2 = repo.status(patchparent, top)[:4]
+            mm, aa, dd = repo.status(patchparent, top)[:3]
             changes = repo.changelog.read(top)
             man = repo.manifest.read(changes[0])
             aaa = aa[:]
@@ -1291,49 +1338,43 @@ class queue(object):
             else:
                 match = cmdutil.matchall(repo)
             m, a, r, d = repo.status(match=match)[:4]
+            mm = set(mm)
+            aa = set(aa)
+            dd = set(dd)
 
             # we might end up with files that were added between
             # qtip and the dirstate parent, but then changed in the
             # local dirstate. in this case, we want them to only
             # show up in the added section
             for x in m:
-                if x == '.hgsub' or x == '.hgsubstate':
-                    self.ui.warn(_('warning: not refreshing %s\n') % x)
-                    continue
                 if x not in aa:
-                    mm.append(x)
+                    mm.add(x)
             # we might end up with files added by the local dirstate that
             # were deleted by the patch.  In this case, they should only
             # show up in the changed section.
             for x in a:
-                if x == '.hgsub' or x == '.hgsubstate':
-                    self.ui.warn(_('warning: not adding %s\n') % x)
-                    continue
                 if x in dd:
-                    del dd[dd.index(x)]
-                    mm.append(x)
+                    dd.remove(x)
+                    mm.add(x)
                 else:
-                    aa.append(x)
+                    aa.add(x)
             # make sure any files deleted in the local dirstate
             # are not in the add or change column of the patch
             forget = []
             for x in d + r:
-                if x == '.hgsub' or x == '.hgsubstate':
-                    self.ui.warn(_('warning: not removing %s\n') % x)
-                    continue
                 if x in aa:
-                    del aa[aa.index(x)]
+                    aa.remove(x)
                     forget.append(x)
                     continue
-                elif x in mm:
-                    del mm[mm.index(x)]
-                dd.append(x)
+                else:
+                    mm.discard(x)
+                dd.add(x)
 
-            m = list(set(mm))
-            r = list(set(dd))
-            a = list(set(aa))
+            m = list(mm)
+            r = list(dd)
+            a = list(aa)
             c = [filter(matchfn, l) for l in (m, a, r)]
-            match = cmdutil.matchfiles(repo, set(c[0] + c[1] + c[2]))
+            match = cmdutil.matchfiles(repo, set(c[0] + c[1] + c[2] + inclsubs))
             chunks = patch.diff(repo, patchparent, match=match,
                                 changes=c, opts=diffopts)
             for chunk in chunks:
@@ -1531,7 +1572,7 @@ class queue(object):
                 l = line.rstrip()
                 l = l[10:].split(' ')
                 qpp = [bin(x) for x in l]
-            elif datastart != None:
+            elif datastart is not None:
                 l = line.rstrip()
                 n, name = l.split(':', 1)
                 if n:
@@ -1741,7 +1782,9 @@ class queue(object):
                                 _('need --name to import a patch from -'))
                         text = sys.stdin.read()
                     else:
-                        text = url.open(self.ui, filename).read()
+                        fp = url.open(self.ui, filename)
+                        text = fp.read()
+                        fp.close()
                 except (OSError, IOError):
                     raise util.Abort(_("unable to read file %s") % filename)
                 if not patchname:
@@ -1750,6 +1793,7 @@ class queue(object):
                 checkfile(patchname)
                 patchf = self.opener(patchname, "w")
                 patchf.write(text)
+                patchf.close()
             if not force:
                 checkseries(patchname)
             if patchname not in self.series:
@@ -1760,6 +1804,8 @@ class queue(object):
             self.ui.warn(_("adding %s to series file\n") % patchname)
             self.added.append(patchname)
             patchname = None
+
+        self.removeundo(repo)
 
 def delete(ui, repo, *patches, **opts):
     """remove patches from queue
@@ -2346,7 +2392,8 @@ def push(ui, repo, patch=None, **opts):
         mergeq = queue(ui, repo.join(""), newpath)
         ui.warn(_("merging with queue at: %s\n") % mergeq.path)
     ret = q.push(repo, patch, force=opts.get('force'), list=opts.get('list'),
-                 mergeq=mergeq, all=opts.get('all'), move=opts.get('move'))
+                 mergeq=mergeq, all=opts.get('all'), move=opts.get('move'),
+                 exact=opts.get('exact'))
     return ret
 
 def pop(ui, repo, patch=None, **opts):
@@ -2746,6 +2793,7 @@ def qqueue(ui, repo, name=None, **opts):
         try:
             fh = repo.opener(_allqueues, 'r')
             queues = [queue.strip() for queue in fh if queue.strip()]
+            fh.close()
             if current not in queues:
                 queues.append(current)
         except IOError:
@@ -2880,7 +2928,7 @@ def reposetup(ui, repo):
             return super(mqrepo, self).commit(text, user, date, match, force,
                                               editor, extra)
 
-        def push(self, remote, force=False, revs=None, newbranch=False):
+        def checkpush(self, force, revs):
             if self.mq.applied and not force:
                 haspatches = True
                 if revs:
@@ -2891,7 +2939,7 @@ def reposetup(ui, repo):
                     haspatches = bool([n for n in revs if n in applied])
                 if haspatches:
                     raise util.Abort(_('source has mq patches applied'))
-            return super(mqrepo, self).push(remote, force, revs, newbranch)
+            super(mqrepo, self).checkpush(force, revs)
 
         def _findtags(self):
             '''augment tags from base class with patch tags'''
@@ -2903,7 +2951,7 @@ def reposetup(ui, repo):
 
             mqtags = [(patch.node, patch.name) for patch in q.applied]
 
-            if mqtags[-1][0] not in self.changelog.nodemap:
+            if mqtags[-1][0] not in self:
                 self.ui.warn(_('mq status file refers to unknown node %s\n')
                              % short(mqtags[-1][0]))
                 return result
@@ -2928,7 +2976,7 @@ def reposetup(ui, repo):
 
             cl = self.changelog
             qbasenode = q.applied[0].node
-            if qbasenode not in cl.nodemap:
+            if qbasenode not in self:
                 self.ui.warn(_('mq status file refers to unknown node %s\n')
                              % short(qbasenode))
                 return super(mqrepo, self)._branchtags(partial, lrev)
@@ -3122,6 +3170,7 @@ cmdtable = {
     "^qpush":
         (push,
          [('f', 'force', None, _('apply on top of local changes')),
+          ('e', 'exact', None, _('apply the target patch to its recorded parent')),
           ('l', 'list', None, _('list patch name in commit text')),
           ('a', 'all', None, _('apply all patches')),
           ('m', 'merge', None, _('merge from another queue (DEPRECATED)')),

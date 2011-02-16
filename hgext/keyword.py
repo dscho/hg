@@ -70,9 +70,8 @@ The default template mappings (view with :hg:`kwdemo -d`) can be
 replaced with customized keywords and templates. Again, run
 :hg:`kwdemo` to control the results of your configuration changes.
 
-Before changing/disabling active keywords, run :hg:`kwshrink` to avoid
-the risk of inadvertently storing expanded keywords in the change
-history.
+Before changing/disabling active keywords, you must run :hg:`kwshrink`
+to avoid storing expanded keywords in the change history.
 
 To force expansion after enabling it, or a configuration change, run
 :hg:`kwexpand`.
@@ -101,6 +100,14 @@ restricted = 'merge kwexpand kwshrink record qrecord resolve transplant'
 # names of extensions using dorecord
 recordextensions = 'record'
 
+colortable = {
+    'kwfiles.enabled': 'green bold',
+    'kwfiles.deleted': 'cyan bold underline',
+    'kwfiles.enabledunknown': 'green',
+    'kwfiles.ignored': 'bold',
+    'kwfiles.ignoredunknown': 'none'
+}
+
 # date like in cvs' $Date
 utcdate = lambda x: util.datestr((x[0], 0), '%Y/%m/%d %H:%M:%S')
 # date like in svn's $Date
@@ -110,7 +117,6 @@ svnutcdate = lambda x: util.datestr((x[0], 0), '%Y-%m-%d %H:%M:%SZ')
 
 # make keyword tools accessible
 kwtools = {'templater': None, 'hgcmd': ''}
-
 
 def _defaultkwmaps(ui):
     '''Returns default keywordmaps according to keywordset configuration.'''
@@ -170,13 +176,24 @@ class kwtemplater(object):
                                   for k, v in kwmaps)
         else:
             self.templates = _defaultkwmaps(self.ui)
-        escaped = '|'.join(map(re.escape, self.templates.keys()))
-        self.re_kw = re.compile(r'\$(%s)\$' % escaped)
-        self.re_kwexp = re.compile(r'\$(%s): [^$\n\r]*? \$' % escaped)
-
         templatefilters.filters.update({'utcdate': utcdate,
                                         'svnisodate': svnisodate,
                                         'svnutcdate': svnutcdate})
+
+    @util.propertycache
+    def escape(self):
+        '''Returns bar-separated and escaped keywords.'''
+        return '|'.join(map(re.escape, self.templates.keys()))
+
+    @util.propertycache
+    def rekw(self):
+        '''Returns regex for unexpanded keywords.'''
+        return re.compile(r'\$(%s)\$' % self.escape)
+
+    @util.propertycache
+    def rekwexp(self):
+        '''Returns regex for expanded keywords.'''
+        return re.compile(r'\$(%s): [^$\n\r]*? \$' % self.escape)
 
     def substitute(self, data, path, ctx, subfunc):
         '''Replaces keywords in data with expanded template.'''
@@ -191,11 +208,15 @@ class kwtemplater(object):
             return '$%s: %s $' % (kw, ekw)
         return subfunc(kwsub, data)
 
+    def linkctx(self, path, fileid):
+        '''Similar to filelog.linkrev, but returns a changectx.'''
+        return self.repo.filectx(path, fileid=fileid).changectx()
+
     def expand(self, path, node, data):
         '''Returns data with keywords expanded.'''
         if not self.restrict and self.match(path) and not util.binary(data):
-            ctx = self.repo.filectx(path, fileid=node).changectx()
-            return self.substitute(data, path, ctx, self.re_kw.sub)
+            ctx = self.linkctx(path, node)
+            return self.substitute(data, path, ctx, self.rekw.sub)
         return data
 
     def iskwfile(self, cand, ctx):
@@ -212,8 +233,8 @@ class kwtemplater(object):
         kwcmd = self.restrict and lookup # kwexpand/kwshrink
         if self.restrict or expand and lookup:
             mf = ctx.manifest()
-        fctx = ctx
-        subn = (self.restrict or rekw) and self.re_kw.subn or self.re_kwexp.subn
+        lctx = ctx
+        re_kw = (self.restrict or rekw) and self.rekw or self.rekwexp
         msg = (expand and _('overwriting %s expanding keywords\n')
                or _('overwriting %s shrinking keywords\n'))
         for f in candidates:
@@ -225,12 +246,12 @@ class kwtemplater(object):
                 continue
             if expand:
                 if lookup:
-                    fctx = self.repo.filectx(f, fileid=mf[f]).changectx()
-                data, found = self.substitute(data, f, fctx, subn)
+                    lctx = self.linkctx(f, mf[f])
+                data, found = self.substitute(data, f, lctx, re_kw.subn)
             elif self.restrict:
-                found = self.re_kw.search(data)
+                found = re_kw.search(data)
             else:
-                data, found = _shrinktext(data, subn)
+                data, found = _shrinktext(data, re_kw.subn)
             if found:
                 self.ui.note(msg % f)
                 self.repo.wwrite(f, data, ctx.flags(f))
@@ -242,7 +263,7 @@ class kwtemplater(object):
     def shrink(self, fname, text):
         '''Returns text with all keyword substitutions removed.'''
         if self.match(fname) and not util.binary(text):
-            return _shrinktext(text, self.re_kwexp.sub)
+            return _shrinktext(text, self.rekwexp.sub)
         return text
 
     def shrinklines(self, fname, lines):
@@ -250,7 +271,7 @@ class kwtemplater(object):
         if self.match(fname):
             text = ''.join(lines)
             if not util.binary(text):
-                return _shrinktext(text, self.re_kwexp.sub).splitlines(True)
+                return _shrinktext(text, self.rekwexp.sub).splitlines(True)
         return lines
 
     def wread(self, fname, data):
@@ -334,6 +355,9 @@ def demo(ui, repo, *args, **opts):
     ui.note(_('creating temporary repository at %s\n') % tmpdir)
     repo = localrepo.localrepository(ui, tmpdir, True)
     ui.setconfig('keyword', fn, '')
+    svn = ui.configbool('keywordset', 'svn')
+    # explicitly set keywordset for demo output
+    ui.setconfig('keywordset', 'svn', svn)
 
     uikwmaps = ui.configitems('keywordmaps')
     if args or opts.get('rcfile'):
@@ -341,7 +365,10 @@ def demo(ui, repo, *args, **opts):
         if uikwmaps:
             ui.status(_('\textending current template maps\n'))
         if opts.get('default') or not uikwmaps:
-            ui.status(_('\toverriding default template maps\n'))
+            if svn:
+                ui.status(_('\toverriding default svn keywordset\n'))
+            else:
+                ui.status(_('\toverriding default cvs keywordset\n'))
         if opts.get('rcfile'):
             ui.readconfig(opts.get('rcfile'))
         if args:
@@ -353,7 +380,10 @@ def demo(ui, repo, *args, **opts):
             ui.readconfig(repo.join('hgrc'))
         kwmaps = dict(ui.configitems('keywordmaps'))
     elif opts.get('default'):
-        ui.status(_('\n\tconfiguration using default keyword template maps\n'))
+        if svn:
+            ui.status(_('\n\tconfiguration using default svn keywordset\n'))
+        else:
+            ui.status(_('\n\tconfiguration using default cvs keywordset\n'))
         kwmaps = _defaultkwmaps(ui)
         if uikwmaps:
             ui.status(_('\tdisabling current template maps\n'))
@@ -367,6 +397,7 @@ def demo(ui, repo, *args, **opts):
     reposetup(ui, repo)
     ui.write('[extensions]\nkeyword =\n')
     demoitems('keyword', ui.configitems('keyword'))
+    demoitems('keywordset', ui.configitems('keywordset'))
     demoitems('keywordmaps', kwmaps.iteritems())
     keywords = '$' + '$\n$'.join(sorted(kwmaps.keys())) + '$\n'
     repo.wopener(fn, 'w').write(keywords)
@@ -424,24 +455,26 @@ def files(ui, repo, *pats, **opts):
         files = sorted(modified + added + clean)
     wctx = repo[None]
     kwfiles = kwt.iskwfile(files, wctx)
+    kwdeleted = kwt.iskwfile(deleted, wctx)
     kwunknown = kwt.iskwfile(unknown, wctx)
     if not opts.get('ignore') or opts.get('all'):
-        showfiles = kwfiles, kwunknown
+        showfiles = kwfiles, kwdeleted, kwunknown
     else:
-        showfiles = [], []
+        showfiles = [], [], []
     if opts.get('all') or opts.get('ignore'):
         showfiles += ([f for f in files if f not in kwfiles],
                       [f for f in unknown if f not in kwunknown])
-    for char, filenames in zip('KkIi', showfiles):
+    kwlabels = 'enabled deleted enabledunknown ignored ignoredunknown'.split()
+    kwstates = zip('K!kIi', showfiles, kwlabels)
+    for char, filenames, kwstate in kwstates:
         fmt = (opts.get('all') or ui.verbose) and '%s %%s\n' % char or '%s\n'
         for f in filenames:
-            ui.write(fmt % repo.pathto(f, cwd))
+            ui.write(fmt % repo.pathto(f, cwd), label='kwfiles.' + kwstate)
 
 def shrink(ui, repo, *pats, **opts):
     '''revert expanded keywords in the working directory
 
-    Run before changing/disabling active keywords or if you experience
-    problems with :hg:`import` or :hg:`merge`.
+    Must be run before changing/disabling active keywords.
 
     kwshrink refuses to run if given files contain local changes.
     '''
@@ -603,8 +636,6 @@ def reposetup(ui, repo):
         finally:
             wlock.release()
 
-    repo.__class__ = kwrepo
-
     def kwfilectx_cmp(orig, self, fctx):
         # keyword affects data size, comparing wdir and filelog size does
         # not make sense
@@ -627,6 +658,8 @@ def reposetup(ui, repo):
             extensions.wrapfunction(record, 'dorecord', kw_dorecord)
         except KeyError:
             pass
+
+    repo.__class__ = kwrepo
 
 cmdtable = {
     'kwdemo':

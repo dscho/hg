@@ -193,6 +193,9 @@ def patchbomb(ui, repo, *revs, **opts):
     PAGER environment variable is set, your pager will be fired up once
     for each patchbomb message, so you can verify everything is alright.
 
+    In case email sending fails, you will find a backup of your series
+    introductory message in ``.hg/last-email.txt``.
+
     Examples::
 
       hg email -r 3000          # send patch 3000 only
@@ -258,7 +261,10 @@ def patchbomb(ui, repo, *revs, **opts):
         tmpfn = os.path.join(tmpdir, 'bundle')
         try:
             commands.bundle(ui, repo, tmpfn, dest, **opts)
-            return open(tmpfn, 'rb').read()
+            fp = open(tmpfn, 'rb')
+            data = fp.read()
+            fp.close()
+            return data
         finally:
             try:
                 os.unlink(tmpfn)
@@ -309,6 +315,10 @@ def patchbomb(ui, repo, *revs, **opts):
             ui.write(_('\nWrite the introductory message for the '
                        'patch series.\n\n'))
             body = ui.edit(body, sender)
+            # Save serie description in case sendmail fails
+            msgfile = repo.opener('last-email.txt', 'wb')
+            msgfile.write(body)
+            msgfile.close()
         return body
 
     def getpatchmsgs(patches, patchnames=None):

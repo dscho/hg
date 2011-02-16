@@ -63,6 +63,18 @@
   $ hg tag -f gack
   $ hg tag --remove gack gorp
 
+  $ hg tag "bleah "
+  abort: tag 'bleah' already exists (use -f to force)
+  [255]
+  $ hg tag " bleah"
+  abort: tag 'bleah' already exists (use -f to force)
+  [255]
+  $ hg tag " bleah"
+  abort: tag 'bleah' already exists (use -f to force)
+  [255]
+  $ hg tag -r 0 "  bleahbleah  "
+  $ hg tag -r 0 " bleah bleah "
+
   $ cat .hgtags
   acb14030fe0a21b60322c440ad2d20cf7685a376 bleah
   acb14030fe0a21b60322c440ad2d20cf7685a376 bleah0
@@ -75,6 +87,9 @@
   0000000000000000000000000000000000000000 gack
   336fccc858a4eb69609a291105009e484a6b6b8d gorp
   0000000000000000000000000000000000000000 gorp
+  acb14030fe0a21b60322c440ad2d20cf7685a376 bleahbleah
+  acb14030fe0a21b60322c440ad2d20cf7685a376 bleah bleah
+
   $ cat .hg/localtags
   d4f0d2909abc9290e2773c08837d70c1794e3f5a bleah1
 
@@ -107,7 +122,9 @@ cloning local tags
   $ hg -R test log -r0:5
   changeset:   0:acb14030fe0a
   tag:         bleah
+  tag:         bleah bleah
   tag:         bleah0
+  tag:         bleahbleah
   tag:         foobar
   tag:         localblah
   user:        test
@@ -210,7 +227,7 @@ local tag with .hgtags modified
 
   $ hg tag hgtags-modified
   $ hg rollback
-  rolling back to revision 11 (undo commit)
+  rolling back to revision 13 (undo commit)
   $ hg st
   M .hgtags
   ? .hgtags.orig
@@ -227,7 +244,7 @@ tagging when at named-branch-head that's not a topo-head
   0 files updated, 1 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
   $ hg ci -m 'merge named branch'
-  $ hg up 11
+  $ hg up 13
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg tag new-topo-head
 
@@ -252,27 +269,29 @@ tagging on an uncommitted merge (issue2542)
   $ echo c1 > f1
   $ hg ci -Am0
   adding f1
+  $ echo c2 > f2
+  $ hg ci -Am1
+  adding f2
+  $ hg co -q 0
   $ hg branch b1
   marked working directory as branch b1
-  $ echo c2 >> f1
-  $ hg ci -m1
+  $ hg ci -m2
   $ hg up default
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg merge b1
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
 
   $ hg tag t1
   abort: uncommitted merge
   [255]
   $ hg status
-  M f1
   $ hg tag --rev 1 t2
   abort: uncommitted merge
   [255]
   $ hg tag --rev 1 --local t3
   $ hg tags -v
-  tip                                1:9466ada9ee90
-  t3                                 1:9466ada9ee90 local
+  tip                                2:8a8f787d0d5c
+  t3                                 1:c3adabd1a5f4 local
 
   $ cd ..

@@ -32,24 +32,22 @@ def addbranchrevs(lrepo, repo, branches, revs):
         return revs, revs[0]
     branchmap = repo.branchmap()
 
-    def primary(butf8):
-        if butf8 == '.':
+    def primary(branch):
+        if branch == '.':
             if not lrepo or not lrepo.local():
                 raise util.Abort(_("dirstate branch not accessible"))
-            butf8 = lrepo.dirstate.branch()
-        if butf8 in branchmap:
-            revs.extend(node.hex(r) for r in reversed(branchmap[butf8]))
+            branch = lrepo.dirstate.branch()
+        if branch in branchmap:
+            revs.extend(node.hex(r) for r in reversed(branchmap[branch]))
             return True
         else:
             return False
 
     for branch in branches:
-        butf8 = encoding.fromlocal(branch)
-        if not primary(butf8):
+        if not primary(branch):
             raise error.RepoLookupError(_("unknown branch '%s'") % branch)
     if hashbranch:
-        butf8 = encoding.fromlocal(hashbranch)
-        if not primary(butf8):
+        if not primary(hashbranch):
             revs.append(hashbranch)
     return revs, revs[0]
 
@@ -365,8 +363,7 @@ def clone(ui, source, dest=None, pull=False, rev=None, update=True,
                     except error.RepoLookupError:
                         continue
                 bn = dest_repo[uprev].branch()
-                dest_repo.ui.status(_("updating to branch %s\n")
-                                    % encoding.tolocal(bn))
+                dest_repo.ui.status(_("updating to branch %s\n") % bn)
                 _update(dest_repo, uprev)
 
         return src_repo, dest_repo
@@ -398,7 +395,8 @@ def clean(repo, node, show_stats=True):
     return stats[3] > 0
 
 def merge(repo, node, force=None, remind=True):
-    """branch merge with node, resolving changes"""
+    """Branch merge with node, resolving changes. Return true if any
+    unresolved conflicts."""
     stats = mergemod.update(repo, node, True, force, False)
     _showstats(repo, stats)
     if stats[3]:

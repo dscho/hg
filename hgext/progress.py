@@ -28,7 +28,7 @@ The following settings are available::
   [progress]
   delay = 3 # number of seconds (float) before showing the progress bar
   refresh = 0.1 # time in seconds between refreshes of the progress bar
-  format = topic bar number # format of the progress bar
+  format = topic bar number estimate # format of the progress bar
   width = <none> # if set, the maximum width of the progress information
                  # (that is, min(width, term width) will be used)
   clear-complete = True # clear the progress bar after it's done
@@ -36,15 +36,17 @@ The following settings are available::
   assume-tty = False # if true, ALWAYS show a progress bar, unless
                      # disable is given
 
-Valid entries for the format field are topic, bar, number, unit, and
-item. item defaults to the last 20 characters of the item, but this
-can be changed by adding either ``-<num>`` which would take the last
-num characters, or ``+<num>`` for the first num characters.
+Valid entries for the format field are topic, bar, number, unit,
+estimate, and item. item defaults to the last 20 characters of the
+item, but this can be changed by adding either ``-<num>`` which would
+take the last num characters, or ``+<num>`` for the first num
+characters.
 """
 
 import sys
 import time
 
+from mercurial.i18n import _
 from mercurial import util
 
 def spacejoin(*args):
@@ -54,6 +56,43 @@ def shouldprint(ui):
     return (getattr(sys.stderr, 'isatty', None) and
             (sys.stderr.isatty() or ui.configbool('progress', 'assume-tty')))
 
+def fmtremaining(seconds):
+    if seconds < 60:
+        # i18n: format XX seconds as "XXs"
+        return _("%02ds") % (seconds)
+    minutes = seconds // 60
+    if minutes < 60:
+        seconds -= minutes * 60
+        # i18n: format X minutes and YY seconds as "XmYYs"
+        return _("%dm%02ds") % (minutes, seconds)
+    # we're going to ignore seconds in this case
+    minutes += 1
+    hours = minutes // 60
+    minutes -= hours * 60
+    if hours < 30:
+        # i18n: format X hours and YY minutes as "XhYYm"
+        return _("%dh%02dm") % (hours, minutes)
+    # we're going to ignore minutes in this case
+    hours += 1
+    days = hours // 24
+    hours -= days * 24
+    if days < 15:
+        # i18n: format X days and YY hours as "XdYYh"
+        return _("%dd%02dh") % (days, hours)
+    # we're going to ignore hours in this case
+    days += 1
+    weeks = days // 7
+    days -= weeks * 7
+    if weeks < 55:
+        # i18n: format X weeks and YY days as "XwYYd"
+        return _("%dw%02dd") % (weeks, days)
+    # we're going to ignore days and treat a year as 52 weeks
+    weeks += 1
+    years = weeks // 52
+    weeks -= years * 52
+    # i18n: format X years and YY weeks as "XyYYw"
+    return _("%dy%02dw") % (years, weeks)
+
 class progbar(object):
     def __init__(self, ui):
         self.ui = ui
@@ -61,6 +100,9 @@ class progbar(object):
 
     def resetstate(self):
         self.topics = []
+        self.topicstates = {}
+        self.starttimes = {}
+        self.startvals = {}
         self.printed = False
         self.lastprint = time.time() + float(self.ui.config(
             'progress', 'delay', default=3))
@@ -69,9 +111,9 @@ class progbar(object):
             'progress', 'refresh', default=0.1))
         self.order = self.ui.configlist(
             'progress', 'format',
-            default=['topic', 'bar', 'number'])
+            default=['topic', 'bar', 'number', 'estimate'])
 
-    def show(self, topic, pos, item, unit, total):
+    def show(self, now, topic, pos, item, unit, total):
         if not shouldprint(self.ui):
             return
         termwidth = self.width()
@@ -108,10 +150,12 @@ class progbar(object):
                 needprogress = True
             elif indicator == 'unit' and unit:
                 add = unit
+            elif indicator == 'estimate':
+                add = self.estimate(topic, pos, total, now)
             if not needprogress:
                 head = spacejoin(head, add)
             else:
-                tail = spacejoin(add, tail)
+                tail = spacejoin(tail, add)
         if needprogress:
             used = 0
             if head:
@@ -159,19 +203,44 @@ class progbar(object):
         tw = self.ui.termwidth()
         return min(int(self.ui.config('progress', 'width', default=tw)), tw)
 
+    def estimate(self, topic, pos, total, now):
+        if total is None:
+            return ''
+        initialpos = self.startvals[topic]
+        target = total - initialpos
+        delta = pos - initialpos
+        if delta > 0:
+            elapsed = now - self.starttimes[topic]
+            if elapsed > float(
+                self.ui.config('progress', 'estimate', default=2)):
+                seconds = (elapsed * (target - delta)) // delta + 1
+                return fmtremaining(seconds)
+        return ''
+
     def progress(self, topic, pos, item='', unit='', total=None):
+        now = time.time()
         if pos is None:
-            if self.topics and self.topics[-1] == topic and self.printed:
+            self.starttimes.pop(topic, None)
+            self.startvals.pop(topic, None)
+            self.topicstates.pop(topic, None)
+            # reset the progress bar if this is the outermost topic
+            if self.topics and self.topics[0] == topic and self.printed:
                 self.complete()
                 self.resetstate()
+            # truncate the list of topics assuming all topics within
+            # this one are also closed
+            if topic in self.topics:
+              self.topics = self.topics[:self.topics.index(topic)]
         else:
             if topic not in self.topics:
+                self.starttimes[topic] = now
+                self.startvals[topic] = pos
                 self.topics.append(topic)
-            now = time.time()
-            if (now - self.lastprint >= self.refresh
-                and topic == self.topics[-1]):
+            self.topicstates[topic] = pos, item, unit, total
+            if now - self.lastprint >= self.refresh and self.topics:
                 self.lastprint = now
-                self.show(topic, pos, item, unit, total)
+                current = self.topics[-1]
+                self.show(now, topic, *self.topicstates[topic])
 
 def uisetup(ui):
     class progressui(ui.__class__):

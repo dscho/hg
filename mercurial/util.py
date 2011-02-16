@@ -198,7 +198,10 @@ def tempfilter(s, cmd):
         if code:
             raise Abort(_("command '%s' failed: %s") %
                         (cmd, explain_exit(code)))
-        return open(outname, 'rb').read()
+        fp = open(outname, 'rb')
+        r = fp.read()
+        fp.close()
+        return r
     finally:
         try:
             if inname:
@@ -431,7 +434,7 @@ def checksignature(func):
 
     return check
 
-def unlink(f):
+def unlinkpath(f):
     """unlink and remove the directory if it is empty"""
     os.unlink(f)
     # try removing directories that might now be empty
@@ -451,7 +454,7 @@ def copyfile(src, dest):
     else:
         try:
             shutil.copyfile(src, dest)
-            shutil.copystat(src, dest)
+            shutil.copymode(src, dest)
         except shutil.Error, inst:
             raise Abort(str(inst))
 
@@ -487,6 +490,7 @@ class path_auditor(object):
     '''ensure that a filesystem path contains no banned components.
     the following properties of a path are checked:
 
+    - ends with a directory separator
     - under top-level .hg
     - starts at the root of a windows drive
     - contains ".."
@@ -504,6 +508,9 @@ class path_auditor(object):
     def __call__(self, path):
         if path in self.audited:
             return
+        # AIX ignores "/" at end of path, others raise EISDIR.
+        if endswithsep(path):
+            raise Abort(_("path ends in directory separator: %s") % path)
         normpath = os.path.normcase(path)
         parts = splitpath(normpath)
         if (os.path.splitdrive(path)[0]
@@ -550,16 +557,6 @@ class path_auditor(object):
         # want to add "foo/bar/baz" before checking if there's a "foo/.hg"
         self.auditeddir.update(prefixes)
 
-def nlinks(pathname):
-    """Return number of hardlinks for the given file."""
-    return os.lstat(pathname).st_nlink
-
-if hasattr(os, 'link'):
-    os_link = os.link
-else:
-    def os_link(src, dst):
-        raise OSError(0, _("Hardlinks not supported"))
-
 def lookup_reg(key, name=None, scope=None):
     return None
 
@@ -597,7 +594,10 @@ def readlock(pathname):
             raise
     except AttributeError: # no symlink in os
         pass
-    return posixfile(pathname).read()
+    fp = posixfile(pathname)
+    r = fp.read()
+    fp.close()
+    return r
 
 def fstat(fp):
     '''stat file object that may not have fileno method.'''
@@ -738,7 +738,7 @@ def checknlink(testfile):
 
         # nlinks() may behave differently for files on Windows shares if
         # the file is open.
-        fd = open(f2)
+        fd = posixfile(f2)
         return nlinks(f2) > 1
     finally:
         if fd is not None:
@@ -837,7 +837,7 @@ class atomictempfile(object):
             self._fp.close()
             rename(self.temp, localpath(self.__name))
 
-    def __del__(self):
+    def close(self):
         if not self._fp:
             return
         if not self._fp.closed:
@@ -845,6 +845,9 @@ class atomictempfile(object):
                 os.unlink(self.temp)
             except: pass
             self._fp.close()
+
+    def __del__(self):
+        self.close()
 
 def makedirs(name, mode=None):
     """recursive directory creation with parent mode inheritance"""
@@ -894,7 +897,6 @@ class opener(object):
             mode += "b" # for that other OS
 
         nlink = -1
-        st_mode = None
         dirname, basename = os.path.split(f)
         # If basename is empty, then the path is malformed because it points
         # to a directory. Let the posixfile() call below raise IOError.
@@ -905,18 +907,19 @@ class opener(object):
                 return atomictempfile(f, mode, self.createmode)
             try:
                 if 'w' in mode:
-                    st_mode = os.lstat(f).st_mode & 0777
-                    os.unlink(f)
+                    unlink(f)
                     nlink = 0
                 else:
                     # nlinks() may behave differently for files on Windows
                     # shares if the file is open.
-                    fd = open(f)
+                    fd = posixfile(f)
                     nlink = nlinks(f)
                     if nlink < 1:
                         nlink = 2 # force mktempcopy (issue1922)
                     fd.close()
-            except (OSError, IOError):
+            except (OSError, IOError), e:
+                if e.errno != errno.ENOENT:
+                    raise
                 nlink = 0
                 if not os.path.isdir(dirname):
                     makedirs(dirname, self.createmode)
@@ -927,10 +930,7 @@ class opener(object):
                     rename(mktempcopy(f), f)
         fp = posixfile(f, mode)
         if nlink == 0:
-            if st_mode is None:
-                self._fixfilemode(f)
-            else:
-                os.chmod(f, st_mode)
+            self._fixfilemode(f)
         return fp
 
     def symlink(self, src, dst):
@@ -1075,7 +1075,7 @@ def strdate(string, format, defaults=[]):
 
     # NOTE: unixtime = localunixtime + offset
     offset, date = timezone(string), string
-    if offset != None:
+    if offset is not None:
         date = " ".join(string.split()[:-1])
 
     # add missing elements from defaults
@@ -1120,7 +1120,7 @@ def parsedate(date, formats=None, bias={}):
         now = makedate()
         defaults = {}
         nowmap = {}
-        for part in "d mb yY HI M S".split():
+        for part in ("d", "mb", "yY", "HI", "M", "S"):
             # this piece is for rounding the specific end of unknowns
             b = bias.get(part)
             if b is None:
@@ -1190,7 +1190,7 @@ def matchdate(date):
 
     def upper(date):
         d = dict(mb="12", HI="23", M="59", S="59")
-        for days in "31 30 29".split():
+        for days in ("31", "30", "29"):
             try:
                 d["d"] = days
                 return parsedate(date, extendeddateformats, d)[0]
@@ -1387,37 +1387,48 @@ def uirepr(s):
     # Avoid double backslash in Windows path repr()
     return repr(s).replace('\\\\', '\\')
 
-#### naming convention of below implementation follows 'textwrap' module
+# delay import of textwrap
+def MBTextWrapper(**kwargs):
+    class tw(textwrap.TextWrapper):
+        """
+        Extend TextWrapper for double-width characters.
 
-class MBTextWrapper(textwrap.TextWrapper):
-    def __init__(self, **kwargs):
-        textwrap.TextWrapper.__init__(self, **kwargs)
+        Some Asian characters use two terminal columns instead of one.
+        A good example of this behavior can be seen with u'\u65e5\u672c',
+        the two Japanese characters for "Japan":
+        len() returns 2, but when printed to a terminal, they eat 4 columns.
 
-    def _cutdown(self, str, space_left):
-        l = 0
-        ucstr = unicode(str, encoding.encoding)
-        w = unicodedata.east_asian_width
-        for i in xrange(len(ucstr)):
-            l += w(ucstr[i]) in 'WFA' and 2 or 1
-            if space_left < l:
-                return (ucstr[:i].encode(encoding.encoding),
-                        ucstr[i:].encode(encoding.encoding))
-        return str, ''
+        (Note that this has nothing to do whatsoever with unicode
+        representation, or encoding of the underlying string)
+        """
+        def __init__(self, **kwargs):
+            textwrap.TextWrapper.__init__(self, **kwargs)
 
-    # ----------------------------------------
-    # overriding of base class
+        def _cutdown(self, str, space_left):
+            l = 0
+            ucstr = unicode(str, encoding.encoding)
+            colwidth = unicodedata.east_asian_width
+            for i in xrange(len(ucstr)):
+                l += colwidth(ucstr[i]) in 'WFA' and 2 or 1
+                if space_left < l:
+                    return (ucstr[:i].encode(encoding.encoding),
+                            ucstr[i:].encode(encoding.encoding))
+            return str, ''
 
-    def _handle_long_word(self, reversed_chunks, cur_line, cur_len, width):
-        space_left = max(width - cur_len, 1)
+        # overriding of base class
+        def _handle_long_word(self, reversed_chunks, cur_line, cur_len, width):
+            space_left = max(width - cur_len, 1)
 
-        if self.break_long_words:
-            cut, res = self._cutdown(reversed_chunks[-1], space_left)
-            cur_line.append(cut)
-            reversed_chunks[-1] = res
-        elif not cur_line:
-            cur_line.append(reversed_chunks.pop())
+            if self.break_long_words:
+                cut, res = self._cutdown(reversed_chunks[-1], space_left)
+                cur_line.append(cut)
+                reversed_chunks[-1] = res
+            elif not cur_line:
+                cur_line.append(reversed_chunks.pop())
 
-#### naming convention of above implementation follows 'textwrap' module
+    global MBTextWrapper
+    MBTextWrapper = tw
+    return tw(**kwargs)
 
 def wrap(line, width, initindent='', hangindent=''):
     maxindent = max(len(hangindent), len(initindent))
@@ -1497,7 +1508,7 @@ except NameError:
                 return False
         return True
 
-def interpolate(prefix, mapping, s, fn=None):
+def interpolate(prefix, mapping, s, fn=None, escape_prefix=False):
     """Return the result of interpolating items in the mapping into string s.
 
     prefix is a single character string, or a two character string with
@@ -1506,9 +1517,20 @@ def interpolate(prefix, mapping, s, fn=None):
 
     fn is an optional function that will be applied to the replacement text
     just before replacement.
+
+    escape_prefix is an optional flag that allows using doubled prefix for
+    its escaping.
     """
     fn = fn or (lambda s: s)
-    r = re.compile(r'%s(%s)' % (prefix, '|'.join(mapping.keys())))
+    patterns = '|'.join(mapping.keys())
+    if escape_prefix:
+        patterns += '|' + prefix
+        if len(prefix) > 1:
+            prefix_char = prefix[1:]
+        else:
+            prefix_char = prefix
+        mapping[prefix_char] = prefix_char
+    r = re.compile(r'%s(%s)' % (prefix, patterns))
     return r.sub(lambda x: fn(mapping[x.group()[1:]]), s)
 
 def getport(port):

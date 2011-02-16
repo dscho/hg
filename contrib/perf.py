@@ -80,11 +80,12 @@ def perfmanifest(ui, repo):
     timer(d)
 
 def perfindex(ui, repo):
-    import mercurial.changelog
+    import mercurial.revlog
+    mercurial.revlog._prereadsize = 2**24 # disable lazy parser in old hg
+    n = repo["tip"].node()
     def d():
-        t = repo.changelog.tip()
-        repo.changelog = mercurial.changelog.changelog(repo.sopener)
-        repo.changelog._loadindexmap()
+        repo.invalidate()
+        repo[n]
     timer(d)
 
 def perfstartup(ui, repo):

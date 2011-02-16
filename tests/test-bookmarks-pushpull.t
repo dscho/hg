@@ -1,9 +1,6 @@
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "bookmarks=" >> $HGRCPATH
 
-  $ echo "[bookmarks]" >> $HGRCPATH
-  $ echo "track.current = True" >> $HGRCPATH
-
 initialize
 
   $ hg init a
@@ -48,8 +45,8 @@ import bookmark by name
   no changes found
   importing bookmark X
   $ hg bookmark
-     Y                         0:4e3505fd9583
      X                         0:4e3505fd9583
+     Y                         0:4e3505fd9583
 
 export bookmark by name
 
@@ -62,23 +59,30 @@ export bookmark by name
   no changes found
   exporting bookmark W
   $ hg -R ../a bookmarks
-     Y                         0:4e3505fd9583
-     X                         0:4e3505fd9583
-   * Z                         0:4e3505fd9583
      W                         -1:000000000000
+     X                         0:4e3505fd9583
+     Y                         0:4e3505fd9583
+   * Z                         0:4e3505fd9583
 
 delete a remote bookmark
 
   $ hg book -d W
   $ hg push -B W ../a
+  pushing to ../a
+  searching for changes
+  no changes found
   deleting remote bookmark W
 
 push/pull name that doesn't exist
 
   $ hg push -B badname ../a
+  pushing to ../a
+  searching for changes
+  no changes found
   bookmark badname does not exist on the local or remote repository!
   [2]
   $ hg pull -B anotherbadname ../a
+  pulling from ../a
   abort: remote bookmark anotherbadname not found!
   [255]
 
@@ -90,8 +94,8 @@ divergent bookmarks
   adding f1
   $ hg book -f X
   $ hg book
-     Y                         0:4e3505fd9583
    * X                         1:0d2164f0ce0d
+     Y                         0:4e3505fd9583
      Z                         1:0d2164f0ce0d
 
   $ cd ../b
@@ -102,8 +106,8 @@ divergent bookmarks
   adding f2
   $ hg book -f X
   $ hg book
-     Y                         0:4e3505fd9583
    * X                         1:9b140be10808
+     Y                         0:4e3505fd9583
      foo                       -1:000000000000
      foobar                    -1:000000000000
 
@@ -117,8 +121,8 @@ divergent bookmarks
   not updating divergent bookmark X
   (run 'hg heads' to see heads, 'hg merge' to merge)
   $ hg book
-     Y                         0:4e3505fd9583
    * X                         1:9b140be10808
+     Y                         0:4e3505fd9583
      foo                       -1:000000000000
      foobar                    -1:000000000000
   $ hg push -f ../a
@@ -129,8 +133,8 @@ divergent bookmarks
   adding file changes
   added 1 changesets with 1 changes to 1 files (+1 heads)
   $ hg -R ../a book
-     Y                         0:4e3505fd9583
    * X                         1:0d2164f0ce0d
+     Y                         0:4e3505fd9583
      Z                         1:0d2164f0ce0d
 
 hgweb

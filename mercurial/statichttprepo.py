@@ -77,7 +77,6 @@ def build_opener(ui, authinfo):
             return httprangereader(f, urlopener)
         return o
 
-    opener.options = {'nonlazy': 1}
     return opener
 
 class statichttprepository(localrepo.localrepository):
@@ -99,7 +98,9 @@ class statichttprepository(localrepo.localrepository):
                 raise
             # check if it is a non-empty old-style repository
             try:
-                self.opener("00changelog.i").read(1)
+                fp = self.opener("00changelog.i")
+                fp.read(1)
+                fp.close()
             except IOError, inst:
                 if inst.errno != errno.ENOENT:
                     raise
@@ -114,9 +115,7 @@ class statichttprepository(localrepo.localrepository):
                 raise error.RepoError(_("requirement '%s' not supported") % r)
 
         # setup store
-        def pjoin(a, b):
-            return a + '/' + b
-        self.store = store.store(requirements, self.path, opener, pjoin)
+        self.store = store.store(requirements, self.path, opener)
         self.spath = self.store.path
         self.sopener = self.store.opener
         self.sjoin = self.store.join

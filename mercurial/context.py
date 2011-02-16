@@ -7,7 +7,7 @@
 
 from node import nullid, nullrev, short, hex
 from i18n import _
-import ancestor, bdiff, error, util, subrepo, patch
+import ancestor, bdiff, error, util, subrepo, patch, encoding
 import os, errno, stat
 
 propertycache = util.propertycache
@@ -109,11 +109,13 @@ class changectx(object):
     def description(self):
         return self._changeset[4]
     def branch(self):
-        return self._changeset[5].get("branch")
+        return encoding.tolocal(self._changeset[5].get("branch"))
     def extra(self):
         return self._changeset[5]
     def tags(self):
         return self._repo.nodetags(self._node)
+    def bookmarks(self):
+        return self._repo.nodebookmarks(self._node)
 
     def parents(self):
         """return contexts for each parent changeset"""
@@ -179,7 +181,7 @@ class changectx(object):
         """
         # deal with workingctxs
         n2 = c2._node
-        if n2 == None:
+        if n2 is None:
             n2 = c2._parents[0]._node
         n = self._repo.changelog.ancestor(self._node, n2)
         return changectx(self._repo, n)
@@ -591,9 +593,8 @@ class workingctx(changectx):
         if extra:
             self._extra = extra.copy()
         if 'branch' not in self._extra:
-            branch = self._repo.dirstate.branch()
             try:
-                branch = branch.decode('UTF-8').encode('UTF-8')
+                branch = encoding.fromlocal(self._repo.dirstate.branch())
             except UnicodeDecodeError:
                 raise util.Abort(_('branch name not in UTF-8!'))
             self._extra['branch'] = branch
@@ -602,6 +603,9 @@ class workingctx(changectx):
 
     def __str__(self):
         return str(self._parents[0]) + "+"
+
+    def __repr__(self):
+        return "<workingctx %s>" % str(self)
 
     def __nonzero__(self):
         return True
@@ -712,13 +716,14 @@ class workingctx(changectx):
         assert self._clean is not None  # must call status first
         return self._clean
     def branch(self):
-        return self._extra['branch']
+        return encoding.tolocal(self._extra['branch'])
     def extra(self):
         return self._extra
 
     def tags(self):
         t = []
-        [t.extend(p.tags()) for p in self.parents()]
+        for p in self.parents():
+            t.extend(p.tags())
         return t
 
     def children(self):
@@ -827,7 +832,7 @@ class workingctx(changectx):
         if unlink:
             for f in list:
                 try:
-                    util.unlink(self._repo.wjoin(f))
+                    util.unlinkpath(self._repo.wjoin(f))
                 except OSError, inst:
                     if inst.errno != errno.ENOENT:
                         raise
@@ -901,6 +906,9 @@ class workingfilectx(filectx):
 
     def __str__(self):
         return "%s@%s" % (self.path(), self._changectx)
+
+    def __repr__(self):
+        return "<workingfilectx %s>" % str(self)
 
     def data(self):
         return self._repo.wread(self._path)
@@ -1042,7 +1050,7 @@ class memctx(object):
     def clean(self):
         return self._status[6]
     def branch(self):
-        return self._extra['branch']
+        return encoding.tolocal(self._extra['branch'])
     def extra(self):
         return self._extra
     def flags(self, f):

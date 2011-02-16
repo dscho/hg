@@ -40,7 +40,7 @@ def get_opts(opts):
         if longopt:
             allopts.append("--%s" % longopt)
         desc += default and _(" (default: %s)") % default or ""
-        yield(", ".join(allopts), desc)
+        yield (", ".join(allopts), desc)
 
 def get_cmd(cmd, cmdtable):
     d = {}
@@ -143,7 +143,7 @@ def commandprinter(ui, cmdtable, sectionfunc):
         opt_output = list(d['opts'])
         if opt_output:
             opts_len = max([len(line[0]) for line in opt_output])
-            ui.write(_("options:\n\n"))
+            ui.write(_("Options:\n\n"))
             for optstr, desc in opt_output:
                 if desc:
                     s = "%-*s  %s" % (opts_len, optstr, desc)

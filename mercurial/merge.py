@@ -32,6 +32,7 @@ class mergestate(object):
                 else:
                     bits = l[:-1].split("\0")
                     self._state[bits[0]] = bits[1:]
+            f.close()
         except IOError, err:
             if err.errno != errno.ENOENT:
                 raise
@@ -42,6 +43,7 @@ class mergestate(object):
             f.write(hex(self._local) + "\n")
             for d, v in self._state.iteritems():
                 f.write("\0".join([d] + v) + "\n")
+            f.close()
             self._dirty = False
     def add(self, fcl, fco, fca, fd, flags):
         hash = util.sha1(fcl.path()).hexdigest()
@@ -67,6 +69,7 @@ class mergestate(object):
         state, hash, lfile, afile, anode, ofile, flags = self._state[dfile]
         f = self._repo.opener("merge/" + hash)
         self._repo.wwrite(dfile, f.read(), flags)
+        f.close()
         fcd = wctx[dfile]
         fco = octx[ofile]
         fca = self._repo.filectx(afile, fileid=anode)
@@ -255,6 +258,9 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
     wctx is the working copy context
     mctx is the context to be merged into the working copy
     actx is the context of the common ancestor
+
+    Return a tuple of counts (updated, merged, removed, unresolved) that
+    describes how many files were affected by the update.
     """
 
     updated, merged, removed, unresolved = 0, 0, 0, 0
@@ -309,7 +315,7 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
             if f == '.hgsubstate': # subrepo states need updating
                 subrepo.submerge(repo, wctx, mctx, wctx, overwrite)
             try:
-                util.unlink(repo.wjoin(f))
+                util.unlinkpath(repo.wjoin(f))
             except OSError, inst:
                 if inst.errno != errno.ENOENT:
                     repo.ui.warn(_("update failed to remove %s: %s!\n") %
@@ -347,7 +353,7 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
                 repo.ui.note(_("moving %s to %s\n") % (f, fd))
                 t = wctx.filectx(f).data()
                 repo.wwrite(fd, t, flags)
-                util.unlink(repo.wjoin(f))
+                util.unlinkpath(repo.wjoin(f))
             if f2:
                 repo.ui.note(_("getting %s to %s\n") % (f2, fd))
                 t = mctx.filectx(f2).data()
@@ -462,6 +468,8 @@ def update(repo, node, branchmerge, force, partial):
                  use 'hg update -C' to discard changes)
     3 = abort: uncommitted local changes
     4 = incompatible options (checked in commands.py)
+
+    Return the same tuple as applyupdates().
     """
 
     onode = node
@@ -524,7 +532,7 @@ def update(repo, node, branchmerge, force, partial):
         action += manifestmerge(repo, wc, p2, pa, overwrite, partial)
 
         ### apply phase
-        if not branchmerge: # just jump to the new rev
+        if not branchmerge or fastforward: # just jump to the new rev
             fp1, fp2, xp1, xp2 = fp2, nullid, xp2, ''
         if not partial:
             repo.hook('preupdate', throw=True, parent1=xp1, parent2=xp2)
@@ -533,7 +541,7 @@ def update(repo, node, branchmerge, force, partial):
 
         if not partial:
             repo.dirstate.setparents(fp1, fp2)
-            recordupdates(repo, action, branchmerge)
+            recordupdates(repo, action, branchmerge and not fastforward)
             if not branchmerge and not fastforward:
                 repo.dirstate.setbranch(p2.branch())
     finally:

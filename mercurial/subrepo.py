@@ -6,7 +6,7 @@
 # GNU General Public License version 2 or any later version.
 
 import errno, os, re, xml.dom.minidom, shutil, urlparse, posixpath
-import stat, subprocess
+import stat, subprocess, tarfile
 from i18n import _
 import config, util, node, error, cmdutil
 hg = None
@@ -163,6 +163,17 @@ def submerge(repo, wctx, mctx, actx, overwrite):
     # record merged .hgsubstate
     writestate(repo, sm)
 
+def _updateprompt(ui, sub, dirty, local, remote):
+    if dirty:
+        msg = (_(' subrepository sources for %s differ\n'
+                 'use (l)ocal source (%s) or (r)emote source (%s)?\n')
+               % (subrelpath(sub), local, remote))
+    else:
+        msg = (_(' subrepository sources for %s differ (in checked out version)\n'
+                 'use (l)ocal source (%s) or (r)emote source (%s)?\n')
+               % (subrelpath(sub), local, remote))
+    return ui.promptchoice(msg, (_('&Local'), _('&Remote')), 0)
+
 def reporelpath(repo):
     """return path to this (sub)repo as seen from outermost repo"""
     parent = repo
@@ -172,6 +183,8 @@ def reporelpath(repo):
 
 def subrelpath(sub):
     """return path to this subrepo as seen from outermost repo"""
+    if hasattr(sub, '_relpath'):
+        return sub._relpath
     if not hasattr(sub, '_repo'):
         return sub._path
     return reporelpath(sub._repo)
@@ -236,9 +249,10 @@ def subrepo(ctx, path):
 
 class abstractsubrepo(object):
 
-    def dirty(self):
-        """returns true if the dirstate of the subrepo does not match
-        current stored state
+    def dirty(self, ignoreupdate=False):
+        """returns true if the dirstate of the subrepo is dirty or does not
+        match current stored state. If ignoreupdate is true, only check
+        whether the subrepo has uncommitted changes in its dirstate.
         """
         raise NotImplementedError
 
@@ -266,7 +280,7 @@ class abstractsubrepo(object):
         """
         raise NotImplementedError
 
-    def merge(self, state, overwrite=False):
+    def merge(self, state):
         """merge currently-saved state with the new state."""
         raise NotImplementedError
 
@@ -304,13 +318,21 @@ class abstractsubrepo(object):
         """return file flags"""
         return ''
 
-    def archive(self, archiver, prefix):
-        for name in self.files():
+    def archive(self, ui, archiver, prefix):
+        files = self.files()
+        total = len(files)
+        relpath = subrelpath(self)
+        ui.progress(_('archiving (%s)') % relpath, 0,
+                    unit=_('files'), total=total)
+        for i, name in enumerate(files):
             flags = self.fileflags(name)
             mode = 'x' in flags and 0755 or 0644
             symlink = 'l' in flags
             archiver.addfile(os.path.join(prefix, self._path, name),
                              mode, symlink, self.filedata(name))
+            ui.progress(_('archiving (%s)') % relpath, i + 1,
+                        unit=_('files'), total=total)
+        ui.progress(_('archiving (%s)') % relpath, None)
 
 
 class hgsubrepo(abstractsubrepo):
@@ -373,21 +395,22 @@ class hgsubrepo(abstractsubrepo):
             self._repo.ui.warn(_('warning: error "%s" in subrepository "%s"\n')
                                % (inst, subrelpath(self)))
 
-    def archive(self, archiver, prefix):
-        abstractsubrepo.archive(self, archiver, prefix)
+    def archive(self, ui, archiver, prefix):
+        abstractsubrepo.archive(self, ui, archiver, prefix)
 
         rev = self._state[1]
         ctx = self._repo[rev]
         for subpath in ctx.substate:
             s = subrepo(ctx, subpath)
-            s.archive(archiver, os.path.join(prefix, self._path))
+            s.archive(ui, archiver, os.path.join(prefix, self._path))
 
-    def dirty(self):
+    def dirty(self, ignoreupdate=False):
         r = self._state[1]
-        if r == '':
+        if r == '' and not ignoreupdate: # no state recorded
             return True
         w = self._repo[None]
-        if w.p1() != self._repo[r]: # version checked out change
+        if w.p1() != self._repo[r] and not ignoreupdate:
+            # different version checked out
             return True
         return w.dirty() # working directory changed
 
@@ -430,14 +453,26 @@ class hgsubrepo(abstractsubrepo):
         cur = self._repo['.']
         dst = self._repo[state[1]]
         anc = dst.ancestor(cur)
-        if anc == cur:
-            self._repo.ui.debug("updating subrepo %s\n" % subrelpath(self))
-            hg.update(self._repo, state[1])
-        elif anc == dst:
-            self._repo.ui.debug("skipping subrepo %s\n" % subrelpath(self))
+
+        def mergefunc():
+            if anc == cur:
+                self._repo.ui.debug("updating subrepo %s\n" % subrelpath(self))
+                hg.update(self._repo, state[1])
+            elif anc == dst:
+                self._repo.ui.debug("skipping subrepo %s\n" % subrelpath(self))
+            else:
+                self._repo.ui.debug("merging subrepo %s\n" % subrelpath(self))
+                hg.merge(self._repo, state[1], remind=False)
+
+        wctx = self._repo[None]
+        if self.dirty():
+            if anc != dst:
+                if _updateprompt(self._repo.ui, self, wctx.dirty(), cur, dst):
+                    mergefunc()
+            else:
+                mergefunc()
         else:
-            self._repo.ui.debug("merging subrepo %s\n" % subrelpath(self))
-            hg.merge(self._repo, state[1], remind=False)
+            mergefunc()
 
     def push(self, force):
         # push subrepos depth-first for coherent ordering
@@ -484,13 +519,10 @@ class svnsubrepo(abstractsubrepo):
     def _svncommand(self, commands, filename=''):
         path = os.path.join(self._ctx._repo.origroot, self._path, filename)
         cmd = ['svn'] + commands + [path]
-        cmd = [util.shellquote(arg) for arg in cmd]
-        cmd = util.quotecommand(' '.join(cmd))
         env = dict(os.environ)
         # Avoid localized output, preserve current locale for everything else.
         env['LC_MESSAGES'] = 'C'
-        p = subprocess.Popen(cmd, shell=True, bufsize=-1,
-                             close_fds=util.closefds,
+        p = subprocess.Popen(cmd, bufsize=-1, close_fds=util.closefds,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              universal_newlines=True, env=env)
         stdout, stderr = p.communicate()
@@ -543,9 +575,10 @@ class svnsubrepo(abstractsubrepo):
                     return True, True
         return bool(changes), False
 
-    def dirty(self):
-        if self._state[1] in self._wcrevs() and not self._wcchanged()[0]:
-            return False
+    def dirty(self, ignoreupdate=False):
+        if not self._wcchanged()[0]:
+            if self._state[1] in self._wcrevs() or ignoreupdate:
+                return False
         return True
 
     def commit(self, text, user, date):
@@ -598,10 +631,12 @@ class svnsubrepo(abstractsubrepo):
         self._ui.status(status)
 
     def merge(self, state):
-        old = int(self._state[1])
-        new = int(state[1])
-        if new > old:
-            self.get(state)
+        old = self._state[1]
+        new = state[1]
+        if new != self._wcrev():
+            dirty = old == self._wcrev() or self._wcchanged()[0]
+            if _updateprompt(self._ui, self, dirty, self._wcrev(), new):
+                self.get(state, False)
 
     def push(self, force):
         # push is a no-op for SVN
@@ -616,7 +651,347 @@ class svnsubrepo(abstractsubrepo):
         return self._svncommand(['cat'], name)
 
 
+class gitsubrepo(abstractsubrepo):
+    def __init__(self, ctx, path, state):
+        # TODO add git version check.
+        self._state = state
+        self._ctx = ctx
+        self._path = path
+        self._relpath = os.path.join(reporelpath(ctx._repo), path)
+        self._abspath = ctx._repo.wjoin(path)
+        self._ui = ctx._repo.ui
+
+    def _gitcommand(self, commands, env=None, stream=False):
+        return self._gitdir(commands, env=env, stream=stream)[0]
+
+    def _gitdir(self, commands, env=None, stream=False):
+        return self._gitnodir(commands, env=env, stream=stream,
+                              cwd=self._abspath)
+
+    def _gitnodir(self, commands, env=None, stream=False, cwd=None):
+        """Calls the git command
+
+        The methods tries to call the git command. versions previor to 1.6.0
+        are not supported and very probably fail.
+        """
+        self._ui.debug('%s: git %s\n' % (self._relpath, ' '.join(commands)))
+        # unless ui.quiet is set, print git's stderr,
+        # which is mostly progress and useful info
+        errpipe = None
+        if self._ui.quiet:
+            errpipe = open(os.devnull, 'w')
+        p = subprocess.Popen(['git'] + commands, bufsize=-1, cwd=cwd, env=env,
+                             close_fds=util.closefds,
+                             stdout=subprocess.PIPE, stderr=errpipe)
+        if stream:
+            return p.stdout, None
+
+        retdata = p.stdout.read().strip()
+        # wait for the child to exit to avoid race condition.
+        p.wait()
+
+        if p.returncode != 0 and p.returncode != 1:
+            # there are certain error codes that are ok
+            command = commands[0]
+            if command in ('cat-file', 'symbolic-ref'):
+                return retdata, p.returncode
+            # for all others, abort
+            raise util.Abort('git %s error %d in %s' %
+                             (command, p.returncode, self._relpath))
+
+        return retdata, p.returncode
+
+    def _gitstate(self):
+        return self._gitcommand(['rev-parse', 'HEAD'])
+
+    def _gitcurrentbranch(self):
+        current, err = self._gitdir(['symbolic-ref', 'HEAD', '--quiet'])
+        if err:
+            current = None
+        return current
+
+    def _githavelocally(self, revision):
+        out, code = self._gitdir(['cat-file', '-e', revision])
+        return code == 0
+
+    def _gitisancestor(self, r1, r2):
+        base = self._gitcommand(['merge-base', r1, r2])
+        return base == r1
+
+    def _gitbranchmap(self):
+        '''returns 2 things:
+        a map from git branch to revision
+        a map from revision to branches'''
+        branch2rev = {}
+        rev2branch = {}
+
+        out = self._gitcommand(['for-each-ref', '--format',
+                                '%(objectname) %(refname)'])
+        for line in out.split('\n'):
+            revision, ref = line.split(' ')
+            if ref.startswith('refs/tags/'):
+                continue
+            if ref.startswith('refs/remotes/') and ref.endswith('/HEAD'):
+                continue # ignore remote/HEAD redirects
+            branch2rev[ref] = revision
+            rev2branch.setdefault(revision, []).append(ref)
+        return branch2rev, rev2branch
+
+    def _gittracking(self, branches):
+        'return map of remote branch to local tracking branch'
+        # assumes no more than one local tracking branch for each remote
+        tracking = {}
+        for b in branches:
+            if b.startswith('refs/remotes/'):
+                continue
+            remote = self._gitcommand(['config', 'branch.%s.remote' % b])
+            if remote:
+                ref = self._gitcommand(['config', 'branch.%s.merge' % b])
+                tracking['refs/remotes/%s/%s' %
+                         (remote, ref.split('/', 2)[2])] = b
+        return tracking
+
+    def _fetch(self, source, revision):
+        if not os.path.exists(os.path.join(self._abspath, '.git')):
+            self._ui.status(_('cloning subrepo %s\n') % self._relpath)
+            self._gitnodir(['clone', source, self._abspath])
+        if self._githavelocally(revision):
+            return
+        self._ui.status(_('pulling subrepo %s\n') % self._relpath)
+        # first try from origin
+        self._gitcommand(['fetch'])
+        if self._githavelocally(revision):
+            return
+        # then try from known subrepo source
+        self._gitcommand(['fetch', source])
+        if not self._githavelocally(revision):
+            raise util.Abort(_("revision %s does not exist in subrepo %s\n") %
+                               (revision, self._relpath))
+
+    def dirty(self, ignoreupdate=False):
+        if not ignoreupdate and self._state[1] != self._gitstate():
+            # different version checked out
+            return True
+        # check for staged changes or modified files; ignore untracked files
+        out, code = self._gitdir(['diff-index', '--quiet', 'HEAD'])
+        return code == 1
+
+    def get(self, state, overwrite=False):
+        source, revision, kind = state
+        self._fetch(source, revision)
+        # if the repo was set to be bare, unbare it
+        if self._gitcommand(['config', '--bool', 'core.bare']) == 'true':
+            self._gitcommand(['config', 'core.bare', 'false'])
+            if self._gitstate() == revision:
+                self._gitcommand(['reset', '--hard', 'HEAD'])
+                return
+        elif self._gitstate() == revision:
+            if overwrite:
+                # first reset the index to unmark new files for commit, because 
+                # reset --hard will otherwise throw away files added for commit,
+                # not just unmark them.
+                self._gitcommand(['reset', 'HEAD'])
+                self._gitcommand(['reset', '--hard', 'HEAD'])
+            return
+        branch2rev, rev2branch = self._gitbranchmap()
+
+        def checkout(args):
+            cmd = ['checkout']
+            if overwrite:
+                # first reset the index to unmark new files for commit, because
+                # the -f option will otherwise throw away files added for
+                # commit, not just unmark them.
+                self._gitcommand(['reset', 'HEAD'])
+                cmd.append('-f')
+            self._gitcommand(cmd + args)
+
+        def rawcheckout():
+            # no branch to checkout, check it out with no branch
+            self._ui.warn(_('checking out detached HEAD in subrepo %s\n') %
+                          self._relpath)
+            self._ui.warn(_('check out a git branch if you intend '
+                            'to make changes\n'))
+            checkout(['-q', revision])
+
+        if revision not in rev2branch:
+            rawcheckout()
+            return
+        branches = rev2branch[revision]
+        firstlocalbranch = None
+        for b in branches:
+            if b == 'refs/heads/master':
+                # master trumps all other branches
+                checkout(['refs/heads/master'])
+                return
+            if not firstlocalbranch and not b.startswith('refs/remotes/'):
+                firstlocalbranch = b
+        if firstlocalbranch:
+            checkout([firstlocalbranch])
+            return
+
+        tracking = self._gittracking(branch2rev.keys())
+        # choose a remote branch already tracked if possible
+        remote = branches[0]
+        if remote not in tracking:
+            for b in branches:
+                if b in tracking:
+                    remote = b
+                    break
+
+        if remote not in tracking:
+            # create a new local tracking branch
+            local = remote.split('/', 2)[2]
+            checkout(['-b', local, remote])
+        elif self._gitisancestor(branch2rev[tracking[remote]], remote):
+            # When updating to a tracked remote branch,
+            # if the local tracking branch is downstream of it,
+            # a normal `git pull` would have performed a "fast-forward merge"
+            # which is equivalent to updating the local branch to the remote.
+            # Since we are only looking at branching at update, we need to
+            # detect this situation and perform this action lazily.
+            if tracking[remote] != self._gitcurrentbranch():
+                checkout([tracking[remote]])
+            self._gitcommand(['merge', '--ff', remote])
+        else:
+            # a real merge would be required, just checkout the revision
+            rawcheckout()
+
+    def commit(self, text, user, date):
+        cmd = ['commit', '-a', '-m', text]
+        env = os.environ.copy()
+        if user:
+            cmd += ['--author', user]
+        if date:
+            # git's date parser silently ignores when seconds < 1e9
+            # convert to ISO8601
+            env['GIT_AUTHOR_DATE'] = util.datestr(date,
+                                                  '%Y-%m-%dT%H:%M:%S %1%2')
+        self._gitcommand(cmd, env=env)
+        # make sure commit works otherwise HEAD might not exist under certain
+        # circumstances
+        return self._gitstate()
+
+    def merge(self, state):
+        source, revision, kind = state
+        self._fetch(source, revision)
+        base = self._gitcommand(['merge-base', revision, self._state[1]])
+        out, code = self._gitdir(['diff-index', '--quiet', 'HEAD'])
+
+        def mergefunc():
+            if base == revision:
+                self.get(state) # fast forward merge
+            elif base != self._state[1]:
+                self._gitcommand(['merge', '--no-commit', revision])
+
+        if self.dirty():
+            if self._gitstate() != revision:
+                dirty = self._gitstate() == self._state[1] or code != 0
+                if _updateprompt(self._ui, self, dirty, self._state[1], revision):
+                    mergefunc()
+        else:
+            mergefunc()
+
+    def push(self, force):
+        # if a branch in origin contains the revision, nothing to do
+        branch2rev, rev2branch = self._gitbranchmap()
+        if self._state[1] in rev2branch:
+            for b in rev2branch[self._state[1]]:
+                if b.startswith('refs/remotes/origin/'):
+                    return True
+        for b, revision in branch2rev.iteritems():
+            if b.startswith('refs/remotes/origin/'):
+                if self._gitisancestor(self._state[1], revision):
+                    return True
+        # otherwise, try to push the currently checked out branch
+        cmd = ['push']
+        if force:
+            cmd.append('--force')
+
+        current = self._gitcurrentbranch()
+        if current:
+            # determine if the current branch is even useful
+            if not self._gitisancestor(self._state[1], current):
+                self._ui.warn(_('unrelated git branch checked out '
+                                'in subrepo %s\n') % self._relpath)
+                return False
+            self._ui.status(_('pushing branch %s of subrepo %s\n') %
+                            (current.split('/', 2)[2], self._relpath))
+            self._gitcommand(cmd + ['origin', current])
+            return True
+        else:
+            self._ui.warn(_('no branch checked out in subrepo %s\n'
+                            'cannot push revision %s') %
+                          (self._relpath, self._state[1]))
+            return False
+
+    def remove(self):
+        if self.dirty():
+            self._ui.warn(_('not removing repo %s because '
+                            'it has changes.\n') % self._relpath)
+            return
+        # we can't fully delete the repository as it may contain
+        # local-only history
+        self._ui.note(_('removing subrepo %s\n') % self._relpath)
+        self._gitcommand(['config', 'core.bare', 'true'])
+        for f in os.listdir(self._abspath):
+            if f == '.git':
+                continue
+            path = os.path.join(self._abspath, f)
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+
+    def archive(self, ui, archiver, prefix):
+        source, revision = self._state
+        self._fetch(source, revision)
+
+        # Parse git's native archive command.
+        # This should be much faster than manually traversing the trees
+        # and objects with many subprocess calls.
+        tarstream = self._gitcommand(['archive', revision], stream=True)
+        tar = tarfile.open(fileobj=tarstream, mode='r|')
+        relpath = subrelpath(self)
+        ui.progress(_('archiving (%s)') % relpath, 0, unit=_('files'))
+        for i, info in enumerate(tar):
+            if info.isdir():
+                continue
+            if info.issym():
+                data = info.linkname
+            else:
+                data = tar.extractfile(info).read()
+            archiver.addfile(os.path.join(prefix, self._path, info.name),
+                             info.mode, info.issym(), data)
+            ui.progress(_('archiving (%s)') % relpath, i + 1,
+                        unit=_('files'))
+        ui.progress(_('archiving (%s)') % relpath, None)
+
+
+    def status(self, rev2, **opts):
+        rev1 = self._state[1]
+        modified, added, removed = [], [], []
+        if rev2:
+            command = ['diff-tree', rev1, rev2]
+        else:
+            command = ['diff-index', rev1]
+        out = self._gitcommand(command)
+        for line in out.split('\n'):
+            tab = line.find('\t')
+            if tab == -1:
+                continue
+            status, f = line[tab - 1], line[tab + 1:]
+            if status == 'M':
+                modified.append(f)
+            elif status == 'A':
+                added.append(f)
+            elif status == 'D':
+                removed.append(f)
+
+        deleted = unknown = ignored = clean = []
+        return modified, added, removed, deleted, unknown, ignored, clean
+
 types = {
     'hg': hgsubrepo,
     'svn': svnsubrepo,
+    'git': gitsubrepo,
     }

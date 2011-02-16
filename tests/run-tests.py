@@ -231,6 +231,8 @@ def parseargs():
                 if line and not line.startswith('#'):
                     blacklist[line] = filename
 
+            f.close()
+
         options.blacklist = blacklist
 
     return (options, args)
@@ -491,6 +493,8 @@ def tsttest(test, options, replacements):
             # non-command/result - queue up for merged output
             after.setdefault(pos, []).append(l)
 
+    t.close()
+
     script.append('echo %s %s $?\n' % (salt, n + 1))
 
     fd, name = tempfile.mkstemp(suffix='hg-tst')
@@ -504,7 +508,8 @@ def tsttest(test, options, replacements):
         vlog("# Running", cmd)
         exitcode, output = run(cmd, options, replacements)
         # do not merge output if skipped, return hghave message instead
-        if exitcode == SKIPPED_STATUS:
+        # similarly, with --debug, output is None
+        if exitcode == SKIPPED_STATUS or output is None:
             return exitcode, output
     finally:
         os.remove(name)
@@ -579,6 +584,7 @@ def tsttest(test, options, replacements):
 
     return exitcode, postout
 
+wifexited = getattr(os, "WIFEXITED", lambda x: False)
 def run(cmd, options, replacements):
     """Run command in a sub-process, capturing the output (stdout and stderr).
     Return a tuple (exitcode, output).  output is None in debug mode."""
@@ -593,7 +599,7 @@ def run(cmd, options, replacements):
         tochild.close()
         output = fromchild.read()
         ret = fromchild.close()
-        if ret == None:
+        if ret is None:
             ret = 0
     else:
         proc = Popen4(cmd)
@@ -610,7 +616,7 @@ def run(cmd, options, replacements):
             proc.tochild.close()
             output = proc.fromchild.read()
             ret = proc.wait()
-            if os.WIFEXITED(ret):
+            if wifexited(ret):
                 ret = os.WEXITSTATUS(ret)
         except Timeout:
             vlog('# Process %d timed out - killing it' % proc.pid)
@@ -713,7 +719,7 @@ def runone(options, test, skips, fails):
     # If we're not in --debug mode and reference output file exists,
     # check test output against it.
     if options.debug:
-        refout = None                   # to match out == None
+        refout = None                   # to match "out is None"
     elif os.path.exists(ref):
         f = open(ref, "r")
         refout = splitnewlines(f.read())
@@ -925,7 +931,9 @@ def runtests(options, tests):
                 continue
 
             if options.keywords:
-                t = open(test).read().lower() + test.lower()
+                fp = open(test)
+                t = fp.read().lower() + test.lower()
+                fp.close()
                 for k in options.keywords.lower().split():
                     if k in t:
                         break
@@ -1108,4 +1116,5 @@ def main():
         time.sleep(1)
         cleanup(options)
 
-main()
+if __name__ == '__main__':
+    main()

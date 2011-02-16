@@ -7,7 +7,7 @@
 
 from node import nullid
 from i18n import _
-import util, ignore, osutil, parsers
+import util, ignore, osutil, parsers, encoding
 import struct, os, stat, errno
 import cStringIO
 
@@ -36,7 +36,7 @@ def _decdirs(dirs, path):
 
 class dirstate(object):
 
-    def __init__(self, opener, ui, root):
+    def __init__(self, opener, ui, root, validate):
         '''Create a new dirstate object.
 
         opener is an open()-like callable that can be used to open the
@@ -44,6 +44,7 @@ class dirstate(object):
         the dirstate.
         '''
         self._opener = opener
+        self._validate = validate
         self._root = root
         self._rootdir = os.path.join(root, '')
         self._dirty = False
@@ -79,7 +80,9 @@ class dirstate(object):
     @propertycache
     def _pl(self):
         try:
-            st = self._opener("dirstate").read(40)
+            fp = self._opener("dirstate")
+            st = fp.read(40)
+            fp.close()
             l = len(st)
             if l == 40:
                 return st[:20], st[20:40]
@@ -197,10 +200,10 @@ class dirstate(object):
             yield x
 
     def parents(self):
-        return self._pl
+        return [self._validate(p) for p in self._pl]
 
     def branch(self):
-        return self._branch
+        return encoding.tolocal(self._branch)
 
     def setparents(self, p1, p2=nullid):
         self._dirty = self._dirtypl = True
@@ -209,8 +212,8 @@ class dirstate(object):
     def setbranch(self, branch):
         if branch in ['tip', '.', 'null']:
             raise util.Abort(_('the name \'%s\' is reserved') % branch)
-        self._branch = branch
-        self._opener("branch", "w").write(branch + '\n')
+        self._branch = encoding.fromlocal(branch)
+        self._opener("branch", "w").write(self._branch + '\n')
 
     def _read(self):
         self._map = {}
@@ -229,7 +232,8 @@ class dirstate(object):
             self._pl = p
 
     def invalidate(self):
-        for a in "_map _copymap _foldmap _branch _pl _dirs _ignore".split():
+        for a in ("_map", "_copymap", "_foldmap", "_branch", "_pl", "_dirs",
+                "_ignore"):
             if a in self.__dict__:
                 delattr(self, a)
         self._dirty = False
