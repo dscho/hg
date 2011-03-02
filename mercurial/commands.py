@@ -207,16 +207,16 @@ def backout(ui, repo, node=None, rev=None, **opts):
     Prepare a new changeset with the effect of REV undone in the
     current working directory.
 
-    If REV is the parent of the working directory, then this changeset
+    If REV is the parent of the working directory, then this new changeset
     is committed automatically. Otherwise, hg needs to merge the
     changes and the merged result is left uncommitted.
 
     By default, the pending changeset will have one parent,
     maintaining a linear history. With --merge, the pending changeset
     will instead have two parents: the old parent of the working
-    directory and a child of REV that simply undoes REV.
+    directory and a new child of REV that simply undoes REV.
 
-    Before version 1.7, the default behavior was equivalent to
+    Before version 1.7, the behavior without --merge was equivalent to
     specifying --merge followed by :hg:`update --clean .` to cancel
     the merge and leave the child of REV as a head to be merged
     separately.
@@ -521,7 +521,8 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False, rename=No
             marks[mark] = repo.lookup(rev)
         else:
             marks[mark] = repo.changectx('.').node()
-        bookmarks.setcurrent(repo, mark)
+        if repo.changectx('.').node() == marks[mark]:
+            bookmarks.setcurrent(repo, mark)
         bookmarks.write(repo)
         return
 
@@ -1365,7 +1366,7 @@ def debugindex(ui, repo, file_, **opts):
 
     format = opts.get('format', 0)
     if format not in (0, 1):
-        raise util.Abort("unknown format %d" % format)
+        raise util.Abort(_("unknown format %d") % format)
 
     if not r:
         r = revlog.revlog(util.opener(os.getcwd(), audit=False), file_)
@@ -2239,8 +2240,8 @@ def help_(ui, name=None, with_version=False, unknowncmd=False):
             else:
                 ui.write("%s\n" % opt)
 
-def identify(ui, repo, source=None,
-             rev=None, num=None, id=None, branch=None, tags=None):
+def identify(ui, repo, source=None, rev=None,
+             num=None, id=None, branch=None, tags=None, bookmarks=None):
     """identify the working copy or specified revision
 
     With no revision, print a summary of the current state of the
@@ -2262,7 +2263,7 @@ def identify(ui, repo, source=None,
                            "(.hg not found)"))
 
     hexfunc = ui.debugflag and hex or short
-    default = not (num or id or branch or tags)
+    default = not (num or id or branch or tags or bookmarks)
     output = []
 
     revs = []
@@ -2276,9 +2277,9 @@ def identify(ui, repo, source=None,
             rev = revs[0]
         if not rev:
             rev = "tip"
-        if num or branch or tags:
-            raise util.Abort(
-                "can't query remote revision number, branch, or tags")
+        if num or branch or tags or bookmarks:
+            raise util.Abort(_("can't query remote revision number,"
+                             " branch, tags, or bookmarks"))
         output = [hexfunc(repo.lookup(rev))]
     elif not rev:
         ctx = repo[None]
@@ -2309,11 +2310,19 @@ def identify(ui, repo, source=None,
         if t:
             output.append(t)
 
+        # multiple bookmarks for a single parent separated by '/'
+        bm = '/'.join(ctx.bookmarks())
+        if bm:
+            output.append(bm)
+
     if branch:
         output.append(ctx.branch())
 
     if tags:
         output.extend(ctx.tags())
+
+    if bookmarks:
+        output.extend(ctx.bookmarks())
 
     ui.write("%s\n" % ' '.join(output))
 
@@ -2501,6 +2510,9 @@ def incoming(ui, repo, source="default", **opts):
         source, branches = hg.parseurl(ui.expandpath(source),
                                        opts.get('branch'))
         other = hg.repository(hg.remoteui(repo, opts), source)
+        if 'bookmarks' not in other.listkeys('namespaces'):
+            ui.warn(_("remote doesn't support bookmarks\n"))
+            return 0
         ui.status(_('comparing with %s\n') % url.hidepassword(source))
         return bookmarks.diff(ui, repo, other)
 
@@ -2785,6 +2797,9 @@ def outgoing(ui, repo, dest=None, **opts):
         dest = ui.expandpath(dest or 'default-push', dest or 'default')
         dest, branches = hg.parseurl(dest, opts.get('branch'))
         other = hg.repository(hg.remoteui(repo, opts), dest)
+        if 'bookmarks' not in other.listkeys('namespaces'):
+            ui.warn(_("remote doesn't support bookmarks\n"))
+            return 0
         ui.status(_('comparing with %s\n') % url.hidepassword(dest))
         return bookmarks.diff(ui, other, repo)
 
@@ -3698,6 +3713,8 @@ def summary(ui, repo, **opts):
         ui.write(_('parent: %d:%s ') % (p.rev(), str(p)),
                  label='log.changeset')
         ui.write(' '.join(p.tags()), label='log.tag')
+        if p.bookmarks():
+            ui.write(' ' + ' '.join(p.bookmarks()), label='log.bookmark')
         if p.rev() == -1:
             if not len(repo):
                 ui.write(_(' (empty repository)'))
@@ -3817,6 +3834,15 @@ def summary(ui, repo, **opts):
         o = repo.changelog.nodesbetween(o, None)[0]
         if o:
             t.append(_('%d outgoing') % len(o))
+        if 'bookmarks' in other.listkeys('namespaces'):
+            lmarks = repo.listkeys('bookmarks')
+            rmarks = other.listkeys('bookmarks')
+            diff = set(rmarks) - set(lmarks)
+            if len(diff) > 0:
+                t.append(_('%d incoming bookmarks') % len(diff))
+            diff = set(lmarks) - set(rmarks)
+            if len(diff) > 0:
+                t.append(_('%d outgoing bookmarks') % len(diff))
 
         if t:
             ui.write(_('remote: %s\n') % (', '.join(t)))
@@ -4078,7 +4104,7 @@ def version_(ui):
              % util.version())
     ui.status(_(
         "(see http://mercurial.selenic.com for more information)\n"
-        "\nCopyright (C) 2005-2010 Matt Mackall and others\n"
+        "\nCopyright (C) 2005-2011 Matt Mackall and others\n"
         "This is free software; see the source for copying conditions. "
         "There is NO\nwarranty; "
         "not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
@@ -4442,8 +4468,9 @@ table = {
           ('n', 'num', None, _('show local revision number')),
           ('i', 'id', None, _('show global revision id')),
           ('b', 'branch', None, _('show branch')),
-          ('t', 'tags', None, _('show tags'))],
-         _('[-nibt] [-r REV] [SOURCE]')),
+          ('t', 'tags', None, _('show tags')),
+          ('B', 'bookmarks', None, _('show bookmarks'))],
+         _('[-nibtB] [-r REV] [SOURCE]')),
     "import|patch":
         (import_,
          [('p', 'strip', 1,

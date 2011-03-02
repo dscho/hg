@@ -1,8 +1,3 @@
-  $ echo "[extensions]" >> $HGRCPATH
-  $ echo "bookmarks=" >> $HGRCPATH
-
-  $ echo "[bookmarks]" >> $HGRCPATH
-
   $ hg init
 
 no bookmarks
@@ -65,6 +60,17 @@ list bookmarks
   $ hg bookmark
    * Y                         0:719295282060
      Z                         -1:000000000000
+
+Verify that switching to Z updates the current bookmark:
+  $ hg update Z
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg bookmark
+     Y                         0:719295282060
+   * Z                         -1:000000000000
+
+Switch back to Y for the remaining tests in this file:
+  $ hg update Y
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
 delete bookmarks
 

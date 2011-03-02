@@ -75,7 +75,8 @@ class localrepository(repo.repository):
                 if inst.errno != errno.ENOENT:
                     raise
             for r in requirements - self.supported:
-                raise error.RepoError(_("requirement '%s' not supported") % r)
+                raise error.RequirementError(
+                          _("requirement '%s' not supported") % r)
 
         self.sharedpath = self.path
         try:
@@ -713,11 +714,12 @@ class localrepository(repo.repository):
                 try:
                     args = self.opener("undo.desc", "r").read().splitlines()
                     if len(args) >= 3 and self.ui.verbose:
-                        desc = _("rolling back to revision %s"
+                        desc = _("repository tip rolled back to revision %s"
                                  " (undo %s: %s)\n") % (
                                  int(args[0]) - 1, args[1], args[2])
                     elif len(args) >= 2:
-                        desc = _("rolling back to revision %s (undo %s)\n") % (
+                        desc = _("repository tip rolled back to revision %s"
+                                 " (undo %s)\n") % (
                                  int(args[0]) - 1, args[1])
                 except IOError:
                     desc = _("rolling back unknown transaction\n")
@@ -740,6 +742,13 @@ class localrepository(repo.repository):
                 self.invalidate()
                 self.dirstate.invalidate()
                 self.destroyed()
+                parents = tuple([p.rev() for p in self.parents()])
+                if len(parents) > 1:
+                    self.ui.status(_("working directory now based on "
+                                     "revisions %d and %d\n") % parents)
+                else:
+                    self.ui.status(_("working directory now based on "
+                                     "revision %d\n") % parents)
             else:
                 self.ui.warn(_("no rollback information available\n"))
                 return 1

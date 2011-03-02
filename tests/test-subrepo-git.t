@@ -305,6 +305,15 @@ nested archive
   f
   g
 
+relative source expansion
+
+  $ cd ..
+  $ mkdir d
+  $ hg clone t d/t
+  updating to branch default
+  cloning subrepo s
+  3 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
 Check hg update --clean
   $ cd $TESTTMP/ta
   $ echo  > s/g
@@ -359,7 +368,7 @@ Sticky subrepositorys, file changes
   $ cd ..
   $ hg update 4
    subrepository sources for s differ
-  use (l)ocal source (da5f5b1d8ffcf62fb8327bcd3c89a4367a6018e7) or (r)emote source (aa84837ccfbdfedcdcdeeedc309d73e6eb069edc)?
+  use (l)ocal source (da5f5b1) or (r)emote source (aa84837)?
    l
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg id -n
@@ -384,7 +393,7 @@ Sticky subrepository, revision updates
   $ cd ..
   $ hg update 1
    subrepository sources for s differ (in checked out version)
-  use (l)ocal source (32a343883b74769118bb1d3b4b1fbf9156f4dddc) or (r)emote source (da5f5b1d8ffcf62fb8327bcd3c89a4367a6018e7)?
+  use (l)ocal source (32a3438) or (r)emote source (da5f5b1)?
    l
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg id -n
@@ -405,7 +414,7 @@ Sticky subrepository, file changes and revision updates
   1+
   $ hg update 7
    subrepository sources for s differ
-  use (l)ocal source (32a343883b74769118bb1d3b4b1fbf9156f4dddc) or (r)emote source (32a343883b74769118bb1d3b4b1fbf9156f4dddc)?
+  use (l)ocal source (32a3438) or (r)emote source (32a3438)?
    l
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg id -n

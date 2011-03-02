@@ -112,7 +112,8 @@ class statichttprepository(localrepo.localrepository):
         # check them
         for r in requirements:
             if r not in self.supported:
-                raise error.RepoError(_("requirement '%s' not supported") % r)
+                raise error.RequirementError(
+                        _("requirement '%s' not supported") % r)
 
         # setup store
         self.store = store.store(requirements, self.path, opener)
@@ -128,7 +129,7 @@ class statichttprepository(localrepo.localrepository):
         self._branchcachetip = None
         self.encodepats = None
         self.decodepats = None
-        self.capabilities.remove("pushkey")
+        self.capabilities = self.capabilities.difference(["pushkey"])
 
     def url(self):
         return self._url

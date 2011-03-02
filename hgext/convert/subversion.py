@@ -36,7 +36,7 @@ try:
             category=DeprecationWarning)
 
 except ImportError:
-    pass
+    svn = None
 
 class SvnPathNotFound(Exception):
     pass
@@ -209,11 +209,8 @@ class svn_source(converter_source):
                 issvnurl(ui, url)):
             raise NoRepo(_("%s does not look like a Subversion repository")
                          % url)
-
-        try:
-            SubversionException
-        except NameError:
-            raise MissingTool(_('Subversion python bindings could not be loaded'))
+        if svn is None:
+            raise MissingTool(_('Could not load Subversion python bindings'))
 
         try:
             version = svn.core.SVN_VER_MAJOR, svn.core.SVN_VER_MINOR
@@ -314,6 +311,9 @@ class svn_source(converter_source):
                 return None
             path = (cfgpath or name).strip('/')
             if not self.exists(path, rev):
+                if self.module.endswith(path) and name == 'trunk':
+                    # we are converting from inside this directory
+                    return None
                 if cfgpath:
                     raise util.Abort(_('expected %s to be at %r, but not found')
                                  % (name, path))
@@ -761,7 +761,8 @@ class svn_source(converter_source):
             author = author and self.recode(author) or ''
             try:
                 branch = self.module.split("/")[-1]
-                if branch == 'trunk':
+                trunkname = self.ui.config('convert', 'svn.trunk', 'trunk')
+                if branch == trunkname.strip('/'):
                     branch = ''
             except IndexError:
                 branch = None
@@ -960,6 +961,9 @@ class svn_sink(converter_sink, commandline):
         return self.join('hg-authormap')
 
     def __init__(self, ui, path):
+
+        if svn is None:
+            raise MissingTool(_('Could not load Subversion python bindings'))
         converter_sink.__init__(self, ui, path)
         commandline.__init__(self, ui, 'svn')
         self.delete = []

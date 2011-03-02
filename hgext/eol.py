@@ -6,7 +6,7 @@ directory. That way you can get CRLF line endings on Windows and LF on
 Unix/Mac, thereby letting everybody use their OS native line endings.
 
 The extension reads its configuration from a versioned ``.hgeol``
-configuration file every time you run an ``hg`` command. The
+configuration file found in the root of the working copy. The
 ``.hgeol`` file use the same syntax as all other Mercurial
 configuration files. It uses two sections, ``[patterns]`` and
 ``[repository]``.
@@ -76,13 +76,15 @@ The ``win32text.forbid*`` hooks provided by the win32text extension
 have been unified into a single hook named ``eol.hook``. The hook will
 lookup the expected line endings from the ``.hgeol`` file, which means
 you must migrate to a ``.hgeol`` file first before using the hook.
+Remember to enable the eol extension in the repository where you
+install the hook.
 
 See :hg:`help patterns` for more information about the glob patterns
 used.
 """
 
 from mercurial.i18n import _
-from mercurial import util, config, extensions, match
+from mercurial import util, config, extensions, match, error
 import re, os
 
 # Matches a lone LF, i.e., one that is not part of CRLF.
@@ -144,11 +146,17 @@ def hook(ui, repo, node, hooktype, **kwargs):
                 elif target == "to-crlf" and singlelf.search(data):
                     raise util.Abort(_("%s should not have LF line endings")
                                      % f)
+                # Ignore other rules for this file
+                break
 
 
 def preupdate(ui, repo, hooktype, parent1, parent2):
     #print "preupdate for %s: %s -> %s" % (repo.root, parent1, parent2)
-    repo.readhgeol(parent1)
+    try:
+        repo.readhgeol(parent1)
+    except error.ParseError, inst:
+        ui.warn(_("warning: ignoring .hgeol file due to parse error "
+                  "at %s: %s\n") % (inst.args[1], inst.args[0]))
     return False
 
 def uisetup(ui):
@@ -229,7 +237,12 @@ def reposetup(ui, repo):
             return match.match(self.root, '', [], include, exclude)
 
         def _hgcleardirstate(self):
-            self._eolfile = self.readhgeol() or self.readhgeol('tip')
+            try:
+                self._eolfile = self.readhgeol() or self.readhgeol('tip')
+            except error.ParseError, inst:
+                ui.warn(_("warning: ignoring .hgeol file due to parse error "
+                          "at %s: %s\n") % (inst.args[1], inst.args[0]))
+                self._eolfile = None
 
             if not self._eolfile:
                 self._eolfile = util.never
@@ -254,13 +267,16 @@ def reposetup(ui, repo):
                     for f, e in self.dirstate._map.iteritems():
                         self.dirstate._map[f] = (e[0], e[1], -1, 0)
                     self.dirstate._dirty = True
-                    # Touch the cache to update mtime. TODO: are we sure this
-                    # always enought to update the mtime, or should we write a
-                    # bit to the file?
+                    # Touch the cache to update mtime.
                     self.opener("eol.cache", "w").close()
-                finally:
-                    if wlock is not None:
-                        wlock.release()
+                    wlock.release()
+                except error.LockUnavailable:
+                    # If we cannot lock the repository and clear the
+                    # dirstate, then a commit might not see all files
+                    # as modified. But if we cannot lock the
+                    # repository, then we can also not make a commit,
+                    # so ignore the error.
+                    pass
 
         def commitctx(self, ctx, error=False):
             for f in sorted(ctx.added() + ctx.modified()):

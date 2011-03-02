@@ -40,9 +40,6 @@ creating 'remote
   > [server]
   > uncompressed = True
   > 
-  > [extensions]
-  > bookmarks =
-  > 
   > [hooks]
   > changegroup = python "$TESTDIR"/printenv.py changegroup-in-remote 0 ../dummylog
   > EOF
@@ -121,8 +118,6 @@ updating rc
   $ echo "default-push = ssh://user@dummy/remote" >> .hg/hgrc
   $ echo "[ui]" >> .hg/hgrc
   $ echo "ssh = python ../dummyssh" >> .hg/hgrc
-  $ echo '[extensions]' >> .hg/hgrc
-  $ echo 'bookmarks =' >> .hg/hgrc
 
 find outgoing
 
@@ -195,8 +190,6 @@ check remote tip
 test pushkeys and bookmarks
 
   $ cd ../local
-  $ echo '[extensions]' >> ../remote/.hg/hgrc
-  $ echo 'bookmarks =' >> ../remote/.hg/hgrc
   $ hg debugpushkey --config ui.ssh="python ../dummyssh" ssh://user@dummy/remote namespaces
   bookmarks	
   namespaces	
@@ -269,6 +262,13 @@ push should succeed even though it has an unexpected response
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     z
   
+
+passwords in ssh urls are not supported
+
+  $ hg push ssh://user:erroneouspwd@dummy/remote
+  abort: password in URL not supported!
+  [255]
+
   $ cd ..
   $ cat dummylog
   Got arguments 1:user@dummy 2:hg -R nonexistent serve --stdio

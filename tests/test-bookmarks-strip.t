@@ -1,5 +1,4 @@
   $ echo "[extensions]" >> $HGRCPATH
-  $ echo "bookmarks=" >> $HGRCPATH
   $ echo "mq=" >> $HGRCPATH
 
   $ hg init
@@ -77,7 +76,8 @@ immediate rollback and reentrancy issue
   adding b
   $ hg bookmarks markb
   $ hg rollback
-  rolling back to revision 0 (undo commit)
+  repository tip rolled back to revision 0 (undo commit)
+  working directory now based on revision 0
 
 are you there?
 

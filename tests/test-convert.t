@@ -131,7 +131,7 @@
                   repositories with missing revlogs, by converting from and to
                   Mercurial. Default is False.
       convert.hg.saverev
-                  store original. revision ID in changeset (forces target IDs to
+                  store original revision ID in changeset (forces target IDs to
                   change). It takes and boolean argument and defaults to False.
       convert.hg.startrev
                   convert start revision and its descendants. It takes a hg
@@ -204,12 +204,12 @@
       The following options can be set with "--config":
   
       convert.svn.branches
-                  specify the directory containing branches. The defaults is
+                  specify the directory containing branches. The default is
                   "branches".
       convert.svn.tags
                   specify the directory containing tags. The default is "tags".
       convert.svn.trunk
-                  specify the name of the trunk branch The defauls is "trunk".
+                  specify the name of the trunk branch. The default is "trunk".
   
       Source history can be retrieved starting at a specific revision, instead
       of being integrally converted. Only single branch conversions are
@@ -231,7 +231,7 @@
       specifying an initial Perforce revision:
   
       convert.p4.startrev
-                  specify initial Perforce revision, a Perforce changelist
+                  specify initial Perforce revision (a Perforce changelist
                   number).
   
       Mercurial Destination
@@ -245,7 +245,7 @@
       convert.hg.tagsbranch
                   branch name for tag revisions, defaults to "default".
       convert.hg.usebranchnames
-                  preserve branch names. The default is True
+                  preserve branch names. The default is True.
   
   options:
   

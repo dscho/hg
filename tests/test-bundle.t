@@ -89,7 +89,8 @@ Pull full.hg into empty (using --cwd)
 Rollback empty
 
   $ hg -R empty rollback
-  rolling back to revision -1 (undo pull)
+  repository tip rolled back to revision -1 (undo pull)
+  working directory now based on revision -1
 
 Pull full.hg into empty again (using --cwd)
 
@@ -119,7 +120,8 @@ Pull full.hg into empty (using -R)
 Rollback empty
 
   $ hg -R empty rollback
-  rolling back to revision -1 (undo pull)
+  repository tip rolled back to revision -1 (undo pull)
+  working directory now based on revision -1
 
 Pull full.hg into empty again (using -R)
 
@@ -204,19 +206,20 @@ doesn't work (yet ?)
 hg -R bundle://../full.hg verify
 
   $ hg pull bundle://../full.hg
-  changegroup hook: HG_NODE=f9ee2f85a263049e9ae6d37a0e67e96194ffb735 HG_SOURCE=pull HG_URL=bundle:../full.hg 
   pulling from bundle://../full.hg
   requesting all changes
   adding changesets
   adding manifests
   adding file changes
   added 9 changesets with 7 changes to 4 files (+1 heads)
+  changegroup hook: HG_NODE=f9ee2f85a263049e9ae6d37a0e67e96194ffb735 HG_SOURCE=pull HG_URL=bundle:../full.hg 
   (run 'hg heads' to see heads, 'hg merge' to merge)
 
 Rollback empty
 
   $ hg rollback
-  rolling back to revision -1 (undo pull)
+  repository tip rolled back to revision -1 (undo pull)
+  working directory now based on revision -1
   $ cd ..
 
 Log -R bundle:empty+full.hg
@@ -227,13 +230,13 @@ Log -R bundle:empty+full.hg
 Pull full.hg into empty again (using -R; with hook)
 
   $ hg -R empty pull full.hg
-  changegroup hook: HG_NODE=f9ee2f85a263049e9ae6d37a0e67e96194ffb735 HG_SOURCE=pull HG_URL=bundle:empty+full.hg 
   pulling from full.hg
   requesting all changes
   adding changesets
   adding manifests
   adding file changes
   added 9 changesets with 7 changes to 4 files (+1 heads)
+  changegroup hook: HG_NODE=f9ee2f85a263049e9ae6d37a0e67e96194ffb735 HG_SOURCE=pull HG_URL=bundle:empty+full.hg 
   (run 'hg heads' to see heads, 'hg merge' to merge)
 
 Create partial clones

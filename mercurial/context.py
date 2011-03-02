@@ -550,15 +550,15 @@ class filectx(object):
         return None
 
     def ancestors(self):
-        seen = set(str(self))
-        visit = [self]
-        while visit:
-            for parent in visit.pop(0).parents():
-                s = str(parent)
-                if s not in seen:
-                    visit.append(parent)
-                    seen.add(s)
-                    yield parent
+        visit = {}
+        c = self
+        while True:
+            for parent in c.parents():
+                visit[(parent.rev(), parent.node())] = parent
+            if not visit:
+                break
+            c = visit.pop(max(visit))
+            yield c
 
 class workingctx(changectx):
     """A workingctx object makes access to data related to
@@ -725,6 +725,12 @@ class workingctx(changectx):
         for p in self.parents():
             t.extend(p.tags())
         return t
+
+    def bookmarks(self):
+        b = []
+        for p in self.parents():
+            b.extend(p.bookmarks())
+        return b
 
     def children(self):
         return []

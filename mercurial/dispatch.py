@@ -226,7 +226,7 @@ class cmdalias(object):
                     elif int(m.groups()[0]) <= len(args):
                         return m.group()
                     else:
-                        ui.debug(_("No argument found for substitution"
+                        ui.debug(_("No argument found for substitution "
                                    "of %i variable in alias '%s' definition.")
                                  % (int(m.groups()[0]), self.name))
                         return ''
@@ -576,6 +576,8 @@ def _dispatch(ui, args):
             if not repo.local():
                 raise util.Abort(_("repository '%s' is not local") % path)
             ui.setconfig("bundle", "mainreporoot", repo.root)
+        except error.RequirementError:
+            raise
         except error.RepoError:
             if cmd not in commands.optionalrepo.split():
                 if args and not path: # try to infer -R from command args

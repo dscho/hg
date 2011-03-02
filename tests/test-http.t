@@ -11,7 +11,7 @@
   adding foo.d/bAr.hg.d/BaR
   adding foo.d/baR.d.hg/bAR
   adding foo.d/foo
-  $ hg serve -p $HGPORT -d --pid-file=../hg1.pid
+  $ hg serve -p $HGPORT -d --pid-file=../hg1.pid -E ../error.log
   $ hg --config server.uncompressed=False serve -p $HGPORT1 -d --pid-file=../hg2.pid
 
 Test server address cannot be reused
@@ -76,12 +76,22 @@ pull
   $ echo '[hooks]' >> .hg/hgrc
   $ echo 'changegroup = python "$TESTDIR"/printenv.py changegroup' >> .hg/hgrc
   $ hg pull
-  changegroup hook: HG_NODE=5fed3813f7f5e1824344fdc9cf8f63bb662c292d HG_SOURCE=pull HG_URL=http://localhost:$HGPORT1/ 
   pulling from http://localhost:$HGPORT1/
   searching for changes
   adding changesets
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files
+  changegroup hook: HG_NODE=5fed3813f7f5e1824344fdc9cf8f63bb662c292d HG_SOURCE=pull HG_URL=http://localhost:$HGPORT1/ 
   (run 'hg update' to get a working copy)
   $ cd ..
+
+clone from invalid URL
+
+  $ hg clone http://localhost:$HGPORT/bad
+  abort: HTTP Error 404: Not Found
+  [255]
+
+check error log
+
+  $ cat error.log

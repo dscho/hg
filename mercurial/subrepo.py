@@ -659,6 +659,7 @@ class gitsubrepo(abstractsubrepo):
         self._path = path
         self._relpath = os.path.join(reporelpath(ctx._repo), path)
         self._abspath = ctx._repo.wjoin(path)
+        self._subparent = ctx._repo
         self._ui = ctx._repo.ui
 
     def _gitcommand(self, commands, env=None, stream=False):
@@ -729,7 +730,8 @@ class gitsubrepo(abstractsubrepo):
                                 '%(objectname) %(refname)'])
         for line in out.split('\n'):
             revision, ref = line.split(' ')
-            if ref.startswith('refs/tags/'):
+            if (not ref.startswith('refs/heads/') and
+                not ref.startswith('refs/remotes/')):
                 continue
             if ref.startswith('refs/remotes/') and ref.endswith('/HEAD'):
                 continue # ignore remote/HEAD redirects
@@ -751,19 +753,19 @@ class gitsubrepo(abstractsubrepo):
                          (remote, ref.split('/', 2)[2])] = b
         return tracking
 
+    def _abssource(self, source):
+        self._subsource = source
+        return _abssource(self)
+
     def _fetch(self, source, revision):
         if not os.path.exists(os.path.join(self._abspath, '.git')):
             self._ui.status(_('cloning subrepo %s\n') % self._relpath)
-            self._gitnodir(['clone', source, self._abspath])
+            self._gitnodir(['clone', self._abssource(source), self._abspath])
         if self._githavelocally(revision):
             return
         self._ui.status(_('pulling subrepo %s\n') % self._relpath)
-        # first try from origin
+        # try only origin: the originally cloned repo
         self._gitcommand(['fetch'])
-        if self._githavelocally(revision):
-            return
-        # then try from known subrepo source
-        self._gitcommand(['fetch', source])
         if not self._githavelocally(revision):
             raise util.Abort(_("revision %s does not exist in subrepo %s\n") %
                                (revision, self._relpath))
@@ -886,7 +888,8 @@ class gitsubrepo(abstractsubrepo):
         if self.dirty():
             if self._gitstate() != revision:
                 dirty = self._gitstate() == self._state[1] or code != 0
-                if _updateprompt(self._ui, self, dirty, self._state[1], revision):
+                if _updateprompt(self._ui, self, dirty,
+                                 self._state[1][:7], revision[:7]):
                     mergefunc()
         else:
             mergefunc()
