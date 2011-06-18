@@ -69,6 +69,18 @@ test transplanted revset
       "transplanted([set])"
         Transplanted changesets in set, or all transplanted changesets.
 
+test tranplanted keyword
+
+  $ hg log --template '{rev} {transplanted}\n'
+  7 a53251cdf717679d1907b289f991534be05c997a
+  6 722f4667af767100cb15b6a79324bf8abbfe1ef4
+  5 37a1297eb21b3ef5c5d2ffac22121a0988ed9f21
+  4 
+  3 
+  2 
+  1 
+  0 
+
   $ hg clone ../t ../prune
   updating to branch default
   4 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -331,6 +343,40 @@ test filter with failed patch
   [255]
   $ cd ..
 
+test environment passed to filter
+
+  $ hg init filter-environment
+  $ cd filter-environment
+  $ cat <<'EOF' >test-filter-environment
+  > #!/bin/sh
+  > echo "Transplant by $HGUSER" >> $1
+  > echo "Transplant from rev $HGREVISION" >> $1
+  > EOF
+  $ chmod +x test-filter-environment
+  $ hg transplant -s ../t --filter ./test-filter-environment 0
+  filtering * (glob)
+  applying 17ab29e464c6
+  17ab29e464c6 transplanted to 5190e68026a0
+
+  $ hg log --template '{rev} {parents} {desc}\n'
+  0  r1
+  Transplant by test
+  Transplant from rev 17ab29e464c6ca53e329470efe2a9918ac617a6f
+  $ cd ..
+
+test transplant with filter handles invalid changelog
+
+  $ hg init filter-invalid-log
+  $ cd filter-invalid-log
+  $ cat <<'EOF' >test-filter-invalid-log
+  > #!/bin/sh
+  > echo "" > $1
+  > EOF
+  $ chmod +x test-filter-invalid-log
+  $ hg transplant -s ../t --filter ./test-filter-invalid-log 0
+  filtering * (glob)
+  abort: filter corrupted changeset (no user or date)
+  [255]
 
 test with a win32ext like setup (differing EOLs)
 

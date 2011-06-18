@@ -80,7 +80,7 @@ def _filerevision(web, tmpl, fctx):
                 path=webutil.up(f),
                 text=lines(),
                 rev=fctx.rev(),
-                node=hex(fctx.node()),
+                node=fctx.hex(),
                 author=fctx.user(),
                 date=fctx.date(),
                 desc=fctx.description(),
@@ -108,10 +108,11 @@ def _search(web, req, tmpl):
     revcount = web.maxchanges
     if 'revcount' in req.form:
         revcount = int(req.form.get('revcount', [revcount])[0])
+        revcount = max(revcount, 1)
         tmpl.defaults['sessionvars']['revcount'] = revcount
 
     lessvars = copy.copy(tmpl.defaults['sessionvars'])
-    lessvars['revcount'] = revcount / 2
+    lessvars['revcount'] = max(revcount / 2, 1)
     lessvars['rev'] = query
     morevars = copy.copy(tmpl.defaults['sessionvars'])
     morevars['revcount'] = revcount * 2
@@ -220,10 +221,11 @@ def changelog(web, req, tmpl, shortlog=False):
     revcount = shortlog and web.maxshortchanges or web.maxchanges
     if 'revcount' in req.form:
         revcount = int(req.form.get('revcount', [revcount])[0])
+        revcount = max(revcount, 1)
         tmpl.defaults['sessionvars']['revcount'] = revcount
 
     lessvars = copy.copy(tmpl.defaults['sessionvars'])
-    lessvars['revcount'] = revcount / 2
+    lessvars['revcount'] = max(revcount / 2, 1)
     morevars = copy.copy(tmpl.defaults['sessionvars'])
     morevars['revcount'] = revcount * 2
 
@@ -237,7 +239,7 @@ def changelog(web, req, tmpl, shortlog=False):
     changenav = webutil.revnavgen(pos, revcount, count, web.repo.changectx)
 
     return tmpl(shortlog and 'shortlog' or 'changelog', changenav=changenav,
-                node=hex(ctx.node()), rev=pos, changesets=count,
+                node=ctx.hex(), rev=pos, changesets=count,
                 entries=lambda **x: changelist(limit=0,**x),
                 latestentry=lambda **x: changelist(limit=1,**x),
                 archives=web.archivelist("tip"), revcount=revcount,
@@ -261,12 +263,17 @@ def changeset(web, req, tmpl):
                           node=ctx.hex(), file=f,
                           parity=parity.next()))
 
-    parity = paritygen(web.stripecount)
     style = web.config('web', 'style', 'paper')
     if 'style' in req.form:
         style = req.form['style'][0]
 
+    parity = paritygen(web.stripecount)
     diffs = webutil.diffs(web.repo, tmpl, ctx, None, parity, style)
+
+    parity = paritygen(web.stripecount)
+    diffstatgen = webutil.diffstatgen(ctx)
+    diffstat = webutil.diffstat(tmpl, ctx, diffstatgen, parity)
+
     return tmpl('changeset',
                 diff=diffs,
                 rev=ctx.rev(),
@@ -280,6 +287,8 @@ def changeset(web, req, tmpl):
                 desc=ctx.description(),
                 date=ctx.date(),
                 files=files,
+                diffsummary=lambda **x: webutil.diffsummary(diffstatgen),
+                diffstat=diffstat,
                 archives=web.archivelist(ctx.hex()),
                 tags=webutil.nodetagsdict(web.repo, ctx.node()),
                 bookmarks=webutil.nodebookmarksdict(web.repo, ctx.node()),
@@ -393,14 +402,11 @@ def tags(web, req, tmpl):
 
 def bookmarks(web, req, tmpl):
     i = web.repo._bookmarks.items()
-    i.reverse()
     parity = paritygen(web.stripecount)
 
-    def entries(notip=False, limit=0, **map):
+    def entries(limit=0, **map):
         count = 0
-        for k, n in i:
-            if notip and k == "tip":
-                continue
+        for k, n in sorted(i):
             if limit > 0 and count >= limit:
                 continue
             count = count + 1
@@ -411,9 +417,8 @@ def bookmarks(web, req, tmpl):
 
     return tmpl("bookmarks",
                 node=hex(web.repo.changelog.tip()),
-                entries=lambda **x: entries(False, 0, **x),
-                entriesnotip=lambda **x: entries(True, 0, **x),
-                latestentry=lambda **x: entries(True, 1, **x))
+                entries=lambda **x: entries(0, **x),
+                latestentry=lambda **x: entries(1, **x))
 
 def branches(web, req, tmpl):
     tips = (web.repo[n] for t, n in web.repo.branchtags().iteritems())
@@ -464,6 +469,15 @@ def summary(web, req, tmpl):
                        node=hex(n),
                        date=web.repo[n].date())
 
+    def bookmarks(**map):
+        parity = paritygen(web.stripecount)
+        b = web.repo._bookmarks.items()
+        for k, n in sorted(b)[:10]:  # limit to 10 bookmarks
+            yield {'parity': parity.next(),
+                   'bookmark': k,
+                   'date': web.repo[n].date(),
+                   'node': hex(n)}
+
     def branches(**map):
         parity = paritygen(web.stripecount)
 
@@ -508,6 +522,7 @@ def summary(web, req, tmpl):
                 owner=get_contact(web.config) or "unknown",
                 lastchange=tip.date(),
                 tags=tagentries,
+                bookmarks=bookmarks,
                 branches=branches,
                 shortlog=changelist,
                 node=tip.hex(),
@@ -574,7 +589,7 @@ def annotate(web, req, tmpl):
                 last = fnode
 
             yield {"parity": parity.next(),
-                   "node": hex(f.node()),
+                   "node": f.hex(),
                    "rev": f.rev(),
                    "author": f.user(),
                    "desc": f.description(),
@@ -590,7 +605,7 @@ def annotate(web, req, tmpl):
                 annotate=annotate,
                 path=webutil.up(f),
                 rev=fctx.rev(),
-                node=hex(fctx.node()),
+                node=fctx.hex(),
                 author=fctx.user(),
                 date=fctx.date(),
                 desc=fctx.description(),
@@ -624,10 +639,11 @@ def filelog(web, req, tmpl):
     revcount = web.maxshortchanges
     if 'revcount' in req.form:
         revcount = int(req.form.get('revcount', [revcount])[0])
+        revcount = max(revcount, 1)
         tmpl.defaults['sessionvars']['revcount'] = revcount
 
     lessvars = copy.copy(tmpl.defaults['sessionvars'])
-    lessvars['revcount'] = revcount / 2
+    lessvars['revcount'] = max(revcount / 2, 1)
     morevars = copy.copy(tmpl.defaults['sessionvars'])
     morevars['revcount'] = revcount * 2
 
@@ -646,7 +662,7 @@ def filelog(web, req, tmpl):
             l.insert(0, {"parity": parity.next(),
                          "filerev": i,
                          "file": f,
-                         "node": hex(iterfctx.node()),
+                         "node": iterfctx.hex(),
                          "author": iterfctx.user(),
                          "date": iterfctx.date(),
                          "rename": webutil.renamelink(iterfctx),
@@ -668,7 +684,7 @@ def filelog(web, req, tmpl):
 
     nodefunc = lambda x: fctx.filectx(fileid=x)
     nav = webutil.revnavgen(end - 1, revcount, count, nodefunc)
-    return tmpl("filelog", file=f, node=hex(fctx.node()), nav=nav,
+    return tmpl("filelog", file=f, node=fctx.hex(), nav=nav,
                 entries=lambda **x: entries(limit=0, **x),
                 latestentry=lambda **x: entries(limit=1, **x),
                 revcount=revcount, morevars=morevars, lessvars=lessvars)
@@ -725,10 +741,11 @@ def graph(web, req, tmpl):
     revcount = web.maxshortchanges
     if 'revcount' in req.form:
         revcount = int(req.form.get('revcount', [revcount])[0])
+        revcount = max(revcount, 1)
         tmpl.defaults['sessionvars']['revcount'] = revcount
 
     lessvars = copy.copy(tmpl.defaults['sessionvars'])
-    lessvars['revcount'] = revcount / 2
+    lessvars['revcount'] = max(revcount / 2, 1)
     morevars = copy.copy(tmpl.defaults['sessionvars'])
     morevars['revcount'] = revcount * 2
 
@@ -745,14 +762,14 @@ def graph(web, req, tmpl):
     if rev < web.maxshortchanges:
         startrev = uprev
 
-    dag = graphmod.revisions(web.repo, startrev, downrev)
+    dag = graphmod.dagwalker(web.repo, range(startrev, downrev - 1, -1))
     tree = list(graphmod.colored(dag))
     canvasheight = (len(tree) + 1) * bg_height - 27
     data = []
     for (id, type, ctx, vtx, edges) in tree:
         if type != graphmod.CHANGESET:
             continue
-        node = short(ctx.node())
+        node = str(ctx)
         age = templatefilters.age(ctx.date())
         desc = templatefilters.firstline(ctx.description())
         desc = cgi.escape(templatefilters.nonempty(desc))
@@ -780,8 +797,6 @@ def help(web, req, tmpl):
 
     topicname = req.form.get('node', [None])[0]
     if not topicname:
-        topic = []
-
         def topics(**map):
             for entries, summary, _ in helpmod.helptable:
                 entries = sorted(entries, key=len)

@@ -65,36 +65,53 @@ with remote http repo
 remote with rev number?
 
   $ hg id -n http://localhost:$HGPORT1/
-  abort: can't query remote revision number, branch, tags, or bookmarks
+  abort: can't query remote revision number, branch, or tags
   [255]
 
 remote with tags?
 
   $ hg id -t http://localhost:$HGPORT1/
-  abort: can't query remote revision number, branch, tags, or bookmarks
+  abort: can't query remote revision number, branch, or tags
   [255]
 
 remote with branch?
 
   $ hg id -b http://localhost:$HGPORT1/
-  abort: can't query remote revision number, branch, tags, or bookmarks
+  abort: can't query remote revision number, branch, or tags
   [255]
 
-remote with bookmarks?
+test bookmark support
 
-  $ hg id -B http://localhost:$HGPORT1/
-  abort: can't query remote revision number, branch, tags, or bookmarks
-  [255]
+  $ hg bookmark Y
+  $ hg bookmark Z
+  $ hg bookmarks
+     Y                         0:cb9a9f314b8b
+   * Z                         0:cb9a9f314b8b
+  $ hg id
+  cb9a9f314b8b+ tip Y/Z
+  $ hg id --bookmarks
+  Y Z
+
+test remote identify with bookmarks
+
+  $ hg id http://localhost:$HGPORT1/
+  cb9a9f314b8b Y/Z
+  $ hg id --bookmarks http://localhost:$HGPORT1/
+  Y Z
+  $ hg id -r . http://localhost:$HGPORT1/
+  cb9a9f314b8b Y/Z
+  $ hg id --bookmarks -r . http://localhost:$HGPORT1/
+  Y Z
 
 Make sure we do not obscure unknown requires file entries (issue2649)
 
   $ echo fake >> .hg/requires
   $ hg id
-  abort: requirement 'fake' not supported!
+  abort: unknown repository format: requires feature 'fake' (upgrade Mercurial)!
   [255]
 
   $ cd ..
   $ hg id test
-  abort: requirement 'fake' not supported!
+  abort: unknown repository format: requires feature 'fake' (upgrade Mercurial)!
   [255]
 

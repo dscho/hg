@@ -20,22 +20,28 @@ create source repository
 
   $ hg init repo
   $ cd repo
-  $ echo '[ui]' > .hg/hgrc
-  $ echo 'username= A. Foo <a.foo@bar.com>' >> .hg/hgrc
   $ echo a > a
   $ echo b > b
   $ hg ci -Am addfile
   adding a
   adding b
-  $ echo a >> a
-  $ echo a >> b
+  $ cat $TESTDIR/binfile.bin >> a
+  $ cat $TESTDIR/binfile.bin >> b
   $ hg ci -Am changefiles
+
+make another commit to create files larger than 1 KB to test
+formatting of final byte count
+
+  $ cat $TESTDIR/binfile.bin >> a
+  $ cat $TESTDIR/binfile.bin >> b
+  $ hg ci -m anotherchange
 
 don't sit forever trying to double-lock the source repo
 
   $ hg relink .
   relinking $TESTTMP/repo/.hg/store to $TESTTMP/repo/.hg/store
   there is nothing to relink
+
 
 Test files are read in binary mode
 
@@ -53,8 +59,6 @@ clone and pull to break links
   updating to branch default
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd clone
-  $ echo '[ui]' >> .hg/hgrc
-  $ echo 'username= A. Baz <a.baz@bar.com>' >> .hg/hgrc
   $ hg pull -q
   $ echo b >> b
   $ hg ci -m changeb
@@ -81,7 +85,7 @@ relink
   pruned down to 2 probably relinkable files
   relinking: data/a.i 1/2 files (50.00%)
   not linkable: data/dummy.i
-  relinked 1 files (136 bytes reclaimed)
+  relinked 1 files (1.37 KB reclaimed)
   $ cd ..
 
 

@@ -29,12 +29,12 @@ def _findtool(ui, tool):
         k = _toolstr(ui, tool, kn)
         if not k:
             continue
-        p = util.lookup_reg(k, _toolstr(ui, tool, "regname"))
+        p = util.lookupreg(k, _toolstr(ui, tool, "regname"))
         if p:
-            p = util.find_exe(p + _toolstr(ui, tool, "regappend"))
+            p = util.findexe(p + _toolstr(ui, tool, "regappend"))
             if p:
                 return p
-    return util.find_exe(_toolstr(ui, tool, "executable", tool))
+    return util.findexe(_toolstr(ui, tool, "executable", tool))
 
 def _picktool(repo, ui, path, binary, symlink):
     def check(tool, pat, symlink, binary):
@@ -113,14 +113,14 @@ def _eoltype(data):
 
 def _matcheol(file, origfile):
     "Convert EOL markers in a file to match origfile"
-    tostyle = _eoltype(open(origfile, "rb").read())
+    tostyle = _eoltype(util.readfile(origfile))
     if tostyle:
-        data = open(file, "rb").read()
+        data = util.readfile(file)
         style = _eoltype(data)
         if style:
             newdata = data.replace(style, tostyle)
             if newdata != data:
-                open(file, "wb").write(newdata)
+                util.writefile(file, newdata)
 
 def filemerge(repo, mynode, orig, fcd, fco, fca):
     """perform a 3-way merge in the working directory

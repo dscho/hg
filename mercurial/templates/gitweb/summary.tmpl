@@ -8,7 +8,7 @@
 <body>
 
 <div class="page_header">
-<a href="http://mercurial.selenic.com/" title="Mercurial" style="float: right;">Mercurial</a><a href="{url}summary{sessionvars%urlparameter}">{repo|escape}</a> / summary
+<a href="{logourl}" title="Mercurial" style="float: right;">Mercurial</a><a href="{url}summary{sessionvars%urlparameter}">{repo|escape}</a> / summary
 
 <form action="{url}log">
 {sessionvars%hiddenformentry}
@@ -48,6 +48,12 @@ summary |
 <table cellspacing="0">
 {tags}
 <tr class="light"><td colspan="3"><a class="list" href="{url}tags{sessionvars%urlparameter}">...</a></td></tr>
+</table>
+
+<div><a class="title" href="{url}bookmarks{sessionvars%urlparameter}">bookmarks</a></div>
+<table cellspacing="0">
+{bookmarks%bookmarkentry}
+<tr class="light"><td colspan="3"><a class="list" href="{url}bookmarks{sessionvars%urlparameter}">...</a></td></tr>
 </table>
 
 <div><a class="title" href="#">branches</a></div>

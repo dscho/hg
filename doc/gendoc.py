@@ -87,6 +87,10 @@ def show_doc(ui):
 
     # print topics
     for names, sec, doc in helptable:
+        if names[0] == "config":
+            # The config help topic is included in the hgrc.5 man
+            # page.
+            continue
         for name in names:
             ui.write(".. _%s:\n" % name)
         ui.write("\n")
@@ -157,16 +161,7 @@ def commandprinter(ui, cmdtable, sectionfunc):
 
 
 def allextensionnames():
-    extensionnames = []
-
-    extensionsdictionary = extensions.enabled()[0]
-    extensionnames.extend(extensionsdictionary.keys())
-
-    extensionsdictionary = extensions.disabled()[0]
-    extensionnames.extend(extensionsdictionary.keys())
-
-    return extensionnames
-
+    return extensions.enabled().keys() + extensions.disabled().keys()
 
 if __name__ == "__main__":
     show_doc(sys.stdout)

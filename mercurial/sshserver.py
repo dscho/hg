@@ -14,34 +14,34 @@ class sshserver(object):
         self.ui = ui
         self.repo = repo
         self.lock = None
-        self.fin = sys.stdin
-        self.fout = sys.stdout
+        self.fin = ui.fin
+        self.fout = ui.fout
 
         hook.redirect(True)
-        sys.stdout = sys.stderr
+        ui.fout = repo.ui.fout = ui.ferr
 
         # Prevent insertion/deletion of CRs
-        util.set_binary(self.fin)
-        util.set_binary(self.fout)
+        util.setbinary(self.fin)
+        util.setbinary(self.fout)
 
     def getargs(self, args):
         data = {}
         keys = args.split()
-        count = len(keys)
         for n in xrange(len(keys)):
             argline = self.fin.readline()[:-1]
             arg, l = argline.split()
-            val = self.fin.read(int(l))
             if arg not in keys:
                 raise util.Abort("unexpected parameter %r" % arg)
             if arg == '*':
                 star = {}
-                for n in xrange(int(l)):
+                for k in xrange(int(l)):
+                    argline = self.fin.readline()[:-1]
                     arg, l = argline.split()
                     val = self.fin.read(int(l))
                     star[arg] = val
                 data['*'] = star
             else:
+                val = self.fin.read(int(l))
                 data[arg] = val
         return [data[k] for k in keys]
 

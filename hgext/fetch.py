@@ -9,7 +9,7 @@
 
 from mercurial.i18n import _
 from mercurial.node import nullid, short
-from mercurial import commands, cmdutil, hg, util, url, error
+from mercurial import commands, cmdutil, hg, util, error
 from mercurial.lock import release
 
 def fetch(ui, repo, source='default', **opts):
@@ -63,10 +63,9 @@ def fetch(ui, repo, source='default', **opts):
             raise util.Abort(_('multiple heads in this branch '
                                '(use "hg heads ." and "hg merge" to merge)'))
 
-        other = hg.repository(hg.remoteui(repo, opts),
-                              ui.expandpath(source))
+        other = hg.peer(repo, opts, ui.expandpath(source))
         ui.status(_('pulling from %s\n') %
-                  url.hidepassword(ui.expandpath(source)))
+                  util.hidepassword(ui.expandpath(source)))
         revs = None
         if opts['rev']:
             try:
@@ -123,9 +122,9 @@ def fetch(ui, repo, source='default', **opts):
 
         if not err:
             # we don't translate commit messages
-            message = (cmdutil.logmessage(opts) or
+            message = (cmdutil.logmessage(ui, opts) or
                        ('Automated merge with %s' %
-                        url.removeauth(other.url())))
+                        util.removeauth(other.url())))
             editor = cmdutil.commiteditor
             if opts.get('force_editor') or opts.get('edit'):
                 editor = cmdutil.commitforceeditor

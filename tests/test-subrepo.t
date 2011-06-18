@@ -239,24 +239,9 @@ clone
   $ cd ..
   $ hg clone t tc
   updating to branch default
-  pulling subrepo s from $TESTTMP/sub/t/s
-  requesting all changes
-  adding changesets
-  adding manifests
-  adding file changes
-  added 4 changesets with 5 changes to 3 files
-  pulling subrepo s/ss from $TESTTMP/sub/t/s/ss
-  requesting all changes
-  adding changesets
-  adding manifests
-  adding file changes
-  added 1 changesets with 1 changes to 1 files
-  pulling subrepo t from $TESTTMP/sub/t/t
-  requesting all changes
-  adding changesets
-  adding manifests
-  adding file changes
-  added 4 changesets with 4 changes to 1 files (+1 heads)
+  cloning subrepo s from $TESTTMP/sub/t/s
+  cloning subrepo s/ss from $TESTTMP/sub/t/s/ss
+  cloning subrepo t from $TESTTMP/sub/t/t
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd tc
   $ hg debugsub
@@ -304,7 +289,7 @@ push -f
   no changes found
   pushing subrepo s to $TESTTMP/sub/t/s
   searching for changes
-  abort: push creates new remote heads on branch 'default'!
+  abort: push creates new remote head 12a213df6fa9!
   (did you forget to merge? use push -f to force)
   [255]
   $ hg push -f
@@ -515,6 +500,7 @@ test subrepo delete from .hgsubstate
   $ hg -R testdelete remove testdelete/.hgsub
   $ hg -R testdelete ci -m ".hgsub deleted"
   $ cat testdelete/.hgsubstate
+  bdf5c9a3103743d900b12ae0db3ffdcfd7b0d878 nested
 
 test repository cloning
 
@@ -563,12 +549,7 @@ Issue1977: multirepo push should fail if subrepo push fails
   committing subrepository s
   $ hg clone repo repo2
   updating to branch default
-  pulling subrepo s from $TESTTMP/sub/repo/s
-  requesting all changes
-  adding changesets
-  adding manifests
-  adding file changes
-  added 1 changesets with 1 changes to 1 files
+  cloning subrepo s from $TESTTMP/sub/repo/s
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg -q -R repo2 pull -u
   $ echo 1 > repo2/s/a
@@ -582,7 +563,7 @@ Issue1977: multirepo push should fail if subrepo push fails
   $ hg -R repo2 ci -m3
   committing subrepository s
   $ hg -q -R repo2 push
-  abort: push creates new remote heads on branch 'default'!
+  abort: push creates new remote head 9d66565e64e1!
   (did you forget to merge? use push -f to force)
   [255]
   $ hg -R repo update
@@ -639,12 +620,7 @@ Try the same, but with pull -u
   adding manifests
   adding file changes
   added 1 changesets with 2 changes to 2 files
-  pulling subrepo sub/repo from issue1852a/sub/repo
-  requesting all changes
-  adding changesets
-  adding manifests
-  adding file changes
-  added 2 changesets with 2 changes to 1 files
+  cloning subrepo sub/repo from issue1852a/sub/repo
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
 Try to push from the other side
@@ -848,3 +824,36 @@ Test subrepo already at intended revision:
   fc627a69481f
   $ hg -R t id 
   e95bcfa18a35
+
+Test that removing .hgsubstate doesn't break anything:
+
+  $ hg rm -f .hgsubstate
+  $ hg ci -mrm
+  committing subrepository s
+  committing subrepository t
+  created new head
+  $ hg log -vr tip
+  changeset:   14:3941e0aa5236
+  tag:         tip
+  parent:      11:365661e5936a
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  description:
+  rm
+  
+  
+
+Test that removing .hgsub removes .hgsubstate:
+
+  $ hg rm .hgsub
+  $ hg ci -mrm2
+  $ hg log -vr tip
+  changeset:   15:8b31de9d13d1
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  files:       .hgsub .hgsubstate
+  description:
+  rm2
+  
+  

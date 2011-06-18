@@ -7,6 +7,7 @@ syntax: glob
 *.mergebackup
 *.o
 *.so
+*.dll
 *.pyd
 *.pyc
 *.pyo
@@ -25,6 +26,7 @@ doc/*.[0-9]
 doc/*.[0-9].gendoc.txt
 doc/*.[0-9].{x,ht}ml
 MANIFEST
+MANIFEST.in
 patches
 mercurial/__version__.py
 mercurial.egg-info
@@ -34,6 +36,7 @@ tags
 cscope.*
 i18n/hg.pot
 locale/*/LC_MESSAGES/hg.mo
+hgext/__index__.py
 
 # files installed with a local --pure build
 mercurial/base85.py

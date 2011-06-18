@@ -86,7 +86,7 @@ Short help:
    remove       remove the specified files on the next commit
    rename       rename files; equivalent of copy + remove
    resolve      redo merges or set/view the merge status of files
-   revert       restore individual files or directories to an earlier state
+   revert       restore files to their checkout state
    rollback     roll back the last transaction (dangerous)
    root         print the root (top) of the current working directory
    serve        start stand-alone webserver
@@ -105,19 +105,21 @@ Short help:
   
    config       Configuration Files
    dates        Date Formats
-   patterns     File Name Patterns
-   environment  Environment Variables
-   revisions    Specifying Single Revisions
-   multirevs    Specifying Multiple Revisions
-   revsets      Specifying Revision Sets
    diffs        Diff Formats
+   environment  Environment Variables
+   extensions   Using additional features
+   filesets     Specifying File Sets
+   glossary     Glossary
+   hgignore     syntax for Mercurial ignore files
+   hgweb        Configuring hgweb
    merge-tools  Merge Tools
+   multirevs    Specifying Multiple Revisions
+   patterns     File Name Patterns
+   revisions    Specifying Single Revisions
+   revsets      Specifying Revision Sets
+   subrepos     Subrepositories
    templating   Template Usage
    urls         URL Paths
-   extensions   Using additional features
-   subrepos     Subrepositories
-   hgweb        Configuring hgweb
-   glossary     Glossary
   
   use "hg -v help" to show builtin aliases and global options
 
@@ -159,7 +161,7 @@ Short help:
    remove       remove the specified files on the next commit
    rename       rename files; equivalent of copy + remove
    resolve      redo merges or set/view the merge status of files
-   revert       restore individual files or directories to an earlier state
+   revert       restore files to their checkout state
    rollback     roll back the last transaction (dangerous)
    root         print the root (top) of the current working directory
    serve        start stand-alone webserver
@@ -178,19 +180,21 @@ Short help:
   
    config       Configuration Files
    dates        Date Formats
-   patterns     File Name Patterns
-   environment  Environment Variables
-   revisions    Specifying Single Revisions
-   multirevs    Specifying Multiple Revisions
-   revsets      Specifying Revision Sets
    diffs        Diff Formats
+   environment  Environment Variables
+   extensions   Using additional features
+   filesets     Specifying File Sets
+   glossary     Glossary
+   hgignore     syntax for Mercurial ignore files
+   hgweb        Configuring hgweb
    merge-tools  Merge Tools
+   multirevs    Specifying Multiple Revisions
+   patterns     File Name Patterns
+   revisions    Specifying Single Revisions
+   revsets      Specifying Revision Sets
+   subrepos     Subrepositories
    templating   Template Usage
    urls         URL Paths
-   extensions   Using additional features
-   subrepos     Subrepositories
-   hgweb        Configuring hgweb
-   glossary     Glossary
 
 Test short command list with verbose option
 
@@ -387,17 +391,6 @@ Test help option with version option
   
   add the specified files on the next commit
   
-      Schedule files to be version controlled and added to the repository.
-  
-      The files will be added to the repository at the next commit. To undo an
-      add before that, see "hg forget".
-  
-      If no names are given, add all files to the repository.
-  
-      Returns 0 if all files are successfully added.
-  
-  use "hg -v help add" to show verbose help
-  
   options:
   
    -I --include PATTERN [+]  include names matching the given patterns
@@ -407,7 +400,7 @@ Test help option with version option
   
   [+] marked option can be specified multiple times
   
-  use "hg -v help add" to show global options
+  use "hg help add" to show the full help text
   [255]
 
 Test ambiguous command help
@@ -682,7 +675,7 @@ Test that default list of commands omits extension commands
    remove       remove the specified files on the next commit
    rename       rename files; equivalent of copy + remove
    resolve      redo merges or set/view the merge status of files
-   revert       restore individual files or directories to an earlier state
+   revert       restore files to their checkout state
    rollback     roll back the last transaction (dangerous)
    root         print the root (top) of the current working directory
    serve        start stand-alone webserver
@@ -705,21 +698,25 @@ Test that default list of commands omits extension commands
   
    config       Configuration Files
    dates        Date Formats
-   patterns     File Name Patterns
-   environment  Environment Variables
-   revisions    Specifying Single Revisions
-   multirevs    Specifying Multiple Revisions
-   revsets      Specifying Revision Sets
    diffs        Diff Formats
+   environment  Environment Variables
+   extensions   Using additional features
+   filesets     Specifying File Sets
+   glossary     Glossary
+   hgignore     syntax for Mercurial ignore files
+   hgweb        Configuring hgweb
    merge-tools  Merge Tools
+   multirevs    Specifying Multiple Revisions
+   patterns     File Name Patterns
+   revisions    Specifying Single Revisions
+   revsets      Specifying Revision Sets
+   subrepos     Subrepositories
    templating   Template Usage
    urls         URL Paths
-   extensions   Using additional features
-   subrepos     Subrepositories
-   hgweb        Configuring hgweb
-   glossary     Glossary
   
   use "hg -v help" to show builtin aliases and global options
+
+
 
 Test list of commands with command with no help text
 
@@ -764,6 +761,14 @@ Test a help topic
       The reserved name "." indicates the working directory parent. If no
       working directory is checked out, it is equivalent to null. If an
       uncommitted merge is in progress, "." is the revision of the first parent.
+
+Test templating help
+
+  $ hg help templating | egrep '(desc|diffstat|firstline|nonempty)  '
+      desc        String. The text of the changeset description.
+      diffstat    String. Statistics of changes with the following format:
+      firstline   Any text. Returns the first line of text.
+      nonempty    Any text. Returns '(none)' if the string is empty.
 
 Test help hooks
 

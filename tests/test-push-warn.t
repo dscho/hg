@@ -1,9 +1,8 @@
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "graphlog=" >> $HGRCPATH
 
-  $ mkdir a
+  $ hg init a
   $ cd a
-  $ hg init
   $ echo foo > t1
   $ hg add t1
   $ hg commit -m "1"
@@ -26,24 +25,21 @@
   $ hg push ../a
   pushing to ../a
   searching for changes
-  abort: push creates new remote heads on branch 'default'!
+  abort: push creates new remote head 1e108cc5548c!
   (you should pull and merge or use push -f to force)
   [255]
 
   $ hg push --debug ../a
   pushing to ../a
+  query 1; heads
   searching for changes
-  examining 1c9246a22a0a:d8d565842d04
-  found incomplete branch 1c9246a22a0a:d8d565842d04
-  searching: 1 queries
-  narrowing 1:1 d8d565842d04
-  found new branch changeset 1c9246a22a0a
-  found new changesets starting at 1c9246a22a0a
-  1 total queries
-  common changesets up to d8d565842d04
+  taking quick initial sample
+  searching: 2 queries
+  query 2; still undecided: 1, sample size is: 1
+  2 total queries
   new remote heads on branch 'default'
   new remote head 1e108cc5548c
-  abort: push creates new remote heads on branch 'default'!
+  abort: push creates new remote head 1e108cc5548c!
   (you should pull and merge or use push -f to force)
   [255]
 
@@ -59,7 +55,7 @@
   $ hg push ../a
   pushing to ../a
   searching for changes
-  abort: push creates new remote heads on branch 'default'!
+  abort: push creates new remote head 1e108cc5548c!
   (did you forget to merge? use push -f to force)
   [255]
 
@@ -112,7 +108,7 @@
   $ hg push ../c
   pushing to ../c
   searching for changes
-  abort: push creates new remote heads on branch 'default'!
+  abort: push creates new remote head 6346d66eb9f5!
   (did you forget to merge? use push -f to force)
   [255]
 
@@ -124,20 +120,26 @@
   $ hg push -r 3 ../c
   pushing to ../c
   searching for changes
-  abort: push creates new remote heads on branch 'default'!
+  abort: push creates new remote head a5dda829a167!
   (did you forget to merge? use push -f to force)
   [255]
 
-  $ hg push -r 3 -r 4 ../c
+  $ hg push -v -r 3 -r 4 ../c
   pushing to ../c
   searching for changes
-  abort: push creates new remote heads on branch 'default'!
+  all remote heads known locally
+  new remote heads on branch 'default'
+  new remote head a5dda829a167
+  new remote head ee8fbc7a0295
+  abort: push creates new remote head a5dda829a167!
   (did you forget to merge? use push -f to force)
   [255]
 
-  $ hg push -f -r 3 -r 4 ../c
+  $ hg push -v -f -r 3 -r 4 ../c
   pushing to ../c
   searching for changes
+  all remote heads known locally
+  2 changesets found
   adding changesets
   adding manifests
   adding file changes
@@ -260,7 +262,7 @@ Fail on multiple head push:
   $ hg push -r 4 -r 7 ../f
   pushing to ../f
   searching for changes
-  abort: push creates new remote heads on branch 'a'!
+  abort: push creates new remote head 0b715ef6ff8f on branch 'a'!
   (did you forget to merge? use push -f to force)
   [255]
 
@@ -383,7 +385,7 @@ multiple new heads:
   $ hg -R i push h
   pushing to h
   searching for changes
-  abort: push creates new remote heads on branch 'default'!
+  abort: push creates new remote head 97bd0c84d346!
   (you should pull and merge or use push -f to force)
   [255]
 
@@ -453,7 +455,7 @@ Prepush -r should not allow you to sneak in new heads:
   $ hg push ../l -b b
   pushing to ../l
   searching for changes
-  abort: push creates new remote heads on branch 'a'!
+  abort: push creates new remote head e7e31d71180f on branch 'a'!
   (did you forget to merge? use push -f to force)
   [255]
 
@@ -700,14 +702,14 @@ outgoing:
   $ hg push inner
   pushing to inner
   searching for changes
-  abort: push creates new remote heads on branch 'A'!
+  abort: push creates new remote head 7d0f4fb6cf04 on branch 'A'!
   (did you forget to merge? use push -f to force)
   [255]
 
   $ hg push inner -r4 -r5
   pushing to inner
   searching for changes
-  abort: push creates new remote heads on branch 'A'!
+  abort: push creates new remote head 7d0f4fb6cf04 on branch 'A'!
   (did you forget to merge? use push -f to force)
   [255]
 

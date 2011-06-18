@@ -93,7 +93,7 @@ def copies(repo, c1, c2, ca, checkdirs=False):
         return {}, {}
 
     # avoid silly behavior for parent -> working dir
-    if c2.node() is None and c1.node() == repo.dirstate.parents()[0]:
+    if c2.node() is None and c1.node() == repo.dirstate.p1():
         return repo.dirstate.copies(), {}
 
     limit = _findlimit(repo, c1.rev(), c2.rev())
@@ -134,7 +134,7 @@ def copies(repo, c1, c2, ca, checkdirs=False):
             if f2r is None:
                 f2 = g2.next()
 
-            while 1:
+            while True:
                 f1r, f2r = f1.rev(), f2.rev()
                 if f1r > f2r:
                     f1 = g1.next()

@@ -6,7 +6,7 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-import osutil, util
+import osutil, scmutil, util
 import os, stat
 
 _sha = util.sha1
@@ -14,6 +14,14 @@ _sha = util.sha1
 # This avoids a collision between a file named foo and a dir named
 # foo.i or foo.d
 def encodedir(path):
+    '''
+    >>> encodedir('data/foo.i')
+    'data/foo.i'
+    >>> encodedir('data/foo.i/bla.i')
+    'data/foo.i.hg/bla.i'
+    >>> encodedir('data/foo.i.hg/bla.i')
+    'data/foo.i.hg.hg/bla.i'
+    '''
     if not path.startswith('data/'):
         return path
     return (path
@@ -22,6 +30,14 @@ def encodedir(path):
             .replace(".d/", ".d.hg/"))
 
 def decodedir(path):
+    '''
+    >>> decodedir('data/foo.i')
+    'data/foo.i'
+    >>> decodedir('data/foo.i.hg/bla.i')
+    'data/foo.i/bla.i'
+    >>> decodedir('data/foo.i.hg.hg/bla.i')
+    'data/foo.i.hg/bla.i'
+    '''
     if not path.startswith('data/') or ".hg/" not in path:
         return path
     return (path
@@ -30,10 +46,33 @@ def decodedir(path):
             .replace(".hg.hg/", ".hg/"))
 
 def _buildencodefun():
+    '''
+    >>> enc, dec = _buildencodefun()
+
+    >>> enc('nothing/special.txt')
+    'nothing/special.txt'
+    >>> dec('nothing/special.txt')
+    'nothing/special.txt'
+
+    >>> enc('HELLO')
+    '_h_e_l_l_o'
+    >>> dec('_h_e_l_l_o')
+    'HELLO'
+
+    >>> enc('hello:world?')
+    'hello~3aworld~3f'
+    >>> dec('hello~3aworld~3f')
+    'hello:world?'
+
+    >>> enc('the\x07quick\xADshot')
+    'the~07quick~adshot'
+    >>> dec('the~07quick~adshot')
+    'the\\x07quick\\xadshot'
+    '''
     e = '_'
-    win_reserved = [ord(x) for x in '\\:*?"<>|']
+    winreserved = [ord(x) for x in '\\:*?"<>|']
     cmap = dict([(chr(x), chr(x)) for x in xrange(127)])
-    for x in (range(32) + range(126, 256) + win_reserved):
+    for x in (range(32) + range(126, 256) + winreserved):
         cmap[chr(x)] = "~%02x" % x
     for x in range(ord("A"), ord("Z")+1) + [ord(e)]:
         cmap[chr(x)] = e + chr(x).lower()
@@ -57,26 +96,54 @@ def _buildencodefun():
 
 encodefilename, decodefilename = _buildencodefun()
 
-def _build_lower_encodefun():
-    win_reserved = [ord(x) for x in '\\:*?"<>|']
+def _buildlowerencodefun():
+    '''
+    >>> f = _buildlowerencodefun()
+    >>> f('nothing/special.txt')
+    'nothing/special.txt'
+    >>> f('HELLO')
+    'hello'
+    >>> f('hello:world?')
+    'hello~3aworld~3f'
+    >>> f('the\x07quick\xADshot')
+    'the~07quick~adshot'
+    '''
+    winreserved = [ord(x) for x in '\\:*?"<>|']
     cmap = dict([(chr(x), chr(x)) for x in xrange(127)])
-    for x in (range(32) + range(126, 256) + win_reserved):
+    for x in (range(32) + range(126, 256) + winreserved):
         cmap[chr(x)] = "~%02x" % x
     for x in range(ord("A"), ord("Z")+1):
         cmap[chr(x)] = chr(x).lower()
     return lambda s: "".join([cmap[c] for c in s])
 
-lowerencode = _build_lower_encodefun()
+lowerencode = _buildlowerencodefun()
 
-_windows_reserved_filenames = '''con prn aux nul
+_winreservednames = '''con prn aux nul
     com1 com2 com3 com4 com5 com6 com7 com8 com9
     lpt1 lpt2 lpt3 lpt4 lpt5 lpt6 lpt7 lpt8 lpt9'''.split()
 def _auxencode(path, dotencode):
+    '''
+    Encodes filenames containing names reserved by Windows or which end in
+    period or space. Does not touch other single reserved characters c.
+    Specifically, c in '\\:*?"<>|' or ord(c) <= 31 are *not* encoded here.
+    Additionally encodes space or period at the beginning, if dotencode is
+    True.
+    path is assumed to be all lowercase.
+
+    >>> _auxencode('.foo/aux.txt/txt.aux/con/prn/nul/foo.', True)
+    '~2efoo/au~78.txt/txt.aux/co~6e/pr~6e/nu~6c/foo~2e'
+    >>> _auxencode('.com1com2/lpt9.lpt4.lpt1/conprn/foo.', False)
+    '.com1com2/lp~749.lpt4.lpt1/conprn/foo~2e'
+    >>> _auxencode('foo. ', True)
+    'foo.~20'
+    >>> _auxencode(' .foo', True)
+    '~20.foo'
+    '''
     res = []
     for n in path.split('/'):
         if n:
             base = n.split('.')[0]
-            if base and (base in _windows_reserved_filenames):
+            if base and (base in _winreservednames):
                 # encode third letter ('aux' -> 'au~78')
                 ec = "~%02x" % ord(n[2])
                 n = n[0:2] + ec + n[3:]
@@ -88,9 +155,9 @@ def _auxencode(path, dotencode):
         res.append(n)
     return '/'.join(res)
 
-MAX_PATH_LEN_IN_HGSTORE = 120
-DIR_PREFIX_LEN = 8
-_MAX_SHORTENED_DIRS_LEN = 8 * (DIR_PREFIX_LEN + 1) - 4
+_maxstorepathlen = 120
+_dirprefixlen = 8
+_maxshortdirslen = 8 * (_dirprefixlen + 1) - 4
 def _hybridencode(path, auxencode):
     '''encodes path with a length limit
 
@@ -106,17 +173,17 @@ def _hybridencode(path, auxencode):
 
     Hashed encoding (not reversible):
 
-    If the default-encoded path is longer than MAX_PATH_LEN_IN_HGSTORE, a
+    If the default-encoded path is longer than _maxstorepathlen, a
     non-reversible hybrid hashing of the path is done instead.
-    This encoding uses up to DIR_PREFIX_LEN characters of all directory
+    This encoding uses up to _dirprefixlen characters of all directory
     levels of the lowerencoded path, but not more levels than can fit into
-    _MAX_SHORTENED_DIRS_LEN.
+    _maxshortdirslen.
     Then follows the filler followed by the sha digest of the full path.
     The filler is the beginning of the basename of the lowerencoded path
     (the basename is everything after the last path separator). The filler
     is as long as possible, filling in characters from the basename until
-    the encoded path has MAX_PATH_LEN_IN_HGSTORE characters (or all chars
-    of the basename have been taken).
+    the encoded path has _maxstorepathlen characters (or all chars of the
+    basename have been taken).
     The extension (e.g. '.i' or '.d') is preserved.
 
     The string 'data/' at the beginning is replaced with 'dh/', if the hashed
@@ -128,7 +195,7 @@ def _hybridencode(path, auxencode):
     path = encodedir(path)
     ndpath = path[len('data/'):]
     res = 'data/' + auxencode(encodefilename(ndpath))
-    if len(res) > MAX_PATH_LEN_IN_HGSTORE:
+    if len(res) > _maxstorepathlen:
         digest = _sha(path).hexdigest()
         aep = auxencode(lowerencode(ndpath))
         _root, ext = os.path.splitext(aep)
@@ -136,21 +203,21 @@ def _hybridencode(path, auxencode):
         basename = parts[-1]
         sdirs = []
         for p in parts[:-1]:
-            d = p[:DIR_PREFIX_LEN]
+            d = p[:_dirprefixlen]
             if d[-1] in '. ':
                 # Windows can't access dirs ending in period or space
                 d = d[:-1] + '_'
             t = '/'.join(sdirs) + '/' + d
-            if len(t) > _MAX_SHORTENED_DIRS_LEN:
+            if len(t) > _maxshortdirslen:
                 break
             sdirs.append(d)
         dirs = '/'.join(sdirs)
         if len(dirs) > 0:
             dirs += '/'
         res = 'dh/' + dirs + digest + ext
-        space_left = MAX_PATH_LEN_IN_HGSTORE - len(res)
-        if space_left > 0:
-            filler = basename[:space_left]
+        spaceleft = _maxstorepathlen - len(res)
+        if spaceleft > 0:
+            filler = basename[:spaceleft]
             res = 'dh/' + dirs + filler + digest + ext
     return res
 
@@ -169,12 +236,12 @@ _data = 'data 00manifest.d 00manifest.i 00changelog.d 00changelog.i'
 
 class basicstore(object):
     '''base class for local repository stores'''
-    def __init__(self, path, opener):
+    def __init__(self, path, openertype):
         self.path = path
         self.createmode = _calcmode(path)
-        op = opener(self.path)
+        op = openertype(self.path)
         op.createmode = self.createmode
-        self.opener = lambda f, *args, **kw: op(encodedir(f), *args, **kw)
+        self.opener = scmutil.filteropener(op, encodedir)
 
     def join(self, f):
         return self.path + '/' + encodedir(f)
@@ -218,12 +285,12 @@ class basicstore(object):
         pass
 
 class encodedstore(basicstore):
-    def __init__(self, path, opener):
+    def __init__(self, path, openertype):
         self.path = path + '/store'
         self.createmode = _calcmode(self.path)
-        op = opener(self.path)
+        op = openertype(self.path)
         op.createmode = self.createmode
-        self.opener = lambda f, *args, **kw: op(encodefilename(f), *args, **kw)
+        self.opener = scmutil.filteropener(op, encodefilename)
 
     def datafiles(self):
         for a, b, size in self._walk('data', True):
@@ -298,21 +365,27 @@ class fncache(object):
             self._load()
         return iter(self.entries)
 
+class _fncacheopener(scmutil.abstractopener):
+    def __init__(self, op, fnc, encode):
+        self.opener = op
+        self.fncache = fnc
+        self.encode = encode
+
+    def __call__(self, path, mode='r', *args, **kw):
+        if mode not in ('r', 'rb') and path.startswith('data/'):
+            self.fncache.add(path)
+        return self.opener(self.encode(path), mode, *args, **kw)
+
 class fncachestore(basicstore):
-    def __init__(self, path, opener, encode):
+    def __init__(self, path, openertype, encode):
         self.encode = encode
         self.path = path + '/store'
         self.createmode = _calcmode(self.path)
-        op = opener(self.path)
+        op = openertype(self.path)
         op.createmode = self.createmode
         fnc = fncache(op)
         self.fncache = fnc
-
-        def fncacheopener(path, mode='r', *args, **kw):
-            if mode not in ('r', 'rb') and path.startswith('data/'):
-                fnc.add(path)
-            return op(self.encode(path), mode, *args, **kw)
-        self.opener = fncacheopener
+        self.opener = _fncacheopener(op, fnc, encode)
 
     def join(self, f):
         return self.path + '/' + self.encode(f)
@@ -344,11 +417,11 @@ class fncachestore(basicstore):
     def write(self):
         self.fncache.write()
 
-def store(requirements, path, opener):
+def store(requirements, path, openertype):
     if 'store' in requirements:
         if 'fncache' in requirements:
             auxencode = lambda f: _auxencode(f, 'dotencode' in requirements)
             encode = lambda f: _hybridencode(f, auxencode)
-            return fncachestore(path, opener, encode)
-        return encodedstore(path, opener)
-    return basicstore(path, opener)
+            return fncachestore(path, openertype, encode)
+        return encodedstore(path, openertype)
+    return basicstore(path, openertype)

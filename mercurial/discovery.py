@@ -7,184 +7,59 @@
 
 from node import nullid, short
 from i18n import _
-import util, error
+import util, setdiscovery, treediscovery
 
 def findcommonincoming(repo, remote, heads=None, force=False):
-    """Return a tuple (common, missing roots, heads) used to identify
-    missing nodes from remote.
+    """Return a tuple (common, anyincoming, heads) used to identify the common
+    subset of nodes between repo and remote.
 
-    If a list of heads is specified, return only nodes which are heads
-    or ancestors of these heads.
+    "common" is a list of (at least) the heads of the common subset.
+    "anyincoming" is testable as a boolean indicating if any nodes are missing
+      locally. If remote does not support getbundle, this actually is a list of
+      roots of the nodes that would be incoming, to be supplied to
+      changegroupsubset. No code except for pull should be relying on this fact
+      any longer.
+    "heads" is either the supplied heads, or else the remote's heads.
+
+    If you pass heads and they are all known locally, the reponse lists justs
+    these heads in "common" and in "heads".
+
+    Please use findcommonoutgoing to compute the set of outgoing nodes to give
+    extensions a good hook into outgoing.
     """
-    m = repo.changelog.nodemap
-    search = []
-    fetch = set()
-    seen = set()
-    seenbranch = set()
-    base = set()
 
-    if not heads:
-        heads = remote.heads()
+    if not remote.capable('getbundle'):
+        return treediscovery.findcommonincoming(repo, remote, heads, force)
 
-    if repo.changelog.tip() == nullid:
-        base.add(nullid)
-        if heads != [nullid]:
-            return [nullid], [nullid], list(heads)
-        return [nullid], [], []
+    if heads:
+        allknown = True
+        nm = repo.changelog.nodemap
+        for h in heads:
+            if nm.get(h) is None:
+                allknown = False
+                break
+        if allknown:
+            return (heads, False, heads)
 
-    # assume we're closer to the tip than the root
-    # and start by examining the heads
-    repo.ui.status(_("searching for changes\n"))
+    res = setdiscovery.findcommonheads(repo.ui, repo, remote,
+                                       abortwhenunrelated=not force)
+    common, anyinc, srvheads = res
+    return (list(common), anyinc, heads or list(srvheads))
 
-    unknown = []
-    for h in heads:
-        if h not in m:
-            unknown.append(h)
-        else:
-            base.add(h)
+def findcommonoutgoing(repo, other, onlyheads=None, force=False, commoninc=None):
+    '''Return a tuple (common, anyoutgoing, heads) used to identify the set
+    of nodes present in repo but not in other.
 
-    heads = unknown
-    if not unknown:
-        return list(base), [], []
+    If onlyheads is given, only nodes ancestral to nodes in onlyheads (inclusive)
+    are included. If you already know the local repo's heads, passing them in
+    onlyheads is faster than letting them be recomputed here.
 
-    req = set(unknown)
-    reqcnt = 0
+    If commoninc is given, it must the the result of a prior call to
+    findcommonincoming(repo, other, force) to avoid recomputing it here.
 
-    # search through remote branches
-    # a 'branch' here is a linear segment of history, with four parts:
-    # head, root, first parent, second parent
-    # (a branch always has two parents (or none) by definition)
-    unknown = remote.branches(unknown)
-    while unknown:
-        r = []
-        while unknown:
-            n = unknown.pop(0)
-            if n[0] in seen:
-                continue
-
-            repo.ui.debug("examining %s:%s\n"
-                          % (short(n[0]), short(n[1])))
-            if n[0] == nullid: # found the end of the branch
-                pass
-            elif n in seenbranch:
-                repo.ui.debug("branch already found\n")
-                continue
-            elif n[1] and n[1] in m: # do we know the base?
-                repo.ui.debug("found incomplete branch %s:%s\n"
-                              % (short(n[0]), short(n[1])))
-                search.append(n[0:2]) # schedule branch range for scanning
-                seenbranch.add(n)
-            else:
-                if n[1] not in seen and n[1] not in fetch:
-                    if n[2] in m and n[3] in m:
-                        repo.ui.debug("found new changeset %s\n" %
-                                      short(n[1]))
-                        fetch.add(n[1]) # earliest unknown
-                    for p in n[2:4]:
-                        if p in m:
-                            base.add(p) # latest known
-
-                for p in n[2:4]:
-                    if p not in req and p not in m:
-                        r.append(p)
-                        req.add(p)
-            seen.add(n[0])
-
-        if r:
-            reqcnt += 1
-            repo.ui.progress(_('searching'), reqcnt, unit=_('queries'))
-            repo.ui.debug("request %d: %s\n" %
-                        (reqcnt, " ".join(map(short, r))))
-            for p in xrange(0, len(r), 10):
-                for b in remote.branches(r[p:p + 10]):
-                    repo.ui.debug("received %s:%s\n" %
-                                  (short(b[0]), short(b[1])))
-                    unknown.append(b)
-
-    # do binary search on the branches we found
-    while search:
-        newsearch = []
-        reqcnt += 1
-        repo.ui.progress(_('searching'), reqcnt, unit=_('queries'))
-        for n, l in zip(search, remote.between(search)):
-            l.append(n[1])
-            p = n[0]
-            f = 1
-            for i in l:
-                repo.ui.debug("narrowing %d:%d %s\n" % (f, len(l), short(i)))
-                if i in m:
-                    if f <= 2:
-                        repo.ui.debug("found new branch changeset %s\n" %
-                                          short(p))
-                        fetch.add(p)
-                        base.add(i)
-                    else:
-                        repo.ui.debug("narrowed branch search to %s:%s\n"
-                                      % (short(p), short(i)))
-                        newsearch.append((p, i))
-                    break
-                p, f = i, f * 2
-            search = newsearch
-
-    # sanity check our fetch list
-    for f in fetch:
-        if f in m:
-            raise error.RepoError(_("already have changeset ")
-                                  + short(f[:4]))
-
-    base = list(base)
-    if base == [nullid]:
-        if force:
-            repo.ui.warn(_("warning: repository is unrelated\n"))
-        else:
-            raise util.Abort(_("repository is unrelated"))
-
-    repo.ui.debug("found new changesets starting at " +
-                 " ".join([short(f) for f in fetch]) + "\n")
-
-    repo.ui.progress(_('searching'), None)
-    repo.ui.debug("%d total queries\n" % reqcnt)
-
-    return base, list(fetch), heads
-
-def findoutgoing(repo, remote, base=None, remoteheads=None, force=False):
-    """Return list of nodes that are roots of subsets not in remote
-
-    If base dict is specified, assume that these nodes and their parents
-    exist on the remote side.
-    If remotehead is specified, assume it is the list of the heads from
-    the remote repository.
-    """
-    if base is None:
-        base = findcommonincoming(repo, remote, heads=remoteheads,
-                                  force=force)[0]
-    else:
-        base = list(base)
-
-    repo.ui.debug("common changesets up to "
-                  + " ".join(map(short, base)) + "\n")
-
-    remain = set(repo.changelog.nodemap)
-
-    # prune everything remote has from the tree
-    remain.remove(nullid)
-    remove = base
-    while remove:
-        n = remove.pop(0)
-        if n in remain:
-            remain.remove(n)
-            for p in repo.changelog.parents(n):
-                remove.append(p)
-
-    # find every node whose parents have been pruned
-    subset = []
-    # find every remote head that will get new children
-    for n in remain:
-        p1, p2 = repo.changelog.parents(n)
-        if p1 not in remain and p2 not in remain:
-            subset.append(n)
-
-    return subset
+    The returned tuple is meant to be passed to changelog.findmissing.'''
+    common, _any, _hds = commoninc or findcommonincoming(repo, other, force=force)
+    return (common, onlyheads or repo.heads())
 
 def prepush(repo, remote, force, revs, newbranch):
     '''Analyze the local and remote repositories and determine which
@@ -200,15 +75,15 @@ def prepush(repo, remote, force, revs, newbranch):
     changegroup is a readable file-like object whose read() returns
     successive changegroup chunks ready to be sent over the wire and
     remoteheads is the list of remote heads.'''
-    remoteheads = remote.heads()
-    common, inc, rheads = findcommonincoming(repo, remote, heads=remoteheads,
-                                             force=force)
+    commoninc = findcommonincoming(repo, remote, force=force)
+    common, revs = findcommonoutgoing(repo, remote, onlyheads=revs,
+                                      commoninc=commoninc, force=force)
+    _common, inc, remoteheads = commoninc
 
     cl = repo.changelog
-    update = findoutgoing(repo, remote, common, remoteheads)
-    outg, bases, heads = cl.nodesbetween(update, revs)
+    outg = cl.findmissing(common, revs)
 
-    if not bases:
+    if not outg:
         repo.ui.status(_("no changes found\n"))
         return None, 1
 
@@ -284,22 +159,23 @@ def prepush(repo, remote, force, revs, newbranch):
             newhs = set(newmap[branch])
             oldhs = set(oldmap[branch])
             if len(newhs) > len(oldhs):
+                dhs = list(newhs - oldhs)
                 if error is None:
-                    if branch:
-                        error = _("push creates new remote heads "
-                                  "on branch '%s'!") % branch
+                    if branch != 'default':
+                        error = _("push creates new remote head %s "
+                                  "on branch '%s'!") % (short(dhs[0]), branch)
                     else:
-                        error = _("push creates new remote heads!")
+                        error = _("push creates new remote head %s!"
+                                  ) % short(dhs[0])
                     if branch in unsynced:
                         hint = _("you should pull and merge or "
                                  "use push -f to force")
                     else:
                         hint = _("did you forget to merge? "
                                  "use push -f to force")
-                if branch:
-                    repo.ui.debug("new remote heads on branch '%s'\n" % branch)
-                for h in (newhs - oldhs):
-                    repo.ui.debug("new remote head %s\n" % short(h))
+                repo.ui.note("new remote heads on branch '%s'\n" % branch)
+                for h in dhs:
+                    repo.ui.note("new remote head %s\n" % short(h))
         if error:
             raise util.Abort(error, hint=hint)
 
@@ -309,8 +185,7 @@ def prepush(repo, remote, force, revs, newbranch):
 
     if revs is None:
         # use the fast path, no race possible on push
-        nodes = repo.changelog.findmissing(common)
-        cg = repo._changegroup(nodes, 'push')
+        cg = repo._changegroup(outg, 'push')
     else:
-        cg = repo.changegroupsubset(update, revs, 'push')
+        cg = repo.getbundle('push', heads=revs, common=common)
     return cg, remoteheads

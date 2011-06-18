@@ -25,10 +25,12 @@ check that {1} syntax works
 
   $ hg incoming --debug parts://localhost
   using http://localhost:$HGPORT/
-  sending between command
-  comparing with parts://localhost
-  sending heads command
+  sending capabilities command
+  comparing with parts://localhost/
+  query 1; heads
+  sending batch command
   searching for changes
+  all remote heads known locally
   no changes found
   [1]
 

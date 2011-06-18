@@ -11,34 +11,63 @@ import util, commands, hg, fancyopts, extensions, hook, error
 import cmdutil, encoding
 import ui as uimod
 
+class request(object):
+    def __init__(self, args, ui=None, repo=None, fin=None, fout=None, ferr=None):
+        self.args = args
+        self.ui = ui
+        self.repo = repo
+
+        # input/output/error streams
+        self.fin = fin
+        self.fout = fout
+        self.ferr = ferr
+
 def run():
     "run the command in sys.argv"
-    sys.exit(dispatch(sys.argv[1:]))
+    sys.exit(dispatch(request(sys.argv[1:])))
 
-def dispatch(args):
-    "run the command specified in args"
+def dispatch(req):
+    "run the command specified in req.args"
+    if req.ferr:
+        ferr = req.ferr
+    elif req.ui:
+        ferr = req.ui.ferr
+    else:
+        ferr = sys.stderr
+
     try:
-        u = uimod.ui()
-        if '--traceback' in args:
-            u.setconfig('ui', 'traceback', 'on')
+        if not req.ui:
+            req.ui = uimod.ui()
+        if '--traceback' in req.args:
+            req.ui.setconfig('ui', 'traceback', 'on')
+
+        # set ui streams from the request
+        if req.fin:
+            req.ui.fin = req.fin
+        if req.fout:
+            req.ui.fout = req.fout
+        if req.ferr:
+            req.ui.ferr = req.ferr
     except util.Abort, inst:
-        sys.stderr.write(_("abort: %s\n") % inst)
+        ferr.write(_("abort: %s\n") % inst)
         if inst.hint:
-            sys.stderr.write(_("(%s)\n") % inst.hint)
+            ferr.write(_("(%s)\n") % inst.hint)
         return -1
     except error.ParseError, inst:
         if len(inst.args) > 1:
-            sys.stderr.write(_("hg: parse error at %s: %s\n") %
+            ferr.write(_("hg: parse error at %s: %s\n") %
                              (inst.args[1], inst.args[0]))
         else:
-            sys.stderr.write(_("hg: parse error: %s\n") % inst.args[0])
+            ferr.write(_("hg: parse error: %s\n") % inst.args[0])
         return -1
-    return _runcatch(u, args)
 
-def _runcatch(ui, args):
+    return _runcatch(req)
+
+def _runcatch(req):
     def catchterm(*args):
         raise error.SignalInterrupt
 
+    ui = req.ui
     try:
         for name in 'SIGBREAK', 'SIGHUP', 'SIGTERM':
             num = getattr(signal, name, None)
@@ -50,17 +79,17 @@ def _runcatch(ui, args):
     try:
         try:
             # enter the debugger before command execution
-            if '--debugger' in args:
+            if '--debugger' in req.args:
                 ui.warn(_("entering debugger - "
                         "type c to continue starting hg or h for help\n"))
                 pdb.set_trace()
             try:
-                return _dispatch(ui, args)
+                return _dispatch(req)
             finally:
                 ui.flush()
         except:
             # enter the debugger when we hit an exception
-            if '--debugger' in args:
+            if '--debugger' in req.args:
                 traceback.print_exc()
                 pdb.post_mortem(sys.exc_info()[2])
             ui.traceback()
@@ -90,7 +119,7 @@ def _runcatch(ui, args):
     except error.CommandError, inst:
         if inst.args[0]:
             ui.warn(_("hg %s: %s\n") % (inst.args[0], inst.args[1]))
-            commands.help_(ui, inst.args[0])
+            commands.help_(ui, inst.args[0], full=False, command=True)
         else:
             ui.warn(_("hg: %s\n") % inst.args[1])
             commands.help_(ui, 'shortlist')
@@ -133,7 +162,8 @@ def _runcatch(ui, args):
         elif hasattr(inst, "reason"):
             try: # usually it is in the form (errno, strerror)
                 reason = inst.reason.args[1]
-            except: # it might be anything, for example a string
+            except (AttributeError, IndexError):
+                 # it might be anything, for example a string
                 reason = inst.reason
             ui.warn(_("abort: error: %s\n") % reason)
         elif hasattr(inst, "args") and inst.args[0] == errno.EPIPE:
@@ -181,10 +211,21 @@ def _runcatch(ui, args):
 
     return -1
 
-def aliasargs(fn):
-    if hasattr(fn, 'args'):
-        return fn.args
-    return []
+def aliasargs(fn, givenargs):
+    args = getattr(fn, 'args', [])
+    if args and givenargs:
+        cmd = ' '.join(map(util.shellquote, args))
+
+        nums = []
+        def replacer(m):
+            num = int(m.group(1)) - 1
+            nums.append(num)
+            return givenargs[num]
+        cmd = re.sub(r'\$(\d+|\$)', replacer, cmd)
+        givenargs = [x for i, x in enumerate(givenargs)
+                     if i not in nums]
+        args = shlex.split(cmd)
+    return args + givenargs
 
 class cmdalias(object):
     def __init__(self, name, definition, cmdtable):
@@ -235,7 +276,7 @@ class cmdalias(object):
                 replace['0'] = self.name
                 replace['@'] = ' '.join(args)
                 cmd = util.interpolate(r'\$', replace, cmd, escape_prefix=True)
-                return util.system(cmd, environ=env)
+                return util.system(cmd, environ=env, out=ui.fout)
             self.fn = fn
             return
 
@@ -262,7 +303,7 @@ class cmdalias(object):
             else:
                 self.fn, self.opts = tableentry
 
-            self.args = aliasargs(self.fn) + args
+            self.args = aliasargs(self.fn, args)
             if cmd not in commands.norepo.split(' '):
                 self.norepo = False
             if self.help.startswith("hg " + cmd):
@@ -329,7 +370,7 @@ def _parse(ui, args):
         aliases, entry = cmdutil.findcmd(cmd, commands.table,
                                      ui.config("ui", "strict"))
         cmd = aliases[0]
-        args = aliasargs(entry[0]) + args
+        args = aliasargs(entry[0], args)
         defaults = ui.config("defaults", cmd)
         if defaults:
             args = map(util.expandpath, shlex.split(defaults)) + args
@@ -474,7 +515,10 @@ def _checkshellalias(ui, args):
     os.chdir(cwd)
 
 _loaded = set()
-def _dispatch(ui, args):
+def _dispatch(req):
+    args = req.args
+    ui = req.ui
+
     shellaliasfn = _checkshellalias(ui, args)
     if shellaliasfn:
         return shellaliasfn()
@@ -549,16 +593,20 @@ def _dispatch(ui, args):
         atexit.register(print_time)
 
     if options['verbose'] or options['debug'] or options['quiet']:
-        ui.setconfig('ui', 'verbose', str(bool(options['verbose'])))
-        ui.setconfig('ui', 'debug', str(bool(options['debug'])))
-        ui.setconfig('ui', 'quiet', str(bool(options['quiet'])))
+        for ui_ in (ui, lui):
+            ui_.setconfig('ui', 'verbose', str(bool(options['verbose'])))
+            ui_.setconfig('ui', 'debug', str(bool(options['debug'])))
+            ui_.setconfig('ui', 'quiet', str(bool(options['quiet'])))
     if options['traceback']:
-        ui.setconfig('ui', 'traceback', 'on')
+        for ui_ in (ui, lui):
+            ui_.setconfig('ui', 'traceback', 'on')
     if options['noninteractive']:
-        ui.setconfig('ui', 'interactive', 'off')
+        for ui_ in (ui, lui):
+            ui_.setconfig('ui', 'interactive', 'off')
 
     if cmdoptions.get('insecure', False):
-        ui.setconfig('web', 'cacerts', '')
+        for ui_ in (ui, lui):
+            ui_.setconfig('web', 'cacerts', '')
 
     if options['help']:
         return commands.help_(ui, cmd, options['version'])
@@ -570,25 +618,31 @@ def _dispatch(ui, args):
     repo = None
     cmdpats = args[:]
     if cmd not in commands.norepo.split():
-        try:
-            repo = hg.repository(ui, path=path)
-            ui = repo.ui
-            if not repo.local():
-                raise util.Abort(_("repository '%s' is not local") % path)
-            ui.setconfig("bundle", "mainreporoot", repo.root)
-        except error.RequirementError:
-            raise
-        except error.RepoError:
-            if cmd not in commands.optionalrepo.split():
-                if args and not path: # try to infer -R from command args
-                    repos = map(cmdutil.findrepo, args)
-                    guess = repos[0]
-                    if guess and repos.count(guess) == len(repos):
-                        return _dispatch(ui, ['--repository', guess] + fullargs)
-                if not path:
-                    raise error.RepoError(_("There is no Mercurial repository"
-                                      " here (.hg not found)"))
+        # use the repo from the request only if we don't have -R
+        if not rpath:
+            repo = req.repo
+
+        if not repo:
+            try:
+                repo = hg.repository(ui, path=path)
+                ui = repo.ui
+                if not repo.local():
+                    raise util.Abort(_("repository '%s' is not local") % path)
+                ui.setconfig("bundle", "mainreporoot", repo.root)
+            except error.RequirementError:
                 raise
+            except error.RepoError:
+                if cmd not in commands.optionalrepo.split():
+                    if args and not path: # try to infer -R from command args
+                        repos = map(cmdutil.findrepo, args)
+                        guess = repos[0]
+                        if guess and repos.count(guess) == len(repos):
+                            req.args = ['--repository', guess] + fullargs
+                            return _dispatch(req)
+                    if not path:
+                        raise error.RepoError(_("no repository found in %r"
+                                                " (.hg not found)") % os.getcwd())
+                    raise
         args.insert(0, repo)
     elif rpath:
         ui.warn(_("warning: --repository ignored\n"))

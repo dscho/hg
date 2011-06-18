@@ -36,6 +36,17 @@ test issue352
   o  hell
   o
 
+  $ echo bla > quickfox
+  $ hg add quickfox
+  $ hg ci -m 2
+  $ A=`printf 'quick\rfox'`
+  $ hg cp quickfox "$A"
+  abort: '\n' and '\r' disallowed in filenames: 'quick\rfox'
+  [255]
+  $ hg mv quickfox "$A"
+  abort: '\n' and '\r' disallowed in filenames: 'quick\rfox'
+  [255]
+
 http://mercurial.selenic.com/bts/issue2036
 
   $ cd ..
@@ -46,6 +57,8 @@ test issue2039
   $ cd bar
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "color=" >> $HGRCPATH
+  $ echo "[color]" >> $HGRCPATH
+  $ echo "mode = ansi" >> $HGRCPATH
   $ A=`printf 'foo\nbar'`
   $ B=`printf 'foo\nbar.baz'`
   $ touch "$A"

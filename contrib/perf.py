@@ -1,14 +1,14 @@
 # perf.py - performance test routines
 '''helper extension to measure performance'''
 
-from mercurial import cmdutil, match, commands
+from mercurial import cmdutil, scmutil, match, commands
 import time, os, sys
 
 def timer(func, title=None):
     results = []
     begin = time.time()
     count = 0
-    while 1:
+    while True:
         ostart = os.times()
         cstart = time.time()
         r = func()
@@ -31,11 +31,11 @@ def timer(func, title=None):
 
 def perfwalk(ui, repo, *pats):
     try:
-        m = cmdutil.match(repo, pats, {})
+        m = scmutil.match(repo[None], pats, {})
         timer(lambda: len(list(repo.dirstate.walk(m, [], True, False))))
     except:
         try:
-            m = cmdutil.match(repo, pats, {})
+            m = scmutil.match(repo[None], pats, {})
             timer(lambda: len([b for a, b, c in repo.dirstate.statwalk([], m)]))
         except:
             timer(lambda: len(list(cmdutil.walk(repo, pats, {}))))

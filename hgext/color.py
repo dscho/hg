@@ -18,14 +18,16 @@
 
 '''colorize output from some commands
 
-This extension modifies the status and resolve commands to add color to their
-output to reflect file status, the qseries command to add color to reflect
-patch status (applied, unapplied, missing), and to diff-related
-commands to highlight additions, removals, diff headers, and trailing
-whitespace.
+This extension modifies the status and resolve commands to add color
+to their output to reflect file status, the qseries command to add
+color to reflect patch status (applied, unapplied, missing), and to
+diff-related commands to highlight additions, removals, diff headers,
+and trailing whitespace.
 
 Other effects in addition to color, like bold and underlined text, are
-also available. Effects are rendered with the ECMA-48 SGR control
+also available. By default, the terminfo database is used to find the
+terminal codes used to change color and effect.  If terminfo is not
+available, then effects are rendered with the ECMA-48 SGR control
 function (aka ANSI escape codes).
 
 Default effects may be overridden from your configuration file::
@@ -66,13 +68,35 @@ Default effects may be overridden from your configuration file::
   branches.current = green
   branches.inactive = none
 
-The color extension will try to detect whether to use ANSI codes or
-Win32 console APIs, unless it is made explicit::
+The available effects in terminfo mode are 'blink', 'bold', 'dim',
+'inverse', 'invisible', 'italic', 'standout', and 'underline'; in
+ECMA-48 mode, the options are 'bold', 'inverse', 'italic', and
+'underline'.  How each is rendered depends on the terminal emulator.
+Some may not be available for a given terminal type, and will be
+silently ignored.
+
+Because there are only eight standard colors, this module allows you
+to define color names for other color slots which might be available
+for your terminal type, assuming terminfo mode.  For instance::
+
+  color.brightblue = 12
+  color.pink = 207
+  color.orange = 202
+
+to set 'brightblue' to color slot 12 (useful for 16 color terminals
+that have brighter colors defined in the upper eight) and, 'pink' and
+'orange' to colors in 256-color xterm's default color cube.  These
+defined colors may then be used as any of the pre-defined eight,
+including appending '_background' to set the background to that color.
+
+The color extension will try to detect whether to use terminfo, ANSI
+codes or Win32 console APIs, unless it is made explicit; e.g.::
 
   [color]
   mode = ansi
 
-Any value other than 'ansi', 'win32', or 'auto' will disable color.
+Any value other than 'ansi', 'win32', 'terminfo', or 'auto' will
+disable color.
 
 '''
 
@@ -89,6 +113,110 @@ _effects = {'none': 0, 'black': 30, 'red': 31, 'green': 32, 'yellow': 33,
             'green_background': 42, 'yellow_background': 43,
             'blue_background': 44, 'purple_background': 45,
             'cyan_background': 46, 'white_background': 47}
+
+def _terminfosetup(ui, mode):
+    '''Initialize terminfo data and the terminal if we're in terminfo mode.'''
+
+    global _terminfo_params
+    # If we failed to load curses, we go ahead and return.
+    if not _terminfo_params:
+        return
+    # Otherwise, see what the config file says.
+    if mode not in ('auto', 'terminfo'):
+        return
+
+    _terminfo_params.update((key[6:], (False, int(val)))
+        for key, val in ui.configitems('color')
+        if key.startswith('color.'))
+
+    try:
+        curses.setupterm()
+    except curses.error, e:
+        _terminfo_params = {}
+        return
+
+    for key, (b, e) in _terminfo_params.items():
+        if not b:
+            continue
+        if not curses.tigetstr(e):
+            # Most terminals don't support dim, invis, etc, so don't be
+            # noisy and use ui.debug().
+            ui.debug("no terminfo entry for %s\n" % e)
+            del _terminfo_params[key]
+    if not curses.tigetstr('setaf') or not curses.tigetstr('setab'):
+        ui.warn(_("no terminfo entry for setab/setaf: reverting to "
+          "ECMA-48 color\n"))
+        _terminfo_params = {}
+
+def _modesetup(ui, opts):
+    global _terminfo_params
+
+    coloropt = opts['color']
+    auto = coloropt == 'auto'
+    always = not auto and util.parsebool(coloropt)
+    if not always and not auto:
+        return None
+
+    formatted = always or (os.environ.get('TERM') != 'dumb' and ui.formatted())
+
+    mode = ui.config('color', 'mode', 'auto')
+    realmode = mode
+    if mode == 'auto':
+        if os.name == 'nt' and 'TERM' not in os.environ:
+            # looks line a cmd.exe console, use win32 API or nothing
+            realmode = 'win32'
+        elif not formatted:
+            realmode = 'ansi'
+        else:
+            realmode = 'terminfo'
+
+    if realmode == 'win32':
+        if not w32effects and mode == 'win32':
+            # only warn if color.mode is explicitly set to win32
+            ui.warn(_('warning: failed to set color mode to %s\n') % mode)
+            return None
+        _effects.update(w32effects)
+    elif realmode == 'ansi':
+        _terminfo_params = {}
+    elif realmode == 'terminfo':
+        _terminfosetup(ui, mode)
+        if not _terminfo_params:
+            if mode == 'terminfo':
+                ## FIXME Shouldn't we return None in this case too?
+                # only warn if color.mode is explicitly set to win32
+                ui.warn(_('warning: failed to set color mode to %s\n') % mode)
+            realmode = 'ansi'
+    else:
+        return None
+
+    if always or (auto and formatted):
+        return realmode
+    return None
+
+try:
+    import curses
+    # Mapping from effect name to terminfo attribute name or color number.
+    # This will also force-load the curses module.
+    _terminfo_params = {'none': (True, 'sgr0'),
+                        'standout': (True, 'smso'),
+                        'underline': (True, 'smul'),
+                        'reverse': (True, 'rev'),
+                        'inverse': (True, 'rev'),
+                        'blink': (True, 'blink'),
+                        'dim': (True, 'dim'),
+                        'bold': (True, 'bold'),
+                        'invisible': (True, 'invis'),
+                        'italic': (True, 'sitm'),
+                        'black': (False, curses.COLOR_BLACK),
+                        'red': (False, curses.COLOR_RED),
+                        'green': (False, curses.COLOR_GREEN),
+                        'yellow': (False, curses.COLOR_YELLOW),
+                        'blue': (False, curses.COLOR_BLUE),
+                        'magenta': (False, curses.COLOR_MAGENTA),
+                        'cyan': (False, curses.COLOR_CYAN),
+                        'white': (False, curses.COLOR_WHITE)}
+except ImportError:
+    _terminfo_params = False
 
 _styles = {'grep.match': 'red bold',
            'bookmarks.current': 'green',
@@ -107,6 +235,7 @@ _styles = {'grep.match': 'red bold',
            'diff.trailingwhitespace': 'bold red_background',
            'diffstat.deleted': 'red',
            'diffstat.inserted': 'green',
+           'ui.prompt': 'yellow',
            'log.changeset': 'yellow',
            'resolve.resolved': 'green bold',
            'resolve.unresolved': 'red bold',
@@ -120,13 +249,33 @@ _styles = {'grep.match': 'red bold',
            'status.unknown': 'magenta bold underline'}
 
 
+def _effect_str(effect):
+    '''Helper function for render_effects().'''
+
+    bg = False
+    if effect.endswith('_background'):
+        bg = True
+        effect = effect[:-11]
+    attr, val = _terminfo_params[effect]
+    if attr:
+        return curses.tigetstr(val)
+    elif bg:
+        return curses.tparm(curses.tigetstr('setab'), val)
+    else:
+        return curses.tparm(curses.tigetstr('setaf'), val)
+
 def render_effects(text, effects):
     'Wrap text in commands to turn on each effect.'
     if not text:
         return text
-    start = [str(_effects[e]) for e in ['none'] + effects.split()]
-    start = '\033[' + ';'.join(start) + 'm'
-    stop = '\033[' + str(_effects['none']) + 'm'
+    if not _terminfo_params:
+        start = [str(_effects[e]) for e in ['none'] + effects.split()]
+        start = '\033[' + ';'.join(start) + 'm'
+        stop = '\033[' + str(_effects['none']) + 'm'
+    else:
+        start = ''.join(_effect_str(effect)
+                        for effect in ['none'] + effects.split())
+        stop = _effect_str('none')
     return ''.join([start, text, stop])
 
 def extstyles():
@@ -135,13 +284,15 @@ def extstyles():
 
 def configstyles(ui):
     for status, cfgeffects in ui.configitems('color'):
-        if '.' not in status:
+        if '.' not in status or status.startswith('color.'):
             continue
         cfgeffects = ui.configlist('color', status)
         if cfgeffects:
             good = []
             for e in cfgeffects:
-                if e in _effects:
+                if not _terminfo_params and e in _effects:
+                    good.append(e)
+                elif e in _terminfo_params or e[:-11] in _terminfo_params:
                     good.append(e)
                 else:
                     ui.warn(_("ignoring unknown color/effect %r "
@@ -183,7 +334,7 @@ class colorui(uimod.ui):
             s = _styles.get(l, '')
             if s:
                 effects.append(s)
-        effects = ''.join(effects)
+        effects = ' '.join(effects)
         if effects:
             return '\n'.join([render_effects(s, effects)
                               for s in msg.split('\n')])
@@ -191,33 +342,16 @@ class colorui(uimod.ui):
 
 
 def uisetup(ui):
+    global _terminfo_params
     if ui.plain():
         return
-    mode = ui.config('color', 'mode', 'auto')
-    if mode == 'auto':
-        if os.name == 'nt' and 'TERM' not in os.environ:
-            # looks line a cmd.exe console, use win32 API or nothing
-            mode = w32effects and 'win32' or 'none'
-        else:
-            mode = 'ansi'
-    if mode == 'win32':
-        if w32effects is None:
-            # only warn if color.mode is explicitly set to win32
-            ui.warn(_('warning: failed to set color mode to %s\n') % mode)
-            return
-        _effects.update(w32effects)
-    elif mode != 'ansi':
-        return
     def colorcmd(orig, ui_, opts, cmd, cmdfunc):
-        coloropt = opts['color']
-        auto = coloropt == 'auto'
-        always = util.parsebool(coloropt)
-        if (always or
-            (always is None and
-             (auto and (os.environ.get('TERM') != 'dumb' and ui_.formatted())))):
+        mode = _modesetup(ui_, opts)
+        if mode:
             colorui._colormode = mode
-            colorui.__bases__ = (ui_.__class__,)
-            ui_.__class__ = colorui
+            if not issubclass(ui_.__class__, colorui):
+                colorui.__bases__ = (ui_.__class__,)
+                ui_.__class__ = colorui
             extstyles()
             configstyles(ui_)
         return orig(ui_, opts, cmd, cmdfunc)
@@ -348,13 +482,15 @@ else:
 
         # Look for ANSI-like codes embedded in text
         m = re.match(ansire, text)
-        while m:
-            for sattr in m.group(1).split(';'):
-                if sattr:
-                    attr = mapcolor(int(sattr), attr)
-            _kernel32.SetConsoleTextAttribute(stdout, attr)
-            orig(m.group(2), **opts)
-            m = re.match(ansire, m.group(3))
 
-        # Explicity reset original attributes
-        _kernel32.SetConsoleTextAttribute(stdout, origattr)
+        try:
+            while m:
+                for sattr in m.group(1).split(';'):
+                    if sattr:
+                        attr = mapcolor(int(sattr), attr)
+                _kernel32.SetConsoleTextAttribute(stdout, attr)
+                orig(m.group(2), **opts)
+                m = re.match(ansire, m.group(3))
+        finally:
+            # Explicity reset original attributes
+            _kernel32.SetConsoleTextAttribute(stdout, origattr)

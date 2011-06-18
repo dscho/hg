@@ -8,7 +8,7 @@
 <body>
 
 <div class="page_header">
-<a href="http://mercurial.selenic.com/" title="Mercurial" style="float: right;">Mercurial</a><a href="{url}summary{sessionvars%urlparameter}">{repo|escape}</a> / changeset
+<a href="{logourl}" title="Mercurial" style="float: right;">Mercurial</a><a href="{url}summary{sessionvars%urlparameter}">{repo|escape}</a> / changeset
 </div>
 
 <div class="page_nav">
@@ -32,7 +32,7 @@ changeset |
 <div class="title_text">
 <table cellspacing="0">
 <tr><td>author</td><td>{author|obfuscate}</td></tr>
-<tr><td></td><td>{date|date} ({date|age})</td></tr>
+<tr><td></td><td class="date age">{date|date}</td></tr>
 {branch%changesetbranch}
 <tr><td>changeset {rev}</td><td style="font-family:monospace">{node|short}</td></tr>
 {parent%changesetparent}

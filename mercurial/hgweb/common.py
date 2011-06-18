@@ -17,12 +17,6 @@ HTTP_NOT_FOUND = 404
 HTTP_METHOD_NOT_ALLOWED = 405
 HTTP_SERVER_ERROR = 500
 
-# Hooks for hgweb permission checks; extensions can add hooks here. Each hook
-# is invoked like this: hook(hgweb, request, operation), where operation is
-# either read, pull or push. Hooks should either raise an ErrorResponse
-# exception, or just return.
-# It is possible to do both authentication and authorization through this.
-permhooks = []
 
 def checkauthz(hgweb, req, op):
     '''Check permission for operation based on request data (including
@@ -65,18 +59,43 @@ def checkauthz(hgweb, req, op):
     if not result:
         raise ErrorResponse(HTTP_UNAUTHORIZED, 'push not authorized')
 
-# Add the default permhook, which provides simple authorization.
-permhooks.append(checkauthz)
+# Hooks for hgweb permission checks; extensions can add hooks here.
+# Each hook is invoked like this: hook(hgweb, request, operation),
+# where operation is either read, pull or push. Hooks should either
+# raise an ErrorResponse exception, or just return.
+#
+# It is possible to do both authentication and authorization through
+# this.
+permhooks = [checkauthz]
 
 
 class ErrorResponse(Exception):
     def __init__(self, code, message=None, headers=[]):
         if message is None:
             message = _statusmessage(code)
-        Exception.__init__(self, code, message)
+        Exception.__init__(self)
         self.code = code
         self.message = message
         self.headers = headers
+    def __str__(self):
+        return self.message
+
+class continuereader(object):
+    def __init__(self, f, write):
+        self.f = f
+        self._write = write
+        self.continued = False
+
+    def read(self, amt=-1):
+        if not self.continued:
+            self.continued = True
+            self._write('HTTP/1.1 100 Continue\r\n\r\n')
+        return self.f.read(amt)
+
+    def __getattr__(self, attr):
+        if attr in ('close', 'readline', 'readlines', '__iter__'):
+            return getattr(self.f, attr)
+        raise AttributeError()
 
 def _statusmessage(code):
     from BaseHTTPServer import BaseHTTPRequestHandler

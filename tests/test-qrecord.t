@@ -2,41 +2,124 @@ Create configuration
 
   $ echo "[ui]" >> $HGRCPATH
   $ echo "interactive=true" >> $HGRCPATH
+
+help record (no record)
+
+  $ hg help record
+  record extension - commands to interactively select changes for commit/qrefresh
+  
+  use "hg help extensions" for information on enabling extensions
+
+help qrecord (no record)
+
+  $ hg help qrecord
+  'qrecord' is provided by the following extension:
+  
+      record  commands to interactively select changes for commit/qrefresh
+  
+  use "hg help extensions" for information on enabling extensions
+
   $ echo "[extensions]"     >> $HGRCPATH
   $ echo "record="          >> $HGRCPATH
+
+help record (record)
+
+  $ hg help record
+  hg record [OPTION]... [FILE]...
+  
+  interactively select changes to commit
+  
+      If a list of files is omitted, all changes reported by "hg status" will be
+      candidates for recording.
+  
+      See "hg help dates" for a list of formats valid for -d/--date.
+  
+      You will be prompted for whether to record changes to each modified file,
+      and for files with multiple changes, for each change to use. For each
+      query, the following responses are possible:
+  
+        y - record this change
+        n - skip this change
+  
+        s - skip remaining changes to this file
+        f - record remaining changes to this file
+  
+        d - done, skip remaining changes and files
+        a - record all changes to all remaining files
+        q - quit, recording no changes
+  
+        ? - display help
+  
+      This command is not available when committing a merge.
+  
+  options:
+  
+   -A --addremove            mark new/missing files as added/removed before
+                             committing
+      --close-branch         mark a branch as closed, hiding it from the branch
+                             list
+   -I --include PATTERN [+]  include names matching the given patterns
+   -X --exclude PATTERN [+]  exclude names matching the given patterns
+   -m --message TEXT         use text as commit message
+   -l --logfile FILE         read commit message from file
+   -d --date DATE            record the specified date as commit date
+   -u --user USER            record the specified user as committer
+   -w --ignore-all-space     ignore white space when comparing lines
+   -b --ignore-space-change  ignore changes in the amount of white space
+   -B --ignore-blank-lines   ignore changes whose lines are all blank
+  
+  [+] marked option can be specified multiple times
+  
+  use "hg -v help record" to show global options
 
 help (no mq, so no qrecord)
 
   $ hg help qrecord
-  hg: unknown command 'qrecord'
-  Mercurial Distributed SCM
+  hg qrecord [OPTION]... PATCH [FILE]...
   
-  basic commands:
+  interactively record a new patch
   
-   add        add the specified files on the next commit
-   annotate   show changeset information by line for each file
-   clone      make a copy of an existing repository
-   commit     commit the specified files or all outstanding changes
-   diff       diff repository (or selected files)
-   export     dump the header and diffs for one or more changesets
-   forget     forget the specified files on the next commit
-   init       create a new repository in the given directory
-   log        show revision history of entire repository or files
-   merge      merge working directory with another revision
-   pull       pull changes from the specified source
-   push       push changes to the specified destination
-   remove     remove the specified files on the next commit
-   serve      start stand-alone webserver
-   status     show changed files in the working directory
-   summary    summarize working directory state
-   update     update working directory (or switch revisions)
+      See "hg help qnew" & "hg help record" for more information and usage.
   
-  use "hg help" for the full list of commands or "hg -v" for details
+  use "hg -v help qrecord" to show global options
+
+  $ hg init a
+
+qrecord (mq not present)
+
+  $ hg -R a qrecord
+  hg qrecord: invalid arguments
+  hg qrecord [OPTION]... PATCH [FILE]...
+  
+  interactively record a new patch
+  
+  use "hg help qrecord" to show the full help text
   [255]
+
+qrecord patch (mq not present)
+
+  $ hg -R a qrecord patch
+  abort: 'mq' extension not loaded
+  [255]
+
+help (bad mq)
+
+  $ echo "mq=nonexistant" >> $HGRCPATH
+  $ hg help qrecord
+  *** failed to import extension mq from nonexistant: [Errno 2] No such file or directory
+  hg qrecord [OPTION]... PATCH [FILE]...
+  
+  interactively record a new patch
+  
+      See "hg help qnew" & "hg help record" for more information and usage.
+  
+  use "hg -v help qrecord" to show global options
 
 help (mq present)
 
-  $ echo "mq="              >> $HGRCPATH
+  $ sed 's/mq=nonexistant/mq=/' $HGRCPATH > hgrc.tmp
+  $ mv hgrc.tmp $HGRCPATH
+
   $ hg help qrecord
   hg qrecord [OPTION]... PATCH [FILE]...
   
@@ -56,12 +139,15 @@ help (mq present)
    -X --exclude PATTERN [+]  exclude names matching the given patterns
    -m --message TEXT         use text as commit message
    -l --logfile FILE         read commit message from file
+   -w --ignore-all-space     ignore white space when comparing lines
+   -b --ignore-space-change  ignore changes in the amount of white space
+   -B --ignore-blank-lines   ignore changes whose lines are all blank
+      --mq                   operate on patch repository
   
   [+] marked option can be specified multiple times
   
   use "hg -v help qrecord" to show global options
 
-  $ hg init a
   $ cd a
 
 Base commit
@@ -139,6 +225,12 @@ Whole diff
    
    someone
    up
+
+qrecord with bad patch name, should abort before prompting
+
+  $ hg qrecord .hg
+  abort: patch name cannot begin with ".hg"
+  [255]
 
 qrecord a.patch
 

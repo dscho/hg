@@ -1,7 +1,7 @@
 
   $ "$TESTDIR/hghave" svn svn-bindings || exit 80
 
-  $ cat > $HGRCPATH <<EOF
+  $ cat >> $HGRCPATH <<EOF
   > [extensions]
   > convert = 
   > graphlog =
@@ -31,6 +31,21 @@ Convert trunk and branches
   2 move to old2
   1 move back to old
   0 last change to a
+
+Test template keywords
+
+  $ hg -R A-hg log --template '{rev} {svnuuid}{svnpath}@{svnrev}\n'
+  10 644ede6c-2b81-4367-9dc8-d786514f2cde/trunk@10
+  9 644ede6c-2b81-4367-9dc8-d786514f2cde/branches/old@9
+  8 644ede6c-2b81-4367-9dc8-d786514f2cde/branches/old2@8
+  7 644ede6c-2b81-4367-9dc8-d786514f2cde/branches/old@7
+  6 644ede6c-2b81-4367-9dc8-d786514f2cde/trunk@6
+  5 644ede6c-2b81-4367-9dc8-d786514f2cde/branches/old@6
+  4 644ede6c-2b81-4367-9dc8-d786514f2cde/branches/old@5
+  3 644ede6c-2b81-4367-9dc8-d786514f2cde/trunk@4
+  2 644ede6c-2b81-4367-9dc8-d786514f2cde/branches/old@3
+  1 644ede6c-2b81-4367-9dc8-d786514f2cde/trunk@2
+  0 644ede6c-2b81-4367-9dc8-d786514f2cde/trunk@1
 
 Convert again
 
@@ -68,10 +83,10 @@ Convert again
   
 
   $ hg branches
-  newbranch                     11:08fca3ff8634
-  default                       10:098988aa63ba
-  old                            9:b308f345079b
-  old2                           8:49f2336c7b8b (inactive)
+  newbranch                     11:a6d7cc050ad1
+  default                       10:6e2b33404495
+  old                            9:93c4b0f99529
+  old2                           8:b52884d7bead (inactive)
   $ hg tags -q
   tip
   $ cd ..

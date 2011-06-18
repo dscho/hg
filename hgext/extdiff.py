@@ -13,7 +13,7 @@ diff programs are called with a configurable set of options and two
 non-option arguments: paths to directories containing snapshots of
 files to compare.
 
-The extdiff extension also allows to configure new diff commands, so
+The extdiff extension also allows you to configure new diff commands, so
 you do not need to type :hg:`extdiff -p kdiff3` always. ::
 
   [extdiff]
@@ -40,6 +40,7 @@ Tool arguments can include variables that are expanded at runtime::
   $parent1, $plabel1 - filename, descriptive label of first parent
   $child,   $clabel  - filename, descriptive label of child revision
   $parent2, $plabel2 - filename, descriptive label of second parent
+  $root              - repository root
   $parent is an alias for $parent1.
 
 The extdiff extension will look in your [diff-tools] and [merge-tools]
@@ -61,7 +62,7 @@ pretty fast (at least faster than having to compare the entire tree).
 
 from mercurial.i18n import _
 from mercurial.node import short, nullid
-from mercurial import cmdutil, util, commands, encoding
+from mercurial import scmutil, scmutil, util, commands, encoding
 import os, shlex, shutil, tempfile, re
 
 def snapshot(ui, repo, files, node, tmproot):
@@ -81,7 +82,7 @@ def snapshot(ui, repo, files, node, tmproot):
     else:
         ui.note(_('making snapshot of %d files from working directory\n') %
             (len(files)))
-    wopener = util.opener(base)
+    wopener = scmutil.opener(base)
     fns_and_mtime = []
     ctx = repo[node]
     for fn in files:
@@ -96,9 +97,9 @@ def snapshot(ui, repo, files, node, tmproot):
         if 'l' in fctx.flags():
             wopener.symlink(data, wfn)
         else:
-            wopener(wfn, 'w').write(data)
+            wopener.write(wfn, data)
             if 'x' in fctx.flags():
-                util.set_flags(dest, False, True)
+                util.setflags(dest, False, True)
         if node is None:
             fns_and_mtime.append((dest, repo.wjoin(fn),
                                   os.lstat(dest).st_mtime))
@@ -122,12 +123,12 @@ def dodiff(ui, repo, diffcmd, diffopts, pats, opts):
         msg = _('cannot specify --rev and --change at the same time')
         raise util.Abort(msg)
     elif change:
-        node2 = repo.lookup(change)
+        node2 = scmutil.revsingle(repo, change, None).node()
         node1a, node1b = repo.changelog.parents(node2)
     else:
-        node1a, node2 = cmdutil.revpair(repo, revs)
+        node1a, node2 = scmutil.revpair(repo, revs)
         if not revs:
-            node1b = repo.dirstate.parents()[1]
+            node1b = repo.dirstate.p2()
         else:
             node1b = nullid
 
@@ -136,7 +137,7 @@ def dodiff(ui, repo, diffcmd, diffopts, pats, opts):
         if node1b == nullid:
             do3way = False
 
-    matcher = cmdutil.match(repo, pats, opts)
+    matcher = scmutil.match(repo[node2], pats, opts)
     mod_a, add_a, rem_a = map(set, repo.status(node1a, node2, matcher)[:3])
     if do3way:
         mod_b, add_b, rem_b = map(set, repo.status(node1b, node2, matcher)[:3])
@@ -188,14 +189,14 @@ def dodiff(ui, repo, diffcmd, diffopts, pats, opts):
         # Handle bogus modifies correctly by checking if the files exist
         if len(common) == 1:
             common_file = util.localpath(common.pop())
-            dir1a = os.path.join(dir1a, common_file)
+            dir1a = os.path.join(tmproot, dir1a, common_file)
             label1a = common_file + rev1a
-            if not os.path.isfile(os.path.join(tmproot, dir1a)):
+            if not os.path.isfile(dir1a):
                 dir1a = os.devnull
             if do3way:
-                dir1b = os.path.join(dir1b, common_file)
+                dir1b = os.path.join(tmproot, dir1b, common_file)
                 label1b = common_file + rev1b
-                if not os.path.isfile(os.path.join(tmproot, dir1b)):
+                if not os.path.isfile(dir1b):
                     dir1b = os.devnull
             dir2 = os.path.join(dir2root, dir2, common_file)
             label2 = common_file + rev2
@@ -205,7 +206,8 @@ def dodiff(ui, repo, diffcmd, diffopts, pats, opts):
         # returned for parent2
         replace = dict(parent=dir1a, parent1=dir1a, parent2=dir1b,
                        plabel1=label1a, plabel2=label1b,
-                       clabel=label2, child=dir2)
+                       clabel=label2, child=dir2,
+                       root=repo.root)
         def quote(match):
             key = match.group()[1:]
             if not do3way and key == 'parent2':
@@ -213,7 +215,7 @@ def dodiff(ui, repo, diffcmd, diffopts, pats, opts):
             return util.shellquote(replace[key])
 
         # Match parent2 first, so 'parent1?' will match both parent1 and parent
-        regex = '\$(parent2|parent1?|child|plabel1|plabel2|clabel)'
+        regex = '\$(parent2|parent1?|child|plabel1|plabel2|clabel|root)'
         if not do3way and not re.search(regex, args):
             args += ' $parent1 $child'
         args = re.sub(regex, quote, args)

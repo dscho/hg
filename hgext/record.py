@@ -12,7 +12,19 @@ from mercurial import cmdutil, commands, extensions, hg, mdiff, patch
 from mercurial import util
 import copy, cStringIO, errno, os, re, shutil, tempfile
 
+cmdtable = {}
+command = cmdutil.command(cmdtable)
+
 lines_re = re.compile(r'@@ -(\d+),(\d+) \+(\d+),(\d+) @@\s*(.*)')
+
+diffopts = [
+    ('w', 'ignore-all-space', False,
+     _('ignore white space when comparing lines')),
+    ('b', 'ignore-space-change', None,
+     _('ignore changes in the amount of white space')),
+    ('B', 'ignore-blank-lines', None,
+     _('ignore changes whose lines are all blank')),
+]
 
 def scanpatch(fp):
     """like patch.iterhunks, but yield different events
@@ -324,10 +336,12 @@ def filterpatch(ui, headers):
         for i, chunk in enumerate(h.hunks):
             if skipfile is None and skipall is None:
                 chunk.pretty(ui)
-            msg = (total == 1
-                   and (_('record this change to %r?') % chunk.filename())
-                   or (_('record change %d/%d to %r?') %
-                       (pos - len(h.hunks) + i, total, chunk.filename())))
+            if total == 1:
+                msg = _('record this change to %r?') % chunk.filename()
+            else:
+                idx = pos - len(h.hunks) + i
+                msg = _('record change %d/%d to %r?') % (idx, total,
+                                                         chunk.filename())
             r, skipfile, skipall = prompt(skipfile, skipall, msg)
             if r:
                 if fixoffset:
@@ -339,6 +353,10 @@ def filterpatch(ui, headers):
     return sum([h for h in applied.itervalues()
                if h[0].special() or len(h) > 1], [])
 
+@command("record",
+         # same options as commit + white space diff options
+         commands.table['^commit|ci'][1][:] + diffopts,
+          _('hg record [OPTION]... [FILE]...'))
 def record(ui, repo, *pats, **opts):
     '''interactively select changes to commit
 
@@ -366,8 +384,20 @@ def record(ui, repo, *pats, **opts):
 
     This command is not available when committing a merge.'''
 
-    dorecord(ui, repo, commands.commit, *pats, **opts)
+    dorecord(ui, repo, commands.commit, 'commit', False, *pats, **opts)
 
+def qrefresh(ui, repo, *pats, **opts):
+    mq = extensions.find('mq')
+
+    def committomq(ui, repo, *pats, **opts):
+        # At this point the working copy contains only changes that
+        # were accepted. All other changes were reverted.
+        # We can't pass *pats here since qrefresh will undo all other
+        # changed files in the patch that aren't in pats.
+        mq.refresh(ui, repo, **opts)
+
+    # backup all changed files
+    dorecord(ui, repo, committomq, 'qrefresh', True, *pats, **opts)
 
 def qrecord(ui, repo, patch, *pats, **opts):
     '''interactively record a new patch
@@ -381,15 +411,18 @@ def qrecord(ui, repo, patch, *pats, **opts):
     except KeyError:
         raise util.Abort(_("'mq' extension not loaded"))
 
+    repo.mq.checkpatchname(patch)
+
     def committomq(ui, repo, *pats, **opts):
+        opts['checkname'] = False
         mq.new(ui, repo, patch, *pats, **opts)
 
-    dorecord(ui, repo, committomq, *pats, **opts)
+    dorecord(ui, repo, committomq, 'qnew', False, *pats, **opts)
 
-
-def dorecord(ui, repo, commitfunc, *pats, **opts):
+def dorecord(ui, repo, commitfunc, cmdsuggest, backupall, *pats, **opts):
     if not ui.interactive():
-        raise util.Abort(_('running non-interactively, use commit instead'))
+        raise util.Abort(_('running non-interactively, use %s instead') %
+                         cmdsuggest)
 
     def recordfunc(ui, repo, message, match, opts):
         """This is generic record driver.
@@ -412,7 +445,10 @@ def dorecord(ui, repo, commitfunc, *pats, **opts):
                                '(use "hg commit" instead)'))
 
         changes = repo.status(match=match)[:3]
-        diffopts = mdiff.diffopts(git=True, nodates=True)
+        diffopts = mdiff.diffopts(git=True, nodates=True,
+                                  ignorews=opts.get('ignore_all_space'),
+                                  ignorewsamount=opts.get('ignore_space_change'),
+                                  ignoreblanklines=opts.get('ignore_blank_lines'))
         chunks = patch.diff(repo, changes=changes, opts=diffopts)
         fp = cStringIO.StringIO()
         fp.write(''.join(chunks))
@@ -438,18 +474,22 @@ def dorecord(ui, repo, commitfunc, *pats, **opts):
         modified = set(changes[0])
 
         # 2. backup changed files, so we can restore them in the end
+        if backupall:
+            tobackup = changed
+        else:
+            tobackup = [f for f in newfiles if f in modified]
+
         backups = {}
-        backupdir = repo.join('record-backups')
-        try:
-            os.mkdir(backupdir)
-        except OSError, err:
-            if err.errno != errno.EEXIST:
-                raise
+        if tobackup:
+            backupdir = repo.join('record-backups')
+            try:
+                os.mkdir(backupdir)
+            except OSError, err:
+                if err.errno != errno.EEXIST:
+                    raise
         try:
             # backup continues
-            for f in newfiles:
-                if f not in modified:
-                    continue
+            for f in tobackup:
                 fd, tmpname = tempfile.mkstemp(prefix=f.replace('/', '_')+'.',
                                                dir=backupdir)
                 os.close(fd)
@@ -467,7 +507,7 @@ def dorecord(ui, repo, commitfunc, *pats, **opts):
 
             # 3a. apply filtered patch to clean repo  (clean)
             if backups:
-                hg.revert(repo, repo.dirstate.parents()[0],
+                hg.revert(repo, repo.dirstate.p1(),
                           lambda key: key in backups)
 
             # 3b. (apply)
@@ -475,10 +515,7 @@ def dorecord(ui, repo, commitfunc, *pats, **opts):
                 try:
                     ui.debug('applying patch\n')
                     ui.debug(fp.getvalue())
-                    pfiles = {}
-                    patch.internalpatch(fp, ui, 1, repo.root, files=pfiles,
-                                        eolmode=None)
-                    cmdutil.updatedir(ui, repo, pfiles)
+                    patch.internalpatch(ui, repo, fp, 1, eolmode=None)
                 except patch.PatchError, err:
                     raise util.Abort(str(err))
             del fp
@@ -513,7 +550,8 @@ def dorecord(ui, repo, commitfunc, *pats, **opts):
                     # writing it.
                     shutil.copystat(tmpname, repo.wjoin(realname))
                     os.unlink(tmpname)
-                os.rmdir(backupdir)
+                if tobackup:
+                    os.rmdir(backupdir)
             except OSError:
                 pass
 
@@ -529,12 +567,9 @@ def dorecord(ui, repo, commitfunc, *pats, **opts):
     finally:
         ui.write = oldwrite
 
-cmdtable = {
-    "record":
-        (record, commands.table['^commit|ci'][1], # same options as commit
-         _('hg record [OPTION]... [FILE]...')),
-}
-
+cmdtable["qrecord"] = \
+    (qrecord, [], # placeholder until mq is available
+     _('hg qrecord [OPTION]... PATCH [FILE]...'))
 
 def uisetup(ui):
     try:
@@ -542,11 +577,22 @@ def uisetup(ui):
     except KeyError:
         return
 
-    qcmdtable = {
-    "qrecord":
-        (qrecord, mq.cmdtable['^qnew'][1], # same options as qnew
-         _('hg qrecord [OPTION]... PATCH [FILE]...')),
-    }
+    cmdtable["qrecord"] = \
+        (qrecord,
+         # same options as qnew, but copy them so we don't get
+         # -i/--interactive for qrecord and add white space diff options
+         mq.cmdtable['^qnew'][1][:] + diffopts,
+         _('hg qrecord [OPTION]... PATCH [FILE]...'))
 
-    cmdtable.update(qcmdtable)
+    _wrapcmd('qnew', mq.cmdtable, qrecord, _("interactively record a new patch"))
+    _wrapcmd('qrefresh', mq.cmdtable, qrefresh,
+             _("interactively select changes to refresh"))
 
+def _wrapcmd(cmd, table, wrapfn, msg):
+    '''wrap the command'''
+    def wrapper(orig, *args, **kwargs):
+        if kwargs['interactive']:
+            return wrapfn(*args, **kwargs)
+        return orig(*args, **kwargs)
+    entry = extensions.wrapcommand(table, cmd, wrapper)
+    entry[1].append(('i', 'interactive', None, msg))

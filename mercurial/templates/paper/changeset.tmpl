@@ -5,7 +5,7 @@
 <div class="container">
 <div class="menu">
 <div class="logo">
-<a href="http://mercurial.selenic.com/">
+<a href="{logourl}">
 <img src="{staticurl}hglogo.png" alt="mercurial" /></a>
 </div>
 <ul>
@@ -40,7 +40,7 @@
 files, or words in the commit message</div>
 </form>
 
-<div class="description">{desc|strip|escape|addbreaks|nonempty}</div>
+<div class="description">{desc|strip|escape|nonempty}</div>
 
 <table id="changesetEntry">
 <tr>
@@ -49,7 +49,7 @@ files, or words in the commit message</div>
 </tr>
 <tr>
  <th class="date">date</th>
- <td class="date">{date|date} ({date|age})</td></tr>
+ <td class="date age">{date|date}</td></tr>
 <tr>
  <th class="author">parents</th>
  <td class="author">{parent%changesetparent}</td>
@@ -61,6 +61,18 @@ files, or words in the commit message</div>
 <tr>
  <th class="files">files</th>
  <td class="files">{files}</td>
+</tr>
+<tr>
+  <th class="diffstat">diffstat</th>
+  <td class="diffstat">
+    {diffsummary}
+    <a id="diffstatexpand" href="javascript:showDiffstat()"/>[<tt>+</tt>]</a>
+    <div id="diffstatdetails" style="display:none;">
+      <a href="javascript:hideDiffstat()"/>[<tt>-</tt>]</a>
+      <p>
+      <table>{diffstat}</table>
+    </div>
+  </td>
 </tr>
 </table>
 

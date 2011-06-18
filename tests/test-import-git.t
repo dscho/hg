@@ -383,3 +383,86 @@ Consecutive import with renames (issue2459)
   a   0         -1 unset               b
   $ hg ci -m done
   $ cd ..
+
+Renames and strip
+
+  $ hg init renameandstrip
+  $ cd renameandstrip
+  $ echo a > a
+  $ hg ci -Am adda
+  adding a
+  $ hg import --no-commit -p2 - <<EOF
+  > diff --git a/foo/a b/foo/b
+  > rename from foo/a
+  > rename to foo/b
+  > EOF
+  applying patch from stdin
+  $ hg st --copies
+  A b
+    a
+  R a
+  $ cd ..
+
+Pure copy with existing destination
+
+  $ hg init copytoexisting
+  $ cd copytoexisting
+  $ echo a > a
+  $ echo b > b
+  $ hg ci -Am add
+  adding a
+  adding b
+  $ hg import --no-commit - <<EOF
+  > diff --git a/a b/b
+  > copy from a
+  > copy to b
+  > EOF
+  applying patch from stdin
+  abort: cannot create b: destination already exists
+  [255]
+  $ cat b
+  b
+
+Copy and changes with existing destination
+
+  $ hg import --no-commit - <<EOF
+  > diff --git a/a b/b
+  > copy from a
+  > copy to b
+  > --- a/a
+  > +++ b/b
+  > @@ -1,1 +1,2 @@
+  > a
+  > +b
+  > EOF
+  applying patch from stdin
+  cannot create b: destination already exists
+  1 out of 1 hunks FAILED -- saving rejects to file b.rej
+  abort: patch failed to apply
+  [255]
+  $ cat b
+  b
+
+  $ ln -s b linkb
+  $ hg add linkb
+  $ hg ci -m addlinkb
+  $ hg import --no-commit - <<EOF
+  > diff --git a/linkb b/linkb
+  > deleted file mode 120000
+  > --- a/linkb
+  > +++ /dev/null
+  > @@ -1,1 +0,0 @@
+  > -badhunk
+  > \ No newline at end of file
+  > EOF
+  applying patch from stdin
+  patching file linkb
+  Hunk #1 FAILED at 0
+  1 out of 1 hunks FAILED -- saving rejects to file linkb.rej
+  abort: patch failed to apply
+  [255]
+  $ hg st
+  ? b.rej
+  ? linkb.rej
+
+  $ cd ..

@@ -1,6 +1,5 @@
-  $ mkdir t
+  $ hg init t
   $ cd t
-  $ hg init
   $ mkdir -p beans
   $ for b in kidney navy turtle borlotti black pinto; do
   >     echo $b > beans/$b
@@ -29,6 +28,7 @@
   adding mammals/Procyonidae/coatimundi
   adding mammals/Procyonidae/raccoon
   adding mammals/skunk
+  warning: filename contains ':', which is reserved on Windows: 'glob:glob'
   $ hg commit -m "commit #0"
 
   $ hg debugwalk
@@ -159,7 +159,7 @@
   f  mammals/Procyonidae/raccoon     Procyonidae/raccoon
   f  mammals/skunk                   skunk
   $ hg debugwalk .hg
-  abort: path 'mammals/.hg' is inside repo 'mammals'
+  abort: path 'mammals/.hg' is inside nested repo 'mammals'
   [255]
   $ hg debugwalk ../.hg
   abort: path contains illegal component: .hg
@@ -203,7 +203,7 @@
   abort: path contains illegal component: .hg/data
   [255]
   $ hg debugwalk beans/.hg
-  abort: path 'beans/.hg' is inside repo 'beans'
+  abort: path 'beans/.hg' is inside nested repo 'beans'
   [255]
 
 Test absolute paths:
@@ -294,6 +294,18 @@ Test patterns:
   $ hg debugwalk ignored
   $ hg debugwalk ignored/file
   f  ignored/file  ignored/file  exact
+
+Test listfile and listfile0
+
+  $ python -c "file('../listfile0', 'wb').write('fenugreek\0new\0')"
+  $ hg debugwalk -I 'listfile0:../listfile0'
+  f  fenugreek  fenugreek
+  f  new        new
+  $ python -c "file('../listfile', 'wb').write('fenugreek\nnew\r\nmammals/skunk\n')"
+  $ hg debugwalk -I 'listfile:../listfile'
+  f  fenugreek      fenugreek
+  f  mammals/skunk  mammals/skunk
+  f  new            new
 
   $ cd ..
   $ hg debugwalk -R t t/mammals/skunk

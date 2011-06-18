@@ -63,7 +63,7 @@ should print +a
 should fail
 
   $ hg qpush a.patch
-  cannot push 'a.patch' - guarded by ['+a']
+  cannot push 'a.patch' - guarded by '+a'
   [1]
 
   $ hg qguard a.patch
@@ -309,7 +309,7 @@ and d.patch as Unapplied
 
 qseries again, but with color
 
-  $ hg --config extensions.color= qseries -v --color=always
+  $ hg --config extensions.color= --config color.mode=ansi qseries -v --color=always
   0 G \x1b[0;30;1mnew.patch\x1b[0m (esc)
   1 G \x1b[0;30;1mb.patch\x1b[0m (esc)
   2 A \x1b[0;34;1;4mc.patch\x1b[0m (esc)
@@ -366,9 +366,9 @@ new.patch, b.patch: Guarded. c.patch: Applied. d.patch: Guarded.
   3 G d.patch
   $ hg qpush -a
   applying new.patch
-  skipping b.patch - guarded by ['+2']
+  skipping b.patch - guarded by '+2'
   applying c.patch
-  skipping d.patch - guarded by ['+2']
+  skipping d.patch - guarded by '+2'
   now at: c.patch
   $ qappunappv
   % hg qapplied
@@ -432,5 +432,5 @@ the guards file was not ignored in the past
 
 hg qseries -m with color
 
-  $ hg --config extensions.color= qseries -m --color=always
+  $ hg --config extensions.color= --config color.mode=ansi qseries -m --color=always
   \x1b[0;31;1mb.patch\x1b[0m (esc)

@@ -32,6 +32,8 @@
     incoming.notify = python:hgext.notify.hook
     # batch emails when many changesets incoming at one time
     changegroup.notify = python:hgext.notify.hook
+    # batch emails when many changesets outgoing at one time (client side)
+    outgoing.notify = python:hgext.notify.hook
   
     [notify]
     # config items go here
@@ -48,7 +50,8 @@
     style = ...            # style file to use when formatting email
     template = ...         # template to use when formatting email
     incoming = ...         # template to use when run as incoming hook
-    changegroup = ...      # template when run as changegroup hook
+    outgoing = ...         # template to use when run as outgoing hook
+    changegroup = ...      # template to use when run as changegroup hook
     maxdiff = 300          # max lines of diffs to include (0=none, -1=all)
     maxsubject = 67        # truncate subject line longer than this
     diffstat = True        # add a diffstat before the diff content
@@ -298,11 +301,11 @@ test merge
   Date: * (glob)
   Subject: merge
   From: test@test.com
-  X-Hg-Notification: changeset 22c88b85aa27
+  X-Hg-Notification: changeset 6a0cf76b2701
   Message-Id: <*> (glob)
   To: baz@test.com, foo@bar
   
-  changeset 22c88b85aa27 in b
+  changeset 6a0cf76b2701 in b
   description: merge
   (run 'hg update' to get a working copy)
 
@@ -330,11 +333,11 @@ truncate multi-byte subject
   Date: * (glob)
   Subject: \xc3\xa0... (esc)
   From: test@test.com
-  X-Hg-Notification: changeset 4a47f01c1356
+  X-Hg-Notification: changeset 7ea05ad269dc
   Message-Id: <*> (glob)
   To: baz@test.com, foo@bar
   
-  changeset 4a47f01c1356 in b
+  changeset 7ea05ad269dc in b
   description: \xc3\xa0\xc3\xa1\xc3\xa2\xc3\xa3\xc3\xa4 (esc)
   diffstat:
   
@@ -343,7 +346,7 @@ truncate multi-byte subject
   
   diffs (7 lines):
   
-  diff -r 22c88b85aa27 -r 4a47f01c1356 a
+  diff -r 6a0cf76b2701 -r 7ea05ad269dc a
   --- a/a	Thu Jan 01 00:00:03 1970 +0000
   +++ b/a	Thu Jan 01 00:00:00 1970 +0000
   @@ -1,2 +1,3 @@

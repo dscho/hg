@@ -22,9 +22,8 @@ one pull
   > EOF
   $ python dumb.py 2>/dev/null &
   $ echo $! >> $DAEMON_PIDS
-  $ mkdir remote
+  $ hg init remote
   $ cd remote
-  $ hg init
   $ echo foo > bar
   $ echo c2 > '.dotfile with spaces'
   $ hg add
@@ -118,7 +117,7 @@ test with "/" URI (issue 747) and subrepo
   adding file changes
   added 1 changesets with 3 changes to 3 files
   updating to branch default
-  pulling subrepo sub from static-http://localhost:$HGPORT/sub
+  cloning subrepo sub from static-http://localhost:$HGPORT/sub
   requesting all changes
   adding changesets
   adding manifests

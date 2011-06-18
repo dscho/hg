@@ -29,7 +29,7 @@ class MissingTool(Exception):
 
 def checktool(exe, name=None, abort=True):
     name = name or exe
-    if not util.find_exe(exe):
+    if not util.findexe(exe):
         exc = abort and util.Abort or MissingTool
         raise exc(_('cannot find required "%s" tool') % name)
 
@@ -151,6 +151,13 @@ class converter_source(object):
         """
         return None
 
+    def getbookmarks(self):
+        """Return the bookmarks as a dictionary of name: revision
+
+        Bookmark names are to be UTF-8 strings.
+        """
+        return {}
+
 class converter_sink(object):
     """Conversion sink (target) interface"""
 
@@ -228,6 +235,13 @@ class converter_sink(object):
     def after(self):
         pass
 
+    def putbookmarks(self, bookmarks):
+        """Put bookmarks into sink.
+
+        bookmarks: {bookmarkname: sink_rev_id, ...}
+        where bookmarkname is an UTF-8 string.
+        """
+        pass
 
 class commandline(object):
     def __init__(self, ui, command):
@@ -240,7 +254,7 @@ class commandline(object):
     def postrun(self):
         pass
 
-    def _cmdline(self, cmd, *args, **kwargs):
+    def _cmdline(self, cmd, closestdin, *args, **kwargs):
         cmdline = [self.command, cmd] + list(args)
         for k, v in kwargs.iteritems():
             if len(k) == 1:
@@ -257,16 +271,23 @@ class commandline(object):
         cmdline = [util.shellquote(arg) for arg in cmdline]
         if not self.ui.debugflag:
             cmdline += ['2>', util.nulldev]
-        cmdline += ['<', util.nulldev]
+        if closestdin:
+            cmdline += ['<', util.nulldev]
         cmdline = ' '.join(cmdline)
         return cmdline
 
     def _run(self, cmd, *args, **kwargs):
-        cmdline = self._cmdline(cmd, *args, **kwargs)
+        return self._dorun(util.popen, cmd, True, *args, **kwargs)
+
+    def _run2(self, cmd, *args, **kwargs):
+        return self._dorun(util.popen2, cmd, False, *args, **kwargs)
+
+    def _dorun(self, openfunc, cmd, closestdin, *args, **kwargs):
+        cmdline = self._cmdline(cmd, closestdin, *args, **kwargs)
         self.ui.debug('running: %s\n' % (cmdline,))
         self.prerun()
         try:
-            return util.popen(cmdline)
+            return openfunc(cmdline)
         finally:
             self.postrun()
 
@@ -287,7 +308,7 @@ class commandline(object):
             if output:
                 self.ui.warn(_('%s error:\n') % self.command)
                 self.ui.warn(output)
-            msg = util.explain_exit(status)[0]
+            msg = util.explainexit(status)[0]
             raise util.Abort('%s %s' % (self.command, msg))
 
     def run0(self, cmd, *args, **kwargs):
@@ -322,8 +343,9 @@ class commandline(object):
         self._argmax = self._argmax / 2 - 1
         return self._argmax
 
-    def limit_arglist(self, arglist, cmd, *args, **kwargs):
-        limit = self.getargmax() - len(self._cmdline(cmd, *args, **kwargs))
+    def limit_arglist(self, arglist, cmd, closestdin, *args, **kwargs):
+        cmdlen = len(self._cmdline(cmd, closestdin, *args, **kwargs))
+        limit = self.getargmax() - cmdlen
         bytes = 0
         fl = []
         for fn in arglist:
@@ -339,7 +361,7 @@ class commandline(object):
             yield fl
 
     def xargs(self, arglist, cmd, *args, **kwargs):
-        for l in self.limit_arglist(arglist, cmd, *args, **kwargs):
+        for l in self.limit_arglist(arglist, cmd, True, *args, **kwargs):
             self.run0(cmd, *(list(args) + l), **kwargs)
 
 class mapfile(dict):

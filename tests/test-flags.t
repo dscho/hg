@@ -1,8 +1,7 @@
   $ umask 027
-  $ mkdir test1
-  $ cd test1
 
-  $ hg init
+  $ hg init test1
+  $ cd test1
   $ touch a b
   $ hg add a b
   $ hg ci -m "added a b"
@@ -11,10 +10,9 @@
   $ hg clone test1 test3
   updating to branch default
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  $ mkdir test2
-  $ cd test2
 
-  $ hg init
+  $ hg init test2
+  $ cd test2
   $ hg pull ../test1
   pulling from ../test1
   requesting all changes
@@ -137,13 +135,13 @@ the changelog should mention file a:
   -rwxr-x---
   -rwxr-x---
 
-  $ hg debugindex .hg/store/data/a.i
+  $ hg debugindex a
      rev    offset  length   base linkrev nodeid       p1           p2
        0         0       0      0       0 b80de5d13875 000000000000 000000000000
-  $ hg debugindex ../test2/.hg/store/data/a.i
+  $ hg debugindex -R ../test2 a
      rev    offset  length   base linkrev nodeid       p1           p2
        0         0       0      0       0 b80de5d13875 000000000000 000000000000
-  $ hg debugindex ../test1/.hg/store/data/a.i
+  $ hg debugindex -R ../test1 a
      rev    offset  length   base linkrev nodeid       p1           p2
        0         0       0      0       0 b80de5d13875 000000000000 000000000000
        1         0       5      1       1 7fe919cc0336 b80de5d13875 000000000000

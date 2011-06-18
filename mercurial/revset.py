@@ -6,13 +6,15 @@
 # GNU General Public License version 2 or any later version.
 
 import re
-import parser, util, error, discovery
+import parser, util, error, discovery, hbisect
 import bookmarks as bookmarksmod
 import match as matchmod
-from i18n import _, gettext
+from i18n import _
 
 elements = {
     "(": (20, ("group", 1, ")"), ("func", 1, ")")),
+    "~": (18, None, ("ancestor", 18)),
+    "^": (18, None, ("parent", 18), ("parentpost", 18)),
     "-": (5, ("negate", 19), ("minus", 5)),
     "::": (17, ("dagrangepre", 17), ("dagrange", 17),
            ("dagrangepost", 17)),
@@ -47,7 +49,7 @@ def tokenize(program):
         elif c == '.' and program[pos:pos + 2] == '..': # look ahead carefully
             yield ('..', None, pos)
             pos += 1 # skip ahead
-        elif c in "():,-|&+!": # handle simple operators
+        elif c in "():,-|&+!~^": # handle simple operators
             yield (c, None, pos)
         elif (c in '"\'' or c == 'r' and
               program[pos:pos + 2] in ("r'", 'r"')): # handle quoted strings
@@ -123,7 +125,7 @@ def stringset(repo, subset, x):
     x = repo[x].rev()
     if x == -1 and len(subset) == len(repo):
         return [-1]
-    if x in subset:
+    if len(subset) == len(repo) or x in subset:
         return [x]
     return []
 
@@ -156,9 +158,10 @@ def andset(repo, subset, x, y):
     return getset(repo, getset(repo, subset, x), y)
 
 def orset(repo, subset, x, y):
-    s = set(getset(repo, subset, x))
-    s |= set(getset(repo, [r for r in subset if r not in s], y))
-    return [r for r in subset if r in s]
+    xl = getset(repo, subset, x)
+    s = set(xl)
+    yl = getset(repo, [r for r in subset if r not in s], y)
+    return xl + yl
 
 def notset(repo, subset, x):
     s = set(getset(repo, subset, x))
@@ -174,6 +177,412 @@ def func(repo, subset, a, b):
 
 # functions
 
+def adds(repo, subset, x):
+    """``adds(pattern)``
+    Changesets that add a file matching pattern.
+    """
+    # i18n: "adds" is a keyword
+    pat = getstring(x, _("adds requires a pattern"))
+    return checkstatus(repo, subset, pat, 1)
+
+def ancestor(repo, subset, x):
+    """``ancestor(single, single)``
+    Greatest common ancestor of the two changesets.
+    """
+    # i18n: "ancestor" is a keyword
+    l = getargs(x, 2, 2, _("ancestor requires two arguments"))
+    r = range(len(repo))
+    a = getset(repo, r, l[0])
+    b = getset(repo, r, l[1])
+    if len(a) != 1 or len(b) != 1:
+        # i18n: "ancestor" is a keyword
+        raise error.ParseError(_("ancestor arguments must be single revisions"))
+    an = [repo[a[0]].ancestor(repo[b[0]]).rev()]
+
+    return [r for r in an if r in subset]
+
+def ancestors(repo, subset, x):
+    """``ancestors(set)``
+    Changesets that are ancestors of a changeset in set.
+    """
+    args = getset(repo, range(len(repo)), x)
+    if not args:
+        return []
+    s = set(repo.changelog.ancestors(*args)) | set(args)
+    return [r for r in subset if r in s]
+
+def ancestorspec(repo, subset, x, n):
+    """``set~n``
+    Changesets that are the Nth ancestor (first parents only) of a changeset in set.
+    """
+    try:
+        n = int(n[1])
+    except ValueError:
+        raise error.ParseError(_("~ expects a number"))
+    ps = set()
+    cl = repo.changelog
+    for r in getset(repo, subset, x):
+        for i in range(n):
+            r = cl.parentrevs(r)[0]
+        ps.add(r)
+    return [r for r in subset if r in ps]
+
+def author(repo, subset, x):
+    """``author(string)``
+    Alias for ``user(string)``.
+    """
+    # i18n: "author" is a keyword
+    n = getstring(x, _("author requires a string")).lower()
+    return [r for r in subset if n in repo[r].user().lower()]
+
+def bisected(repo, subset, x):
+    """``bisected(string)``
+    Changesets marked in the specified bisect state (good, bad, skip).
+    """
+    state = getstring(x, _("bisect requires a string")).lower()
+    if state not in ('good', 'bad', 'skip', 'unknown'):
+        raise error.ParseError(_('invalid bisect state'))
+    marked = set(repo.changelog.rev(n) for n in hbisect.load_state(repo)[state])
+    return [r for r in subset if r in marked]
+
+def bookmark(repo, subset, x):
+    """``bookmark([name])``
+    The named bookmark or all bookmarks.
+    """
+    # i18n: "bookmark" is a keyword
+    args = getargs(x, 0, 1, _('bookmark takes one or no arguments'))
+    if args:
+        bm = getstring(args[0],
+                       # i18n: "bookmark" is a keyword
+                       _('the argument to bookmark must be a string'))
+        bmrev = bookmarksmod.listbookmarks(repo).get(bm, None)
+        if not bmrev:
+            raise util.Abort(_("bookmark '%s' does not exist") % bm)
+        bmrev = repo[bmrev].rev()
+        return [r for r in subset if r == bmrev]
+    bms = set([repo[r].rev()
+               for r in bookmarksmod.listbookmarks(repo).values()])
+    return [r for r in subset if r in bms]
+
+def branch(repo, subset, x):
+    """``branch(string or set)``
+    All changesets belonging to the given branch or the branches of the given
+    changesets.
+    """
+    try:
+        b = getstring(x, '')
+        if b in repo.branchmap():
+            return [r for r in subset if repo[r].branch() == b]
+    except error.ParseError:
+        # not a string, but another revspec, e.g. tip()
+        pass
+
+    s = getset(repo, range(len(repo)), x)
+    b = set()
+    for r in s:
+        b.add(repo[r].branch())
+    s = set(s)
+    return [r for r in subset if r in s or repo[r].branch() in b]
+
+def checkstatus(repo, subset, pat, field):
+    m = matchmod.match(repo.root, repo.getcwd(), [pat])
+    s = []
+    fast = (m.files() == [pat])
+    for r in subset:
+        c = repo[r]
+        if fast:
+            if pat not in c.files():
+                continue
+        else:
+            for f in c.files():
+                if m(f):
+                    break
+            else:
+                continue
+        files = repo.status(c.p1().node(), c.node())[field]
+        if fast:
+            if pat in files:
+                s.append(r)
+        else:
+            for f in files:
+                if m(f):
+                    s.append(r)
+                    break
+    return s
+
+def children(repo, subset, x):
+    """``children(set)``
+    Child changesets of changesets in set.
+    """
+    cs = set()
+    cl = repo.changelog
+    s = set(getset(repo, range(len(repo)), x))
+    for r in xrange(0, len(repo)):
+        for p in cl.parentrevs(r):
+            if p in s:
+                cs.add(r)
+    return [r for r in subset if r in cs]
+
+def closed(repo, subset, x):
+    """``closed()``
+    Changeset is closed.
+    """
+    # i18n: "closed" is a keyword
+    getargs(x, 0, 0, _("closed takes no arguments"))
+    return [r for r in subset if repo[r].extra().get('close')]
+
+def contains(repo, subset, x):
+    """``contains(pattern)``
+    Revision contains a file matching pattern. See :hg:`help patterns`
+    for information about file patterns.
+    """
+    # i18n: "contains" is a keyword
+    pat = getstring(x, _("contains requires a pattern"))
+    m = matchmod.match(repo.root, repo.getcwd(), [pat])
+    s = []
+    if m.files() == [pat]:
+        for r in subset:
+            if pat in repo[r]:
+                s.append(r)
+    else:
+        for r in subset:
+            for f in repo[r].manifest():
+                if m(f):
+                    s.append(r)
+                    break
+    return s
+
+def date(repo, subset, x):
+    """``date(interval)``
+    Changesets within the interval, see :hg:`help dates`.
+    """
+    # i18n: "date" is a keyword
+    ds = getstring(x, _("date requires a string"))
+    dm = util.matchdate(ds)
+    return [r for r in subset if dm(repo[r].date()[0])]
+
+def desc(repo, subset, x):
+    """``desc(string)``
+    Search commit message for string. The match is case-insensitive.
+    """
+    # i18n: "desc" is a keyword
+    ds = getstring(x, _("desc requires a string")).lower()
+    l = []
+    for r in subset:
+        c = repo[r]
+        if ds in c.description().lower():
+            l.append(r)
+    return l
+
+def descendants(repo, subset, x):
+    """``descendants(set)``
+    Changesets which are descendants of changesets in set.
+    """
+    args = getset(repo, range(len(repo)), x)
+    if not args:
+        return []
+    s = set(repo.changelog.descendants(*args)) | set(args)
+    return [r for r in subset if r in s]
+
+def filelog(repo, subset, x):
+    """``filelog(pattern)``
+    Changesets connected to the specified filelog.
+    """
+
+    pat = getstring(x, _("filelog requires a pattern"))
+    m = matchmod.match(repo.root, repo.getcwd(), [pat], default='relpath')
+    s = set()
+
+    if not m.anypats():
+        for f in m.files():
+            fl = repo.file(f)
+            for fr in fl:
+                s.add(fl.linkrev(fr))
+    else:
+        for f in repo[None]:
+            if m(f):
+                fl = repo.file(f)
+                for fr in fl:
+                    s.add(fl.linkrev(fr))
+
+    return [r for r in subset if r in s]
+
+def follow(repo, subset, x):
+    """``follow([file])``
+    An alias for ``::.`` (ancestors of the working copy's first parent).
+    If a filename is specified, the history of the given file is followed,
+    including copies.
+    """
+    # i18n: "follow" is a keyword
+    l = getargs(x, 0, 1, _("follow takes no arguments or a filename"))
+    p = repo['.'].rev()
+    if l:
+        x = getstring(l[0], "follow expected a filename")
+        s = set(ctx.rev() for ctx in repo['.'][x].ancestors())
+    else:
+        s = set(repo.changelog.ancestors(p))
+
+    s |= set([p])
+    return [r for r in subset if r in s]
+
+def followfile(repo, subset, f):
+    """``follow()``
+    An alias for ``::.`` (ancestors of the working copy's first parent).
+    """
+    # i18n: "follow" is a keyword
+    getargs(x, 0, 0, _("follow takes no arguments"))
+    p = repo['.'].rev()
+    s = set(repo.changelog.ancestors(p)) | set([p])
+    return [r for r in subset if r in s]
+
+def getall(repo, subset, x):
+    """``all()``
+    All changesets, the same as ``0:tip``.
+    """
+    # i18n: "all" is a keyword
+    getargs(x, 0, 0, _("all takes no arguments"))
+    return subset
+
+def grep(repo, subset, x):
+    """``grep(regex)``
+    Like ``keyword(string)`` but accepts a regex. Use ``grep(r'...')``
+    to ensure special escape characters are handled correctly. Unlike
+    ``keyword(string)``, the match is case-sensitive.
+    """
+    try:
+        # i18n: "grep" is a keyword
+        gr = re.compile(getstring(x, _("grep requires a string")))
+    except re.error, e:
+        raise error.ParseError(_('invalid match pattern: %s') % e)
+    l = []
+    for r in subset:
+        c = repo[r]
+        for e in c.files() + [c.user(), c.description()]:
+            if gr.search(e):
+                l.append(r)
+                break
+    return l
+
+def hasfile(repo, subset, x):
+    """``file(pattern)``
+    Changesets affecting files matched by pattern.
+    """
+    # i18n: "file" is a keyword
+    pat = getstring(x, _("file requires a pattern"))
+    m = matchmod.match(repo.root, repo.getcwd(), [pat])
+    s = []
+    for r in subset:
+        for f in repo[r].files():
+            if m(f):
+                s.append(r)
+                break
+    return s
+
+def head(repo, subset, x):
+    """``head()``
+    Changeset is a named branch head.
+    """
+    # i18n: "head" is a keyword
+    getargs(x, 0, 0, _("head takes no arguments"))
+    hs = set()
+    for b, ls in repo.branchmap().iteritems():
+        hs.update(repo[h].rev() for h in ls)
+    return [r for r in subset if r in hs]
+
+def heads(repo, subset, x):
+    """``heads(set)``
+    Members of set with no children in set.
+    """
+    s = getset(repo, subset, x)
+    ps = set(parents(repo, subset, x))
+    return [r for r in s if r not in ps]
+
+def keyword(repo, subset, x):
+    """``keyword(string)``
+    Search commit message, user name, and names of changed files for
+    string. The match is case-insensitive.
+    """
+    # i18n: "keyword" is a keyword
+    kw = getstring(x, _("keyword requires a string")).lower()
+    l = []
+    for r in subset:
+        c = repo[r]
+        t = " ".join(c.files() + [c.user(), c.description()])
+        if kw in t.lower():
+            l.append(r)
+    return l
+
+def limit(repo, subset, x):
+    """``limit(set, n)``
+    First n members of set.
+    """
+    # i18n: "limit" is a keyword
+    l = getargs(x, 2, 2, _("limit requires two arguments"))
+    try:
+        # i18n: "limit" is a keyword
+        lim = int(getstring(l[1], _("limit requires a number")))
+    except ValueError:
+        # i18n: "limit" is a keyword
+        raise error.ParseError(_("limit expects a number"))
+    ss = set(subset)
+    os = getset(repo, range(len(repo)), l[0])[:lim]
+    return [r for r in os if r in ss]
+
+def last(repo, subset, x):
+    """``last(set, n)``
+    Last n members of set.
+    """
+    # i18n: "last" is a keyword
+    l = getargs(x, 2, 2, _("last requires two arguments"))
+    try:
+        # i18n: "last" is a keyword
+        lim = int(getstring(l[1], _("last requires a number")))
+    except ValueError:
+        # i18n: "last" is a keyword
+        raise error.ParseError(_("last expects a number"))
+    ss = set(subset)
+    os = getset(repo, range(len(repo)), l[0])[-lim:]
+    return [r for r in os if r in ss]
+
+def maxrev(repo, subset, x):
+    """``max(set)``
+    Changeset with highest revision number in set.
+    """
+    os = getset(repo, range(len(repo)), x)
+    if os:
+        m = max(os)
+        if m in subset:
+            return [m]
+    return []
+
+def merge(repo, subset, x):
+    """``merge()``
+    Changeset is a merge changeset.
+    """
+    # i18n: "merge" is a keyword
+    getargs(x, 0, 0, _("merge takes no arguments"))
+    cl = repo.changelog
+    return [r for r in subset if cl.parentrevs(r)[1] != -1]
+
+def minrev(repo, subset, x):
+    """``min(set)``
+    Changeset with lowest revision number in set.
+    """
+    os = getset(repo, range(len(repo)), x)
+    if os:
+        m = min(os)
+        if m in subset:
+            return [m]
+    return []
+
+def modifies(repo, subset, x):
+    """``modifies(pattern)``
+    Changesets modifying files matched by pattern.
+    """
+    # i18n: "modifies" is a keyword
+    pat = getstring(x, _("modifies requires a pattern"))
+    return checkstatus(repo, subset, pat, 0)
+
 def node(repo, subset, x):
     """``id(string)``
     Revision non-ambiguously specified by the given hex string prefix.
@@ -188,26 +597,35 @@ def node(repo, subset, x):
         rn = repo.changelog.rev(repo.changelog._partialmatch(n))
     return [r for r in subset if r == rn]
 
-def rev(repo, subset, x):
-    """``rev(number)``
-    Revision with the given numeric identifier.
+def outgoing(repo, subset, x):
+    """``outgoing([path])``
+    Changesets not found in the specified destination repository, or the
+    default push location.
     """
-    # i18n: "rev" is a keyword
-    l = getargs(x, 1, 1, _("rev requires one argument"))
-    try:
-        # i18n: "rev" is a keyword
-        l = int(getstring(l[0], _("rev requires a number")))
-    except ValueError:
-        # i18n: "rev" is a keyword
-        raise error.ParseError(_("rev expects a number"))
-    return [r for r in subset if r == l]
+    import hg # avoid start-up nasties
+    # i18n: "outgoing" is a keyword
+    l = getargs(x, 0, 1, _("outgoing requires a repository path"))
+    # i18n: "outgoing" is a keyword
+    dest = l and getstring(l[0], _("outgoing requires a repository path")) or ''
+    dest = repo.ui.expandpath(dest or 'default-push', dest or 'default')
+    dest, branches = hg.parseurl(dest)
+    revs, checkout = hg.addbranchrevs(repo, repo, branches, [])
+    if revs:
+        revs = [repo.lookup(rev) for rev in revs]
+    other = hg.peer(repo, {}, dest)
+    repo.ui.pushbuffer()
+    common, outheads = discovery.findcommonoutgoing(repo, other, onlyheads=revs)
+    repo.ui.popbuffer()
+    cl = repo.changelog
+    o = set([cl.rev(r) for r in repo.changelog.findmissing(common, outheads)])
+    return [r for r in subset if r in o]
 
 def p1(repo, subset, x):
     """``p1([set])``
     First parent of changesets in set, or the working directory.
     """
     if x is None:
-        p = repo[x].parents()[0].rev()
+        p = repo[x].p1().rev()
         return [r for r in subset if r == p]
 
     ps = set()
@@ -248,293 +666,30 @@ def parents(repo, subset, x):
         ps.update(cl.parentrevs(r))
     return [r for r in subset if r in ps]
 
-def maxrev(repo, subset, x):
-    """``max(set)``
-    Changeset with highest revision number in set.
+def parentspec(repo, subset, x, n):
+    """``set^0``
+    The set.
+    ``set^1`` (or ``set^``), ``set^2``
+    First or second parent, respectively, of all changesets in set.
     """
-    s = getset(repo, subset, x)
-    if s:
-        m = max(s)
-        if m in subset:
-            return [m]
-    return []
-
-def minrev(repo, subset, x):
-    """``min(set)``
-    Changeset with lowest revision number in set.
-    """
-    s = getset(repo, subset, x)
-    if s:
-        m = min(s)
-        if m in subset:
-            return [m]
-    return []
-
-def limit(repo, subset, x):
-    """``limit(set, n)``
-    First n members of set.
-    """
-    # i18n: "limit" is a keyword
-    l = getargs(x, 2, 2, _("limit requires two arguments"))
     try:
-        # i18n: "limit" is a keyword
-        lim = int(getstring(l[1], _("limit requires a number")))
+        n = int(n[1])
+        if n not in (0, 1, 2):
+            raise ValueError
     except ValueError:
-        # i18n: "limit" is a keyword
-        raise error.ParseError(_("limit expects a number"))
-    return getset(repo, subset, l[0])[:lim]
-
-def children(repo, subset, x):
-    """``children(set)``
-    Child changesets of changesets in set.
-    """
-    cs = set()
+        raise error.ParseError(_("^ expects a number 0, 1, or 2"))
+    ps = set()
     cl = repo.changelog
-    s = set(getset(repo, range(len(repo)), x))
-    for r in xrange(0, len(repo)):
-        for p in cl.parentrevs(r):
-            if p in s:
-                cs.add(r)
-    return [r for r in subset if r in cs]
-
-def branch(repo, subset, x):
-    """``branch(set)``
-    All changesets belonging to the branches of changesets in set.
-    """
-    s = getset(repo, range(len(repo)), x)
-    b = set()
-    for r in s:
-        b.add(repo[r].branch())
-    s = set(s)
-    return [r for r in subset if r in s or repo[r].branch() in b]
-
-def ancestor(repo, subset, x):
-    """``ancestor(single, single)``
-    Greatest common ancestor of the two changesets.
-    """
-    # i18n: "ancestor" is a keyword
-    l = getargs(x, 2, 2, _("ancestor requires two arguments"))
-    r = range(len(repo))
-    a = getset(repo, r, l[0])
-    b = getset(repo, r, l[1])
-    if len(a) != 1 or len(b) != 1:
-        # i18n: "ancestor" is a keyword
-        raise error.ParseError(_("ancestor arguments must be single revisions"))
-    an = [repo[a[0]].ancestor(repo[b[0]]).rev()]
-
-    return [r for r in an if r in subset]
-
-def ancestors(repo, subset, x):
-    """``ancestors(set)``
-    Changesets that are ancestors of a changeset in set.
-    """
-    args = getset(repo, range(len(repo)), x)
-    if not args:
-        return []
-    s = set(repo.changelog.ancestors(*args)) | set(args)
-    return [r for r in subset if r in s]
-
-def descendants(repo, subset, x):
-    """``descendants(set)``
-    Changesets which are descendants of changesets in set.
-    """
-    args = getset(repo, range(len(repo)), x)
-    if not args:
-        return []
-    s = set(repo.changelog.descendants(*args)) | set(args)
-    return [r for r in subset if r in s]
-
-def follow(repo, subset, x):
-    """``follow()``
-    An alias for ``::.`` (ancestors of the working copy's first parent).
-    """
-    # i18n: "follow" is a keyword
-    getargs(x, 0, 0, _("follow takes no arguments"))
-    p = repo['.'].rev()
-    s = set(repo.changelog.ancestors(p)) | set([p])
-    return [r for r in subset if r in s]
-
-def date(repo, subset, x):
-    """``date(interval)``
-    Changesets within the interval, see :hg:`help dates`.
-    """
-    # i18n: "date" is a keyword
-    ds = getstring(x, _("date requires a string"))
-    dm = util.matchdate(ds)
-    return [r for r in subset if dm(repo[r].date()[0])]
-
-def keyword(repo, subset, x):
-    """``keyword(string)``
-    Search commit message, user name, and names of changed files for
-    string. The match is case-insensitive.
-    """
-    # i18n: "keyword" is a keyword
-    kw = getstring(x, _("keyword requires a string")).lower()
-    l = []
-    for r in subset:
-        c = repo[r]
-        t = " ".join(c.files() + [c.user(), c.description()])
-        if kw in t.lower():
-            l.append(r)
-    return l
-
-def grep(repo, subset, x):
-    """``grep(regex)``
-    Like ``keyword(string)`` but accepts a regex. Use ``grep(r'...')``
-    to ensure special escape characters are handled correctly. Unlike
-    ``keyword(string)``, the match is case-sensitive.
-    """
-    try:
-        # i18n: "grep" is a keyword
-        gr = re.compile(getstring(x, _("grep requires a string")))
-    except re.error, e:
-        raise error.ParseError(_('invalid match pattern: %s') % e)
-    l = []
-    for r in subset:
-        c = repo[r]
-        for e in c.files() + [c.user(), c.description()]:
-            if gr.search(e):
-                l.append(r)
-                continue
-    return l
-
-def author(repo, subset, x):
-    """``author(string)``
-    Alias for ``user(string)``.
-    """
-    # i18n: "author" is a keyword
-    n = getstring(x, _("author requires a string")).lower()
-    return [r for r in subset if n in repo[r].user().lower()]
-
-def user(repo, subset, x):
-    """``user(string)``
-    User name contains string. The match is case-insensitive.
-    """
-    return author(repo, subset, x)
-
-def hasfile(repo, subset, x):
-    """``file(pattern)``
-    Changesets affecting files matched by pattern.
-    """
-    # i18n: "file" is a keyword
-    pat = getstring(x, _("file requires a pattern"))
-    m = matchmod.match(repo.root, repo.getcwd(), [pat])
-    s = []
-    for r in subset:
-        for f in repo[r].files():
-            if m(f):
-                s.append(r)
-                continue
-    return s
-
-def contains(repo, subset, x):
-    """``contains(pattern)``
-    Revision contains a file matching pattern. See :hg:`help patterns`
-    for information about file patterns.
-    """
-    # i18n: "contains" is a keyword
-    pat = getstring(x, _("contains requires a pattern"))
-    m = matchmod.match(repo.root, repo.getcwd(), [pat])
-    s = []
-    if m.files() == [pat]:
-        for r in subset:
-            if pat in repo[r]:
-                s.append(r)
-                continue
-    else:
-        for r in subset:
-            for f in repo[r].manifest():
-                if m(f):
-                    s.append(r)
-                    continue
-    return s
-
-def checkstatus(repo, subset, pat, field):
-    m = matchmod.match(repo.root, repo.getcwd(), [pat])
-    s = []
-    fast = (m.files() == [pat])
-    for r in subset:
-        c = repo[r]
-        if fast:
-            if pat not in c.files():
-                continue
-        else:
-            for f in c.files():
-                if m(f):
-                    break
-            else:
-                continue
-        files = repo.status(c.p1().node(), c.node())[field]
-        if fast:
-            if pat in files:
-                s.append(r)
-                continue
-        else:
-            for f in files:
-                if m(f):
-                    s.append(r)
-                    continue
-    return s
-
-def modifies(repo, subset, x):
-    """``modifies(pattern)``
-    Changesets modifying files matched by pattern.
-    """
-    # i18n: "modifies" is a keyword
-    pat = getstring(x, _("modifies requires a pattern"))
-    return checkstatus(repo, subset, pat, 0)
-
-def adds(repo, subset, x):
-    """``adds(pattern)``
-    Changesets that add a file matching pattern.
-    """
-    # i18n: "adds" is a keyword
-    pat = getstring(x, _("adds requires a pattern"))
-    return checkstatus(repo, subset, pat, 1)
-
-def removes(repo, subset, x):
-    """``removes(pattern)``
-    Changesets which remove files matching pattern.
-    """
-    # i18n: "removes" is a keyword
-    pat = getstring(x, _("removes requires a pattern"))
-    return checkstatus(repo, subset, pat, 2)
-
-def merge(repo, subset, x):
-    """``merge()``
-    Changeset is a merge changeset.
-    """
-    # i18n: "merge" is a keyword
-    getargs(x, 0, 0, _("merge takes no arguments"))
-    cl = repo.changelog
-    return [r for r in subset if cl.parentrevs(r)[1] != -1]
-
-def closed(repo, subset, x):
-    """``closed()``
-    Changeset is closed.
-    """
-    # i18n: "closed" is a keyword
-    getargs(x, 0, 0, _("closed takes no arguments"))
-    return [r for r in subset if repo[r].extra().get('close')]
-
-def head(repo, subset, x):
-    """``head()``
-    Changeset is a named branch head.
-    """
-    # i18n: "head" is a keyword
-    getargs(x, 0, 0, _("head takes no arguments"))
-    hs = set()
-    for b, ls in repo.branchmap().iteritems():
-        hs.update(repo[h].rev() for h in ls)
-    return [r for r in subset if r in hs]
-
-def reverse(repo, subset, x):
-    """``reverse(set)``
-    Reverse order of set.
-    """
-    l = getset(repo, subset, x)
-    l.reverse()
-    return l
+    for r in getset(repo, subset, x):
+        if n == 0:
+            ps.add(r)
+        elif n == 1:
+            ps.add(cl.parentrevs(r)[0])
+        elif n == 2:
+            parents = cl.parentrevs(r)
+            if len(parents) > 1:
+                ps.add(parents[1])
+    return [r for r in subset if r in ps]
 
 def present(repo, subset, x):
     """``present(set)``
@@ -545,6 +700,44 @@ def present(repo, subset, x):
         return getset(repo, subset, x)
     except error.RepoLookupError:
         return []
+
+def removes(repo, subset, x):
+    """``removes(pattern)``
+    Changesets which remove files matching pattern.
+    """
+    # i18n: "removes" is a keyword
+    pat = getstring(x, _("removes requires a pattern"))
+    return checkstatus(repo, subset, pat, 2)
+
+def rev(repo, subset, x):
+    """``rev(number)``
+    Revision with the given numeric identifier.
+    """
+    # i18n: "rev" is a keyword
+    l = getargs(x, 1, 1, _("rev requires one argument"))
+    try:
+        # i18n: "rev" is a keyword
+        l = int(getstring(l[0], _("rev requires a number")))
+    except ValueError:
+        # i18n: "rev" is a keyword
+        raise error.ParseError(_("rev expects a number"))
+    return [r for r in subset if r == l]
+
+def reverse(repo, subset, x):
+    """``reverse(set)``
+    Reverse order of set.
+    """
+    l = getset(repo, subset, x)
+    l.reverse()
+    return l
+
+def roots(repo, subset, x):
+    """``roots(set)``
+    Changesets with no parent changeset in set.
+    """
+    s = getset(repo, subset, x)
+    cs = set(children(repo, subset, x))
+    return [r for r in s if r not in cs]
 
 def sort(repo, subset, x):
     """``sort(set[, [-]key...])``
@@ -601,53 +794,6 @@ def sort(repo, subset, x):
     l.sort()
     return [e[-1] for e in l]
 
-def getall(repo, subset, x):
-    """``all()``
-    All changesets, the same as ``0:tip``.
-    """
-    # i18n: "all" is a keyword
-    getargs(x, 0, 0, _("all takes no arguments"))
-    return subset
-
-def heads(repo, subset, x):
-    """``heads(set)``
-    Members of set with no children in set.
-    """
-    s = getset(repo, subset, x)
-    ps = set(parents(repo, subset, x))
-    return [r for r in s if r not in ps]
-
-def roots(repo, subset, x):
-    """``roots(set)``
-    Changesets with no parent changeset in set.
-    """
-    s = getset(repo, subset, x)
-    cs = set(children(repo, subset, x))
-    return [r for r in s if r not in cs]
-
-def outgoing(repo, subset, x):
-    """``outgoing([path])``
-    Changesets not found in the specified destination repository, or the
-    default push location.
-    """
-    import hg # avoid start-up nasties
-    # i18n: "outgoing" is a keyword
-    l = getargs(x, 0, 1, _("outgoing requires a repository path"))
-    # i18n: "outgoing" is a keyword
-    dest = l and getstring(l[0], _("outgoing requires a repository path")) or ''
-    dest = repo.ui.expandpath(dest or 'default-push', dest or 'default')
-    dest, branches = hg.parseurl(dest)
-    revs, checkout = hg.addbranchrevs(repo, repo, branches, [])
-    if revs:
-        revs = [repo.lookup(rev) for rev in revs]
-    other = hg.repository(hg.remoteui(repo, {}), dest)
-    repo.ui.pushbuffer()
-    o = discovery.findoutgoing(repo, other)
-    repo.ui.popbuffer()
-    cl = repo.changelog
-    o = set([cl.rev(r) for r in repo.changelog.nodesbetween(o, revs)[0]])
-    return [r for r in subset if r in o]
-
 def tag(repo, subset, x):
     """``tag([name])``
     The specified tag by name, or all tagged revisions if no name is given.
@@ -659,6 +805,8 @@ def tag(repo, subset, x):
         tn = getstring(args[0],
                        # i18n: "tag" is a keyword
                        _('the argument to tag must be a string'))
+        if not repo.tags().get(tn, None):
+            raise util.Abort(_("tag '%s' does not exist") % tn)
         s = set([cl.rev(n) for t, n in repo.tagslist() if t == tn])
     else:
         s = set([cl.rev(n) for t, n in repo.tagslist() if t != 'tip'])
@@ -667,23 +815,11 @@ def tag(repo, subset, x):
 def tagged(repo, subset, x):
     return tag(repo, subset, x)
 
-def bookmark(repo, subset, x):
-    """``bookmark([name])``
-    The named bookmark or all bookmarks.
+def user(repo, subset, x):
+    """``user(string)``
+    User name contains string. The match is case-insensitive.
     """
-    # i18n: "bookmark" is a keyword
-    args = getargs(x, 0, 1, _('bookmark takes one or no arguments'))
-    if args:
-        bm = getstring(args[0],
-                       # i18n: "bookmark" is a keyword
-                       _('the argument to bookmark must be a string'))
-        bmrev = bookmarksmod.listbookmarks(repo).get(bm, None)
-        if bmrev:
-            bmrev = repo[bmrev].rev()
-        return [r for r in subset if r == bmrev]
-    bms = set([repo[r].rev()
-               for r in bookmarksmod.listbookmarks(repo).values()])
-    return [r for r in subset if r in bms]
+    return author(repo, subset, x)
 
 symbols = {
     "adds": adds,
@@ -691,33 +827,37 @@ symbols = {
     "ancestor": ancestor,
     "ancestors": ancestors,
     "author": author,
+    "bisected": bisected,
     "bookmark": bookmark,
     "branch": branch,
     "children": children,
     "closed": closed,
     "contains": contains,
     "date": date,
+    "desc": desc,
     "descendants": descendants,
     "file": hasfile,
+    "filelog": filelog,
     "follow": follow,
     "grep": grep,
     "head": head,
     "heads": heads,
+    "id": node,
     "keyword": keyword,
+    "last": last,
     "limit": limit,
     "max": maxrev,
-    "min": minrev,
     "merge": merge,
+    "min": minrev,
     "modifies": modifies,
-    "id": node,
     "outgoing": outgoing,
     "p1": p1,
     "p2": p2,
     "parents": parents,
     "present": present,
     "removes": removes,
-    "reverse": reverse,
     "rev": rev,
+    "reverse": reverse,
     "roots": roots,
     "sort": sort,
     "tag": tag,
@@ -734,6 +874,9 @@ methods = {
     "not": notset,
     "list": listset,
     "func": func,
+    "ancestor": ancestorspec,
+    "parent": parentspec,
+    "parentpost": p1,
 }
 
 def optimize(x, small):
@@ -779,16 +922,20 @@ def optimize(x, small):
     elif op == 'not':
         o = optimize(x[1], not small)
         return o[0], (op, o[1])
+    elif op == 'parentpost':
+        o = optimize(x[1], small)
+        return o[0], (op, o[1])
     elif op == 'group':
         return optimize(x[1], small)
-    elif op in 'range list':
+    elif op in 'range list parent ancestorspec':
         wa, ta = optimize(x[1], small)
         wb, tb = optimize(x[2], small)
         return wa + wb, (op, ta, tb)
     elif op == 'func':
         f = getstring(x[1], _("not a symbol"))
         wa, ta = optimize(x[2], small)
-        if f in "grep date user author keyword branch file outgoing":
+        if f in ("author branch closed date desc file grep keyword "
+                 "outgoing user"):
             w = 10 # slow
         elif f in "modifies adds removes":
             w = 30 # slower
@@ -805,33 +952,93 @@ def optimize(x, small):
         return w + wa, (op, x[1], ta)
     return 1, x
 
+class revsetalias(object):
+    funcre = re.compile('^([^(]+)\(([^)]+)\)$')
+    args = ()
+
+    def __init__(self, token, value):
+        '''Aliases like:
+
+        h = heads(default)
+        b($1) = ancestors($1) - ancestors(default)
+        '''
+        if isinstance(token, tuple):
+            self.type, self.name = token
+        else:
+            m = self.funcre.search(token)
+            if m:
+                self.type = 'func'
+                self.name = m.group(1)
+                self.args = [x.strip() for x in m.group(2).split(',')]
+            else:
+                self.type = 'symbol'
+                self.name = token
+
+        if isinstance(value, str):
+            for arg in self.args:
+                value = value.replace(arg, repr(arg))
+            self.replacement, pos = parse(value)
+            if pos != len(value):
+                raise error.ParseError('invalid token', pos)
+        else:
+            self.replacement = value
+
+    def match(self, tree):
+        if not tree:
+            return False
+        if tree == (self.type, self.name):
+            return True
+        if tree[0] != self.type:
+            return False
+        if len(tree) > 1 and tree[1] != ('symbol', self.name):
+            return False
+        # 'func' + funcname + args
+        if ((self.args and len(tree) != 3) or
+            (len(self.args) == 1 and tree[2][0] == 'list') or
+            (len(self.args) > 1 and (tree[2][0] != 'list' or
+                                     len(tree[2]) - 1 != len(self.args)))):
+            raise error.ParseError('invalid amount of arguments', len(tree) - 2)
+        return True
+
+    def replace(self, tree):
+        if tree == (self.type, self.name):
+            return self.replacement
+        result = self.replacement
+        def getsubtree(i):
+            if tree[2][0] == 'list':
+                return tree[2][i + 1]
+            return tree[i + 2]
+        for i, v in enumerate(self.args):
+            valalias = revsetalias(('string', v), getsubtree(i))
+            result = valalias.process(result)
+        return result
+
+    def process(self, tree):
+        if self.match(tree):
+            return self.replace(tree)
+        if isinstance(tree, tuple):
+            return tuple(map(self.process, tree))
+        return tree
+
+def findaliases(ui, tree):
+    for k, v in ui.configitems('revsetalias'):
+        alias = revsetalias(k, v)
+        tree = alias.process(tree)
+    return tree
+
 parse = parser.parser(tokenize, elements).parse
 
-def match(spec):
+def match(ui, spec):
     if not spec:
         raise error.ParseError(_("empty query"))
     tree, pos = parse(spec)
     if (pos != len(spec)):
         raise error.ParseError("invalid token", pos)
+    tree = findaliases(ui, tree)
     weight, tree = optimize(tree, True)
     def mfunc(repo, subset):
         return getset(repo, subset, tree)
     return mfunc
-
-def makedoc(topic, doc):
-    """Generate and include predicates help in revsets topic."""
-    predicates = []
-    for name in sorted(symbols):
-        text = symbols[name].__doc__
-        if not text:
-            continue
-        text = gettext(text.rstrip())
-        lines = text.splitlines()
-        lines[1:] = [('  ' + l.strip()) for l in lines[1:]]
-        predicates.append('\n'.join(lines))
-    predicates = '\n\n'.join(predicates)
-    doc = doc.replace('.. predicatesmarker', predicates)
-    return doc
 
 # tell hggettext to extract docstrings from these functions:
 i18nfunctions = symbols.values()

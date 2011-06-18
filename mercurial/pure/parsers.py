@@ -5,7 +5,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from mercurial.node import bin, nullid, nullrev
+from mercurial.node import bin, nullid
 from mercurial import util
 import struct, zlib
 
@@ -55,6 +55,9 @@ def parse_index2(data, inline):
             append(e)
             n += 1
             off += s
+
+    if off != len(data):
+        raise ValueError('corrupt index file')
 
     if index:
         e = list(index[0])

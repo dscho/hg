@@ -27,6 +27,13 @@ should print a warning that this is not a real copy; foo is added
   A foo
   $ hg commit -m1
 
+moving a missing file
+  $ rm foo
+  $ hg mv foo foo3
+  foo: deleted in working copy
+  foo3 does not exist!
+  $ hg up -qC .
+
 copy --after to a nonexistant target filename
   $ hg cp -A foo dummy
   foo: not recording copy - dummy does not exist
@@ -46,7 +53,7 @@ shouldn't show copy
   $ hg st -C
 
 should match
-  $ hg debugindex .hg/store/data/foo.i
+  $ hg debugindex foo
      rev    offset  length   base linkrev nodeid       p1           p2
        0         0       5      0       0 2ed2a3912a0b 000000000000 000000000000
   $ hg debugrename bar
@@ -68,13 +75,13 @@ should show copy
   $ hg commit -m3
 
 should show no parents for tip
-  $ hg debugindex .hg/store/data/bar.i
+  $ hg debugindex bar
      rev    offset  length   base linkrev nodeid       p1           p2
        0         0      69      0       1 7711d36246cc 000000000000 000000000000
        1        69       6      1       2 bdf70a2b8d03 7711d36246cc 000000000000
        2        75      81      1       3 b2558327ea8d 000000000000 000000000000
 should match
-  $ hg debugindex .hg/store/data/foo.i
+  $ hg debugindex foo
      rev    offset  length   base linkrev nodeid       p1           p2
        0         0       5      0       0 2ed2a3912a0b 000000000000 000000000000
        1         5       7      1       2 dd12c926cf16 2ed2a3912a0b 000000000000

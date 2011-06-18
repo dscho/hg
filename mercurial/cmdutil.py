@@ -7,12 +7,10 @@
 
 from node import hex, nullid, nullrev, short
 from i18n import _
-import os, sys, errno, re, glob, tempfile
-import util, templater, patch, error, encoding, templatekw
+import os, sys, errno, re, tempfile
+import util, scmutil, templater, patch, error, templatekw, revlog
 import match as matchmod
-import similar, revset, subrepo
-
-revrangesep = ':'
+import subrepo
 
 def parsealiases(cmd):
     return cmd.lstrip("^").split("|")
@@ -71,14 +69,14 @@ def findrepo(p):
 
     return p
 
-def bail_if_changed(repo):
-    if repo.dirstate.parents()[1] != nullid:
+def bailifchanged(repo):
+    if repo.dirstate.p2() != nullid:
         raise util.Abort(_('outstanding uncommitted merge'))
     modified, added, removed, deleted = repo.status()[:4]
     if modified or added or removed or deleted:
         raise util.Abort(_("outstanding uncommitted changes"))
 
-def logmessage(opts):
+def logmessage(ui, opts):
     """ get the log message according to -m and -l option """
     message = opts.get('message')
     logfile = opts.get('logfile')
@@ -89,9 +87,9 @@ def logmessage(opts):
     if not message and logfile:
         try:
             if logfile == '-':
-                message = sys.stdin.read()
+                message = ui.fin.read()
             else:
-                message = open(logfile).read()
+                message = '\n'.join(util.readfile(logfile).splitlines())
         except IOError, inst:
             raise util.Abort(_("can't read commit message '%s': %s") %
                              (logfile, inst.strerror))
@@ -111,78 +109,7 @@ def loglimit(opts):
         limit = None
     return limit
 
-def revsingle(repo, revspec, default='.'):
-    if not revspec:
-        return repo[default]
-
-    l = revrange(repo, [revspec])
-    if len(l) < 1:
-        raise util.Abort(_('empty revision set'))
-    return repo[l[-1]]
-
-def revpair(repo, revs):
-    if not revs:
-        return repo.dirstate.parents()[0], None
-
-    l = revrange(repo, revs)
-
-    if len(l) == 0:
-        return repo.dirstate.parents()[0], None
-
-    if len(l) == 1:
-        return repo.lookup(l[0]), None
-
-    return repo.lookup(l[0]), repo.lookup(l[-1])
-
-def revrange(repo, revs):
-    """Yield revision as strings from a list of revision specifications."""
-
-    def revfix(repo, val, defval):
-        if not val and val != 0 and defval is not None:
-            return defval
-        return repo.changelog.rev(repo.lookup(val))
-
-    seen, l = set(), []
-    for spec in revs:
-        # attempt to parse old-style ranges first to deal with
-        # things like old-tag which contain query metacharacters
-        try:
-            if isinstance(spec, int):
-                seen.add(spec)
-                l.append(spec)
-                continue
-
-            if revrangesep in spec:
-                start, end = spec.split(revrangesep, 1)
-                start = revfix(repo, start, 0)
-                end = revfix(repo, end, len(repo) - 1)
-                step = start > end and -1 or 1
-                for rev in xrange(start, end + step, step):
-                    if rev in seen:
-                        continue
-                    seen.add(rev)
-                    l.append(rev)
-                continue
-            elif spec and spec in repo: # single unquoted rev
-                rev = revfix(repo, spec, None)
-                if rev in seen:
-                    continue
-                seen.add(rev)
-                l.append(rev)
-                continue
-        except error.RepoLookupError:
-            pass
-
-        # fall through to new-style queries if old-style fails
-        m = revset.match(spec)
-        for r in m(repo, range(len(repo))):
-            if r not in seen:
-                l.append(r)
-        seen.update(l)
-
-    return l
-
-def make_filename(repo, pat, node,
+def makefilename(repo, pat, node,
                   total=None, seqno=None, revwidth=None, pathname=None):
     node_expander = {
         'H': lambda: hex(node),
@@ -227,172 +154,71 @@ def make_filename(repo, pat, node,
         raise util.Abort(_("invalid format spec '%%%s' in output filename") %
                          inst.args[0])
 
-def make_file(repo, pat, node=None,
-              total=None, seqno=None, revwidth=None, mode='wb', pathname=None):
+def makefileobj(repo, pat, node=None, total=None,
+                seqno=None, revwidth=None, mode='wb', pathname=None):
 
-    writable = 'w' in mode or 'a' in mode
+    writable = mode not in ('r', 'rb')
 
     if not pat or pat == '-':
-        fp = writable and sys.stdout or sys.stdin
-        return os.fdopen(os.dup(fp.fileno()), mode)
+        fp = writable and repo.ui.fout or repo.ui.fin
+        if hasattr(fp, 'fileno'):
+            return os.fdopen(os.dup(fp.fileno()), mode)
+        else:
+            # if this fp can't be duped properly, return
+            # a dummy object that can be closed
+            class wrappedfileobj(object):
+                noop = lambda x: None
+                def __init__(self, f):
+                    self.f = f
+                def __getattr__(self, attr):
+                    if attr == 'close':
+                        return self.noop
+                    else:
+                        return getattr(self.f, attr)
+
+            return wrappedfileobj(fp)
     if hasattr(pat, 'write') and writable:
         return pat
     if hasattr(pat, 'read') and 'r' in mode:
         return pat
-    return open(make_filename(repo, pat, node, total, seqno, revwidth,
+    return open(makefilename(repo, pat, node, total, seqno, revwidth,
                               pathname),
                 mode)
 
-def expandpats(pats):
-    if not util.expandglobs:
-        return list(pats)
-    ret = []
-    for p in pats:
-        kind, name = matchmod._patsplit(p, None)
-        if kind is None:
-            try:
-                globbed = glob.glob(name)
-            except re.error:
-                globbed = [name]
-            if globbed:
-                ret.extend(globbed)
-                continue
-        ret.append(p)
-    return ret
+def openrevlog(repo, cmd, file_, opts):
+    """opens the changelog, manifest, a filelog or a given revlog"""
+    cl = opts['changelog']
+    mf = opts['manifest']
+    msg = None
+    if cl and mf:
+        msg = _('cannot specify --changelog and --manifest at the same time')
+    elif cl or mf:
+        if file_:
+            msg = _('cannot specify filename with --changelog or --manifest')
+        elif not repo:
+            msg = _('cannot specify --changelog or --manifest '
+                    'without a repository')
+    if msg:
+        raise util.Abort(msg)
 
-def match(repo, pats=[], opts={}, globbed=False, default='relpath'):
-    if pats == ("",):
-        pats = []
-    if not globbed and default == 'relpath':
-        pats = expandpats(pats or [])
-    m = matchmod.match(repo.root, repo.getcwd(), pats,
-                       opts.get('include'), opts.get('exclude'), default,
-                       auditor=repo.auditor)
-    def badfn(f, msg):
-        repo.ui.warn("%s: %s\n" % (m.rel(f), msg))
-    m.bad = badfn
-    return m
-
-def matchall(repo):
-    return matchmod.always(repo.root, repo.getcwd())
-
-def matchfiles(repo, files):
-    return matchmod.exact(repo.root, repo.getcwd(), files)
-
-def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
-    if dry_run is None:
-        dry_run = opts.get('dry_run')
-    if similarity is None:
-        similarity = float(opts.get('similarity') or 0)
-    # we'd use status here, except handling of symlinks and ignore is tricky
-    added, unknown, deleted, removed = [], [], [], []
-    audit_path = util.path_auditor(repo.root)
-    m = match(repo, pats, opts)
-    for abs in repo.walk(m):
-        target = repo.wjoin(abs)
-        good = True
-        try:
-            audit_path(abs)
-        except:
-            good = False
-        rel = m.rel(abs)
-        exact = m.exact(abs)
-        if good and abs not in repo.dirstate:
-            unknown.append(abs)
-            if repo.ui.verbose or not exact:
-                repo.ui.status(_('adding %s\n') % ((pats and rel) or abs))
-        elif repo.dirstate[abs] != 'r' and (not good or not os.path.lexists(target)
-            or (os.path.isdir(target) and not os.path.islink(target))):
-            deleted.append(abs)
-            if repo.ui.verbose or not exact:
-                repo.ui.status(_('removing %s\n') % ((pats and rel) or abs))
-        # for finding renames
-        elif repo.dirstate[abs] == 'r':
-            removed.append(abs)
-        elif repo.dirstate[abs] == 'a':
-            added.append(abs)
-    copies = {}
-    if similarity > 0:
-        for old, new, score in similar.findrenames(repo,
-                added + unknown, removed + deleted, similarity):
-            if repo.ui.verbose or not m.exact(old) or not m.exact(new):
-                repo.ui.status(_('recording removal of %s as rename to %s '
-                                 '(%d%% similar)\n') %
-                               (m.rel(old), m.rel(new), score * 100))
-            copies[new] = old
-
-    if not dry_run:
-        wctx = repo[None]
-        wlock = repo.wlock()
-        try:
-            wctx.remove(deleted)
-            wctx.add(unknown)
-            for new, old in copies.iteritems():
-                wctx.copy(old, new)
-        finally:
-            wlock.release()
-
-def updatedir(ui, repo, patches, similarity=0):
-    '''Update dirstate after patch application according to metadata'''
-    if not patches:
-        return
-    copies = []
-    removes = set()
-    cfiles = patches.keys()
-    cwd = repo.getcwd()
-    if cwd:
-        cfiles = [util.pathto(repo.root, cwd, f) for f in patches.keys()]
-    for f in patches:
-        gp = patches[f]
-        if not gp:
-            continue
-        if gp.op == 'RENAME':
-            copies.append((gp.oldpath, gp.path))
-            removes.add(gp.oldpath)
-        elif gp.op == 'COPY':
-            copies.append((gp.oldpath, gp.path))
-        elif gp.op == 'DELETE':
-            removes.add(gp.path)
-
-    wctx = repo[None]
-    for src, dst in copies:
-        dirstatecopy(ui, repo, wctx, src, dst, cwd=cwd)
-    if (not similarity) and removes:
-        wctx.remove(sorted(removes), True)
-
-    for f in patches:
-        gp = patches[f]
-        if gp and gp.mode:
-            islink, isexec = gp.mode
-            dst = repo.wjoin(gp.path)
-            # patch won't create empty files
-            if gp.op == 'ADD' and not os.path.lexists(dst):
-                flags = (isexec and 'x' or '') + (islink and 'l' or '')
-                repo.wwrite(gp.path, '', flags)
-            util.set_flags(dst, islink, isexec)
-    addremove(repo, cfiles, similarity=similarity)
-    files = patches.keys()
-    files.extend([r for r in removes if r not in files])
-    return sorted(files)
-
-def dirstatecopy(ui, repo, wctx, src, dst, dryrun=False, cwd=None):
-    """Update the dirstate to reflect the intent of copying src to dst. For
-    different reasons it might not end with dst being marked as copied from src.
-    """
-    origsrc = repo.dirstate.copied(src) or src
-    if dst == origsrc: # copying back a copy?
-        if repo.dirstate[dst] not in 'mn' and not dryrun:
-            repo.dirstate.normallookup(dst)
-    else:
-        if repo.dirstate[origsrc] == 'a' and origsrc == src:
-            if not ui.quiet:
-                ui.warn(_("%s has not been committed yet, so no copy "
-                          "data will be stored for %s.\n")
-                        % (repo.pathto(origsrc, cwd), repo.pathto(dst, cwd)))
-            if repo.dirstate[dst] in '?r' and not dryrun:
-                wctx.add([dst])
-        elif not dryrun:
-            wctx.copy(origsrc, dst)
+    r = None
+    if repo:
+        if cl:
+            r = repo.changelog
+        elif mf:
+            r = repo.manifest
+        elif file_:
+            filelog = repo.file(file_)
+            if len(filelog):
+                r = filelog
+    if not r:
+        if not file_:
+            raise error.CommandError(cmd, _('invalid arguments'))
+        if not os.path.isfile(file_):
+            raise util.Abort(_("revlog '%s' not found") % file_)
+        r = revlog.revlog(scmutil.opener(os.getcwd(), audit=False),
+                          file_[:-2] + ".i")
+    return r
 
 def copy(ui, repo, pats, opts, rename=False):
     # called with the repo lock held
@@ -408,7 +234,7 @@ def copy(ui, repo, pats, opts, rename=False):
     def walkpat(pat):
         srcs = []
         badstates = after and '?' or '?r'
-        m = match(repo, [pat], opts, globbed=True)
+        m = scmutil.match(repo[None], [pat], opts, globbed=True)
         for abs in repo.walk(m):
             state = repo.dirstate[abs]
             rel = m.rel(abs)
@@ -429,11 +255,13 @@ def copy(ui, repo, pats, opts, rename=False):
     # relsrc: ossep
     # otarget: ossep
     def copyfile(abssrc, relsrc, otarget, exact):
-        abstarget = util.canonpath(repo.root, cwd, otarget)
+        abstarget = scmutil.canonpath(repo.root, cwd, otarget)
         reltarget = repo.pathto(abstarget, cwd)
         target = repo.wjoin(abstarget)
         src = repo.wjoin(abssrc)
         state = repo.dirstate[abstarget]
+
+        scmutil.checkportable(ui, abstarget)
 
         # check for collisions
         prevsrc = targets.get(abstarget)
@@ -468,9 +296,11 @@ def copy(ui, repo, pats, opts, rename=False):
                 if not os.path.isdir(targetdir):
                     os.makedirs(targetdir)
                 util.copyfile(src, target)
+                srcexists = True
             except IOError, inst:
                 if inst.errno == errno.ENOENT:
                     ui.warn(_('%s: deleted in working copy\n') % relsrc)
+                    srcexists = False
                 else:
                     ui.warn(_('%s: cannot copy - %s\n') %
                             (relsrc, inst.strerror))
@@ -485,9 +315,12 @@ def copy(ui, repo, pats, opts, rename=False):
         targets[abstarget] = abssrc
 
         # fix up dirstate
-        dirstatecopy(ui, repo, wctx, abssrc, abstarget, dryrun=dryrun, cwd=cwd)
+        scmutil.dirstatecopy(ui, repo, wctx, abssrc, abstarget,
+                             dryrun=dryrun, cwd=cwd)
         if rename and not dryrun:
-            wctx.remove([abssrc], not after)
+            if not after and srcexists:
+                util.unlinkpath(repo.wjoin(abssrc))
+            wctx.forget([abssrc])
 
     # pat: ossep
     # dest ossep
@@ -495,7 +328,7 @@ def copy(ui, repo, pats, opts, rename=False):
     # return: function that takes hgsep and returns ossep
     def targetpathfn(pat, dest, srcs):
         if os.path.isdir(pat):
-            abspfx = util.canonpath(repo.root, cwd, pat)
+            abspfx = scmutil.canonpath(repo.root, cwd, pat)
             abspfx = util.localpath(abspfx)
             if destdirexists:
                 striplen = len(os.path.split(abspfx)[0])
@@ -521,7 +354,7 @@ def copy(ui, repo, pats, opts, rename=False):
             res = lambda p: os.path.join(dest,
                                          os.path.basename(util.localpath(p)))
         else:
-            abspfx = util.canonpath(repo.root, cwd, pat)
+            abspfx = scmutil.canonpath(repo.root, cwd, pat)
             if len(abspfx) < len(srcs[0][0]):
                 # A directory. Either the target path contains the last
                 # component of the source path or it does not.
@@ -556,7 +389,7 @@ def copy(ui, repo, pats, opts, rename=False):
         return res
 
 
-    pats = expandpats(pats)
+    pats = scmutil.expandpats(pats)
     if not pats:
         raise util.Abort(_('no source or destination specified'))
     if len(pats) == 1:
@@ -683,8 +516,8 @@ def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
 
         shouldclose = False
         if not fp:
-            fp = make_file(repo, template, node, total=total, seqno=seqno,
-                           revwidth=revwidth, mode='ab')
+            fp = makefileobj(repo, template, node, total=total, seqno=seqno,
+                             revwidth=revwidth, mode='ab')
             if fp != template:
                 shouldclose = True
         if fp != sys.stdout and hasattr(fp, 'name'):
@@ -1020,7 +853,7 @@ def show_changeset(ui, repo, opts, buffered=False):
     # options
     patch = False
     if opts.get('patch') or opts.get('stat'):
-        patch = matchall(repo)
+        patch = scmutil.matchall(repo)
 
     tmpl = opts.get('template')
     style = None
@@ -1061,7 +894,7 @@ def finddate(ui, repo, date):
     """Find the tipmost changeset that matches the given date spec"""
 
     df = util.matchdate(date)
-    m = matchall(repo)
+    m = scmutil.matchall(repo)
     results = {}
 
     def prep(ctx, fns):
@@ -1116,7 +949,7 @@ def walkchangerevs(repo, match, opts, prepare):
         defrange = '%s:0' % repo['.'].rev()
     else:
         defrange = '-1:0'
-    revs = revrange(repo, opts['rev'] or [defrange])
+    revs = scmutil.revrange(repo, opts['rev'] or [defrange])
     if not revs:
         return []
     wanted = set()
@@ -1312,9 +1145,15 @@ def add(ui, repo, match, dryrun, listsubrepos, prefix):
     match.bad = lambda x, y: bad.append(x) or oldbad(x, y)
     names = []
     wctx = repo[None]
+    cca = None
+    abort, warn = scmutil.checkportabilityalert(ui)
+    if abort or warn:
+        cca = scmutil.casecollisionauditor(ui, abort, wctx)
     for f in repo.walk(match):
         exact = match.exact(f)
         if exact or f not in repo.dirstate:
+            if cca:
+                cca(f)
             names.append(f)
             if ui.verbose or not exact:
                 ui.status(_('adding %s\n') % match.rel(join(f)))
@@ -1339,14 +1178,15 @@ def commit(ui, repo, commitfunc, pats, opts):
     date = opts.get('date')
     if date:
         opts['date'] = util.parsedate(date)
-    message = logmessage(opts)
+    message = logmessage(ui, opts)
 
     # extract addremove carefully -- this function can be called from a command
     # that doesn't support addremove
     if opts.get('addremove'):
-        addremove(repo, pats, opts)
+        scmutil.addremove(repo, pats, opts)
 
-    return commitfunc(ui, repo, message, match(repo, pats, opts), opts)
+    return commitfunc(ui, repo, message,
+                      scmutil.match(repo[None], pats, opts), opts)
 
 def commiteditor(repo, ctx, subs):
     if ctx.description():
@@ -1387,3 +1227,18 @@ def commitforceeditor(repo, ctx, subs):
         raise util.Abort(_("empty commit message"))
 
     return text
+
+def command(table):
+    '''returns a function object bound to table which can be used as
+    a decorator for populating table as a command table'''
+
+    def cmd(name, options, synopsis=None):
+        def decorator(func):
+            if synopsis:
+                table[name] = func, options[:], synopsis
+            else:
+                table[name] = func, options[:]
+            return func
+        return decorator
+
+    return cmd

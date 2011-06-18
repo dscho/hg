@@ -7,7 +7,7 @@
 
 from common import NoRepo, checktool, commandline, commit, converter_source
 from mercurial.i18n import _
-from mercurial import encoding, util
+from mercurial import util
 import os, shutil, tempfile, re
 
 # The naming drift of ElementTree is fun!
@@ -191,7 +191,7 @@ class darcs_source(converter_source, commandline):
         if rev != self.lastrev:
             raise util.Abort(_('internal calling inconsistency'))
         path = os.path.join(self.tmppath, name)
-        data = open(path, 'rb').read()
+        data = util.readfile(path)
         mode = os.lstat(path).st_mode
         mode = (mode & 0111) and 'x' or ''
         return data, mode

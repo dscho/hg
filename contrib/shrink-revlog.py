@@ -1,5 +1,4 @@
-"""\
-reorder a revlog (the manifest by default) to save space
+"""reorder a revlog (the manifest by default) to save space
 
 Specifically, this topologically sorts the revisions in the revlog so that
 revisions on the same branch are adjacent as much as possible. This is a
@@ -18,7 +17,7 @@ This is *not* safe to run on a changelog.
 # (maybe: export before, shrink, export after, diff).
 
 import os, tempfile, errno
-from mercurial import revlog, transaction, node, util
+from mercurial import revlog, transaction, node, util, scmutil
 from mercurial import changegroup
 from mercurial.i18n import _
 
@@ -31,7 +30,10 @@ def postorder(start, edges):
     while visit:
         cur = visit[-1]
         for p in edges[cur]:
-            if p not in finished:
+            # defend against node.nullrev because it's occasionally
+            # possible for a node to have parents (null, something)
+            # rather than (something, null)
+            if p not in finished and p != node.nullrev:
                 visit.append(p)
                 break
         else:
@@ -102,19 +104,21 @@ def writerevs(ui, r1, r2, order, tr):
 
     ui.status(_('writing revs\n'))
 
-    count = [0]
-    def progress(*args):
-        ui.progress(_('writing'), count[0], total=len(order))
-        count[0] += 1
 
     order = [r1.node(r) for r in order]
 
     # this is a bit ugly, but it works
-    lookup = lambda x: "%020d" % r1.linkrev(r1.rev(x))
+    count = [0]
+    def lookup(revl, x):
+        count[0] += 1
+        ui.progress(_('writing'), count[0], total=len(order))
+        return "%020d" % revl.linkrev(revl.rev(x))
+
     unlookup = lambda x: int(x, 10)
 
     try:
-        group = util.chunkbuffer(r1.group(order, lookup, progress))
+        bundler = changegroup.bundle10(lookup)
+        group = util.chunkbuffer(r1.group(order, bundler))
         group = changegroup.unbundle10(group, "UN")
         r2.addgroup(group, unlookup, tr)
     finally:
@@ -190,8 +194,8 @@ def shrink(ui, repo, **opts):
     prefix = os.path.basename(indexfn)[:-1]
     tmpindexfn = util.mktempcopy(indexfn, emptyok=True)
 
-    r1 = revlog.revlog(util.opener(os.getcwd(), audit=False), indexfn)
-    r2 = revlog.revlog(util.opener(os.getcwd(), audit=False), tmpindexfn)
+    r1 = revlog.revlog(scmutil.opener(os.getcwd(), audit=False), indexfn)
+    r2 = revlog.revlog(scmutil.opener(os.getcwd(), audit=False), tmpindexfn)
 
     datafn, tmpdatafn = r1.datafile, r2.datafile
 
@@ -247,8 +251,8 @@ def shrink(ui, repo, **opts):
         if not opts.get('dry_run'):
             # racy, both files cannot be renamed atomically
             # copy files
-            util.os_link(indexfn, oldindexfn)
-            ignoremissing(util.os_link)(datafn, olddatafn)
+            util.oslink(indexfn, oldindexfn)
+            ignoremissing(util.oslink)(datafn, olddatafn)
 
             # rename
             util.rename(tmpindexfn, indexfn)

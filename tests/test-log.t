@@ -512,11 +512,32 @@ log -k r1
   date:        Thu Jan 01 00:00:01 1970 +0000
   summary:     r1
   
+log -d " " (whitespaces only)
 
+  $ hg log -d " "
+  abort: dates cannot consist entirely of whitespace
+  [255]
 
 log -d -1
 
   $ hg log -d -1
+
+log -d ">"
+
+  $ hg log -d ">"
+  abort: invalid day spec, use '>DATE'
+  [255]
+
+log -d "<"
+
+  $ hg log -d "<"
+  abort: invalid day spec, use '<DATE'
+  [255]
+
+Negative ranges
+  $ hg log -d "--2"
+  abort: -2 must be nonnegative (see 'hg help dates')
+  [255]
 
 
 log -p -l2 --color=always
@@ -1117,3 +1138,21 @@ Diff here should be the same:
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     a
   
+  $ cat > $HGTMP/testhidden.py << EOF
+  > def reposetup(ui, repo):
+  >     for line in repo.opener('hidden'):
+  >         ctx = repo[line.strip()]
+  >         repo.changelog.hiddenrevs.add(ctx.rev())
+  > EOF
+  $ echo '[extensions]' >> $HGRCPATH
+  $ echo "hidden=$HGTMP/testhidden.py" >> $HGRCPATH
+  $ touch .hg/hidden
+  $ hg log --template='{rev}:{node}\n'
+  1:a765632148dc55d38c35c4f247c618701886cb2f
+  0:9f758d63dcde62d547ebfb08e1e7ee96535f2b05
+  $ echo a765632148dc55d38c35c4f247c618701886cb2f > .hg/hidden
+  $ hg log --template='{rev}:{node}\n'
+  0:9f758d63dcde62d547ebfb08e1e7ee96535f2b05
+  $ hg log --template='{rev}:{node}\n' --hidden
+  1:a765632148dc55d38c35c4f247c618701886cb2f
+  0:9f758d63dcde62d547ebfb08e1e7ee96535f2b05

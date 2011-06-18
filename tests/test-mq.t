@@ -177,7 +177,7 @@ add an untracked file
 
 status --mq with color (issue2096)
 
-  $ hg status --mq --config extensions.color= --color=always
+  $ hg status --mq --config extensions.color= --config color.mode=ansi --color=always
   \x1b[0;32;1mA .hgignore\x1b[0m (esc)
   \x1b[0;32;1mA A\x1b[0m (esc)
   \x1b[0;32;1mA B\x1b[0m (esc)
@@ -460,7 +460,7 @@ qpush --move
   $ hg qguard test1b.patch -- -negguard
   $ hg qguard test2.patch -- +posguard
   $ hg qpush --move test2.patch # can't move guarded patch
-  cannot push 'test2.patch' - guarded by ['+posguard']
+  cannot push 'test2.patch' - guarded by '+posguard'
   [1]
   $ hg qselect posguard
   number of unguarded, unapplied patches has changed from 2 to 3
@@ -843,6 +843,14 @@ mq tags
   1 foo qbase
   2 bar qtip tip
 
+mq revset
+
+  $ hg log -r 'mq()' --template '{rev}\n'
+  1
+  2
+  $ hg help revsets | grep -i mq
+      "mq()"
+        Changesets managed by MQ.
 
 bad node in status
 
@@ -1251,6 +1259,64 @@ Issue1033: test applying on an empty file
   now at: changea
   $ cd ..
 
+test qpop with local changes, issue2780
+
+  $ hg init forcepop
+  $ cd forcepop
+  $ echo 1 > 1
+  $ hg ci -Am 1
+  adding 1
+  $ hg qnew foo
+  $ echo 2 > 2
+  $ hg add
+  adding 2
+
+unrelated changes
+
+  $ hg qpop
+  popping foo
+  patch queue now empty
+
+related changes
+
+  $ hg forget 2
+  $ rm 2
+  $ hg qpush
+  applying foo
+  patch foo is empty
+  now at: foo
+  $ echo 2 >> 1
+  $ hg qrefresh
+  $ echo 2 >> 1
+  $ hg qpop
+  abort: local changes found, refresh first
+  [255]
+  $ hg st
+  M 1
+
+related changes with force
+  $ hg qpop --force
+  popping foo
+  patch queue now empty
+  $ hg st
+
+related renamed source without change
+  $ hg qpush
+  applying foo
+  now at: foo
+  $ echo 1 > 1
+  $ hg mv 1 2
+  $ hg qref --git
+  $ hg qpop
+  popping foo
+  patch queue now empty
+  $ echo 3 > 1
+  $ hg st
+  M 1
+  $ hg qpush
+  abort: local changes found
+  [255]
+  $ cd ..
 
 test qpush with --force, issue1087
 
@@ -1268,21 +1334,14 @@ test qpush with --force, issue1087
   $ echo world >> hello.txt
 
 
-qpush should fail, local changes
+apply, should not discard changes with empty patch
 
   $ hg qpush
-  abort: local changes found, refresh first
-  [255]
-
-
-apply force, should not discard changes with empty patch
-
-  $ hg qpush -f
   applying empty
   patch empty is empty
   now at: empty
   $ hg diff --config diff.nodates=True
-  diff -r bf5fc3f07a0a hello.txt
+  diff -r d58265112590 hello.txt
   --- a/hello.txt
   +++ b/hello.txt
   @@ -1,1 +1,2 @@
@@ -1296,7 +1355,7 @@ apply force, should not discard changes with empty patch
    hello
   +world
   $ hg log -l1 -p
-  changeset:   1:bf5fc3f07a0a
+  changeset:   1:d58265112590
   tag:         empty
   tag:         qbase
   tag:         qtip
@@ -1317,7 +1376,7 @@ apply force, should not discard changes with empty patch
 qpush should fail, local changes
 
   $ hg qpush
-  abort: local changes found, refresh first
+  abort: local changes found
   [255]
 
 

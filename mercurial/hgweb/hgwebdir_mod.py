@@ -6,9 +6,9 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import os, re, time, urlparse
+import os, re, time
 from mercurial.i18n import _
-from mercurial import ui, hg, util, templater
+from mercurial import ui, hg, scmutil, util, templater
 from mercurial import error, encoding
 from common import ErrorResponse, get_mtime, staticfile, paritygen, \
                    get_contact, HTTP_OK, HTTP_NOT_FOUND, HTTP_SERVER_ERROR
@@ -33,16 +33,17 @@ def findrepos(paths):
             repos.append((prefix, root))
             continue
         roothead = os.path.normpath(os.path.abspath(roothead))
-        paths = util.walkrepos(roothead, followsym=True, recurse=recurse)
+        paths = scmutil.walkrepos(roothead, followsym=True, recurse=recurse)
         repos.extend(urlrepos(prefix, roothead, paths))
     return repos
 
 def urlrepos(prefix, roothead, paths):
     """yield url paths and filesystem paths from a list of repo paths
 
-    >>> list(urlrepos('hg', '/opt', ['/opt/r', '/opt/r/r', '/opt']))
+    >>> conv = lambda seq: [(v, util.pconvert(p)) for v,p in seq]
+    >>> conv(urlrepos('hg', '/opt', ['/opt/r', '/opt/r/r', '/opt']))
     [('hg/r', '/opt/r'), ('hg/r/r', '/opt/r/r'), ('hg', '/opt')]
-    >>> list(urlrepos('', '/opt', ['/opt/r', '/opt/r/r', '/opt']))
+    >>> conv(urlrepos('', '/opt', ['/opt/r', '/opt/r/r', '/opt']))
     [('r', '/opt/r'), ('r/r', '/opt/r/r'), ('', '/opt')]
     """
     for path in paths:
@@ -76,7 +77,10 @@ class hgwebdir(object):
             if not os.path.exists(self.conf):
                 raise util.Abort(_('config file %s not found!') % self.conf)
             u.readconfig(self.conf, remap=map, trust=True)
-            paths = u.configitems('hgweb-paths')
+            paths = []
+            for name, ignored in u.configitems('hgweb-paths'):
+                for path in u.configlist('hgweb-paths', name):
+                    paths.append((name, path))
         elif isinstance(self.conf, (list, tuple)):
             paths = self.conf
         elif isinstance(self.conf, dict):
@@ -85,7 +89,7 @@ class hgwebdir(object):
         repos = findrepos(paths)
         for prefix, root in u.configitems('collections'):
             prefix = util.pconvert(prefix)
-            for path in util.walkrepos(root, followsym=True):
+            for path in scmutil.walkrepos(root, followsym=True):
                 repo = os.path.normpath(path)
                 name = util.pconvert(repo)
                 if name.startswith(prefix):
@@ -247,6 +251,9 @@ class hgwebdir(object):
                 # update time with local timezone
                 try:
                     r = hg.repository(self.ui, path)
+                except IOError:
+                    u.warn(_('error accessing repository at %s\n') % path)
+                    continue
                 except error.RepoError:
                     u.warn(_('error accessing repository at %s\n') % path)
                     continue
@@ -340,6 +347,7 @@ class hgwebdir(object):
 
         start = url[-1] == '?' and '&' or '?'
         sessionvars = webutil.sessionvars(vars, start)
+        logourl = config('web', 'logourl', 'http://mercurial.selenic.com/')
         staticurl = config('web', 'staticurl') or url + 'static/'
         if not staticurl.endswith('/'):
             staticurl += '/'
@@ -349,22 +357,15 @@ class hgwebdir(object):
                                              "footer": footer,
                                              "motd": motd,
                                              "url": url,
+                                             "logourl": logourl,
                                              "staticurl": staticurl,
                                              "sessionvars": sessionvars})
         return tmpl
 
     def updatereqenv(self, env):
-        def splitnetloc(netloc):
-            if ':' in netloc:
-                return netloc.split(':', 1)
-            else:
-                return (netloc, None)
-
         if self._baseurl is not None:
-            urlcomp = urlparse.urlparse(self._baseurl)
-            host, port = splitnetloc(urlcomp[1])
-            path = urlcomp[2]
-            env['SERVER_NAME'] = host
-            if port:
-                env['SERVER_PORT'] = port
-            env['SCRIPT_NAME'] = path
+            u = util.url(self._baseurl)
+            env['SERVER_NAME'] = u.host
+            if u.port:
+                env['SERVER_PORT'] = u.port
+            env['SCRIPT_NAME'] = '/' + u.path

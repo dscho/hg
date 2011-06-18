@@ -6,12 +6,12 @@
 # GNU General Public License version 2 or any later version.
 
 import imp, os
-import util, cmdutil, help, error
+import util, cmdutil, error
 from i18n import _, gettext
 
 _extensions = {}
 _order = []
-_ignore = ['hbisect', 'bookmarks']
+_ignore = ['hbisect', 'bookmarks', 'parentrevspec']
 
 def extensions():
     for name in _order:
@@ -21,13 +21,17 @@ def extensions():
 
 def find(name):
     '''return module with given extension name'''
+    mod = None
     try:
-        return _extensions[name]
+        mod =  _extensions[name]
     except KeyError:
         for k, v in _extensions.iteritems():
             if k.endswith('.' + name) or k.endswith('/' + name):
-                return v
+                mod = v
+                break
+    if not mod:
         raise KeyError(name)
+    return mod
 
 def loadpath(path, module_name):
     module_name = module_name.replace('.', '_')
@@ -209,6 +213,38 @@ def _disabledpaths(strip_init=False):
         exts[name] = path
     return exts
 
+def _moduledoc(file):
+    '''return the top-level python documentation for the given file
+
+    Loosely inspired by pydoc.source_synopsis(), but rewritten to
+    handle triple quotes and to return the whole text instead of just
+    the synopsis'''
+    result = []
+
+    line = file.readline()
+    while line[:1] == '#' or not line.strip():
+        line = file.readline()
+        if not line:
+            break
+
+    start = line[:3]
+    if start == '"""' or start == "'''":
+        line = line[3:]
+        while line:
+            if line.rstrip().endswith(start):
+                line = line.split(start)[0]
+                if line:
+                    result.append(line)
+                break
+            elif not line:
+                return None # unmatched delimiter
+            result.append(line)
+            line = file.readline()
+    else:
+        return None
+
+    return ''.join(result)
+
 def _disabledhelp(path):
     '''retrieve help synopsis of a disabled extension (without importing)'''
     try:
@@ -216,7 +252,7 @@ def _disabledhelp(path):
     except IOError:
         return
     else:
-        doc = help.moduledoc(file)
+        doc = _moduledoc(file)
         file.close()
 
     if doc: # extracting localized synopsis
@@ -225,28 +261,38 @@ def _disabledhelp(path):
         return _('(no help text available)')
 
 def disabled():
-    '''find disabled extensions from hgext
-    returns a dict of {name: desc}, and the max name length'''
+    '''find disabled extensions from hgext. returns a dict of {name: desc}'''
+    try:
+        from hgext import __index__
+        return dict((name, gettext(desc))
+                    for name, desc in __index__.docs.iteritems()
+                    if name not in _order)
+    except ImportError:
+        pass
 
     paths = _disabledpaths()
     if not paths:
-        return None, 0
+        return None
 
     exts = {}
-    maxlength = 0
     for name, path in paths.iteritems():
         doc = _disabledhelp(path)
-        if not doc:
-            continue
+        if doc:
+            exts[name] = doc
 
-        exts[name] = doc
-        if len(name) > maxlength:
-            maxlength = len(name)
-
-    return exts, maxlength
+    return exts
 
 def disabledext(name):
     '''find a specific disabled extension from hgext. returns desc'''
+    try:
+        from hgext import __index__
+        if name in _order:  # enabled
+            return
+        else:
+            return gettext(__index__.docs.get(name))
+    except ImportError:
+        pass
+
     paths = _disabledpaths()
     if name in paths:
         return _disabledhelp(paths[name])
@@ -297,13 +343,11 @@ def disabledcmd(ui, cmd, strict=False):
     raise error.UnknownCommand(cmd)
 
 def enabled():
-    '''return a dict of {name: desc} of extensions, and the max name length'''
+    '''return a dict of {name: desc} of extensions'''
     exts = {}
-    maxlength = 0
     for ename, ext in extensions():
         doc = (gettext(ext.__doc__) or _('(no help text available)'))
         ename = ename.split('.')[-1]
-        maxlength = max(len(ename), maxlength)
         exts[ename] = doc.splitlines()[0].strip()
 
-    return exts, maxlength
+    return exts

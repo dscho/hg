@@ -30,7 +30,7 @@
   $ echo bar >> b/foo
   $ hg -R b ci -m bar
   $ hg --encoding utf-8 -R b push
-  pushing to http://localhost:$HGPORT1
+  pushing to http://localhost:$HGPORT1/
   searching for changes
   remote: adding changesets
   remote: adding manifests
@@ -79,7 +79,7 @@ verify 7e7d56fe4833 (encoding fallback in branchmap to maintain compatibility wi
   > 
   > myui = ui.ui()
   > repo = hg.repository(myui, 'a')
-  > commands.serve(myui, repo, stdio=True)
+  > commands.serve(myui, repo, stdio=True, cmdserver=False)
   > EOF
   $ echo baz >> b/foo
   $ hg -R b ci -m baz

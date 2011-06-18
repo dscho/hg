@@ -5,39 +5,57 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import cStringIO, zlib, sys, urllib
+import cgi, cStringIO, zlib, urllib
 from mercurial import util, wireproto
 from common import HTTP_OK
 
 HGTYPE = 'application/mercurial-0.1'
 
 class webproto(object):
-    def __init__(self, req):
+    def __init__(self, req, ui):
         self.req = req
         self.response = ''
+        self.ui = ui
     def getargs(self, args):
+        knownargs = self._args()
         data = {}
         keys = args.split()
         for k in keys:
             if k == '*':
                 star = {}
-                for key in self.req.form.keys():
-                    if key not in keys:
-                        star[key] = self.req.form[key][0]
+                for key in knownargs.keys():
+                    if key != 'cmd' and key not in keys:
+                        star[key] = knownargs[key][0]
                 data['*'] = star
             else:
-                data[k] = self.req.form[k][0]
+                data[k] = knownargs[k][0]
         return [data[k] for k in keys]
+    def _args(self):
+        args = self.req.form.copy()
+        chunks = []
+        i = 1
+        while True:
+            h = self.req.env.get('HTTP_X_HGARG_' + str(i))
+            if h is None:
+                break
+            chunks += [h]
+            i += 1
+        args.update(cgi.parse_qs(''.join(chunks), keep_blank_values=True))
+        return args
     def getfile(self, fp):
         length = int(self.req.env['CONTENT_LENGTH'])
         for s in util.filechunkiter(self.req, limit=length):
             fp.write(s)
     def redirect(self):
-        self.oldio = sys.stdout, sys.stderr
-        sys.stderr = sys.stdout = cStringIO.StringIO()
+        self.oldio = self.ui.fout, self.ui.ferr
+        self.ui.ferr = self.ui.fout = cStringIO.StringIO()
+    def restore(self):
+        val = self.ui.fout.getvalue()
+        self.ui.ferr, self.ui.fout = self.oldio
+        return val
     def groupchunks(self, cg):
         z = zlib.compressobj()
-        while 1:
+        while True:
             chunk = cg.read(4096)
             if not chunk:
                 break
@@ -53,7 +71,7 @@ def iscmd(cmd):
     return cmd in wireproto.commands
 
 def call(repo, req, cmd):
-    p = webproto(req)
+    p = webproto(req, repo.ui)
     rsp = wireproto.dispatch(repo, p, cmd)
     if isinstance(rsp, str):
         req.respond(HTTP_OK, HGTYPE, length=len(rsp))
@@ -62,14 +80,13 @@ def call(repo, req, cmd):
         req.respond(HTTP_OK, HGTYPE)
         return rsp.gen
     elif isinstance(rsp, wireproto.pushres):
-        val = sys.stdout.getvalue()
-        sys.stdout, sys.stderr = p.oldio
+        val = p.restore()
         req.respond(HTTP_OK, HGTYPE)
         return ['%d\n%s' % (rsp.res, val)]
     elif isinstance(rsp, wireproto.pusherr):
         # drain the incoming bundle
         req.drain()
-        sys.stdout, sys.stderr = p.oldio
+        p.restore()
         rsp = '0\n%s\n' % rsp.res
         req.respond(HTTP_OK, HGTYPE, length=len(rsp))
         return [rsp]

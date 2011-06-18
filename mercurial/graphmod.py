@@ -21,40 +21,39 @@ from mercurial.node import nullrev
 
 CHANGESET = 'C'
 
-def revisions(repo, start, stop):
+def dagwalker(repo, revs):
     """cset DAG generator yielding (id, CHANGESET, ctx, [parentids]) tuples
 
-    This generator function walks through the revision history from revision
-    start to revision stop (which must be less than or equal to start). It
-    returns a tuple for each node. The node and parent ids are arbitrary
-    integers which identify a node in the context of the graph returned.
+    This generator function walks through revisions (which should be ordered
+    from bigger to lower). It returns a tuple for each node. The node and parent
+    ids are arbitrary integers which identify a node in the context of the graph
+    returned.
     """
-    cur = start
-    while cur >= stop:
-        ctx = repo[cur]
-        parents = set([p.rev() for p in ctx.parents() if p.rev() != nullrev])
-        yield (cur, CHANGESET, ctx, sorted(parents))
-        cur -= 1
+    if not revs:
+        return
 
-def filerevs(repo, path, start, stop, limit=None):
-    """file cset DAG generator yielding (id, CHANGESET, ctx, [parentids]) tuples
+    cl = repo.changelog
+    lowestrev = min(revs)
+    gpcache = {}
 
-    This generator function walks through the revision history of a single
-    file from revision start down to revision stop.
-    """
-    filerev = len(repo.file(path)) - 1
-    rev = stop + 1
-    count = 0
-    while filerev >= 0 and rev > stop:
-        fctx = repo.filectx(path, fileid=filerev)
-        parents = set([f.linkrev() for f in fctx.parents() if f.path() == path])
-        rev = fctx.rev()
-        if rev <= start:
-            yield (rev, CHANGESET, fctx.changectx(), sorted(parents))
-            count += 1
-            if count == limit:
-                break
-        filerev -= 1
+    knownrevs = set(revs)
+    for rev in revs:
+        ctx = repo[rev]
+        parents = sorted(set([p.rev() for p in ctx.parents()
+                              if p.rev() in knownrevs]))
+        mpars = [p.rev() for p in ctx.parents() if
+                 p.rev() != nullrev and p.rev() not in parents]
+
+        for mpar in mpars:
+            gp = gpcache.get(mpar)
+            if gp is None:
+                gp = gpcache[mpar] = grandparent(cl, lowestrev, revs, mpar)
+            if not gp:
+                parents.append(mpar)
+            else:
+                parents.extend(g for g in gp if g not in parents)
+
+        yield (ctx.rev(), CHANGESET, ctx, parents)
 
 def nodes(repo, nodes):
     """cset DAG generator yielding (id, CHANGESET, ctx, [parentids]) tuples
@@ -120,3 +119,21 @@ def colored(dag):
         # Yield and move on
         yield (cur, type, data, (col, color), edges)
         seen = next
+
+def grandparent(cl, lowestrev, roots, head):
+    """Return all ancestors of head in roots which revision is
+    greater or equal to lowestrev.
+    """
+    pending = set([head])
+    seen = set()
+    kept = set()
+    llowestrev = max(nullrev, lowestrev)
+    while pending:
+        r = pending.pop()
+        if r >= llowestrev and r not in seen:
+            if r in roots:
+                kept.add(r)
+            else:
+                pending.update([p for p in cl.parentrevs(r)])
+            seen.add(r)
+    return sorted(kept)

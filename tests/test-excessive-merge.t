@@ -63,7 +63,7 @@
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     test
   
-  $ hg debugindex .hg/store/00changelog.i
+  $ hg debugindex --changelog
      rev    offset  length   base linkrev nodeid       p1           p2
        0         0      60      0       0 5e0375449e74 000000000000 000000000000
        1        60      62      1       1 96155394af80 5e0375449e74 000000000000
@@ -88,7 +88,7 @@ revision 4
   79d7492df40aa0fa093ec4209be78043c181f094 644   a
   79d7492df40aa0fa093ec4209be78043c181f094 644   b
 
-  $ hg debugindex .hg/store/data/a.i
+  $ hg debugindex a
      rev    offset  length   base linkrev nodeid       p1           p2
        0         0       5      0       0 2ed2a3912a0b 000000000000 000000000000
        1         5       6      1       1 79d7492df40a 2ed2a3912a0b 000000000000

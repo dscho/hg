@@ -1,14 +1,12 @@
-  $ mkdir a
+  $ hg init a
   $ cd a
-  $ hg init
   $ echo 123 > a
   $ hg add a
   $ hg commit -m "a" -u a
 
   $ cd ..
-  $ mkdir b
+  $ hg init b
   $ cd b
-  $ hg init
   $ echo 321 > b
   $ hg add b
   $ hg commit -m "b" -u b
@@ -23,6 +21,7 @@
   pulling from ../a
   searching for changes
   warning: repository is unrelated
+  requesting all changes
   adding changesets
   adding manifests
   adding file changes

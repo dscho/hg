@@ -9,7 +9,7 @@
 
 from i18n import _
 import changelog, byterange, url, error
-import localrepo, manifest, util, store
+import localrepo, manifest, util, scmutil, store
 import urllib, urllib2, errno
 
 class httprangereader(object):
@@ -67,17 +67,17 @@ def build_opener(ui, authinfo):
     urlopener = url.opener(ui, authinfo)
     urlopener.add_handler(byterange.HTTPRangeHandler())
 
-    def opener(base):
-        """return a function that opens files over http"""
-        p = base
-        def o(path, mode="r", atomictemp=None):
-            if 'a' in mode or 'w' in mode:
-                raise IOError('Permission denied')
-            f = "/".join((p, urllib.quote(path)))
-            return httprangereader(f, urlopener)
-        return o
+    class statichttpopener(scmutil.abstractopener):
+        def __init__(self, base):
+            self.base = base
 
-    return opener
+        def __call__(self, path, mode="r", atomictemp=None):
+            if mode not in ('r', 'rb'):
+                raise IOError('Permission denied')
+            f = "/".join((self.base, urllib.quote(path)))
+            return httprangereader(f, urlopener)
+
+    return statichttpopener
 
 class statichttprepository(localrepo.localrepository):
     def __init__(self, ui, path):
@@ -85,17 +85,19 @@ class statichttprepository(localrepo.localrepository):
         self.ui = ui
 
         self.root = path
-        self.path, authinfo = url.getauthinfo(path.rstrip('/') + "/.hg")
+        u = util.url(path.rstrip('/') + "/.hg")
+        self.path, authinfo = u.authinfo()
 
         opener = build_opener(ui, authinfo)
         self.opener = opener(self.path)
 
-        # find requirements
         try:
-            requirements = self.opener("requires").read().splitlines()
+            requirements = scmutil.readrequires(self.opener, self.supported)
         except IOError, inst:
             if inst.errno != errno.ENOENT:
                 raise
+            requirements = set()
+
             # check if it is a non-empty old-style repository
             try:
                 fp = self.opener("00changelog.i")
@@ -107,13 +109,6 @@ class statichttprepository(localrepo.localrepository):
                 # we do not care about empty old-style repositories here
                 msg = _("'%s' does not appear to be an hg repository") % path
                 raise error.RepoError(msg)
-            requirements = []
-
-        # check them
-        for r in requirements:
-            if r not in self.supported:
-                raise error.RequirementError(
-                        _("requirement '%s' not supported") % r)
 
         # setup store
         self.store = store.store(requirements, self.path, opener)
@@ -129,7 +124,7 @@ class statichttprepository(localrepo.localrepository):
         self._branchcachetip = None
         self.encodepats = None
         self.decodepats = None
-        self.capabilities = self.capabilities.difference(["pushkey"])
+        self.capabilities.difference_update(["pushkey"])
 
     def url(self):
         return self._url

@@ -73,7 +73,7 @@ clone root
   $ cd t
   $ hg clone . ../tc
   updating to branch default
-  cloning subrepo s
+  cloning subrepo s from $TESTTMP/gitroot
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd ../tc
   $ hg debugsub
@@ -96,7 +96,7 @@ clone root, make local change
   $ cd ../t
   $ hg clone . ../ta
   updating to branch default
-  cloning subrepo s
+  cloning subrepo s from $TESTTMP/gitroot
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
   $ cd ../ta
@@ -115,7 +115,7 @@ clone root separately, make different local change
   $ cd ../t
   $ hg clone . ../tb
   updating to branch default
-  cloning subrepo s
+  cloning subrepo s from $TESTTMP/gitroot
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
   $ cd ../tb/s
@@ -155,7 +155,7 @@ user a pulls, merges, commits
   added 1 changesets with 1 changes to 1 files (+1 heads)
   (run 'hg heads' to see heads, 'hg merge' to merge)
   $ hg merge 2>/dev/null
-  pulling subrepo s
+  pulling subrepo s from $TESTTMP/gitroot
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
   $ cat s/f
@@ -199,7 +199,7 @@ make and push changes to hg without updating the subrepo
   $ cd ../t
   $ hg clone . ../td
   updating to branch default
-  cloning subrepo s
+  cloning subrepo s from $TESTTMP/gitroot
   checking out detached HEAD in subrepo s
   check out a git branch if you intend to make changes
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -232,7 +232,7 @@ sync to upstream git, distribute changes
   $ cd ../tb
   $ hg pull -q
   $ hg update 2>/dev/null
-  pulling subrepo s
+  pulling subrepo s from $TESTTMP/gitroot
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg debugsub
   path s
@@ -262,7 +262,7 @@ archive subrepos
   $ cd ../tc
   $ hg pull -q
   $ hg archive --subrepos -r 5 ../archive 2>/dev/null
-  pulling subrepo s
+  pulling subrepo s from $TESTTMP/gitroot
   $ cd ../archive
   $ cat s/f
   f
@@ -282,7 +282,7 @@ create nested repo
 
   $ hg clone ../t inner
   updating to branch default
-  cloning subrepo s
+  cloning subrepo s from $TESTTMP/gitroot
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ echo inner = inner > .hgsub
   $ hg add .hgsub
@@ -311,7 +311,7 @@ relative source expansion
   $ mkdir d
   $ hg clone t d/t
   updating to branch default
-  cloning subrepo s
+  cloning subrepo s from $TESTTMP/gitroot
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
 Don't crash if the subrepo is missing
@@ -329,7 +329,7 @@ Don't crash if the subrepo is missing
   abort: subrepo s is missing
   [255]
   $ hg update -C
-  cloning subrepo s
+  cloning subrepo s from $TESTTMP/gitroot
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg sum | grep commit
   commit: (clean)

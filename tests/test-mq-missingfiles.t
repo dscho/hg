@@ -102,7 +102,6 @@ Push git patch with missing target:
   unable to find 'b' for patching
   1 out of 1 hunks FAILED -- saving rejects to file b.rej
   patch failed, unable to continue (try -v)
-  b: No such file or directory
   patch failed, rejects left in working dir
   errors during apply, please fix and refresh changeb
   [2]

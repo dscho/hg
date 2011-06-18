@@ -20,12 +20,12 @@ Issue1199: Can't use '%' in hgrc (eg url encoded username)
   $ cd foobar
   $ cat .hg/hgrc
   [paths]
-  default = */foo%bar (glob)
+  default = $TESTTMP/foo%bar
   $ hg paths
-  default = */foo%bar (glob)
+  default = $TESTTMP/foo%bar
   $ hg showconfig
-  bundle.mainreporoot=*/foobar (glob)
-  paths.default=*/foo%bar (glob)
+  bundle.mainreporoot=$TESTTMP/foobar
+  paths.default=$TESTTMP/foo%bar
   $ cd ..
 
 issue1829: wrong indentation
@@ -46,8 +46,12 @@ issue1829: wrong indentation
   $ export FAKEPATH
   $ echo '%include $FAKEPATH/no-such-file' > $HGRCPATH
   $ hg version
-  hg: parse error at $TESTTMP/hgrc:1: cannot include /path/to/nowhere/no-such-file (No such file or directory)
-  [255]
+  Mercurial Distributed SCM (version *) (glob)
+  (see http://mercurial.selenic.com for more information)
+  
+  Copyright (C) 2005-2011 Matt Mackall and others
+  This is free software; see the source for copying conditions. There is NO
+  warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   $ unset FAKEPATH
 
 username expansion
@@ -129,6 +133,42 @@ plain hgrc
   $ HGPLAIN=; export HGPLAIN
   $ hg showconfig --config ui.traceback=True --debug
   read config from: $TESTTMP/hgrc
+  none: ui.traceback=True
+  none: ui.verbose=False
+  none: ui.debug=True
+  none: ui.quiet=False
+
+plain mode with exceptions
+
+  $ cat > plain.py <<EOF
+  > def uisetup(ui):
+  >     ui.write('plain: %r\n' % ui.plain())
+  > EOF
+  $ echo "[extensions]" >> $HGRCPATH
+  $ echo "plain=./plain.py" >> $HGRCPATH
+  $ HGPLAINEXCEPT=; export HGPLAINEXCEPT
+  $ hg showconfig --config ui.traceback=True --debug
+  plain: True
+  read config from: $TESTTMP/hgrc
+  $TESTTMP/hgrc:15: extensions.plain=./plain.py
+  none: ui.traceback=True
+  none: ui.verbose=False
+  none: ui.debug=True
+  none: ui.quiet=False
+  $ unset HGPLAIN
+  $ hg showconfig --config ui.traceback=True --debug
+  plain: True
+  read config from: $TESTTMP/hgrc
+  $TESTTMP/hgrc:15: extensions.plain=./plain.py
+  none: ui.traceback=True
+  none: ui.verbose=False
+  none: ui.debug=True
+  none: ui.quiet=False
+  $ HGPLAINEXCEPT=i18n; export HGPLAINEXCEPT
+  $ hg showconfig --config ui.traceback=True --debug
+  plain: True
+  read config from: $TESTTMP/hgrc
+  $TESTTMP/hgrc:15: extensions.plain=./plain.py
   none: ui.traceback=True
   none: ui.verbose=False
   none: ui.debug=True

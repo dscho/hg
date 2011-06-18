@@ -7,7 +7,8 @@
 # GNU General Public License version 2 or any later version.
 
 import os, copy
-from mercurial import match, patch, util, error, ui
+from mercurial import match, patch, scmutil, error, ui, util
+from mercurial.i18n import _
 from mercurial.node import hex, nullid
 
 def up(p):
@@ -66,7 +67,7 @@ def _siblings(siblings=[], hiderev=None):
     if len(siblings) == 1 and siblings[0].rev() == hiderev:
         return
     for s in siblings:
-        d = {'node': hex(s.node()), 'rev': s.rev()}
+        d = {'node': s.hex(), 'rev': s.rev()}
         d['user'] = s.user()
         d['date'] = s.date()
         d['description'] = s.description()
@@ -127,7 +128,7 @@ def showbookmark(repo, tmpl, t1, node=nullid, **args):
 
 def cleanpath(repo, path):
     path = path.lstrip('/')
-    return util.canonpath(repo.root, '', path)
+    return scmutil.canonpath(repo.root, '', path)
 
 def changectx(repo, req):
     changeid = "tip"
@@ -210,6 +211,41 @@ def diffs(repo, tmpl, ctx, files, parity, style):
         block.append(chunk)
     yield tmpl('diffblock', parity=parity.next(),
                lines=prettyprintlines(''.join(block)))
+
+def diffstatgen(ctx):
+    '''Generator function that provides the diffstat data.'''
+
+    stats = patch.diffstatdata(util.iterlines(ctx.diff()))
+    maxname, maxtotal, addtotal, removetotal, binary = patch.diffstatsum(stats)
+    while True:
+        yield stats, maxname, maxtotal, addtotal, removetotal, binary
+
+def diffsummary(statgen):
+    '''Return a short summary of the diff.'''
+
+    stats, maxname, maxtotal, addtotal, removetotal, binary = statgen.next()
+    return _(' %d files changed, %d insertions(+), %d deletions(-)\n') % (
+             len(stats), addtotal, removetotal)
+
+def diffstat(tmpl, ctx, statgen, parity):
+    '''Return a diffstat template for each file in the diff.'''
+
+    stats, maxname, maxtotal, addtotal, removetotal, binary = statgen.next()
+    files = ctx.files()
+
+    def pct(i):
+        if maxtotal == 0:
+            return 0
+        return (float(i) / maxtotal) * 100
+
+    fileno = 0
+    for filename, adds, removes, isbinary in stats:
+        template = filename in files and 'diffstatlink' or 'diffstatnolink'
+        total = adds + removes
+        fileno += 1
+        yield tmpl(template, node=ctx.hex(), file=filename, fileno=fileno,
+                   total=total, addpct=pct(adds), removepct=pct(removes),
+                   parity=parity.next())
 
 class sessionvars(object):
     def __init__(self, vars, start='?'):

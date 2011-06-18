@@ -57,7 +57,7 @@ Should diff cloned directories:
 Should diff cloned files directly:
 
   $ hg falabala -r 0:1
-  diffing a.8a5febb7f867/a a.34eed99112ab/a
+  diffing */extdiff.*/a.8a5febb7f867/a a.34eed99112ab/a (glob)
   [1]
 
 Test diff during merge:
@@ -75,7 +75,7 @@ Test diff during merge:
 Should diff cloned file against wc file:
 
   $ hg falabala
-  diffing a.2a13a4d2da36/a $TESTTMP/a/a
+  diffing */extdiff.*/a.2a13a4d2da36/a */a/a (glob)
   [1]
 
 
@@ -83,13 +83,13 @@ Test --change option:
 
   $ hg ci -d '2 0' -mtest3
   $ hg falabala -c 1
-  diffing a.8a5febb7f867/a a.34eed99112ab/a
+  diffing */extdiff.*/a.8a5febb7f867/a a.34eed99112ab/a (glob)
   [1]
 
 Check diff are made from the first parent:
 
   $ hg falabala -c 3 || echo "diff-like tools yield a non-zero exit code"
-  diffing a.2a13a4d2da36/a a.46c0e4daeb72/a
+  diffing */extdiff.*/a.2a13a4d2da36/a a.46c0e4daeb72/a (glob)
   diff-like tools yield a non-zero exit code
 
 Test extdiff of multiple files in tmp dir:
@@ -161,13 +161,26 @@ Diff in working directory, after:
 Test extdiff with --option:
 
   $ hg extdiff -p echo -o this -c 1
-  this a.8a5febb7f867/a a.34eed99112ab/a
+  this */extdiff.*/a.8a5febb7f867/a a.34eed99112ab/a (glob)
   [1]
 
   $ hg falabala -o this -c 1
-  diffing this a.8a5febb7f867/a a.34eed99112ab/a
+  diffing this */extdiff.*/a.8a5febb7f867/a a.34eed99112ab/a (glob)
   [1]
+
+Test with revsets:
+
+  $ hg extdif -p echo -c "rev(1)"
+  */extdiff.*/a.8a5febb7f867/a a.34eed99112ab/a (glob)
+  [1]
+
+  $ hg extdif -p echo -r "0::1"
+  */extdiff.*/a.8a5febb7f867/a a.34eed99112ab/a (glob)
+  [1]
+
   $ cd ..
+
+Test symlinks handling (issue1909)
 
   $ hg init testsymlinks
   $ cd testsymlinks
@@ -181,4 +194,3 @@ Test extdiff with --option:
   diffing testsymlinks.07f494440405 testsymlinks
   [1]
   $ cd ..
-

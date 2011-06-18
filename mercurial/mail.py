@@ -91,7 +91,7 @@ def _sendmail(ui, sender, recipients, msg):
     if ret:
         raise util.Abort('%s %s' % (
             os.path.basename(program.split(None, 1)[0]),
-            util.explain_exit(ret)[0]))
+            util.explainexit(ret)[0]))
 
 def connect(ui):
     '''make a mail connection. return a function to send mail.
@@ -112,7 +112,7 @@ def validateconfig(ui):
             raise util.Abort(_('smtp specified as email transport, '
                                'but no smtp host configured'))
     else:
-        if not util.find_exe(method):
+        if not util.findexe(method):
             raise util.Abort(_('%r specified as email transport, '
                                'but not in PATH') % method)
 

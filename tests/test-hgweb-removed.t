@@ -24,6 +24,7 @@ revision
   <link rel="icon" href="/static/hgicon.png" type="image/png" />
   <meta name="robots" content="index, nofollow" />
   <link rel="stylesheet" href="/static/style-paper.css" type="text/css" />
+  <script type="text/javascript" src="/static/mercurial.js"></script>
   
   <title>test: c78f6c5cbea9</title>
   </head>
@@ -75,7 +76,7 @@ revision
   </tr>
   <tr>
    <th class="date">date</th>
-   <td class="date">Thu Jan 01 00:00:00 1970 +0000 (1970-01-01)</td></tr>
+   <td class="date age">Thu Jan 01 00:00:00 1970 +0000</td></tr>
   <tr>
    <th class="author">parents</th>
    <td class="author"><a href="/rev/cb9a9f314b8b">cb9a9f314b8b</a> </td>
@@ -87,6 +88,27 @@ revision
   <tr>
    <th class="files">files</th>
    <td class="files">a </td>
+  </tr>
+  <tr>
+    <th class="diffstat">diffstat</th>
+    <td class="diffstat">
+       1 files changed, 0 insertions(+), 1 deletions(-)
+  
+      <a id="diffstatexpand" href="javascript:showDiffstat()"/>[<tt>+</tt>]</a>
+      <div id="diffstatdetails" style="display:none;">
+        <a href="javascript:hideDiffstat()"/>[<tt>-</tt>]</a>
+        <p>
+        <table>  <tr class="parity0">
+      <td class="diffstat-file"><a href="#l1.1">a</a></td>
+      <td class="diffstat-total" align="right">1</td>
+      <td class="diffstat-graph">
+        <span class="diffstat-add" style="width:0.0%;">&nbsp;</span>
+        <span class="diffstat-remove" style="width:100.0%;">&nbsp;</span>
+      </td>
+    </tr>
+  </table>
+      </div>
+    </td>
   </tr>
   </table>
   
@@ -102,6 +124,7 @@ revision
   
   </div>
   </div>
+  <script type="text/javascript">process_dates()</script>
   
   
   </body>
@@ -119,6 +142,7 @@ diff removed file
   <link rel="icon" href="/static/hgicon.png" type="image/png" />
   <meta name="robots" content="index, nofollow" />
   <link rel="stylesheet" href="/static/style-paper.css" type="text/css" />
+  <script type="text/javascript" src="/static/mercurial.js"></script>
   
   <title>test: a diff</title>
   </head>
@@ -174,7 +198,7 @@ diff removed file
   </tr>
   <tr>
    <th>date</th>
-   <td>Thu Jan 01 00:00:00 1970 +0000 (1970-01-01)</td>
+   <td class="date age">Thu Jan 01 00:00:00 1970 +0000</td>
   </tr>
   <tr>
    <th>parents</th>
@@ -199,6 +223,7 @@ diff removed file
   </div>
   </div>
   
+  <script type="text/javascript">process_dates()</script>
   
   
   </body>

@@ -73,11 +73,13 @@ disable win32text and enable eol and your filters will still work. You
 only need to these filters until you have prepared a ``.hgeol`` file.
 
 The ``win32text.forbid*`` hooks provided by the win32text extension
-have been unified into a single hook named ``eol.hook``. The hook will
-lookup the expected line endings from the ``.hgeol`` file, which means
-you must migrate to a ``.hgeol`` file first before using the hook.
-Remember to enable the eol extension in the repository where you
-install the hook.
+have been unified into a single hook named ``eol.checkheadshook``. The
+hook will lookup the expected line endings from the ``.hgeol`` file,
+which means you must migrate to a ``.hgeol`` file first before using
+the hook. ``eol.checkheadshook`` only checks heads, intermediate
+invalid revisions will be pushed. To forbid them completely, use the
+``eol.checkallhook`` hook. These hooks are best used as
+``pretxnchangegroup`` hooks.
 
 See :hg:`help patterns` for more information about the glob patterns
 used.
@@ -127,36 +129,119 @@ filters = {
     'cleverdecode:': tocrlf
 }
 
+class eolfile(object):
+    def __init__(self, ui, root, data):
+        self._decode = {'LF': 'to-lf', 'CRLF': 'to-crlf', 'BIN': 'is-binary'}
+        self._encode = {'LF': 'to-lf', 'CRLF': 'to-crlf', 'BIN': 'is-binary'}
 
-def hook(ui, repo, node, hooktype, **kwargs):
-    """verify that files have expected EOLs"""
-    files = set()
-    for rev in xrange(repo[node].rev(), len(repo)):
-        files.update(repo[rev].files())
-    tip = repo['tip']
-    for f in files:
-        if f not in tip:
-            continue
-        for pattern, target in ui.configitems('encode'):
-            if match.match(repo.root, '', [pattern])(f):
-                data = tip[f].data()
-                if target == "to-lf" and "\r\n" in data:
-                    raise util.Abort(_("%s should not have CRLF line endings")
-                                     % f)
-                elif target == "to-crlf" and singlelf.search(data):
-                    raise util.Abort(_("%s should not have LF line endings")
-                                     % f)
-                # Ignore other rules for this file
+        self.cfg = config.config()
+        # Our files should not be touched. The pattern must be
+        # inserted first override a '** = native' pattern.
+        self.cfg.set('patterns', '.hg*', 'BIN')
+        # We can then parse the user's patterns.
+        self.cfg.parse('.hgeol', data)
+
+        isrepolf = self.cfg.get('repository', 'native') != 'CRLF'
+        self._encode['NATIVE'] = isrepolf and 'to-lf' or 'to-crlf'
+        iswdlf = ui.config('eol', 'native', os.linesep) in ('LF', '\n')
+        self._decode['NATIVE'] = iswdlf and 'to-lf' or 'to-crlf'
+
+        include = []
+        exclude = []
+        for pattern, style in self.cfg.items('patterns'):
+            key = style.upper()
+            if key == 'BIN':
+                exclude.append(pattern)
+            else:
+                include.append(pattern)
+        # This will match the files for which we need to care
+        # about inconsistent newlines.
+        self.match = match.match(root, '', [], include, exclude)
+
+    def setfilters(self, ui):
+        for pattern, style in self.cfg.items('patterns'):
+            key = style.upper()
+            try:
+                ui.setconfig('decode', pattern, self._decode[key])
+                ui.setconfig('encode', pattern, self._encode[key])
+            except KeyError:
+                ui.warn(_("ignoring unknown EOL style '%s' from %s\n")
+                        % (style, self.cfg.source('patterns', pattern)))
+
+    def checkrev(self, repo, ctx, files):
+        failed = []
+        for f in (files or ctx.files()):
+            if f not in ctx:
+                continue
+            for pattern, style in self.cfg.items('patterns'):
+                if not match.match(repo.root, '', [pattern])(f):
+                    continue
+                target = self._encode[style.upper()]
+                data = ctx[f].data()
+                if (target == "to-lf" and "\r\n" in data
+                    or target == "to-crlf" and singlelf.search(data)):
+                    failed.append((str(ctx), target, f))
                 break
+        return failed
 
-
-def preupdate(ui, repo, hooktype, parent1, parent2):
-    #print "preupdate for %s: %s -> %s" % (repo.root, parent1, parent2)
+def parseeol(ui, repo, nodes):
     try:
-        repo.readhgeol(parent1)
+        for node in nodes:
+            try:
+                if node is None:
+                    # Cannot use workingctx.data() since it would load
+                    # and cache the filters before we configure them.
+                    data = repo.wfile('.hgeol').read()
+                else:
+                    data = repo[node]['.hgeol'].data()
+                return eolfile(ui, repo.root, data)
+            except (IOError, LookupError):
+                pass
     except error.ParseError, inst:
         ui.warn(_("warning: ignoring .hgeol file due to parse error "
                   "at %s: %s\n") % (inst.args[1], inst.args[0]))
+    return None
+
+def _checkhook(ui, repo, node, headsonly):
+    # Get revisions to check and touched files at the same time
+    files = set()
+    revs = set()
+    for rev in xrange(repo[node].rev(), len(repo)):
+        revs.add(rev)
+        if headsonly:
+            ctx = repo[rev]
+            files.update(ctx.files())
+            for pctx in ctx.parents():
+                revs.discard(pctx.rev())
+    failed = []
+    for rev in revs:
+        ctx = repo[rev]
+        eol = parseeol(ui, repo, [ctx.node()])
+        if eol:
+            failed.extend(eol.checkrev(repo, ctx, files))
+
+    if failed:
+        eols = {'to-lf': 'CRLF', 'to-crlf': 'LF'}
+        msgs = []
+        for node, target, f in failed:
+            msgs.append(_("  %s in %s should not have %s line endings") %
+                        (f, node, eols[target]))
+        raise util.Abort(_("end-of-line check failed:\n") + "\n".join(msgs))
+
+def checkallhook(ui, repo, node, hooktype, **kwargs):
+    """verify that files have expected EOLs"""
+    _checkhook(ui, repo, node, False)
+
+def checkheadshook(ui, repo, node, hooktype, **kwargs):
+    """verify that files have expected EOLs"""
+    _checkhook(ui, repo, node, True)
+
+# "checkheadshook" used to be called "hook"
+hook = checkheadshook
+
+def preupdate(ui, repo, hooktype, parent1, parent2):
+    #print "preupdate for %s: %s -> %s" % (repo.root, parent1, parent2)
+    repo.loadeol([parent1])
     return False
 
 def uisetup(ui):
@@ -184,66 +269,15 @@ def reposetup(ui, repo):
 
     class eolrepo(repo.__class__):
 
-        _decode = {'LF': 'to-lf', 'CRLF': 'to-crlf', 'BIN': 'is-binary'}
-        _encode = {'LF': 'to-lf', 'CRLF': 'to-crlf', 'BIN': 'is-binary'}
-
-        def readhgeol(self, node=None, data=None):
-            if data is None:
-                try:
-                    if node is None:
-                        data = self.wfile('.hgeol').read()
-                    else:
-                        data = self[node]['.hgeol'].data()
-                except (IOError, LookupError):
-                    return None
-
-            if self.ui.config('eol', 'native', os.linesep) in ('LF', '\n'):
-                self._decode['NATIVE'] = 'to-lf'
-            else:
-                self._decode['NATIVE'] = 'to-crlf'
-
-            eol = config.config()
-            # Our files should not be touched. The pattern must be
-            # inserted first override a '** = native' pattern.
-            eol.set('patterns', '.hg*', 'BIN')
-            # We can then parse the user's patterns.
-            eol.parse('.hgeol', data)
-
-            if eol.get('repository', 'native') == 'CRLF':
-                self._encode['NATIVE'] = 'to-crlf'
-            else:
-                self._encode['NATIVE'] = 'to-lf'
-
-            for pattern, style in eol.items('patterns'):
-                key = style.upper()
-                try:
-                    self.ui.setconfig('decode', pattern, self._decode[key])
-                    self.ui.setconfig('encode', pattern, self._encode[key])
-                except KeyError:
-                    self.ui.warn(_("ignoring unknown EOL style '%s' from %s\n")
-                                 % (style, eol.source('patterns', pattern)))
-
-            include = []
-            exclude = []
-            for pattern, style in eol.items('patterns'):
-                key = style.upper()
-                if key == 'BIN':
-                    exclude.append(pattern)
-                else:
-                    include.append(pattern)
-
-            # This will match the files for which we need to care
-            # about inconsistent newlines.
-            return match.match(self.root, '', [], include, exclude)
+        def loadeol(self, nodes):
+            eol = parseeol(self.ui, self, nodes)
+            if eol is None:
+                return None
+            eol.setfilters(self.ui)
+            return eol.match
 
         def _hgcleardirstate(self):
-            try:
-                self._eolfile = self.readhgeol() or self.readhgeol('tip')
-            except error.ParseError, inst:
-                ui.warn(_("warning: ignoring .hgeol file due to parse error "
-                          "at %s: %s\n") % (inst.args[1], inst.args[0]))
-                self._eolfile = None
-
+            self._eolfile = self.loadeol([None, 'tip'])
             if not self._eolfile:
                 self._eolfile = util.never
                 return

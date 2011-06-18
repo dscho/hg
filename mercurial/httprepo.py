@@ -8,8 +8,8 @@
 
 from node import nullid
 from i18n import _
-import changegroup, statichttprepo, error, url, util, wireproto
-import os, urllib, urllib2, urlparse, zlib, httplib
+import changegroup, statichttprepo, error, httpconnection, url, util, wireproto
+import os, urllib, urllib2, zlib, httplib
 import errno, socket
 
 def zgenerator(f):
@@ -28,13 +28,13 @@ class httprepository(wireproto.wirerepository):
         self.path = path
         self.caps = None
         self.handler = None
-        scheme, netloc, urlpath, query, frag = urlparse.urlsplit(path)
-        if query or frag:
+        u = util.url(path)
+        if u.query or u.fragment:
             raise util.Abort(_('unsupported URL component: "%s"') %
-                             (query or frag))
+                             (u.query or u.fragment))
 
         # urllib cannot handle URLs with embedded user or passwd
-        self._url, authinfo = url.getauthinfo(path)
+        self._url, authinfo = u.authinfo()
 
         self.ui = ui
         self.ui.debug('using %s\n' % self._url)
@@ -52,10 +52,13 @@ class httprepository(wireproto.wirerepository):
 
     # look up capabilities only when needed
 
+    def _fetchcaps(self):
+        self.caps = set(self._call('capabilities').split())
+
     def get_caps(self):
         if self.caps is None:
             try:
-                self.caps = set(self._call('capabilities').split())
+                self._fetchcaps()
             except error.RepoError:
                 self.caps = set()
             self.ui.debug('capabilities: %s\n' %
@@ -72,9 +75,31 @@ class httprepository(wireproto.wirerepository):
             args['data'] = ''
         data = args.pop('data', None)
         headers = args.pop('headers', {})
+
+        if data and self.ui.configbool('ui', 'usehttp2', False):
+            headers['Expect'] = '100-Continue'
+
         self.ui.debug("sending %s command\n" % cmd)
-        q = {"cmd": cmd}
-        q.update(args)
+        q = [('cmd', cmd)]
+        headersize = 0
+        if len(args) > 0:
+            httpheader = self.capable('httpheader')
+            if httpheader:
+                headersize = int(httpheader.split(',')[0])
+        if headersize > 0:
+            # The headers can typically carry more data than the URL.
+            encargs = urllib.urlencode(sorted(args.items()))
+            headerfmt = 'X-HgArg-%s'
+            contentlen = headersize - len(headerfmt % '000' + ': \r\n')
+            headernum = 0
+            for i in xrange(0, len(encargs), contentlen):
+                headernum += 1
+                header = headerfmt % str(headernum)
+                headers[header] = encargs[i:i + contentlen]
+            varyheaders = [headerfmt % str(h) for h in range(1, headernum + 1)]
+            headers['Vary'] = ','.join(varyheaders)
+        else:
+            q += sorted(args.items())
         qs = '?%s' % urllib.urlencode(q)
         cu = "%s%s" % (self._url, qs)
         req = urllib2.Request(cu, data, headers)
@@ -110,12 +135,12 @@ class httprepository(wireproto.wirerepository):
         except AttributeError:
             proto = resp.headers.get('content-type', '')
 
-        safeurl = url.hidepassword(self._url)
+        safeurl = util.hidepassword(self._url)
         # accept old "text/plain" and "application/hg-changegroup" for now
         if not (proto.startswith('application/mercurial-') or
                 proto.startswith('text/plain') or
                 proto.startswith('application/hg-changegroup')):
-            self.ui.debug("requested URL: '%s'\n" % url.hidepassword(cu))
+            self.ui.debug("requested URL: '%s'\n" % util.hidepassword(cu))
             raise error.RepoError(
                 _("'%s' does not appear to be an hg repository:\n"
                   "---%%<--- (%s)\n%s\n---%%<---\n")
@@ -146,28 +171,30 @@ class httprepository(wireproto.wirerepository):
         # have to stream bundle to a temp file because we do not have
         # http 1.1 chunked transfer.
 
-        type = ""
         types = self.capable('unbundle')
-        # servers older than d1b16a746db6 will send 'unbundle' as a
-        # boolean capability
         try:
             types = types.split(',')
         except AttributeError:
+            # servers older than d1b16a746db6 will send 'unbundle' as a
+            # boolean capability. They only support headerless/uncompressed
+            # bundles.
             types = [""]
-        if types:
-            for x in types:
-                if x in changegroup.bundletypes:
-                    type = x
-                    break
+        for x in types:
+            if x in changegroup.bundletypes:
+                type = x
+                break
 
         tempname = changegroup.writebundle(cg, None, type)
-        fp = url.httpsendfile(self.ui, tempname, "rb")
+        fp = httpconnection.httpsendfile(self.ui, tempname, "rb")
         headers = {'Content-Type': 'application/mercurial-0.1'}
 
         try:
             try:
                 r = self._call(cmd, data=fp, headers=headers, **args)
-                return r.split('\n', 1)
+                vals = r.split('\n', 1)
+                if len(vals) < 2:
+                    raise error.ResponseError(_("unexpected response:"), r)
+                return vals
             except socket.error, err:
                 if err.args[0] in (errno.ECONNRESET, errno.EPIPE):
                     raise util.Abort(_('push failed: %s') % err.args[1])
@@ -197,8 +224,18 @@ def instance(ui, path, create):
             inst = httpsrepository(ui, path)
         else:
             inst = httprepository(ui, path)
-        inst.between([(nullid, nullid)])
+        try:
+            # Try to do useful work when checking compatibility.
+            # Usually saves a roundtrip since we want the caps anyway.
+            inst._fetchcaps()
+        except error.RepoError:
+            # No luck, try older compatibility check.
+            inst.between([(nullid, nullid)])
         return inst
-    except error.RepoError:
-        ui.note('(falling back to static-http)\n')
-        return statichttprepo.instance(ui, "static-" + path, create)
+    except error.RepoError, httpexception:
+        try:
+            r = statichttprepo.instance(ui, "static-" + path, create)
+            ui.note('(falling back to static-http)\n')
+            return r
+        except error.RepoError:
+            raise httpexception # use the original http RepoError instead

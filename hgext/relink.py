@@ -38,9 +38,8 @@ def relink(ui, repo, origin=None, **opts):
     """
     if not hasattr(util, 'samefile') or not hasattr(util, 'samedevice'):
         raise util.Abort(_('hardlinks are not supported on this system'))
-    src = hg.repository(
-        hg.remoteui(repo, opts),
-        ui.expandpath(origin or 'default-relink', origin or 'default'))
+    src = hg.repository(ui, ui.expandpath(origin or 'default-relink',
+                                          origin or 'default'))
     if not src.local():
         raise util.Abort(_('must specify local origin repository'))
     ui.status(_('relinking %s to %s\n') % (src.store.path, repo.store.path))
@@ -132,7 +131,7 @@ def do_relink(src, dst, files, ui):
         bak = dst + '.bak'
         os.rename(dst, bak)
         try:
-            util.os_link(src, dst)
+            util.oslink(src, dst)
         except OSError:
             os.rename(bak, dst)
             raise
@@ -172,8 +171,8 @@ def do_relink(src, dst, files, ui):
 
     ui.progress(_('relinking'), None)
 
-    ui.status(_('relinked %d files (%d bytes reclaimed)\n') %
-              (relinked, savedbytes))
+    ui.status(_('relinked %d files (%s reclaimed)\n') %
+              (relinked, util.bytecount(savedbytes)))
 
 cmdtable = {
     'relink': (

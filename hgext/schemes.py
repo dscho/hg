@@ -40,8 +40,9 @@ You can override a predefined scheme by defining a new scheme with the
 same name.
 """
 
-import re
-from mercurial import hg, templater
+import os, re
+from mercurial import extensions, hg, templater, util
+from mercurial.i18n import _
 
 
 class ShortRepository(object):
@@ -58,6 +59,7 @@ class ShortRepository(object):
         return '<ShortRepository: %s>' % self.scheme
 
     def instance(self, ui, url, create):
+        # Should this use urlmod.url(), or is manual parsing better?
         url = url.split('://', 1)[1]
         parts = url.split('/', self.parts)
         if len(parts) > self.parts:
@@ -67,7 +69,13 @@ class ShortRepository(object):
             tail = ''
         context = dict((str(i + 1), v) for i, v in enumerate(parts))
         url = ''.join(self.templater.process(self.url, context)) + tail
-        return hg._lookup(url).instance(ui, url, create)
+        return hg._peerlookup(url).instance(ui, url, create)
+
+def hasdriveletter(orig, path):
+    for scheme in schemes:
+        if path.startswith(scheme + ':'):
+            return False
+    return orig(path)
 
 schemes = {
     'py': 'http://hg.python.org/',
@@ -81,4 +89,10 @@ def extsetup(ui):
     schemes.update(dict(ui.configitems('schemes')))
     t = templater.engine(lambda x: x)
     for scheme, url in schemes.items():
+        if (os.name == 'nt' and len(scheme) == 1 and scheme.isalpha()
+            and os.path.exists('%s:\\' % scheme)):
+            raise util.Abort(_('custom scheme %s:// conflicts with drive '
+                               'letter %s:\\\n') % (scheme, scheme.upper()))
         hg.schemes[scheme] = ShortRepository(url, scheme, t)
+
+    extensions.wrapfunction(util, 'hasdriveletter', hasdriveletter)

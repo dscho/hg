@@ -6,12 +6,27 @@
 # GNU General Public License version 2 or any later version.
 
 import re
-import util
+import scmutil, util, fileset
 from i18n import _
+
+def _expandsets(pats, ctx):
+    '''convert set: patterns into a list of files in the given context'''
+    fset = set()
+    other = []
+
+    for kind, expr in pats:
+        if kind == 'set':
+            if not ctx:
+                raise util.Abort("fileset expression with no context")
+            s = fileset.getfileset(ctx, expr)
+            fset.update(s)
+            continue
+        other.append((kind, expr))
+    return fset, other
 
 class match(object):
     def __init__(self, root, cwd, patterns, include=[], exclude=[],
-                 default='glob', exact=False, auditor=None):
+                 default='glob', exact=False, auditor=None, ctx=None):
         """build an object to match a set of file patterns
 
         arguments:
@@ -30,20 +45,23 @@ class match(object):
         'relglob:<glob>' - an unrooted glob (*.c matches C files in all dirs)
         'relpath:<path>' - a path relative to cwd
         'relre:<regexp>' - a regexp that needn't match the start of a name
+        'set:<fileset>' - a fileset expression
         '<something>' - a pattern of the specified default type
         """
 
+        self._ctx = None
         self._root = root
         self._cwd = cwd
         self._files = []
         self._anypats = bool(include or exclude)
+        self._ctx = ctx
 
         if include:
             pats = _normalize(include, 'glob', root, cwd, auditor)
-            self.includepat, im = _buildmatch(pats, '(?:/|$)')
+            self.includepat, im = _buildmatch(ctx, pats, '(?:/|$)')
         if exclude:
             pats = _normalize(exclude, 'glob', root, cwd, auditor)
-            self.excludepat, em = _buildmatch(pats, '(?:/|$)')
+            self.excludepat, em = _buildmatch(ctx, pats, '(?:/|$)')
         if exact:
             self._files = patterns
             pm = self.exact
@@ -51,7 +69,7 @@ class match(object):
             pats = _normalize(patterns, default, root, cwd, auditor)
             self._files = _roots(pats)
             self._anypats = self._anypats or _anypats(pats)
-            self.patternspat, pm = _buildmatch(pats, '$')
+            self.patternspat, pm = _buildmatch(ctx, pats, '$')
 
         if patterns or exact:
             if include:
@@ -162,7 +180,7 @@ def _patsplit(pat, default):
     if ':' in pat:
         kind, val = pat.split(':', 1)
         if kind in ('re', 'glob', 'path', 'relglob', 'relpath', 'relre',
-                    'listfile', 'listfile0'):
+                    'listfile', 'listfile0', 'set'):
             return kind, val
     return default, pat
 
@@ -240,7 +258,17 @@ def _regex(kind, name, tail):
         return '.*' + name
     return _globre(name) + tail
 
-def _buildmatch(pats, tail):
+def _buildmatch(ctx, pats, tail):
+    fset, pats = _expandsets(pats, ctx)
+    if not pats:
+        return "", fset.__contains__
+
+    pat, mf = _buildregexmatch(pats, tail)
+    if fset:
+        return pat, lambda f: f in fset or mf(f)
+    return pat, mf
+
+def _buildregexmatch(pats, tail):
     """build a matching function from a set of patterns"""
     try:
         pat = '(?:%s)' % '|'.join([_regex(k, p, tail) for (k, p) in pats])
@@ -269,13 +297,16 @@ def _normalize(names, default, root, cwd, auditor):
     pats = []
     for kind, name in [_patsplit(p, default) for p in names]:
         if kind in ('glob', 'relpath'):
-            name = util.canonpath(root, cwd, name, auditor)
+            name = scmutil.canonpath(root, cwd, name, auditor)
         elif kind in ('relglob', 'path'):
             name = util.normpath(name)
         elif kind in ('listfile', 'listfile0'):
-            delimiter = kind == 'listfile0' and '\0' or '\n'
             try:
-                files = open(name, 'r').read().split(delimiter)
+                files = util.readfile(name)
+                if kind == 'listfile0':
+                    files = files.split('\0')
+                else:
+                    files = files.splitlines()
                 files = [f for f in files if f]
             except EnvironmentError:
                 raise util.Abort(_("unable to read file list (%s)") % name)

@@ -1,8 +1,7 @@
-  $ mkdir test
+  $ hg init test
   $ cd test
 
   $ echo foo>foo
-  $ hg init
   $ hg addremove
   adding foo
   $ hg commit -m 1
@@ -68,7 +67,11 @@ Issue622: hg init && hg pull -u URL doesn't checkout default branch
 Test 'file:' uri handling:
 
   $ hg pull -q file://../test-doesnt-exist
-  abort: repository /test-doesnt-exist not found!
+  abort: file:// URLs can only refer to localhost
+  [255]
+
+  $ hg pull -q file://../test
+  abort: file:// URLs can only refer to localhost
   [255]
 
   $ hg pull -q file:../test
@@ -78,4 +81,8 @@ regular shell commands.
 
   $ URL=`python -c "import os; print 'file://foobar' + ('/' + os.getcwd().replace(os.sep, '/')).replace('//', '/') + '/../test'"`
   $ hg pull -q "$URL"
+  abort: file:// URLs can only refer to localhost
+  [255]
 
+  $ URL=`python -c "import os; print 'file://localhost' + ('/' + os.getcwd().replace(os.sep, '/')).replace('//', '/') + '/../test'"`
+  $ hg pull -q "$URL"

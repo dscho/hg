@@ -5,10 +5,10 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import errno, os, re, xml.dom.minidom, shutil, urlparse, posixpath
+import errno, os, re, xml.dom.minidom, shutil, posixpath
 import stat, subprocess, tarfile
 from i18n import _
-import config, util, node, error, cmdutil
+import config, scmutil, util, node, error, cmdutil, bookmarks
 hg = None
 propertycache = util.propertycache
 
@@ -79,9 +79,8 @@ def state(ctx, ui):
 
 def writestate(repo, state):
     """rewrite .hgsubstate in (outer) repo with these subrepo states"""
-    repo.wwrite('.hgsubstate',
-                ''.join(['%s %s\n' % (state[s][1], s)
-                         for s in sorted(state)]), '')
+    lines = ['%s %s\n' % (state[s][1], s) for s in sorted(state)]
+    repo.wwrite('.hgsubstate', ''.join(lines), '')
 
 def submerge(repo, wctx, mctx, actx, overwrite):
     """delegated from merge.applyupdates: merging of .hgsubstate file
@@ -137,6 +136,10 @@ def submerge(repo, wctx, mctx, actx, overwrite):
         elif ld == a: # remote removed, local unchanged
             debug(s, "remote removed, remove")
             wctx.sub(s).remove()
+        elif a == nullstate: # not present in remote or ancestor
+            debug(s, "local added, keep")
+            sm[s] = l
+            continue
         else:
             if repo.ui.promptchoice(
                 _(' local changed subrepository %s which remote removed\n'
@@ -145,7 +148,7 @@ def submerge(repo, wctx, mctx, actx, overwrite):
                 debug(s, "prompt remove")
                 wctx.sub(s).remove()
 
-    for s, r in s2.items():
+    for s, r in sorted(s2.items()):
         if s in s1:
             continue
         elif s not in sa:
@@ -194,26 +197,16 @@ def _abssource(repo, push=False, abort=True):
     """return pull/push path of repo - either based on parent repo .hgsub info
     or on the top repo config. Abort or return None if no source found."""
     if hasattr(repo, '_subparent'):
-        source = repo._subsource
-        if source.startswith('/') or '://' in source:
-            return source
+        source = util.url(repo._subsource)
+        source.path = posixpath.normpath(source.path)
+        if posixpath.isabs(source.path) or source.scheme:
+            return str(source)
         parent = _abssource(repo._subparent, push, abort=False)
         if parent:
-            if '://' in parent:
-                if parent[-1] == '/':
-                    parent = parent[:-1]
-                r = urlparse.urlparse(parent + '/' + source)
-                if parent.startswith('ssh://') and not r[1]:
-                    # Python before 2.6 parses ssh:// URLs wrong
-                    host, path = r[2][2:].split('/', 1)
-                    r2 = '//%s/%s' % (host, posixpath.normpath(path))
-                else:
-                    r2 = posixpath.normpath(r[2])
-                r = urlparse.urlunparse((r[0], r[1], r2,
-                                         r[3], r[4], r[5]))
-                return r
-            else: # plain file system path
-                return posixpath.normpath(os.path.join(parent, repo._subsource))
+            parent = util.url(parent)
+            parent.path = posixpath.join(parent.path, source.path)
+            parent.path = posixpath.normpath(parent.path)
+            return str(parent)
     else: # recursion reached top repo
         if hasattr(repo, '_subtoppath'):
             return repo._subtoppath
@@ -245,7 +238,7 @@ def subrepo(ctx, path):
     import hg as h
     hg = h
 
-    util.path_auditor(ctx._repo.root)(path)
+    scmutil.pathauditor(ctx._repo.root)(path)
     state = ctx.substate.get(path, nullstate)
     if state[2] not in types:
         raise util.Abort(_('unknown subrepo type %s') % state[2])
@@ -352,8 +345,11 @@ class hgsubrepo(abstractsubrepo):
             create = True
             util.makedirs(root)
         self._repo = hg.repository(r.ui, root, create=create)
-        self._repo._subparent = r
-        self._repo._subsource = state[0]
+        self._initrepo(r, state[0], create)
+
+    def _initrepo(self, parentrepo, source, create):
+        self._repo._subparent = parentrepo
+        self._repo._subsource = source
 
         if create:
             fp = self._repo.opener("hgrc", "w", text=True)
@@ -415,7 +411,7 @@ class hgsubrepo(abstractsubrepo):
         if r == '' and not ignoreupdate: # no state recorded
             return True
         w = self._repo[None]
-        if w.p1() != self._repo[r] and not ignoreupdate:
+        if r != w.p1().hex() and not ignoreupdate:
             # different version checked out
             return True
         return w.dirty() # working directory changed
@@ -438,15 +434,23 @@ class hgsubrepo(abstractsubrepo):
 
     def _get(self, state):
         source, revision, kind = state
-        try:
-            self._repo.lookup(revision)
-        except error.RepoError:
+        if revision not in self._repo:
             self._repo._subsource = source
             srcurl = _abssource(self._repo)
-            self._repo.ui.status(_('pulling subrepo %s from %s\n')
-                                 % (subrelpath(self), srcurl))
-            other = hg.repository(self._repo.ui, srcurl)
-            self._repo.pull(other)
+            other = hg.peer(self._repo.ui, {}, srcurl)
+            if len(self._repo) == 0:
+                self._repo.ui.status(_('cloning subrepo %s from %s\n')
+                                     % (subrelpath(self), srcurl))
+                parentrepo = self._repo._subparent
+                shutil.rmtree(self._repo.root)
+                other, self._repo = hg.clone(self._repo._subparent.ui, {}, other,
+                                         self._repo.root, update=False)
+                self._initrepo(parentrepo, source, create=True)
+            else:
+                self._repo.ui.status(_('pulling subrepo %s from %s\n')
+                                     % (subrelpath(self), srcurl))
+                self._repo.pull(other)
+            bookmarks.updatefromremote(self._repo.ui, self._repo, other)
 
     def get(self, state, overwrite=False):
         self._get(state)
@@ -491,7 +495,7 @@ class hgsubrepo(abstractsubrepo):
         dsturl = _abssource(self._repo, True)
         self._repo.ui.status(_('pushing subrepo %s to %s\n') %
             (subrelpath(self), dsturl))
-        other = hg.repository(self._repo.ui, dsturl)
+        other = hg.peer(self._repo.ui, {}, dsturl)
         return self._repo.push(other, force)
 
     def outgoing(self, ui, dest, opts):
@@ -522,7 +526,7 @@ class svnsubrepo(abstractsubrepo):
         self._ctx = ctx
         self._ui = ctx._repo.ui
 
-    def _svncommand(self, commands, filename=''):
+    def _svncommand(self, commands, filename='', failok=False):
         cmd = ['svn']
         extrakw = {}
         if not self._ui.interactive():
@@ -547,15 +551,16 @@ class svnsubrepo(abstractsubrepo):
                               universal_newlines=True, env=env, **extrakw)
         stdout, stderr = p.communicate()
         stderr = stderr.strip()
-        if p.returncode:
-            raise util.Abort(stderr or 'exited with code %d' % p.returncode)
-        if stderr:
-            self._ui.warn(stderr + '\n')
-        return stdout
+        if not failok:
+            if p.returncode:
+                raise util.Abort(stderr or 'exited with code %d' % p.returncode)
+            if stderr:
+                self._ui.warn(stderr + '\n')
+        return stdout, stderr
 
     @propertycache
     def _svnversion(self):
-        output = self._svncommand(['--version'], filename=None)
+        output, err = self._svncommand(['--version'], filename=None)
         m = re.search(r'^svn,\s+version\s+(\d+)\.(\d+)', output)
         if not m:
             raise util.Abort(_('cannot retrieve svn tool version'))
@@ -565,7 +570,7 @@ class svnsubrepo(abstractsubrepo):
         # Get the working directory revision as well as the last
         # commit revision so we can compare the subrepo state with
         # both. We used to store the working directory one.
-        output = self._svncommand(['info', '--xml'])
+        output, err = self._svncommand(['info', '--xml'])
         doc = xml.dom.minidom.parseString(output)
         entries = doc.getElementsByTagName('entry')
         lastrev, rev = '0', '0'
@@ -584,7 +589,7 @@ class svnsubrepo(abstractsubrepo):
         if the working directory was changed, and extchanges is
         True if any of these changes concern an external entry.
         """
-        output = self._svncommand(['status', '--xml'])
+        output, err = self._svncommand(['status', '--xml'])
         externals, changes = [], []
         doc = xml.dom.minidom.parseString(output)
         for e in doc.getElementsByTagName('entry'):
@@ -619,13 +624,13 @@ class svnsubrepo(abstractsubrepo):
         if extchanged:
             # Do not try to commit externals
             raise util.Abort(_('cannot commit svn externals'))
-        commitinfo = self._svncommand(['commit', '-m', text])
+        commitinfo, err = self._svncommand(['commit', '-m', text])
         self._ui.status(commitinfo)
         newrev = re.search('Committed revision ([0-9]+).', commitinfo)
         if not newrev:
             raise util.Abort(commitinfo.splitlines()[-1])
         newrev = newrev.groups()[0]
-        self._ui.status(self._svncommand(['update', '-r', newrev]))
+        self._ui.status(self._svncommand(['update', '-r', newrev])[0])
         return newrev
 
     def remove(self):
@@ -659,9 +664,15 @@ class svnsubrepo(abstractsubrepo):
         if self._svnversion >= (1, 5):
             args.append('--force')
         args.extend([state[0], '--revision', state[1]])
-        status = self._svncommand(args)
+        status, err = self._svncommand(args, failok=True)
         if not re.search('Checked out revision [0-9]+.', status):
-            raise util.Abort(status.splitlines()[-1])
+            if ('is already a working copy for a different URL' in err
+                and (self._wcchanged() == (False, False))):
+                # obstructed but clean working copy, so just blow it away.
+                self.remove()
+                self.get(state, overwrite=False)
+                return
+            raise util.Abort((status or err).splitlines()[-1])
         self._ui.status(status)
 
     def merge(self, state):
@@ -748,6 +759,12 @@ class gitsubrepo(abstractsubrepo):
             current = None
         return current
 
+    def _gitremote(self, remote):
+        out = self._gitcommand(['remote', 'show', '-n', remote])
+        line = out.split('\n')[1]
+        i = line.index('URL: ') + len('URL: ')
+        return line[i:]
+
     def _githavelocally(self, revision):
         out, code = self._gitdir(['cat-file', '-e', revision])
         return code == 0
@@ -755,6 +772,9 @@ class gitsubrepo(abstractsubrepo):
     def _gitisancestor(self, r1, r2):
         base = self._gitcommand(['merge-base', r1, r2])
         return base == r1
+
+    def _gitisbare(self):
+        return self._gitcommand(['config', '--bool', 'core.bare']) == 'true'
 
     def _gitbranchmap(self):
         '''returns 2 things:
@@ -801,11 +821,14 @@ class gitsubrepo(abstractsubrepo):
 
     def _fetch(self, source, revision):
         if self._gitmissing():
-            self._ui.status(_('cloning subrepo %s\n') % self._relpath)
-            self._gitnodir(['clone', self._abssource(source), self._abspath])
+            source = self._abssource(source)
+            self._ui.status(_('cloning subrepo %s from %s\n') %
+                            (self._relpath, source))
+            self._gitnodir(['clone', source, self._abspath])
         if self._githavelocally(revision):
             return
-        self._ui.status(_('pulling subrepo %s\n') % self._relpath)
+        self._ui.status(_('pulling subrepo %s from %s\n') %
+                        (self._relpath, self._gitremote('origin')))
         # try only origin: the originally cloned repo
         self._gitcommand(['fetch'])
         if not self._githavelocally(revision):
@@ -815,6 +838,8 @@ class gitsubrepo(abstractsubrepo):
     def dirty(self, ignoreupdate=False):
         if self._gitmissing():
             return self._state[1] != ''
+        if self._gitisbare():
+            return True
         if not ignoreupdate and self._state[1] != self._gitstate():
             # different version checked out
             return True
@@ -829,14 +854,14 @@ class gitsubrepo(abstractsubrepo):
             return
         self._fetch(source, revision)
         # if the repo was set to be bare, unbare it
-        if self._gitcommand(['config', '--bool', 'core.bare']) == 'true':
+        if self._gitisbare():
             self._gitcommand(['config', 'core.bare', 'false'])
             if self._gitstate() == revision:
                 self._gitcommand(['reset', '--hard', 'HEAD'])
                 return
         elif self._gitstate() == revision:
             if overwrite:
-                # first reset the index to unmark new files for commit, because 
+                # first reset the index to unmark new files for commit, because
                 # reset --hard will otherwise throw away files added for commit,
                 # not just unmark them.
                 self._gitcommand(['reset', 'HEAD'])

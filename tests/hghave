@@ -52,7 +52,7 @@ def has_darcs():
 
 def has_mtn():
     return matchoutput('mtn --version', r'monotone', True) and not matchoutput(
-        'mtn --version', r'monotone 0\.(\d|[12]\d|3[01])[^\d]', True)
+        'mtn --version', r'monotone 0\.', True)
 
 def has_eol_in_paths():
     try:
@@ -172,6 +172,11 @@ def has_unix_permissions():
     finally:
         os.rmdir(d)
 
+def has_pyflakes():
+    return matchoutput('echo "import re" 2>&1 | pyflakes',
+                       r"<stdin>:1: 're' imported but unused",
+                       True)
+
 def has_pygments():
     try:
         import pygments
@@ -207,9 +212,10 @@ checks = {
     "icasefs": (has_icasefs, "case insensitive file system"),
     "inotify": (has_inotify, "inotify extension support"),
     "lsprof": (has_lsprof, "python lsprof module"),
-    "mtn": (has_mtn, "monotone client (> 0.31)"),
+    "mtn": (has_mtn, "monotone client (>= 1.0)"),
     "outer-repo": (has_outer_repo, "outer repo"),
     "p4": (has_p4, "Perforce server and client"),
+    "pyflakes": (has_pyflakes, "Pyflakes python linter"),
     "pygments": (has_pygments, "Pygments source highlighting library"),
     "ssl": (has_ssl, "python >= 2.6 ssl module and python OpenSSL"),
     "svn": (has_svn, "subversion client and admin tools"),

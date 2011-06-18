@@ -26,6 +26,7 @@ import bookmark by name
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files
+  updating bookmark Y
   (run 'hg update' to get a working copy)
   $ hg bookmarks
      Y                         0:4e3505fd9583
@@ -38,7 +39,6 @@ import bookmark by name
   Z	4e3505fd95835d721066b76e75dbb8cc554d7f77
   $ hg pull -B X ../a
   pulling from ../a
-  searching for changes
   no changes found
   importing bookmark X
   $ hg bookmark
@@ -172,9 +172,22 @@ hgweb
      foobar                    000000000000
   $ hg pull -B Z http://localhost:$HGPORT/
   pulling from http://localhost:$HGPORT/
-  searching for changes
   no changes found
   not updating divergent bookmark X
   importing bookmark Z
+  $ hg clone http://localhost:$HGPORT/ cloned-bookmarks
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 3 changesets with 3 changes to 3 files (+1 heads)
+  updating to branch default
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg -R cloned-bookmarks bookmarks
+     X                         1:9b140be10808
+     Y                         0:4e3505fd9583
+     Z                         2:0d2164f0ce0d
+     foo                       -1:000000000000
+     foobar                    -1:000000000000
 
   $ kill `cat ../hg.pid`

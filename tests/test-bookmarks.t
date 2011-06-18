@@ -84,6 +84,10 @@ bookmarks revset
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     1
   
+  $ hg log -r 'bookmark(unknown)'
+  abort: bookmark 'unknown' does not exist
+  [255]
+
   $ hg help revsets | grep 'bookmark('
       "bookmark([name])"
 
@@ -116,13 +120,13 @@ bookmarks X moved to rev 2, Y at rev -1, Z at rev 0
 rename nonexistent bookmark
 
   $ hg bookmark -m A B
-  abort: a bookmark of this name does not exist
+  abort: bookmark 'A' does not exist
   [255]
 
 rename to existent bookmark
 
   $ hg bookmark -m X Y
-  abort: a bookmark of the same name already exists
+  abort: bookmark 'Y' already exists (use -f to force)
   [255]
 
 force rename to existent bookmark
@@ -151,7 +155,7 @@ delete without name
 delete nonexistent bookmark
 
   $ hg bookmark -d A
-  abort: a bookmark of this name does not exist
+  abort: bookmark 'A' does not exist
   [255]
 
 bookmark name with spaces should be stripped
@@ -189,7 +193,7 @@ reject bookmark name with newline
 bookmark with existing name
 
   $ hg bookmark Z
-  abort: a bookmark of the same name already exists
+  abort: bookmark 'Z' already exists (use -f to force)
   [255]
 
 force bookmark with existing name
@@ -248,13 +252,93 @@ test id
 
 test rollback
 
+  $ echo foo > f1
+  $ hg ci -Amr
+  adding f1
   $ hg bookmark -f Y -r 1
   $ hg bookmark -f Z -r 1
   $ hg rollback
-  repository tip rolled back to revision 1 (undo commit)
-  working directory now based on revision 0
+  repository tip rolled back to revision 2 (undo commit)
+  working directory now based on revision 2
   $ hg bookmarks
-     X                         0:f7b1eb17ad24
      X2                        1:925d80f479bb
-     Y                         -1:000000000000
-   * Z                         0:f7b1eb17ad24
+     Y                         2:db815d6d32e6
+   * Z                         2:db815d6d32e6
+     x  y                      2:db815d6d32e6
+
+test clone
+
+  $ hg bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+   * Z                         2:db815d6d32e6
+     x  y                      2:db815d6d32e6
+  $ hg clone . cloned-bookmarks
+  updating to branch default
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg -R cloned-bookmarks bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+     Z                         2:db815d6d32e6
+     x  y                      2:db815d6d32e6
+
+test clone with pull protocol
+
+  $ hg clone --pull . cloned-bookmarks-pull
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 3 changesets with 3 changes to 3 files (+1 heads)
+  updating to branch default
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg -R cloned-bookmarks-pull bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+     Z                         2:db815d6d32e6
+     x  y                      2:db815d6d32e6
+
+test clone with a specific revision
+
+  $ hg clone -r 925d80 . cloned-bookmarks-rev
+  adding changesets
+  adding manifests
+  adding file changes
+  added 2 changesets with 2 changes to 2 files
+  updating to branch default
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg -R cloned-bookmarks-rev bookmarks
+     X2                        1:925d80f479bb
+
+create bundle with two heads
+
+  $ hg clone . tobundle
+  updating to branch default
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ echo x > tobundle/x
+  $ hg -R tobundle add tobundle/x
+  $ hg -R tobundle commit -m'x'
+  $ hg -R tobundle update -r -2
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo y > tobundle/y
+  $ hg -R tobundle branch test
+  marked working directory as branch test
+  $ hg -R tobundle add tobundle/y
+  $ hg -R tobundle commit -m'y'
+  $ hg -R tobundle bundle tobundle.hg
+  searching for changes
+  2 changesets found
+  $ hg unbundle tobundle.hg
+  adding changesets
+  adding manifests
+  adding file changes
+  added 2 changesets with 2 changes to 2 files (+1 heads)
+  (run 'hg heads' to see heads, 'hg merge' to merge)
+  $ hg update
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+   * Z                         3:125c9a1d6df6
+     x  y                      2:db815d6d32e6
+

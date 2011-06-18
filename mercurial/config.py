@@ -7,7 +7,7 @@
 
 from i18n import _
 import error, util
-import re, os
+import re, os, errno
 
 class sortdict(dict):
     'a simple sorted dictionary'
@@ -75,6 +75,7 @@ class config(object):
         itemre = re.compile(r'([^=\s][^=]*?)\s*=\s*(.*\S|)')
         contre = re.compile(r'\s+(\S|\S.*\S)\s*$')
         emptyre = re.compile(r'(;|#|\s*$)')
+        commentre = re.compile(r'(;|#)')
         unsetre = re.compile(r'%unset\s+(\S+)')
         includere = re.compile(r'%include\s+(\S|\S.*\S)\s*$')
         section = ""
@@ -85,6 +86,8 @@ class config(object):
         for l in data.splitlines(True):
             line += 1
             if cont:
+                if commentre.match(l):
+                    continue
                 m = contre.match(l)
                 if m:
                     if sections and section not in sections:
@@ -103,9 +106,10 @@ class config(object):
                     try:
                         include(inc, remap=remap, sections=sections)
                     except IOError, inst:
-                        raise error.ParseError(_("cannot include %s (%s)")
-                                               % (inc, inst.strerror),
-                                               "%s:%s" % (src, line))
+                        if inst.errno != errno.ENOENT:
+                            raise error.ParseError(_("cannot include %s (%s)")
+                                                   % (inc, inst.strerror),
+                                                   "%s:%s" % (src, line))
                 continue
             if emptyre.match(l):
                 continue
@@ -138,5 +142,5 @@ class config(object):
 
     def read(self, path, fp=None, sections=None, remap=None):
         if not fp:
-            fp = open(path)
+            fp = util.posixfile(path)
         self.parse(path, fp.read(), sections, remap, self.read)

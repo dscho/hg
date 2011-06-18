@@ -5,7 +5,7 @@
   > {
   >     tr '\\' /
   > }
-  $ cat > $HGRCPATH <<EOF
+  $ cat >> $HGRCPATH <<EOF
   > [extensions]
   > convert = 
   > graphlog =
@@ -106,6 +106,11 @@ Update svn repository again
   Transmitting file data .
   Committed revision 8.
   $ cd ..
+
+  $ hg convert -s svn "$svnurl/non-existent-path" dest
+  initializing destination dest repository
+  abort: no revision found in module /proj B/non-existent-path
+  [255]
 
 ########################################
 

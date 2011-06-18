@@ -22,6 +22,8 @@ filedifflink = '<a href="{url}diff/{node|short}/{file|urlescape}{sessionvars%url
 filenodelink = '<a href="{url}file/{node|short}/{file|urlescape}{sessionvars%urlparameter}">{file|escape}</a> '
 filenolink = '{file|escape} '
 fileellipses = '...'
+diffstatlink = diffstat.tmpl
+diffstatnolink = diffstat.tmpl
 changelogentry = shortlogentry.tmpl
 searchentry = shortlogentry.tmpl
 changeset = changeset.tmpl
@@ -93,14 +95,12 @@ filerevchild = '<a href="{url}file/{node|short}/{file|urlescape}{sessionvars%url
 
 filerename = '{file|escape}@'
 filelogrename = '
-  <tr>
-    <th>base:</th>
-    <td>
-      <a href="{url}file/{node|short}/{file|urlescape}{sessionvars%urlparameter}">
-        {file|escape}@{node|short}
-      </a>
-    </td>
-  </tr>'
+  <span class="base">
+    base
+    <a href="{url}file/{node|short}/{file|urlescape}{sessionvars%urlparameter}">
+      {file|escape}@{node|short}
+    </a>
+  </span>'
 fileannotateparent = '
   <tr>
     <td class="metatag">parent:</td>
@@ -198,7 +198,7 @@ indexentry = '
     <td><a href="{url}{sessionvars%urlparameter}">{name|escape}</a></td>
     <td>{description}</td>
     <td>{contact|obfuscate}</td>
-    <td class="age">{lastchange|age}</td>
+    <td class="age">{lastchange|date}</td>
     <td class="indexlinks">{archives%indexarchiveentry}</td>
   </tr>\n'
 indexarchiveentry = '<a href="{url}archive/{node|short}{extension|urlescape}">&nbsp;&darr;{type|escape}</a>'

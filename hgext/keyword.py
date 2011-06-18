@@ -60,11 +60,11 @@ For [keywordmaps] template mapping and expansion demonstration and
 control run :hg:`kwdemo`. See :hg:`help templates` for a list of
 available templates and filters.
 
-Three additional date template filters are provided::
+Three additional date template filters are provided:
 
-    utcdate      "2006/09/18 15:13:13"
-    svnutcdate   "2006-09-18 15:13:13Z"
-    svnisodate   "2006-09-18 08:13:13 -700 (Mon, 18 Sep 2006)"
+:``utcdate``:    "2006/09/18 15:13:13"
+:``svnutcdate``: "2006-09-18 15:13:13Z"
+:``svnisodate``: "2006-09-18 08:13:13 -700 (Mon, 18 Sep 2006)"
 
 The default template mappings (view with :hg:`kwdemo -d`) can be
 replaced with customized keywords and templates. Again, run
@@ -83,11 +83,15 @@ like CVS' $Log$, are not supported. A keyword template map "Log =
 
 from mercurial import commands, context, cmdutil, dispatch, filelog, extensions
 from mercurial import localrepo, match, patch, templatefilters, templater, util
+from mercurial import scmutil
 from mercurial.hgweb import webcommands
 from mercurial.i18n import _
 import os, re, shutil, tempfile
 
 commands.optionalrepo += ' kwdemo'
+
+cmdtable = {}
+command = cmdutil.command(cmdtable)
 
 # hg commands that do not act on keywords
 nokwcommands = ('add addremove annotate bundle export grep incoming init log'
@@ -109,11 +113,26 @@ colortable = {
 }
 
 # date like in cvs' $Date
-utcdate = lambda x: util.datestr((x[0], 0), '%Y/%m/%d %H:%M:%S')
+def utcdate(text):
+    ''':utcdate: Date. Returns a UTC-date in this format: "2009/08/18 11:00:13".
+    '''
+    return util.datestr((text[0], 0), '%Y/%m/%d %H:%M:%S')
 # date like in svn's $Date
-svnisodate = lambda x: util.datestr(x, '%Y-%m-%d %H:%M:%S %1%2 (%a, %d %b %Y)')
+def svnisodate(text):
+    ''':svnisodate: Date. Returns a date in this format: "2009-08-18 13:00:13
+    +0200 (Tue, 18 Aug 2009)".
+    '''
+    return util.datestr(text, '%Y-%m-%d %H:%M:%S %1%2 (%a, %d %b %Y)')
 # date like in svn's $Id
-svnutcdate = lambda x: util.datestr((x[0], 0), '%Y-%m-%d %H:%M:%SZ')
+def svnutcdate(text):
+    ''':svnutcdate: Date. Returns a UTC-date in this format: "2009-08-18
+    11:00:13Z".
+    '''
+    return util.datestr((text[0], 0), '%Y-%m-%d %H:%M:%SZ')
+
+templatefilters.filters.update({'utcdate': utcdate,
+                                'svnisodate': svnisodate,
+                                'svnutcdate': svnutcdate})
 
 # make keyword tools accessible
 kwtools = {'templater': None, 'hgcmd': ''}
@@ -176,9 +195,6 @@ class kwtemplater(object):
                                   for k, v in kwmaps)
         else:
             self.templates = _defaultkwmaps(self.ui)
-        templatefilters.filters.update({'utcdate': utcdate,
-                                        'svnisodate': svnisodate,
-                                        'svnutcdate': svnutcdate})
 
     @util.propertycache
     def escape(self):
@@ -310,7 +326,7 @@ def _status(ui, repo, kwt, *pats, **opts):
     '''Bails out if [keyword] configuration is not active.
     Returns status of working directory.'''
     if kwt:
-        return repo.status(match=cmdutil.match(repo, pats, opts), clean=True,
+        return repo.status(match=scmutil.match(repo[None], pats, opts), clean=True,
                            unknown=opts.get('unknown') or opts.get('all'))
     if ui.configitems('keyword'):
         raise util.Abort(_('[keyword] patterns cannot match'))
@@ -332,6 +348,11 @@ def _kwfwrite(ui, repo, expand, *pats, **opts):
     finally:
         wlock.release()
 
+@command('kwdemo',
+         [('d', 'default', None, _('show default keyword template maps')),
+          ('f', 'rcfile', '',
+           _('read maps from rcfile'), _('FILE'))],
+         _('hg kwdemo [-d] [-f RCFILE] [TEMPLATEMAP]...'))
 def demo(ui, repo, *args, **opts):
     '''print [keywordmaps] configuration and an expansion example
 
@@ -400,7 +421,7 @@ def demo(ui, repo, *args, **opts):
     demoitems('keywordset', ui.configitems('keywordset'))
     demoitems('keywordmaps', kwmaps.iteritems())
     keywords = '$' + '$\n$'.join(sorted(kwmaps.keys())) + '$\n'
-    repo.wopener(fn, 'w').write(keywords)
+    repo.wopener.write(fn, keywords)
     repo[None].add([fn])
     ui.note(_('\nkeywords written to %s:\n') % fn)
     ui.note(keywords)
@@ -415,6 +436,7 @@ def demo(ui, repo, *args, **opts):
     ui.write(repo.wread(fn))
     shutil.rmtree(tmpdir, ignore_errors=True)
 
+@command('kwexpand', commands.walkopts, _('hg kwexpand [OPTION]... [FILE]...'))
 def expand(ui, repo, *pats, **opts):
     '''expand keywords in the working directory
 
@@ -425,6 +447,12 @@ def expand(ui, repo, *pats, **opts):
     # 3rd argument sets expansion to True
     _kwfwrite(ui, repo, True, *pats, **opts)
 
+@command('kwfiles',
+         [('A', 'all', None, _('show keyword status flags of all files')),
+          ('i', 'ignore', None, _('show files excluded from expansion')),
+          ('u', 'unknown', None, _('only show unknown (not tracked) files')),
+         ] + commands.walkopts,
+         _('hg kwfiles [OPTION]... [FILE]...'))
 def files(ui, repo, *pats, **opts):
     '''show files configured for keyword expansion
 
@@ -471,6 +499,7 @@ def files(ui, repo, *pats, **opts):
         for f in filenames:
             ui.write(fmt % repo.pathto(f, cwd), label='kwfiles.' + kwstate)
 
+@command('kwshrink', commands.walkopts, _('hg kwshrink [OPTION]... [FILE]...'))
 def shrink(ui, repo, *pats, **opts):
     '''revert expanded keywords in the working directory
 
@@ -566,11 +595,10 @@ def reposetup(ui, repo):
                 wlock.release()
 
     # monkeypatches
-    def kwpatchfile_init(orig, self, ui, fname, opener,
-                         missing=False, eolmode=None):
+    def kwpatchfile_init(orig, self, ui, gp, backend, store, eolmode=None):
         '''Monkeypatch/wrap patch.patchfile.__init__ to avoid
         rejects or conflicts due to expanded keywords in working dir.'''
-        orig(self, ui, fname, opener, missing, eolmode)
+        orig(self, ui, gp, backend, store, eolmode)
         # shrink keywords read from working dir
         self.lines = kwt.shrinklines(self.fname, self.lines)
 
@@ -607,8 +635,8 @@ def reposetup(ui, repo):
             expansion. '''
             source = repo.dirstate.copied(dest)
             if 'l' in wctx.flags(source):
-                source = util.canonpath(repo.root, cwd,
-                                        os.path.realpath(source))
+                source = scmutil.canonpath(repo.root, cwd,
+                                           os.path.realpath(source))
             return kwt.match(source)
 
         candidates = [f for f in repo.dirstate.copies() if
@@ -660,23 +688,3 @@ def reposetup(ui, repo):
             pass
 
     repo.__class__ = kwrepo
-
-cmdtable = {
-    'kwdemo':
-        (demo,
-         [('d', 'default', None, _('show default keyword template maps')),
-          ('f', 'rcfile', '',
-           _('read maps from rcfile'), _('FILE'))],
-         _('hg kwdemo [-d] [-f RCFILE] [TEMPLATEMAP]...')),
-    'kwexpand': (expand, commands.walkopts,
-                 _('hg kwexpand [OPTION]... [FILE]...')),
-    'kwfiles':
-        (files,
-         [('A', 'all', None, _('show keyword status flags of all files')),
-          ('i', 'ignore', None, _('show files excluded from expansion')),
-          ('u', 'unknown', None, _('only show unknown (not tracked) files')),
-         ] + commands.walkopts,
-         _('hg kwfiles [OPTION]... [FILE]...')),
-    'kwshrink': (shrink, commands.walkopts,
-                 _('hg kwshrink [OPTION]... [FILE]...')),
-}

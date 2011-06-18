@@ -100,9 +100,15 @@ def delayopener(opener, target, divert, buf):
 class changelog(revlog.revlog):
     def __init__(self, opener):
         revlog.revlog.__init__(self, opener, "00changelog.i")
+        if self._initempty:
+            # changelogs don't benefit from generaldelta
+            self.version &= ~revlog.REVLOGGENERALDELTA
+            self._generaldelta = False
         self._realopener = opener
         self._delayed = False
         self._divert = False
+        # hiddenrevs: revs that should be hidden by command and tools
+        self.hiddenrevs = set()
 
     def delayupdate(self):
         "delay visibility of index updates to other readers"
@@ -118,7 +124,9 @@ class changelog(revlog.revlog):
         self.opener = self._realopener
         # move redirected index data back into place
         if self._divert:
-            n = self.opener(self.indexfile + ".a").name
+            nfile = self.opener(self.indexfile + ".a")
+            n = nfile.name
+            nfile.close()
             util.rename(n, n[:-2])
         elif self._delaybuf:
             fp = self.opener(self.indexfile, 'a')
@@ -185,7 +193,7 @@ class changelog(revlog.revlog):
             try:
                 # various tools did silly things with the time zone field.
                 timezone = int(extra_data[0])
-            except:
+            except ValueError:
                 timezone = 0
             extra = {}
         else:

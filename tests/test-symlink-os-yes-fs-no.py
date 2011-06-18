@@ -1,7 +1,8 @@
 import os, sys, time
-from mercurial import hg, ui, commands
+from mercurial import hg, ui, commands, util
 
 TESTDIR = os.environ["TESTDIR"]
+BUNDLEPATH = os.path.join(TESTDIR, 'bundles', 'test-no-symlinks.hg')
 
 # only makes sense to test on os which supports symlinks
 if not hasattr(os, "symlink"):
@@ -9,7 +10,7 @@ if not hasattr(os, "symlink"):
 
 # clone with symlink support
 u = ui.ui()
-hg.clone(u, os.path.join(TESTDIR, 'test-no-symlinks.hg'), 'test0')
+hg.clone(u, {}, BUNDLEPATH, 'test0')
 
 repo = hg.repository(u, 'test0')
 
@@ -28,7 +29,7 @@ os.symlink = symlink_failure
 for f in 'test0/a.lnk', 'test0/d/b.lnk':
     os.unlink(f)
     fp = open(f, 'wb')
-    fp.write(open(f[:-4]).read())
+    fp.write(util.readfile(f[:-4]))
     fp.close()
 
 # reload repository
@@ -38,4 +39,4 @@ commands.status(u, repo)
 
 # try cloning a repo which contains symlinks
 u = ui.ui()
-hg.clone(u, os.path.join(TESTDIR, 'test-no-symlinks.hg'), 'test1')
+hg.clone(u, {}, BUNDLEPATH, 'test1')

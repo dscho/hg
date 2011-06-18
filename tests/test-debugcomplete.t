@@ -67,6 +67,7 @@ Show debug commands if there are no other candidates
   $ hg debugcomplete debug
   debugancestor
   debugbuilddag
+  debugbundle
   debugcheckstate
   debugcommands
   debugcomplete
@@ -74,19 +75,25 @@ Show debug commands if there are no other candidates
   debugdag
   debugdata
   debugdate
+  debugdiscovery
+  debugfileset
   debugfsinfo
+  debuggetbundle
   debugignore
   debugindex
   debugindexdot
   debuginstall
+  debugknown
   debugpushkey
   debugrebuildstate
   debugrename
+  debugrevlog
   debugrevspec
   debugsetparents
   debugstate
   debugsub
   debugwalk
+  debugwireargs
 
 Do not show the alias of a debug command if there are other candidates
 (this should hide rawcommit)
@@ -130,6 +137,7 @@ Show the options for the "serve" command
   --accesslog
   --address
   --certificate
+  --cmdserver
   --config
   --cwd
   --daemon
@@ -187,54 +195,61 @@ Show all commands + options
   export: output, switch-parent, rev, text, git, nodates
   forget: include, exclude
   init: ssh, remotecmd, insecure
-  log: follow, follow-first, date, copies, keyword, rev, removed, only-merges, user, only-branch, branch, prune, patch, git, limit, no-merges, stat, style, template, include, exclude
+  log: follow, follow-first, date, copies, keyword, rev, removed, only-merges, user, only-branch, branch, prune, hidden, patch, git, limit, no-merges, stat, style, template, include, exclude
   merge: force, tool, rev, preview
   pull: update, force, rev, bookmark, branch, ssh, remotecmd, insecure
   push: force, rev, bookmark, branch, new-branch, ssh, remotecmd, insecure
   remove: after, force, include, exclude
-  serve: accesslog, daemon, daemon-pipefds, errorlog, port, address, prefix, name, web-conf, webdir-conf, pid-file, stdio, templates, style, ipv6, certificate
+  serve: accesslog, daemon, daemon-pipefds, errorlog, port, address, prefix, name, web-conf, webdir-conf, pid-file, stdio, cmdserver, templates, style, ipv6, certificate
   status: all, modified, added, removed, deleted, clean, unknown, ignored, no-status, copies, print0, rev, change, include, exclude, subrepos
   summary: remote
   update: clean, check, date, rev
   addremove: similarity, include, exclude, dry-run
   archive: no-decode, prefix, rev, type, subrepos, include, exclude
   backout: merge, parent, tool, rev, include, exclude, message, logfile, date, user
-  bisect: reset, good, bad, skip, command, noupdate
-  bookmarks: force, rev, delete, rename
+  bisect: reset, good, bad, skip, extend, command, noupdate
+  bookmarks: force, rev, delete, rename, inactive
   branch: force, clean
   branches: active, closed
   bundle: force, rev, branch, base, all, type, ssh, remotecmd, insecure
   cat: output, rev, decode, include, exclude
   copy: after, force, include, exclude, dry-run
   debugancestor: 
-  debugbuilddag: mergeable-file, appended-file, overwritten-file, new-file
+  debugbuilddag: mergeable-file, overwritten-file, new-file
+  debugbundle: all
   debugcheckstate: 
   debugcommands: 
   debugcomplete: options
   debugdag: tags, branches, dots, spaces
-  debugdata: 
+  debugdata: changelog, manifest
   debugdate: extended
+  debugdiscovery: old, nonheads, ssh, remotecmd, insecure
+  debugfileset: 
   debugfsinfo: 
+  debuggetbundle: head, common, type
   debugignore: 
-  debugindex: format
+  debugindex: changelog, manifest, format
   debugindexdot: 
   debuginstall: 
+  debugknown: 
   debugpushkey: 
   debugrebuildstate: rev
   debugrename: rev
+  debugrevlog: changelog, manifest, dump
   debugrevspec: 
   debugsetparents: 
-  debugstate: nodates
+  debugstate: nodates, datesort
   debugsub: rev
   debugwalk: include, exclude
-  grep: print0, all, follow, ignore-case, files-with-matches, line-number, rev, user, date, include, exclude
+  debugwireargs: three, four, five, ssh, remotecmd, insecure
+  grep: print0, all, text, follow, ignore-case, files-with-matches, line-number, rev, user, date, include, exclude
   heads: rev, topo, active, closed, style, template
-  help: 
+  help: extension, command
   identify: rev, num, id, branch, tags, bookmarks
-  import: strip, base, force, no-commit, exact, import-branch, message, logfile, date, user, similarity
+  import: strip, base, force, no-commit, bypass, exact, import-branch, message, logfile, date, user, similarity
   incoming: force, newest-first, bundle, rev, bookmarks, branch, patch, git, limit, no-merges, stat, style, template, ssh, remotecmd, insecure, subrepos
   locate: rev, print0, fullpath, include, exclude
-  manifest: rev
+  manifest: rev, all
   outgoing: force, rev, newest-first, bookmarks, branch, patch, git, limit, no-merges, stat, style, template, ssh, remotecmd, insecure, subrepos
   parents: rev, style, template
   paths: 

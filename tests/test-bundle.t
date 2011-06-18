@@ -206,7 +206,7 @@ doesn't work (yet ?)
 hg -R bundle://../full.hg verify
 
   $ hg pull bundle://../full.hg
-  pulling from bundle://../full.hg
+  pulling from bundle:../full.hg
   requesting all changes
   adding changesets
   adding manifests
@@ -310,7 +310,7 @@ Log -R full.hg in partial
 Incoming full.hg in partial
 
   $ hg incoming bundle://../full.hg
-  comparing with bundle://../full.hg
+  comparing with bundle:../full.hg
   searching for changes
   changeset:   4:095197eb4973
   parent:      0:f9ee2f85a263
@@ -470,6 +470,22 @@ test for 540d1059c802
   
   $ cd ..
 
+test bundle with # in the filename (issue2154):
+
+  $ cp bundle.hg 'test#bundle.hg'
+  $ cd orig
+  $ hg incoming '../test#bundle.hg'
+  comparing with ../test
+  abort: unknown revision 'bundle.hg'!
+  [255]
+
+note that percent encoding is not handled:
+
+  $ hg incoming ../test%23bundle.hg
+  abort: repository ../test%23bundle.hg not found!
+  [255]
+  $ cd ..
+
 test for http://mercurial.selenic.com/bts/issue1144
 
 test that verify bundle does not traceback
@@ -545,32 +561,17 @@ bundle single branch
 == bundling
 
   $ hg bundle bundle.hg part --debug
+  query 1; heads
   searching for changes
-  common changesets up to c0025332f9ed
+  all remote heads known locally
   2 changesets found
   list of changesets:
   d2ae7f538514cd87c17547b0de4cea71fe1af9fb
   5ece8e77363e2b5269e27c66828b72da29e4341a
-  bundling: 0 changesets
-  bundling: 0 changesets
-  bundling: 0 changesets
-  bundling: 1 changesets
-  bundling: 1 changesets
-  bundling: 1 changesets
-  bundling: 2 changesets
-  bundling: 0/2 manifests (0.00%)
-  bundling: 0/2 manifests (0.00%)
-  bundling: 0/2 manifests (0.00%)
-  bundling: 1/2 manifests (50.00%)
-  bundling: 1/2 manifests (50.00%)
+  bundling: 1/2 changesets (50.00%)
+  bundling: 2/2 changesets (100.00%)
   bundling: 1/2 manifests (50.00%)
   bundling: 2/2 manifests (100.00%)
-  bundling: b 0/2 files (0.00%)
-  bundling: b 0/2 files (0.00%)
-  bundling: b 0/2 files (0.00%)
-  bundling: b 0/2 files (0.00%)
-  bundling: b1 1/2 files (50.00%)
-  bundling: b1 1/2 files (50.00%)
-  bundling: b1 1/2 files (50.00%)
-  bundling: b1 1/2 files (50.00%)
+  bundling: b 1/2 files (50.00%)
+  bundling: b1 2/2 files (100.00%)
 

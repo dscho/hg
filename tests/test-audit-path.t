@@ -33,7 +33,7 @@ unbundle tampered bundle
 
   $ hg init target
   $ cd target
-  $ hg unbundle $TESTDIR/tampered.hg
+  $ hg unbundle $TESTDIR/bundles/tampered.hg
   adding changesets
   adding manifests
   adding file changes
@@ -53,7 +53,7 @@ attack foo/.hg/test
   $ hg manifest -r1
   foo/.hg/test
   $ hg update -Cr1
-  abort: path 'foo/.hg/test' is inside repo 'foo'
+  abort: path 'foo/.hg/test' is inside nested repo 'foo'
   [255]
 
 attack back/test where back symlinks to ..

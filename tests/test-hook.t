@@ -168,6 +168,61 @@ update hook
   update hook: HG_ERROR=0 HG_PARENT1=539e4b31b6dc 
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
+pushkey hook
+
+  $ echo 'pushkey = python "$TESTDIR"/printenv.py pushkey' >> .hg/hgrc
+  $ cd ../b
+  $ hg bookmark -r null foo
+  $ hg push -B foo ../a
+  pushing to ../a
+  searching for changes
+  no changes found
+  exporting bookmark foo
+  pushkey hook: HG_KEY=foo HG_NAMESPACE=bookmarks HG_NEW=0000000000000000000000000000000000000000 HG_RET=1 
+  $ cd ../a
+
+listkeys hook
+
+  $ echo 'listkeys = python "$TESTDIR"/printenv.py listkeys' >> .hg/hgrc
+  $ hg bookmark -r null bar
+  $ cd ../b
+  $ hg pull -B bar ../a
+  pulling from ../a
+  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'} 
+  no changes found
+  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'} 
+  importing bookmark bar
+  $ cd ../a
+
+test that prepushkey can prevent incoming keys
+
+  $ echo 'prepushkey = python "$TESTDIR"/printenv.py prepushkey.forbid 1' >> .hg/hgrc
+  $ cd ../b
+  $ hg bookmark -r null baz
+  $ hg push -B baz ../a
+  pushing to ../a
+  searching for changes
+  no changes found
+  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'} 
+  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'} 
+  exporting bookmark baz
+  prepushkey.forbid hook: HG_KEY=baz HG_NAMESPACE=bookmarks HG_NEW=0000000000000000000000000000000000000000 
+  abort: prepushkey hook exited with status 1
+  [255]
+  $ cd ../a
+
+test that prelistkeys can prevent listing keys
+
+  $ echo 'prelistkeys = python "$TESTDIR"/printenv.py prelistkeys.forbid 1' >> .hg/hgrc
+  $ hg bookmark -r null quux
+  $ cd ../b
+  $ hg pull -B quux ../a
+  pulling from ../a
+  prelistkeys.forbid hook: HG_NAMESPACE=bookmarks 
+  abort: prelistkeys hook exited with status 1
+  [255]
+  $ cd ../a
+
 prechangegroup hook can prevent incoming changes
 
   $ cd ../b
@@ -290,6 +345,9 @@ preoutgoing hook can prevent outgoing changes for local clones
   > 
   > def brokenhook(**args):
   >     return 1 + {}
+  > 
+  > def verbosehook(ui, **args):
+  >     ui.note('verbose output from hook\n')
   > 
   > class container:
   >     unreachable = 1
@@ -480,3 +538,14 @@ commit and update hooks should run after command completion
   cb9a9f314b8b
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
+make sure --verbose (and --quiet/--debug etc.) are propogated to the local ui
+that is passed to pre/post hooks
+
+  $ echo '[hooks]' > .hg/hgrc
+  $ echo 'pre-identify = python:hooktests.verbosehook' >> .hg/hgrc
+  $ hg id
+  cb9a9f314b8b
+  $ hg id --verbose
+  calling hook pre-identify: hooktests.verbosehook
+  verbose output from hook
+  cb9a9f314b8b

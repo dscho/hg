@@ -99,3 +99,29 @@ list bookmarks
 
   $ hg bookmark
    * Y                         0:719295282060
+
+set bookmark Z using -i
+
+  $ hg bookmark -r . -i Z
+  $ hg bookmarks
+   * Y                         0:719295282060
+     Z                         0:719295282060
+
+deactivate current bookmark using -i
+
+  $ hg bookmark -i Y
+  $ hg bookmarks
+     Y                         0:719295282060
+     Z                         0:719295282060
+
+  $ hg up -q Y
+  $ hg bookmarks
+   * Y                         0:719295282060
+     Z                         0:719295282060
+
+deactivate current bookmark while renaming
+
+  $ hg bookmark -i -m Y X
+  $ hg bookmarks
+     X                         0:719295282060
+     Z                         0:719295282060

@@ -13,13 +13,12 @@ were part of the actual repository.
 
 from node import nullid
 from i18n import _
-import os, struct, tempfile, shutil
+import os, tempfile, shutil
 import changegroup, util, mdiff, discovery
 import localrepo, changelog, manifest, filelog, revlog, error
 
 class bundlerevlog(revlog.revlog):
-    def __init__(self, opener, indexfile, bundle,
-                 linkmapper=None):
+    def __init__(self, opener, indexfile, bundle, linkmapper):
         # How it works:
         # to retrieve a revision, we need to know the offset of
         # the revision in the bundle (an unbundle object).
@@ -32,43 +31,39 @@ class bundlerevlog(revlog.revlog):
         revlog.revlog.__init__(self, opener, indexfile)
         self.bundle = bundle
         self.basemap = {}
-        def chunkpositer():
-            while 1:
-                chunk = bundle.chunk()
-                if not chunk:
-                    break
-                pos = bundle.tell()
-                yield chunk, pos - len(chunk)
         n = len(self)
-        prev = None
-        for chunk, start in chunkpositer():
-            size = len(chunk)
-            if size < 80:
-                raise util.Abort(_("invalid changegroup"))
-            start += 80
-            size -= 80
-            node, p1, p2, cs = struct.unpack("20s20s20s20s", chunk[:80])
+        chain = None
+        while True:
+            chunkdata = bundle.deltachunk(chain)
+            if not chunkdata:
+                break
+            node = chunkdata['node']
+            p1 = chunkdata['p1']
+            p2 = chunkdata['p2']
+            cs = chunkdata['cs']
+            deltabase = chunkdata['deltabase']
+            delta = chunkdata['delta']
+
+            size = len(delta)
+            start = bundle.tell() - size
+
+            link = linkmapper(cs)
             if node in self.nodemap:
-                prev = node
+                # this can happen if two branches make the same change
+                chain = node
                 continue
+
             for p in (p1, p2):
                 if not p in self.nodemap:
                     raise error.LookupError(p, self.indexfile,
                                             _("unknown parent"))
-            if linkmapper is None:
-                link = n
-            else:
-                link = linkmapper(cs)
-
-            if not prev:
-                prev = p1
             # start, size, full unc. size, base (unused), link, p1, p2, node
             e = (revlog.offset_type(start, 0), size, -1, -1, link,
                  self.rev(p1), self.rev(p2), node)
-            self.basemap[n] = prev
+            self.basemap[n] = deltabase
             self.index.insert(-1, e)
             self.nodemap[node] = n
-            prev = node
+            chain = node
             n += 1
 
     def inbundle(self, rev):
@@ -144,7 +139,9 @@ class bundlerevlog(revlog.revlog):
 class bundlechangelog(bundlerevlog, changelog.changelog):
     def __init__(self, opener, bundle):
         changelog.changelog.__init__(self, opener)
-        bundlerevlog.__init__(self, opener, self.indexfile, bundle)
+        linkmapper = lambda x: x
+        bundlerevlog.__init__(self, opener, self.indexfile, bundle,
+                              linkmapper)
 
 class bundlemanifest(bundlerevlog, manifest.manifest):
     def __init__(self, opener, bundle, linkmapper):
@@ -153,10 +150,14 @@ class bundlemanifest(bundlerevlog, manifest.manifest):
                               linkmapper)
 
 class bundlefilelog(bundlerevlog, filelog.filelog):
-    def __init__(self, opener, path, bundle, linkmapper):
+    def __init__(self, opener, path, bundle, linkmapper, repo):
         filelog.filelog.__init__(self, opener, path)
         bundlerevlog.__init__(self, opener, self.indexfile, bundle,
                               linkmapper)
+        self._repo = repo
+
+    def _file(self, f):
+        self._repo.file(f)
 
 class bundlerepository(localrepo.localrepository):
     def __init__(self, ui, path, bundlename):
@@ -184,7 +185,7 @@ class bundlerepository(localrepo.localrepository):
 
             try:
                 fptemp.write("HG10UN")
-                while 1:
+                while True:
                     chunk = self.bundle.read(2**18)
                     if not chunk:
                         break
@@ -200,6 +201,8 @@ class bundlerepository(localrepo.localrepository):
 
     @util.propertycache
     def changelog(self):
+        # consume the header if it exists
+        self.bundle.changelogheader()
         c = bundlechangelog(self.sopener, self.bundle)
         self.manstart = self.bundle.tell()
         return c
@@ -207,6 +210,8 @@ class bundlerepository(localrepo.localrepository):
     @util.propertycache
     def manifest(self):
         self.bundle.seek(self.manstart)
+        # consume the header if it exists
+        self.bundle.manifestheader()
         m = bundlemanifest(self.sopener, self.bundle, self.changelog.rev)
         self.filestart = self.bundle.tell()
         return m
@@ -227,13 +232,14 @@ class bundlerepository(localrepo.localrepository):
     def file(self, f):
         if not self.bundlefilespos:
             self.bundle.seek(self.filestart)
-            while 1:
-                chunk = self.bundle.chunk()
-                if not chunk:
+            while True:
+                chunkdata = self.bundle.filelogheader()
+                if not chunkdata:
                     break
-                self.bundlefilespos[chunk] = self.bundle.tell()
-                while 1:
-                    c = self.bundle.chunk()
+                fname = chunkdata['filename']
+                self.bundlefilespos[fname] = self.bundle.tell()
+                while True:
+                    c = self.bundle.deltachunk(None)
                     if not c:
                         break
 
@@ -242,7 +248,7 @@ class bundlerepository(localrepo.localrepository):
         if f in self.bundlefilespos:
             self.bundle.seek(self.bundlefilespos[f])
             return bundlefilelog(self.sopener, f, self.bundle,
-                                 self.changelog.rev)
+                                 self.changelog.rev, self)
         else:
             return filelog.filelog(self.sopener, f)
 
@@ -274,9 +280,9 @@ def instance(ui, path, create):
             cwd = os.path.join(cwd,'')
             if parentpath.startswith(cwd):
                 parentpath = parentpath[len(cwd):]
-    path = util.drop_scheme('file', path)
-    if path.startswith('bundle:'):
-        path = util.drop_scheme('bundle', path)
+    u = util.url(path)
+    path = u.localpath()
+    if u.scheme == 'bundle':
         s = path.split("+", 1)
         if len(s) == 1:
             repopath, bundlename = parentpath, s[0]
@@ -286,27 +292,48 @@ def instance(ui, path, create):
         repopath, bundlename = parentpath, path
     return bundlerepository(ui, repopath, bundlename)
 
-def getremotechanges(ui, repo, other, revs=None, bundlename=None, force=False):
-    tmp = discovery.findcommonincoming(repo, other, heads=revs, force=force)
+def getremotechanges(ui, repo, other, onlyheads=None, bundlename=None,
+                     force=False):
+    '''obtains a bundle of changes incoming from other
+
+    "onlyheads" restricts the returned changes to those reachable from the
+      specified heads.
+    "bundlename", if given, stores the bundle to this file path permanently;
+      otherwise it's stored to a temp file and gets deleted again when you call
+      the returned "cleanupfn".
+    "force" indicates whether to proceed on unrelated repos.
+
+    Returns a tuple (local, csets, cleanupfn):
+
+    "local" is a local repo from which to obtain the actual incoming changesets; it
+      is a bundlerepo for the obtained bundle when the original "other" is remote.
+    "csets" lists the incoming changeset node ids.
+    "cleanupfn" must be called without arguments when you're done processing the
+      changes; it closes both the original "other" and the one returned here.
+    '''
+    tmp = discovery.findcommonincoming(repo, other, heads=onlyheads, force=force)
     common, incoming, rheads = tmp
     if not incoming:
         try:
             os.unlink(bundlename)
-        except:
+        except OSError:
             pass
-        return other, None, None
+        return other, [], other.close
 
     bundle = None
+    bundlerepo = None
+    localrepo = other
     if bundlename or not other.local():
         # create a bundle (uncompressed if other repo is not local)
 
-        if revs is None and other.capable('changegroupsubset'):
-            revs = rheads
-
-        if revs is None:
+        if other.capable('getbundle'):
+            cg = other.getbundle('incoming', common=common, heads=rheads)
+        elif onlyheads is None and not other.capable('changegroupsubset'):
+            # compat with older servers when pulling all remote heads
             cg = other.changegroup(incoming, "incoming")
+            rheads = None
         else:
-            cg = other.changegroupsubset(incoming, revs, 'incoming')
+            cg = other.changegroupsubset(incoming, rheads, 'incoming')
         bundletype = other.local() and "HG10BZ" or "HG10UN"
         fname = bundle = changegroup.writebundle(cg, bundlename, bundletype)
         # keep written bundle?
@@ -314,6 +341,18 @@ def getremotechanges(ui, repo, other, revs=None, bundlename=None, force=False):
             bundle = None
         if not other.local():
             # use the created uncompressed bundlerepo
-            other = bundlerepository(ui, repo.root, fname)
-    return (other, incoming, bundle)
+            localrepo = bundlerepo = bundlerepository(ui, repo.root, fname)
+            # this repo contains local and other now, so filter out local again
+            common = repo.heads()
+
+    csets = localrepo.changelog.findmissing(common, rheads)
+
+    def cleanup():
+        if bundlerepo:
+            bundlerepo.close()
+        if bundle:
+            os.unlink(bundle)
+        other.close()
+
+    return (localrepo, csets, cleanup)
 
