@@ -42,7 +42,7 @@ These are the supported infix operators:
 
 ``x - y``
   Changesets in x but not in y.
-  
+
 ``x^n``
   The nth parent of x, n == 0, 1, or 2.
   For n == 0, x; for n == 1, the first parent of each changeset in x;
@@ -66,8 +66,9 @@ existing predicates or other aliases. An alias definition looks like::
 
   <alias> = <definition>
 
-in the ``revsetalias`` section of ``.hgrc``. Arguments of the form `$1`, `$2`,
-etc. are substituted from the alias into the definition.
+in the ``revsetalias`` section of a Mercurial configuration file. Arguments
+of the form `$1`, `$2`, etc. are substituted from the alias into the
+definition.
 
 For example,
 
