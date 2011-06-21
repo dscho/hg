@@ -267,8 +267,8 @@ class cmdalias(object):
                     elif int(m.groups()[0]) <= len(args):
                         return m.group()
                     else:
-                        ui.debug(_("No argument found for substitution "
-                                   "of %i variable in alias '%s' definition.")
+                        ui.debug("No argument found for substitution "
+                                 "of %i variable in alias '%s' definition."
                                  % (int(m.groups()[0]), self.name))
                         return ''
                 cmd = re.sub(r'\$(\d+|\$)', _checkvar, self.definition[1:])
@@ -333,7 +333,7 @@ class cmdalias(object):
 
     def __call__(self, ui, *args, **opts):
         if self.shadows:
-            ui.debug(_("alias '%s' shadows command '%s'\n") %
+            ui.debug("alias '%s' shadows command '%s'\n" %
                      (self.name, self.cmdname))
 
         if hasattr(self, 'shell'):
@@ -343,7 +343,7 @@ class cmdalias(object):
                 util.checksignature(self.fn)(ui, *args, **opts)
             except error.SignatureError:
                 args = ' '.join([self.cmdname] + self.args)
-                ui.debug(_("alias '%s' expands to '%s'\n") % (self.name, args))
+                ui.debug("alias '%s' expands to '%s'\n" % (self.name, args))
                 raise
 
 def addaliases(ui, cmdtable):

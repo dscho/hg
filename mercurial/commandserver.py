@@ -155,6 +155,9 @@ class server(object):
             raise util.Abort(_('unknown mode %s') % mode)
 
     def _read(self, size):
+        if not size:
+            return ''
+
         data = self.client.read(size)
 
         # is the other end closed?
@@ -168,7 +171,10 @@ class server(object):
         and writes the return code to the result channel """
 
         length = struct.unpack('>I', self._read(4))[0]
-        args = self._read(length).split('\0')
+        if not length:
+            args = []
+        else:
+            args = self._read(length).split('\0')
 
         # copy the ui so changes to it don't persist between requests
         req = dispatch.request(args, self.ui.copy(), self.repo, self.cin,
