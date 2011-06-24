@@ -254,8 +254,7 @@ def _sizetoint(s):
                 return int(float(s[:-len(k)]) * v)
         return int(s)
     except ValueError:
-        raise
-        raise error.ParseError(_("couldn't parse size"), s)
+        raise error.ParseError(_("couldn't parse size: %s") % s)
 
 def _sizetomax(s):
     try:
@@ -271,8 +270,7 @@ def _sizetomax(s):
         # no extension, this is a precise value
         return int(s)
     except ValueError:
-        raise
-        raise error.ParseError(_("couldn't parse size"), s)
+        raise error.ParseError(_("couldn't parse size: %s") % s)
 
 def size(mctx, x):
     """``size(expression)``
@@ -284,7 +282,7 @@ def size(mctx, x):
     - 4k - 1MB (files from 4096 bytes to 1048576 bytes)
     """
 
-    expr = getstring(x, _("grep requires a pattern")).strip()
+    expr = getstring(x, _("size requires an expression")).strip()
     if '-' in expr: # do we have a range?
         a, b = expr.split('-', 1)
         a = _sizetoint(a)
@@ -307,7 +305,7 @@ def size(mctx, x):
         b = _sizetomax(expr)
         m = lambda x: x >= a and x <= b
     else:
-        raise error.ParseError(_("couldn't parse size"), expr)
+        raise error.ParseError(_("couldn't parse size: %s") % expr)
 
     return [f for f in mctx.subset if m(mctx.ctx[f].size())]
 
@@ -337,6 +335,7 @@ def copied(mctx, x):
     """``copied()``
     File that is recorded as being copied.
     """
+    getargs(x, 0, 0, _("copied takes no arguments"))
     s = []
     for f in mctx.subset:
         p = mctx.ctx[f].parents()
