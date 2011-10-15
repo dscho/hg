@@ -66,6 +66,7 @@ Short help:
    diff         diff repository (or selected files)
    export       dump the header and diffs for one or more changesets
    forget       forget the specified files on the next commit
+   graft        copy changes from other branches onto the current branch
    grep         search for a pattern in specified files and revisions
    heads        show current repository heads or show branch heads
    help         show help for a given topic or a help overview
@@ -141,6 +142,7 @@ Short help:
    diff         diff repository (or selected files)
    export       dump the header and diffs for one or more changesets
    forget       forget the specified files on the next commit
+   graft        copy changes from other branches onto the current branch
    grep         search for a pattern in specified files and revisions
    heads        show current repository heads or show branch heads
    help         show help for a given topic or a help overview
@@ -199,12 +201,7 @@ Short help:
 Test short command list with verbose option
 
   $ hg -v help shortlist
-  Mercurial Distributed SCM (version *) (glob)
-  (see http://mercurial.selenic.com for more information)
-  
-  Copyright (C) 2005-2011 Matt Mackall and others
-  This is free software; see the source for copying conditions. There is NO
-  warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  Mercurial Distributed SCM
   
   basic commands:
   
@@ -244,23 +241,24 @@ Test short command list with verbose option
         update working directory (or switch revisions)
   
   global options:
-   -R --repository REPO    repository root directory or name of overlay bundle
-                           file
-      --cwd DIR            change working directory
-   -y --noninteractive     do not prompt, automatically pick the first choice
-                           for all prompts
-   -q --quiet              suppress output
-   -v --verbose            enable additional output
-      --config CONFIG [+]  set/override config option (use 'section.name=value')
-      --debug              enable debugging output
-      --debugger           start debugger
-      --encoding ENCODE    set the charset encoding (default: ascii)
-      --encodingmode MODE  set the charset encoding mode (default: strict)
-      --traceback          always print a traceback on exception
-      --time               time how long the command takes
-      --profile            print command execution profile
-      --version            output version information and exit
-   -h --help               display help and exit
+  
+   -R --repository REPO   repository root directory or name of overlay bundle
+                          file
+      --cwd DIR           change working directory
+   -y --noninteractive    do not prompt, automatically pick the first choice for
+                          all prompts
+   -q --quiet             suppress output
+   -v --verbose           enable additional output
+      --config CONFIG [+] set/override config option (use 'section.name=value')
+      --debug             enable debugging output
+      --debugger          start debugger
+      --encoding ENCODE   set the charset encoding (default: ascii)
+      --encodingmode MODE set the charset encoding mode (default: strict)
+      --traceback         always print a traceback on exception
+      --time              time how long the command takes
+      --profile           print command execution profile
+      --version           output version information and exit
+   -h --help              display help and exit
   
   [+] marked option can be specified multiple times
   
@@ -280,18 +278,16 @@ Test short command list with verbose option
   
       Returns 0 if all files are successfully added.
   
-  use "hg -v help add" to show verbose help
-  
   options:
   
-   -I --include PATTERN [+]  include names matching the given patterns
-   -X --exclude PATTERN [+]  exclude names matching the given patterns
-   -S --subrepos             recurse into subrepositories
-   -n --dry-run              do not perform actions, just print output
+   -I --include PATTERN [+] include names matching the given patterns
+   -X --exclude PATTERN [+] exclude names matching the given patterns
+   -S --subrepos            recurse into subrepositories
+   -n --dry-run             do not perform actions, just print output
   
   [+] marked option can be specified multiple times
   
-  use "hg -v help add" to show global options
+  use "hg -v help add" to show more info
 
 Verbose help for add
 
@@ -323,30 +319,32 @@ Verbose help for add
   
   options:
   
-   -I --include PATTERN [+]  include names matching the given patterns
-   -X --exclude PATTERN [+]  exclude names matching the given patterns
-   -S --subrepos             recurse into subrepositories
-   -n --dry-run              do not perform actions, just print output
+   -I --include PATTERN [+] include names matching the given patterns
+   -X --exclude PATTERN [+] exclude names matching the given patterns
+   -S --subrepos            recurse into subrepositories
+   -n --dry-run             do not perform actions, just print output
+  
+  [+] marked option can be specified multiple times
   
   global options:
-   -R --repository REPO      repository root directory or name of overlay bundle
-                             file
-      --cwd DIR              change working directory
-   -y --noninteractive       do not prompt, automatically pick the first choice
-                             for all prompts
-   -q --quiet                suppress output
-   -v --verbose              enable additional output
-      --config CONFIG [+]    set/override config option (use
-                             'section.name=value')
-      --debug                enable debugging output
-      --debugger             start debugger
-      --encoding ENCODE      set the charset encoding (default: ascii)
-      --encodingmode MODE    set the charset encoding mode (default: strict)
-      --traceback            always print a traceback on exception
-      --time                 time how long the command takes
-      --profile              print command execution profile
-      --version              output version information and exit
-   -h --help                 display help and exit
+  
+   -R --repository REPO   repository root directory or name of overlay bundle
+                          file
+      --cwd DIR           change working directory
+   -y --noninteractive    do not prompt, automatically pick the first choice for
+                          all prompts
+   -q --quiet             suppress output
+   -v --verbose           enable additional output
+      --config CONFIG [+] set/override config option (use 'section.name=value')
+      --debug             enable debugging output
+      --debugger          start debugger
+      --encoding ENCODE   set the charset encoding (default: ascii)
+      --encodingmode MODE set the charset encoding mode (default: strict)
+      --traceback         always print a traceback on exception
+      --time              time how long the command takes
+      --profile           print command execution profile
+      --version           output version information and exit
+   -h --help              display help and exit
   
   [+] marked option can be specified multiple times
 
@@ -359,32 +357,6 @@ Test help option with version option
   Copyright (C) 2005-2011 Matt Mackall and others
   This is free software; see the source for copying conditions. There is NO
   warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-  
-  hg add [OPTION]... [FILE]...
-  
-  add the specified files on the next commit
-  
-      Schedule files to be version controlled and added to the repository.
-  
-      The files will be added to the repository at the next commit. To undo an
-      add before that, see "hg forget".
-  
-      If no names are given, add all files to the repository.
-  
-      Returns 0 if all files are successfully added.
-  
-  use "hg -v help add" to show verbose help
-  
-  options:
-  
-   -I --include PATTERN [+]  include names matching the given patterns
-   -X --exclude PATTERN [+]  exclude names matching the given patterns
-   -S --subrepos             recurse into subrepositories
-   -n --dry-run              do not perform actions, just print output
-  
-  [+] marked option can be specified multiple times
-  
-  use "hg -v help add" to show global options
 
   $ hg add --skjdfks
   hg add: option --skjdfks not recognized
@@ -394,10 +366,10 @@ Test help option with version option
   
   options:
   
-   -I --include PATTERN [+]  include names matching the given patterns
-   -X --exclude PATTERN [+]  exclude names matching the given patterns
-   -S --subrepos             recurse into subrepositories
-   -n --dry-run              do not perform actions, just print output
+   -I --include PATTERN [+] include names matching the given patterns
+   -X --exclude PATTERN [+] exclude names matching the given patterns
+   -S --subrepos            recurse into subrepositories
+   -n --dry-run             do not perform actions, just print output
   
   [+] marked option can be specified multiple times
   
@@ -430,7 +402,7 @@ Test command without options
   
       Returns 0 on success, 1 if errors are encountered.
   
-  use "hg -v help verify" to show global options
+  use "hg -v help verify" to show more info
 
   $ hg help diff
   hg diff [OPTION]... ([-c REV] | [-r REV1 [-r REV2]]) [FILE]...
@@ -465,25 +437,25 @@ Test command without options
   
   options:
   
-   -r --rev REV [+]          revision
-   -c --change REV           change made by revision
-   -a --text                 treat all files as text
-   -g --git                  use git extended diff format
-      --nodates              omit dates from diff headers
-   -p --show-function        show which function each change is in
-      --reverse              produce a diff that undoes the changes
-   -w --ignore-all-space     ignore white space when comparing lines
-   -b --ignore-space-change  ignore changes in the amount of white space
-   -B --ignore-blank-lines   ignore changes whose lines are all blank
-   -U --unified NUM          number of lines of context to show
-      --stat                 output diffstat-style summary of changes
-   -I --include PATTERN [+]  include names matching the given patterns
-   -X --exclude PATTERN [+]  exclude names matching the given patterns
-   -S --subrepos             recurse into subrepositories
+   -r --rev REV [+]         revision
+   -c --change REV          change made by revision
+   -a --text                treat all files as text
+   -g --git                 use git extended diff format
+      --nodates             omit dates from diff headers
+   -p --show-function       show which function each change is in
+      --reverse             produce a diff that undoes the changes
+   -w --ignore-all-space    ignore white space when comparing lines
+   -b --ignore-space-change ignore changes in the amount of white space
+   -B --ignore-blank-lines  ignore changes whose lines are all blank
+   -U --unified NUM         number of lines of context to show
+      --stat                output diffstat-style summary of changes
+   -I --include PATTERN [+] include names matching the given patterns
+   -X --exclude PATTERN [+] exclude names matching the given patterns
+   -S --subrepos            recurse into subrepositories
   
   [+] marked option can be specified multiple times
   
-  use "hg -v help diff" to show global options
+  use "hg -v help diff" to show more info
 
   $ hg help status
   hg status [OPTION]... [FILE]...
@@ -527,26 +499,26 @@ Test command without options
   
   options:
   
-   -A --all                  show status of all files
-   -m --modified             show only modified files
-   -a --added                show only added files
-   -r --removed              show only removed files
-   -d --deleted              show only deleted (but tracked) files
-   -c --clean                show only files without changes
-   -u --unknown              show only unknown (not tracked) files
-   -i --ignored              show only ignored files
-   -n --no-status            hide status prefix
-   -C --copies               show source of copied files
-   -0 --print0               end filenames with NUL, for use with xargs
-      --rev REV [+]          show difference from revision
-      --change REV           list the changed files of a revision
-   -I --include PATTERN [+]  include names matching the given patterns
-   -X --exclude PATTERN [+]  exclude names matching the given patterns
-   -S --subrepos             recurse into subrepositories
+   -A --all                 show status of all files
+   -m --modified            show only modified files
+   -a --added               show only added files
+   -r --removed             show only removed files
+   -d --deleted             show only deleted (but tracked) files
+   -c --clean               show only files without changes
+   -u --unknown             show only unknown (not tracked) files
+   -i --ignored             show only ignored files
+   -n --no-status           hide status prefix
+   -C --copies              show source of copied files
+   -0 --print0              end filenames with NUL, for use with xargs
+      --rev REV [+]         show difference from revision
+      --change REV          list the changed files of a revision
+   -I --include PATTERN [+] include names matching the given patterns
+   -X --exclude PATTERN [+] exclude names matching the given patterns
+   -S --subrepos            recurse into subrepositories
   
   [+] marked option can be specified multiple times
   
-  use "hg -v help status" to show global options
+  use "hg -v help status" to show more info
 
   $ hg -q help status
   hg status [OPTION]... [FILE]...
@@ -630,7 +602,7 @@ Test command with no help text
   
   (no help text available)
   
-  use "hg -v help nohelp" to show global options
+  use "hg -v help nohelp" to show more info
 
 Test that default list of commands omits extension commands
 
@@ -656,6 +628,7 @@ Test that default list of commands omits extension commands
    diff         diff repository (or selected files)
    export       dump the header and diffs for one or more changesets
    forget       forget the specified files on the next commit
+   graft        copy changes from other branches onto the current branch
    grep         search for a pattern in specified files and revisions
    heads        show current repository heads or show branch heads
    help         show help for a given topic or a help overview

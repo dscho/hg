@@ -10,13 +10,14 @@ from i18n import _
 import repo, changegroup, subrepo, discovery, pushkey
 import changelog, dirstate, filelog, manifest, context, bookmarks
 import lock, transaction, store, encoding
-import scmutil, util, extensions, hook, error
+import scmutil, util, extensions, hook, error, revset
 import match as matchmod
 import merge as mergemod
 import tags as tagsmod
 from lock import release
 import weakref, errno, os, time, inspect
 propertycache = util.propertycache
+filecache = scmutil.filecache
 
 class localrepository(repo.repository):
     capabilities = set(('lookup', 'changegroupsubset', 'branchmap', 'pushkey',
@@ -63,6 +64,7 @@ class localrepository(repo.repository):
                     )
                 if self.ui.configbool('format', 'generaldelta', False):
                     requirements.append("generaldelta")
+                requirements = set(requirements)
             else:
                 raise error.RepoError(_("repository %s not found") % path)
         elif create:
@@ -77,7 +79,7 @@ class localrepository(repo.repository):
 
         self.sharedpath = self.path
         try:
-            s = os.path.realpath(self.opener.read("sharedpath"))
+            s = os.path.realpath(self.opener.read("sharedpath").rstrip('\n'))
             if not os.path.exists(s):
                 raise error.RepoError(
                     _('.hg/sharedpath points to nonexistent directory %s') % s)
@@ -95,20 +97,18 @@ class localrepository(repo.repository):
         if create:
             self._writerequirements()
 
-        # These two define the set of tags for this repository.  _tags
-        # maps tag name to node; _tagtypes maps tag name to 'global' or
-        # 'local'.  (Global tags are defined by .hgtags across all
-        # heads, and local tags are defined in .hg/localtags.)  They
-        # constitute the in-memory cache of tags.
-        self._tags = None
-        self._tagtypes = None
 
         self._branchcache = None
         self._branchcachetip = None
-        self.nodetagscache = None
         self.filterpats = {}
         self._datafilters = {}
         self._transref = self._lockref = self._wlockref = None
+
+        # A cache for various files under .hg/ that tracks file changes,
+        # (used by the filecache decorator)
+        #
+        # Maps a property name to its util.filecacheentry
+        self._filecache = {}
 
     def _applyrequirements(self, requirements):
         self.requirements = requirements
@@ -159,15 +159,18 @@ class localrepository(repo.repository):
                 parts.pop()
         return False
 
-    @util.propertycache
+    @filecache('bookmarks')
     def _bookmarks(self):
         return bookmarks.read(self)
 
-    @util.propertycache
+    @filecache('bookmarks.current')
     def _bookmarkcurrent(self):
         return bookmarks.readcurrent(self)
 
-    @propertycache
+    def _writebookmarks(self, marks):
+      bookmarks.write(self)
+
+    @filecache('00changelog.i', True)
     def changelog(self):
         c = changelog.changelog(self.sopener)
         if 'HG_PENDING' in os.environ:
@@ -176,11 +179,11 @@ class localrepository(repo.repository):
                 c.readpending('00changelog.i.a')
         return c
 
-    @propertycache
+    @filecache('00manifest.i', True)
     def manifest(self):
         return manifest.manifest(self.sopener)
 
-    @propertycache
+    @filecache('dirstate')
     def dirstate(self):
         warned = [0]
         def validate(node):
@@ -217,6 +220,17 @@ class localrepository(repo.repository):
         for i in xrange(len(self)):
             yield i
 
+    def set(self, expr, *args):
+        '''
+        Yield a context for each matching revision, after doing arg
+        replacement via revset.formatspec
+        '''
+
+        expr = revset.formatspec(expr, *args)
+        m = revset.match(None, expr)
+        for r in m(self, range(len(self))):
+            yield self[r]
+
     def url(self):
         return 'file:' + self.root
 
@@ -249,8 +263,8 @@ class localrepository(repo.repository):
                 fp.write('\n')
             for name in names:
                 m = munge and munge(name) or name
-                if self._tagtypes and name in self._tagtypes:
-                    old = self._tags.get(name, nullid)
+                if self._tagscache.tagtypes and name in self._tagscache.tagtypes:
+                    old = self.tags().get(name, nullid)
                     fp.write('%s %s\n' % (hex(old), m))
                 fp.write('%s %s\n' % (hex(node), m))
             fp.close()
@@ -325,12 +339,31 @@ class localrepository(repo.repository):
         self.tags() # instantiate the cache
         self._tag(names, node, message, local, user, date)
 
+    @propertycache
+    def _tagscache(self):
+        '''Returns a tagscache object that contains various tags related caches.'''
+
+        # This simplifies its cache management by having one decorated
+        # function (this one) and the rest simply fetch things from it.
+        class tagscache(object):
+            def __init__(self):
+                # These two define the set of tags for this repository. tags
+                # maps tag name to node; tagtypes maps tag name to 'global' or
+                # 'local'. (Global tags are defined by .hgtags across all
+                # heads, and local tags are defined in .hg/localtags.)
+                # They constitute the in-memory cache of tags.
+                self.tags = self.tagtypes = None
+
+                self.nodetagscache = self.tagslist = None
+
+        cache = tagscache()
+        cache.tags, cache.tagtypes = self._findtags()
+
+        return cache
+
     def tags(self):
         '''return a mapping of tag to node'''
-        if self._tags is None:
-            (self._tags, self._tagtypes) = self._findtags()
-
-        return self._tags
+        return self._tagscache.tags
 
     def _findtags(self):
         '''Do the hard work of finding tags.  Return a pair of dicts
@@ -379,27 +412,29 @@ class localrepository(repo.repository):
         None     : tag does not exist
         '''
 
-        self.tags()
-
-        return self._tagtypes.get(tagname)
+        return self._tagscache.tagtypes.get(tagname)
 
     def tagslist(self):
         '''return a list of tags ordered by revision'''
-        l = []
-        for t, n in self.tags().iteritems():
-            r = self.changelog.rev(n)
-            l.append((r, t, n))
-        return [(t, n) for r, t, n in sorted(l)]
+        if not self._tagscache.tagslist:
+            l = []
+            for t, n in self.tags().iteritems():
+                r = self.changelog.rev(n)
+                l.append((r, t, n))
+            self._tagscache.tagslist = [(t, n) for r, t, n in sorted(l)]
+
+        return self._tagscache.tagslist
 
     def nodetags(self, node):
         '''return the tags associated with a node'''
-        if not self.nodetagscache:
-            self.nodetagscache = {}
+        if not self._tagscache.nodetagscache:
+            nodetagscache = {}
             for t, n in self.tags().iteritems():
-                self.nodetagscache.setdefault(n, []).append(t)
-            for tags in self.nodetagscache.itervalues():
+                nodetagscache.setdefault(n, []).append(t)
+            for tags in nodetagscache.itervalues():
                 tags.sort()
-        return self.nodetagscache.get(node, [])
+            self._tagscache.nodetagscache = nodetagscache
+        return self._tagscache.nodetagscache.get(node, [])
 
     def nodebookmarks(self, node):
         marks = []
@@ -489,7 +524,7 @@ class localrepository(repo.repository):
             for label, nodes in branches.iteritems():
                 for node in nodes:
                     f.write("%s %s\n" % (hex(node), encoding.fromlocal(label)))
-            f.rename()
+            f.close()
         except (IOError, OSError):
             pass
 
@@ -722,67 +757,112 @@ class localrepository(repo.repository):
         finally:
             lock.release()
 
-    def rollback(self, dryrun=False):
+    def rollback(self, dryrun=False, force=False):
         wlock = lock = None
         try:
             wlock = self.wlock()
             lock = self.lock()
             if os.path.exists(self.sjoin("undo")):
-                try:
-                    args = self.opener.read("undo.desc").splitlines()
-                    if len(args) >= 3 and self.ui.verbose:
-                        desc = _("repository tip rolled back to revision %s"
-                                 " (undo %s: %s)\n") % (
-                                 int(args[0]) - 1, args[1], args[2])
-                    elif len(args) >= 2:
-                        desc = _("repository tip rolled back to revision %s"
-                                 " (undo %s)\n") % (
-                                 int(args[0]) - 1, args[1])
-                except IOError:
-                    desc = _("rolling back unknown transaction\n")
-                self.ui.status(desc)
-                if dryrun:
-                    return
-                transaction.rollback(self.sopener, self.sjoin("undo"),
-                                     self.ui.warn)
-                util.rename(self.join("undo.dirstate"), self.join("dirstate"))
-                if os.path.exists(self.join('undo.bookmarks')):
-                    util.rename(self.join('undo.bookmarks'),
-                                self.join('bookmarks'))
-                try:
-                    branch = self.opener.read("undo.branch")
-                    self.dirstate.setbranch(branch)
-                except IOError:
-                    self.ui.warn(_("named branch could not be reset, "
-                                   "current branch is still: %s\n")
-                                 % self.dirstate.branch())
-                self.invalidate()
-                self.dirstate.invalidate()
-                self.destroyed()
-                parents = tuple([p.rev() for p in self.parents()])
-                if len(parents) > 1:
-                    self.ui.status(_("working directory now based on "
-                                     "revisions %d and %d\n") % parents)
-                else:
-                    self.ui.status(_("working directory now based on "
-                                     "revision %d\n") % parents)
+                return self._rollback(dryrun, force)
             else:
                 self.ui.warn(_("no rollback information available\n"))
                 return 1
         finally:
             release(lock, wlock)
 
+    def _rollback(self, dryrun, force):
+        ui = self.ui
+        try:
+            args = self.opener.read('undo.desc').splitlines()
+            (oldlen, desc, detail) = (int(args[0]), args[1], None)
+            if len(args) >= 3:
+                detail = args[2]
+            oldtip = oldlen - 1
+
+            if detail and ui.verbose:
+                msg = (_('repository tip rolled back to revision %s'
+                         ' (undo %s: %s)\n')
+                       % (oldtip, desc, detail))
+            else:
+                msg = (_('repository tip rolled back to revision %s'
+                         ' (undo %s)\n')
+                       % (oldtip, desc))
+        except IOError:
+            msg = _('rolling back unknown transaction\n')
+            desc = None
+
+        if not force and self['.'] != self['tip'] and desc == 'commit':
+            raise util.Abort(
+                _('rollback of last commit while not checked out '
+                  'may lose data'), hint=_('use -f to force'))
+
+        ui.status(msg)
+        if dryrun:
+            return 0
+
+        parents = self.dirstate.parents()
+        transaction.rollback(self.sopener, self.sjoin('undo'), ui.warn)
+        if os.path.exists(self.join('undo.bookmarks')):
+            util.rename(self.join('undo.bookmarks'),
+                        self.join('bookmarks'))
+        self.invalidate()
+
+        parentgone = (parents[0] not in self.changelog.nodemap or
+                      parents[1] not in self.changelog.nodemap)
+        if parentgone:
+            util.rename(self.join('undo.dirstate'), self.join('dirstate'))
+            try:
+                branch = self.opener.read('undo.branch')
+                self.dirstate.setbranch(branch)
+            except IOError:
+                ui.warn(_('named branch could not be reset: '
+                          'current branch is still \'%s\'\n')
+                        % self.dirstate.branch())
+
+            self.dirstate.invalidate()
+            self.destroyed()
+            parents = tuple([p.rev() for p in self.parents()])
+            if len(parents) > 1:
+                ui.status(_('working directory now based on '
+                            'revisions %d and %d\n') % parents)
+            else:
+                ui.status(_('working directory now based on '
+                            'revision %d\n') % parents)
+        return 0
+
     def invalidatecaches(self):
-        self._tags = None
-        self._tagtypes = None
-        self.nodetagscache = None
+        try:
+            delattr(self, '_tagscache')
+        except AttributeError:
+            pass
+
         self._branchcache = None # in UTF-8
         self._branchcachetip = None
 
+    def invalidatedirstate(self):
+        '''Invalidates the dirstate, causing the next call to dirstate
+        to check if it was modified since the last time it was read,
+        rereading it if it has.
+
+        This is different to dirstate.invalidate() that it doesn't always
+        rereads the dirstate. Use dirstate.invalidate() if you want to
+        explicitly read the dirstate again (i.e. restoring it to a previous
+        known good state).'''
+        try:
+            delattr(self, 'dirstate')
+        except AttributeError:
+            pass
+
     def invalidate(self):
-        for a in ("changelog", "manifest", "_bookmarks", "_bookmarkcurrent"):
-            if a in self.__dict__:
-                delattr(self, a)
+        for k in self._filecache:
+            # dirstate is invalidated separately in invalidatedirstate()
+            if k == 'dirstate':
+                continue
+
+            try:
+                delattr(self, k)
+            except AttributeError:
+                pass
         self.invalidatecaches()
 
     def _lock(self, lockname, wait, releasefn, acquirefn, desc):
@@ -809,7 +889,14 @@ class localrepository(repo.repository):
             l.lock()
             return l
 
-        l = self._lock(self.sjoin("lock"), wait, self.store.write,
+        def unlock():
+            self.store.write()
+            for k, ce in self._filecache.items():
+                if k == 'dirstate':
+                    continue
+                ce.refresh()
+
+        l = self._lock(self.sjoin("lock"), wait, unlock,
                        self.invalidate, _('repository %s') % self.origroot)
         self._lockref = weakref.ref(l)
         return l
@@ -823,8 +910,14 @@ class localrepository(repo.repository):
             l.lock()
             return l
 
-        l = self._lock(self.join("wlock"), wait, self.dirstate.write,
-                       self.dirstate.invalidate, _('working directory of %s') %
+        def unlock():
+            self.dirstate.write()
+            ce = self._filecache.get('dirstate')
+            if ce:
+                ce.refresh()
+
+        l = self._lock(self.join("wlock"), wait, unlock,
+                       self.invalidatedirstate, _('working directory of %s') %
                        self.origroot)
         self._wlockref = weakref.ref(l)
         return l

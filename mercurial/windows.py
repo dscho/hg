@@ -9,6 +9,22 @@ from i18n import _
 import osutil
 import errno, msvcrt, os, re, sys
 
+import win32
+executablepath = win32.executablepath
+getuser = win32.getuser
+hidewindow = win32.hidewindow
+lookupreg = win32.lookupreg
+makedir = win32.makedir
+nlinks = win32.nlinks
+oslink = win32.oslink
+samedevice = win32.samedevice
+samefile = win32.samefile
+setsignalhandler = win32.setsignalhandler
+spawndetached = win32.spawndetached
+termwidth = win32.termwidth
+testpid = win32.testpid
+unlink = win32.unlink
+
 nulldev = 'NUL:'
 umask = 002
 
@@ -90,6 +106,9 @@ def sshargs(sshcmd, host, user, port):
 def setflags(f, l, x):
     pass
 
+def copymode(src, dst, mode=None):
+    pass
+
 def checkexec(path):
     return False
 
@@ -99,8 +118,9 @@ def checklink(path):
 def setbinary(fd):
     # When run without console, pipes may expose invalid
     # fileno(), usually set to -1.
-    if hasattr(fd, 'fileno') and fd.fileno() >= 0:
-        msvcrt.setmode(fd.fileno(), os.O_BINARY)
+    fno = getattr(fd, 'fileno', None)
+    if fno is not None and fno() >= 0:
+        msvcrt.setmode(fno(), os.O_BINARY)
 
 def pconvert(path):
     return '/'.join(path.split(os.sep))
@@ -281,6 +301,14 @@ def groupmembers(name):
     # Don't support groups on Windows for now
     raise KeyError()
 
-from win32 import *
+def isexec(f):
+    return False
+
+class cachestat(object):
+    def __init__(self, path):
+        pass
+
+    def cacheable(self):
+        return False
 
 expandglobs = True

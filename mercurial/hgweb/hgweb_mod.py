@@ -7,7 +7,7 @@
 # GNU General Public License version 2 or any later version.
 
 import os
-from mercurial import ui, hg, hook, error, encoding, templater
+from mercurial import ui, hg, hook, error, encoding, templater, util
 from common import get_stat, ErrorResponse, permhooks, caching
 from common import HTTP_OK, HTTP_NOT_MODIFIED, HTTP_BAD_REQUEST
 from common import HTTP_NOT_FOUND, HTTP_SERVER_ERROR
@@ -148,7 +148,7 @@ class hgweb(object):
                 cmd = cmd[style + 1:]
 
             # avoid accepting e.g. style parameter as command
-            if hasattr(webcommands, cmd):
+            if util.safehasattr(webcommands, cmd):
                 req.form['cmd'] = [cmd]
             else:
                 cmd = ''
@@ -236,6 +236,7 @@ class hgweb(object):
         port = port != default_port and (":" + port) or ""
         urlbase = '%s://%s%s' % (proto, req.env['SERVER_NAME'], port)
         logourl = self.config("web", "logourl", "http://mercurial.selenic.com/")
+        logoimg = self.config("web", "logoimg", "hglogo.png")
         staticurl = self.config("web", "staticurl") or req.url + 'static/'
         if not staticurl.endswith('/'):
             staticurl += '/'
@@ -276,6 +277,7 @@ class hgweb(object):
         tmpl = templater.templater(mapfile,
                                    defaults={"url": req.url,
                                              "logourl": logourl,
+                                             "logoimg": logoimg,
                                              "staticurl": staticurl,
                                              "urlbase": urlbase,
                                              "repo": self.reponame,

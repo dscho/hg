@@ -8,7 +8,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import os
+import os, error
 from i18n import _
 from node import short, hex
 import util
@@ -35,17 +35,18 @@ def bisect(changelog, state):
         # build visit array
         ancestors = [None] * (len(changelog) + 1) # an extra for [-1]
 
-        # set nodes descended from goodrev
-        ancestors[goodrev] = []
+        # set nodes descended from goodrevs
+        for rev in goodrevs:
+            ancestors[rev] = []
         for rev in xrange(goodrev + 1, len(changelog)):
             for prev in clparents(rev):
                 if ancestors[prev] == []:
                     ancestors[rev] = []
 
         # clear good revs from array
-        for node in goodrevs:
-            ancestors[node] = None
-        for rev in xrange(len(changelog), -1, -1):
+        for rev in goodrevs:
+            ancestors[rev] = None
+        for rev in xrange(len(changelog), goodrev, -1):
             if ancestors[rev] is None:
                 for prev in clparents(rev):
                     ancestors[prev] = None
@@ -149,7 +150,102 @@ def save_state(repo, state):
         for kind in state:
             for node in state[kind]:
                 f.write("%s %s\n" % (kind, hex(node)))
-        f.rename()
+        f.close()
     finally:
         wlock.release()
 
+def get(repo, status):
+    """
+    Return a list of revision(s) that match the given status:
+
+    - ``good``, ``bad``, ``skip``: csets explicitly marked as good/bad/skip
+    - ``goods``, ``bads``      : csets topologicaly good/bad
+    - ``range``              : csets taking part in the bisection
+    - ``pruned``             : csets that are goods, bads or skipped
+    - ``untested``           : csets whose fate is yet unknown
+    - ``ignored``            : csets ignored due to DAG topology
+    """
+    state = load_state(repo)
+    if status in ('good', 'bad', 'skip'):
+        return [repo.changelog.rev(n) for n in state[status]]
+    else:
+        # In the floowing sets, we do *not* call 'bisect()' with more
+        # than one level of recusrsion, because that can be very, very
+        # time consuming. Instead, we always develop the expression as
+        # much as possible.
+
+        # 'range' is all csets that make the bisection:
+        #   - have a good ancestor and a bad descendant, or conversely
+        # that's because the bisection can go either way
+        range = '( bisect(bad)::bisect(good) | bisect(good)::bisect(bad) )'
+
+        _t = [c.rev() for c in repo.set('bisect(good)::bisect(bad)')]
+        # The sets of topologically good or bad csets
+        if len(_t) == 0:
+            # Goods are topologically after bads
+            goods = 'bisect(good)::'    # Pruned good csets
+            bads  = '::bisect(bad)'     # Pruned bad csets
+        else:
+            # Goods are topologically before bads
+            goods = '::bisect(good)'    # Pruned good csets
+            bads  = 'bisect(bad)::'     # Pruned bad csets
+
+        # 'pruned' is all csets whose fate is already known: good, bad, skip
+        skips = 'bisect(skip)'                 # Pruned skipped csets
+        pruned = '( (%s) | (%s) | (%s) )' % (goods, bads, skips)
+
+        # 'untested' is all cset that are- in 'range', but not in 'pruned'
+        untested = '( (%s) - (%s) )' % (range, pruned)
+
+        # 'ignored' is all csets that were not used during the bisection
+        # due to DAG topology, but may however have had an impact.
+        # Eg., a branch merged between bads and goods, but whose branch-
+        # point is out-side of the range.
+        iba = '::bisect(bad) - ::bisect(good)'  # Ignored bads' ancestors
+        iga = '::bisect(good) - ::bisect(bad)'  # Ignored goods' ancestors
+        ignored = '( ( (%s) | (%s) ) - (%s) )' % (iba, iga, range)
+
+        if status == 'range':
+            return [c.rev() for c in repo.set(range)]
+        elif status == 'pruned':
+            return [c.rev() for c in repo.set(pruned)]
+        elif status == 'untested':
+            return [c.rev() for c in repo.set(untested)]
+        elif status == 'ignored':
+            return [c.rev() for c in repo.set(ignored)]
+        elif status == "goods":
+            return [c.rev() for c in repo.set(goods)]
+        elif status == "bads":
+            return [c.rev() for c in repo.set(bads)]
+
+        else:
+            raise error.ParseError(_('invalid bisect state'))
+
+def label(repo, node, short=False):
+    rev = repo.changelog.rev(node)
+
+    # Try explicit sets
+    if rev in get(repo, 'good'):
+        return _('good')
+    if rev in get(repo, 'bad'):
+        return _('bad')
+    if rev in get(repo, 'skip'):
+        return _('skipped')
+    if rev in get(repo, 'untested'):
+        return _('untested')
+    if rev in get(repo, 'ignored'):
+        return _('ignored')
+
+    # Try implicit sets
+    if rev in get(repo, 'goods'):
+        return _('good (implicit)')
+    if rev in get(repo, 'bads'):
+        return _('bad (implicit)')
+
+    return None
+
+def shortlabel(label):
+    if label:
+        return label[0].upper()
+
+    return None

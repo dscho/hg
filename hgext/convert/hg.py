@@ -70,10 +70,10 @@ class mercurial_sink(converter_sink):
             self.wlock.release()
 
     def revmapfile(self):
-        return os.path.join(self.path, ".hg", "shamap")
+        return self.repo.join("shamap")
 
     def authorfile(self):
-        return os.path.join(self.path, ".hg", "authormap")
+        return self.repo.join("authormap")
 
     def getheads(self):
         h = self.repo.changelog.heads()
@@ -178,7 +178,7 @@ class mercurial_sink(converter_sink):
             closed = 'close' in commit.extra
             if not closed and not man.cmp(m1node, man.revision(mnode)):
                 self.ui.status(_("filtering out empty revision\n"))
-                self.repo.rollback()
+                self.repo.rollback(force=True)
                 return parent
         return p2
 
@@ -364,8 +364,7 @@ class mercurial_source(converter_source):
 
     def converted(self, rev, destrev):
         if self.convertfp is None:
-            self.convertfp = open(os.path.join(self.path, '.hg', 'shamap'),
-                                  'a')
+            self.convertfp = open(self.repo.join('shamap'), 'a')
         self.convertfp.write('%s %s\n' % (destrev, rev))
         self.convertfp.flush()
 

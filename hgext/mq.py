@@ -287,25 +287,31 @@ class queue(object):
 
     @util.propertycache
     def applied(self):
-        if os.path.exists(self.join(self.statuspath)):
-            def parselines(lines):
-                for l in lines:
-                    entry = l.split(':', 1)
-                    if len(entry) > 1:
-                        n, name = entry
-                        yield statusentry(bin(n), name)
-                    elif l.strip():
-                        self.ui.warn(_('malformated mq status line: %s\n') % entry)
-                    # else we ignore empty lines
+        def parselines(lines):
+            for l in lines:
+                entry = l.split(':', 1)
+                if len(entry) > 1:
+                    n, name = entry
+                    yield statusentry(bin(n), name)
+                elif l.strip():
+                    self.ui.warn(_('malformated mq status line: %s\n') % entry)
+                # else we ignore empty lines
+        try:
             lines = self.opener.read(self.statuspath).splitlines()
             return list(parselines(lines))
-        return []
+        except IOError, e:
+            if e.errno == errno.ENOENT:
+                return []
+            raise
 
     @util.propertycache
     def fullseries(self):
-        if os.path.exists(self.join(self.seriespath)):
-            return self.opener.read(self.seriespath).splitlines()
-        return []
+        try:
+             return self.opener.read(self.seriespath).splitlines()
+        except IOError, e:
+            if e.errno == errno.ENOENT:
+                return []
+            raise
 
     @util.propertycache
     def series(self):
@@ -626,6 +632,7 @@ class queue(object):
             self.ui.note(str(inst) + '\n')
             if not self.ui.verbose:
                 self.ui.warn(_("patch failed, unable to continue (try -v)\n"))
+            self.ui.traceback()
             return (False, list(files), False)
 
     def apply(self, repo, series, list=False, update_status=True,
@@ -938,7 +945,7 @@ class queue(object):
                         p.write("# User " + user + "\n")
                     if date:
                         p.write("# Date %s %s\n\n" % date)
-                if hasattr(msg, '__call__'):
+                if util.safehasattr(msg, '__call__'):
                     msg = msg()
                 commitmsg = msg and msg or ("[mq]: %s" % patchfn)
                 n = repo.commit(commitmsg, user, date, match=match, force=True)
@@ -1010,12 +1017,10 @@ class queue(object):
     # if the exact patch name does not exist, we try a few
     # variations.  If strict is passed, we try only #1
     #
-    # 1) a number to indicate an offset in the series file
+    # 1) a number (as string) to indicate an offset in the series file
     # 2) a unique substring of the patch name was given
     # 3) patchname[-+]num to indicate an offset in the series file
     def lookup(self, patch, strict=False):
-        patch = patch and str(patch)
-
         def partialname(s):
             if s in self.series:
                 return s
@@ -1034,8 +1039,6 @@ class queue(object):
                     return self.series[0]
             return None
 
-        if patch is None:
-            return None
         if patch in self.series:
             return patch
 
@@ -1095,12 +1098,12 @@ class queue(object):
                 self.ui.warn(_('no patches in series\n'))
                 return 0
 
-            patch = self.lookup(patch)
             # Suppose our series file is: A B C and the current 'top'
             # patch is B. qpush C should be performed (moving forward)
             # qpush B is a NOP (no change) qpush A is an error (can't
             # go backwards with qpush)
             if patch:
+                patch = self.lookup(patch)
                 info = self.isapplied(patch)
                 if info and info[0] >= len(self.applied) - 1:
                     self.ui.warn(
@@ -1492,7 +1495,7 @@ class queue(object):
                 n = repo.commit(message, user, ph.date, match=match,
                                 force=True)
                 # only write patch after a successful commit
-                patchf.rename()
+                patchf.close()
                 self.applied.append(statusentry(n, patchfn))
             except:
                 ctx = repo[cparents[0]]
@@ -2675,7 +2678,11 @@ def save(ui, repo, **opts):
     return 0
 
 @command("strip",
-         [('f', 'force', None, _('force removal of changesets, discard '
+         [
+          ('r', 'rev', [], _('strip specified revision (optional, '
+                               'can specify revisions without this '
+                               'option)'), _('REV')),
+          ('f', 'force', None, _('force removal of changesets, discard '
                                  'uncommitted changes (no backup)')),
           ('b', 'backup', None, _('bundle only changesets with local revision'
                                   ' number greater than REV which are not'
@@ -2716,6 +2723,7 @@ def strip(ui, repo, *revs, **opts):
         backup = 'none'
 
     cl = repo.changelog
+    revs = list(revs) + opts.get('rev')
     revs = set(scmutil.revrange(repo, revs))
     if not revs:
         raise util.Abort(_('empty revision set'))
@@ -2867,7 +2875,7 @@ def select(ui, repo, *args, **opts):
                 if i == 0:
                     q.pop(repo, all=True)
                 else:
-                    q.pop(repo, i - 1)
+                    q.pop(repo, str(i - 1))
                 break
     if popped:
         try:
@@ -2915,6 +2923,7 @@ def finish(ui, repo, *revrange, **opts):
 
 @command("qqueue",
          [('l', 'list', False, _('list all available queues')),
+          ('', 'active', False, _('print name of active queue')),
           ('c', 'create', False, _('create new queue')),
           ('', 'rename', False, _('rename active queue')),
           ('', 'delete', False, _('delete reference to queue')),
@@ -2929,7 +2938,8 @@ def qqueue(ui, repo, name=None, **opts):
 
     Omitting a queue name or specifying -l/--list will show you the registered
     queues - by default the "normal" patches queue is registered. The currently
-    active queue will be marked with "(active)".
+    active queue will be marked with "(active)". Specifying --active will print
+    only the name of the active queue.
 
     To create a new queue, use -c/--create. The queue is automatically made
     active, except in the case where there are applied patches from the
@@ -3022,8 +3032,11 @@ def qqueue(ui, repo, name=None, **opts):
         fh.close()
         util.rename(repo.join('patches.queues.new'), repo.join(_allqueues))
 
-    if not name or opts.get('list'):
+    if not name or opts.get('list') or opts.get('active'):
         current = _getcurrent()
+        if opts.get('active'):
+            ui.write('%s\n' % (current,))
+            return
         for queue in _getqueues():
             ui.write('%s' % (queue,))
             if queue == current and not ui.quiet:

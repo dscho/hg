@@ -223,6 +223,10 @@ alias, as was done above for the purge alias. In addition,
 ``$HG_ARGS`` expand to the arguments given to Mercurial. In the ``hg
 echo foo`` call above, ``$HG_ARGS`` would expand to ``echo foo``.
 
+.. note:: Some global configuration options such as ``-R`` are
+   processed before shell aliases and will thus not be passed to
+   aliases.
+
 ``auth``
 """"""""
 
@@ -1260,6 +1264,12 @@ The full set of options is:
 
 ``ipv6``
     Whether to use IPv6. Default is False.
+
+``logoimg``
+    File name of the logo image that some templates display on each page.
+    The file name is relative to ``staticurl``. That is, the full path to
+    the logo image is "staticurl/logoimg".
+    If unset, ``hglogo.png`` will be used.
 
 ``logourl``
     Base URL to use for logos. If unset, ``http://mercurial.selenic.com/``

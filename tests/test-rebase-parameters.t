@@ -51,8 +51,8 @@ These fail:
   $ cd a1
 
   $ hg rebase -s 8 -d 7
-  abort: source is descendant of destination
-  [255]
+  nothing to rebase
+  [1]
 
   $ hg rebase --continue --abort
   abort: cannot use both abort and continue
@@ -67,7 +67,7 @@ These fail:
   [255]
 
   $ hg rebase --base 5 --source 4
-  abort: cannot specify both a revision and a base
+  abort: cannot specify both a source and a base
   [255]
 
   $ hg rebase
@@ -76,7 +76,7 @@ These fail:
 
   $ hg up -q 7
 
-  $ hg rebase
+  $ hg rebase --traceback
   nothing to rebase
   [1]
 

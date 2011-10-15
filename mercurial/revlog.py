@@ -226,9 +226,10 @@ class revlog(object):
         self._nodepos = None
 
         v = REVLOG_DEFAULT_VERSION
-        if hasattr(opener, 'options'):
-            if 'revlogv1' in opener.options:
-                if 'generaldelta' in opener.options:
+        opts = getattr(opener, 'options', None)
+        if opts is not None:
+            if 'revlogv1' in opts:
+                if 'generaldelta' in opts:
                     v |= REVLOGGENERALDELTA
             else:
                 v = 0
@@ -945,9 +946,9 @@ class revlog(object):
             e = self._io.packentry(self.index[i], self.node, self.version, i)
             fp.write(e)
 
-        # if we don't call rename, the temp file will never replace the
+        # if we don't call close, the temp file will never replace the
         # real index
-        fp.rename()
+        fp.close()
 
         tr.replace(self.indexfile, trindex * self._io.size)
         self._chunkclear()

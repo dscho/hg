@@ -239,9 +239,10 @@ the bookmark extension should be ignored now that it is part of core
 test summary
 
   $ hg summary
-  parent: 2:db815d6d32e6 tip Y Z x  y
+  parent: 2:db815d6d32e6 tip
    2
   branch: default
+  bookmarks: *Z Y x  y
   commit: (clean)
   update: 1 new changesets, 2 branch heads (merge)
 
@@ -337,6 +338,22 @@ create bundle with two heads
   $ hg update
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+   * Z                         3:125c9a1d6df6
+     x  y                      2:db815d6d32e6
+
+test wrongly formated bookmark
+
+  $ echo '' >> .hg/bookmarks
+  $ hg bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+   * Z                         3:125c9a1d6df6
+     x  y                      2:db815d6d32e6
+  $ echo "Ican'thasformatedlines" >> .hg/bookmarks
+  $ hg bookmarks
+  malformed line in .hg/bookmarks: "Ican'thasformatedlines"
      X2                        1:925d80f479bb
      Y                         2:db815d6d32e6
    * Z                         3:125c9a1d6df6

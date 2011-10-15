@@ -7,6 +7,7 @@
 
 import cgi, re, os, time, urllib
 import encoding, node, util
+import hbisect
 
 def addbreaks(text):
     """:addbreaks: Any text. Add an XHTML "<br />" tag before the end of
@@ -188,13 +189,13 @@ def json(obj):
         return '"%s"' % jsonescape(u)
     elif isinstance(obj, unicode):
         return '"%s"' % jsonescape(obj)
-    elif hasattr(obj, 'keys'):
+    elif util.safehasattr(obj, 'keys'):
         out = []
         for k, v in obj.iteritems():
             s = '%s: %s' % (json(k), json(v))
             out.append(s)
         return '{' + ', '.join(out) + '}'
-    elif hasattr(obj, '__iter__'):
+    elif util.safehasattr(obj, '__iter__'):
         out = []
         for i in obj:
             out.append(json(i))
@@ -268,6 +269,14 @@ def short(text):
     """
     return text[:12]
 
+def shortbisect(text):
+    """:shortbisect: Any text. Treats `text` as a bisection status, and
+    returns a single-character representing the status (G: good, B: bad,
+    S: skipped, U: untested, I: ignored). Returns single space if `text`
+    is not a valid bisection status.
+    """
+    return hbisect.shortlabel(text) or ' '
+
 def shortdate(text):
     """:shortdate: Date. Returns a date like "2006-09-18"."""
     return util.shortdate(text)
@@ -279,7 +288,7 @@ def stringify(thing):
     """:stringify: Any type. Turns the value into text by converting values into
     text and concatenating them.
     """
-    if hasattr(thing, '__iter__') and not isinstance(thing, str):
+    if util.safehasattr(thing, '__iter__') and not isinstance(thing, str):
         return "".join([stringify(t) for t in thing if t is not None])
     return str(thing)
 
@@ -347,6 +356,7 @@ filters = {
     "rfc3339date": rfc3339date,
     "rfc822date": rfc822date,
     "short": short,
+    "shortbisect": shortbisect,
     "shortdate": shortdate,
     "stringescape": stringescape,
     "stringify": stringify,

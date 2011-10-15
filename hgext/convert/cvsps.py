@@ -11,6 +11,7 @@ import cPickle as pickle
 from mercurial import util
 from mercurial.i18n import _
 from mercurial import hook
+from mercurial import util
 
 class logentry(object):
     '''Class logentry has the following attributes:
@@ -362,8 +363,14 @@ def createlog(ui, directory=None, root="", rlog=True, cache=None):
         elif state == 8:
             # store commit log message
             if re_31.match(line):
-                state = 5
-                store = True
+                cpeek = peek
+                if cpeek.endswith('\n'):
+                    cpeek = cpeek[:-1]
+                if re_50.match(cpeek):
+                    state = 5
+                    store = True
+                else:
+                    e.comment.append(line)
             elif re_32.match(line):
                 state = 0
                 store = True
@@ -513,8 +520,8 @@ def createchangeset(ui, log, fuzz=60, mergefrom=None, mergeto=None):
                   e.comment == c.comment and
                   e.author == c.author and
                   e.branch == c.branch and
-                  (not hasattr(e, 'branchpoints') or
-                    not hasattr (c, 'branchpoints') or
+                  (not util.safehasattr(e, 'branchpoints') or
+                    not util.safehasattr (c, 'branchpoints') or
                     e.branchpoints == c.branchpoints) and
                   ((c.date[0] + c.date[1]) <=
                    (e.date[0] + e.date[1]) <=

@@ -135,7 +135,7 @@ def runsymbol(context, mapping, key):
     v = mapping.get(key)
     if v is None:
         v = context._defaults.get(key, '')
-    if hasattr(v, '__call__'):
+    if util.safehasattr(v, '__call__'):
         return v(**mapping)
     return v
 
@@ -172,14 +172,14 @@ def runmap(context, mapping, data):
 def buildfunc(exp, context):
     n = getsymbol(exp[1])
     args = [compileexp(x, context) for x in getlist(exp[2])]
+    if n in funcs:
+        f = funcs[n]
+        return (f, args)
     if n in context._filters:
         if len(args) != 1:
             raise error.ParseError(_("filter %s expects one argument") % n)
         f = context._filters[n]
         return (runfilter, (args[0][0], args[0][1], f))
-    elif n in context._funcs:
-        f = context._funcs[n]
-        return (f, args)
 
 methods = {
     "string": lambda e, c: (runstring, e[1]),
@@ -191,6 +191,9 @@ methods = {
     "func": buildfunc,
     }
 
+funcs = {
+}
+
 # template engine
 
 path = ['templates', '../templates']
@@ -200,14 +203,14 @@ def _flatten(thing):
     '''yield a single stream from a possibly nested set of iterators'''
     if isinstance(thing, str):
         yield thing
-    elif not hasattr(thing, '__iter__'):
+    elif not util.safehasattr(thing, '__iter__'):
         if thing is not None:
             yield str(thing)
     else:
         for i in thing:
             if isinstance(i, str):
                 yield i
-            elif not hasattr(i, '__iter__'):
+            elif not util.safehasattr(i, '__iter__'):
                 if i is not None:
                     yield str(i)
             elif i is not None:
@@ -338,7 +341,7 @@ def templatepath(name=None):
     normpaths = []
 
     # executable version (py2exe) doesn't support __file__
-    if hasattr(sys, 'frozen'):
+    if util.mainfrozen():
         module = sys.executable
     else:
         module = __file__

@@ -123,6 +123,9 @@ def _runcatch(req):
         else:
             ui.warn(_("hg: %s\n") % inst.args[1])
             commands.help_(ui, 'shortlist')
+    except error.OutOfBandError, inst:
+        ui.warn("abort: remote error:\n")
+        ui.warn(''.join(inst.args))
     except error.RepoError, inst:
         ui.warn(_("abort: %s!\n") % inst)
         if inst.hint:
@@ -159,16 +162,16 @@ def _runcatch(req):
         elif m in "zlib".split():
             ui.warn(_("(is your Python install correct?)\n"))
     except IOError, inst:
-        if hasattr(inst, "code"):
+        if util.safehasattr(inst, "code"):
             ui.warn(_("abort: %s\n") % inst)
-        elif hasattr(inst, "reason"):
+        elif util.safehasattr(inst, "reason"):
             try: # usually it is in the form (errno, strerror)
                 reason = inst.reason.args[1]
             except (AttributeError, IndexError):
                  # it might be anything, for example a string
                 reason = inst.reason
             ui.warn(_("abort: error: %s\n") % reason)
-        elif hasattr(inst, "args") and inst.args[0] == errno.EPIPE:
+        elif util.safehasattr(inst, "args") and inst.args[0] == errno.EPIPE:
             if ui.debugflag:
                 ui.warn(_("broken pipe\n"))
         elif getattr(inst, "strerror", None):
@@ -338,7 +341,7 @@ class cmdalias(object):
             ui.debug("alias '%s' shadows command '%s'\n" %
                      (self.name, self.cmdname))
 
-        if hasattr(self, 'shell'):
+        if util.safehasattr(self, 'shell'):
             return self.fn(ui, *args, **opts)
         else:
             try:
@@ -363,7 +366,7 @@ def addaliases(ui, cmdtable):
             # definition might not exist or it might not be a cmdalias
             pass
 
-        cmdtable[aliasdef.cmd] = (aliasdef, aliasdef.opts, aliasdef.help)
+        cmdtable[aliasdef.name] = (aliasdef, aliasdef.opts, aliasdef.help)
         if aliasdef.norepo:
             commands.norepo += ' %s' % alias
 
@@ -483,15 +486,14 @@ def _getlocal(ui, rpath):
         lui = ui.copy()
         lui.readconfig(os.path.join(path, ".hg", "hgrc"), path)
 
-    if rpath:
+    if rpath and rpath[-1]:
         path = lui.expandpath(rpath[-1])
         lui = ui.copy()
         lui.readconfig(os.path.join(path, ".hg", "hgrc"), path)
 
     return path, lui
 
-def _checkshellalias(ui, args):
-    cwd = os.getcwd()
+def _checkshellalias(lui, ui, args):
     norepo = commands.norepo
     options = {}
 
@@ -503,12 +505,6 @@ def _checkshellalias(ui, args):
     if not args:
         return
 
-    _parseconfig(ui, options['config'])
-    if options['cwd']:
-        os.chdir(options['cwd'])
-
-    path, lui = _getlocal(ui, [options['repository']])
-
     cmdtable = commands.table.copy()
     addaliases(lui, cmdtable)
 
@@ -517,27 +513,21 @@ def _checkshellalias(ui, args):
         aliases, entry = cmdutil.findcmd(cmd, cmdtable, lui.config("ui", "strict"))
     except (error.AmbiguousCommand, error.UnknownCommand):
         commands.norepo = norepo
-        os.chdir(cwd)
         return
 
     cmd = aliases[0]
     fn = entry[0]
 
-    if cmd and hasattr(fn, 'shell'):
+    if cmd and util.safehasattr(fn, 'shell'):
         d = lambda: fn(ui, *args[1:])
         return lambda: runcommand(lui, None, cmd, args[:1], ui, options, d, [], {})
 
     commands.norepo = norepo
-    os.chdir(cwd)
 
 _loaded = set()
 def _dispatch(req):
     args = req.args
     ui = req.ui
-
-    shellaliasfn = _checkshellalias(ui, args)
-    if shellaliasfn:
-        return shellaliasfn()
 
     # read --config before doing anything else
     # (e.g. to change trust settings for reading .hg/hgrc)
@@ -550,6 +540,12 @@ def _dispatch(req):
 
     rpath = _earlygetopt(["-R", "--repository", "--repo"], args)
     path, lui = _getlocal(ui, rpath)
+
+    # Now that we're operating in the right directory/repository with
+    # the right config settings, check for shell aliases
+    shellaliasfn = _checkshellalias(lui, ui, args)
+    if shellaliasfn:
+        return shellaliasfn()
 
     # Configure extensions in phases: uisetup, extsetup, cmdtable, and
     # reposetup. Programs like TortoiseHg will call _dispatch several
@@ -635,10 +631,10 @@ def _dispatch(req):
         for ui_ in uis:
             ui_.setconfig('web', 'cacerts', '')
 
-    if options['help']:
-        return commands.help_(ui, cmd, options['version'])
-    elif options['version']:
+    if options['version']:
         return commands.version_(ui)
+    if options['help']:
+        return commands.help_(ui, cmd)
     elif not cmd:
         return commands.help_(ui, 'shortlist')
 

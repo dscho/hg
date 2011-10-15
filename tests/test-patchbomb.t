@@ -1469,13 +1469,71 @@ test inreplyto:
   +ff2c9fa2018b15fa74b33363bda9527323e2a99f two
   +ff2c9fa2018b15fa74b33363bda9527323e2a99f two.diff
   
-
+no intro message in non-interactive mode
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar --in-reply-to baz \
-  >  -r 0:1
+  >  -r 0:1 | fixheaders
   This patch series consists of 2 patches.
   
-  abort: Subject: [PATCH 0 of 2] Please enter a valid value
-  [255]
+  Subject: [PATCH 0 of 2] 
+  
+  Displaying [PATCH 1 of 2] a ...
+  Content-Type: text/plain; charset="us-ascii"
+  MIME-Version: 1.0
+  Content-Transfer-Encoding: 7bit
+  Subject: [PATCH 1 of 2] a
+  X-Mercurial-Node: 8580ff50825a50c8f716709acdf8de0deddcd6ab
+  Message-Id: <8580ff50825a50c8f716.60@
+  In-Reply-To: <baz>
+  References: <baz>
+  User-Agent: Mercurial-patchbomb
+  Date: Thu, 01 Jan 1970 00:01:00 +0000
+  From: quux
+  To: foo
+  Cc: bar
+  
+  # HG changeset patch
+  # User test
+  # Date 1 0
+  # Node ID 8580ff50825a50c8f716709acdf8de0deddcd6ab
+  # Parent  0000000000000000000000000000000000000000
+  a
+  
+  diff -r 000000000000 -r 8580ff50825a a
+  --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  +++ b/a	Thu Jan 01 00:00:01 1970 +0000
+  @@ -0,0 +1,1 @@
+  +a
+  
+  Displaying [PATCH 2 of 2] b ...
+  Content-Type: text/plain; charset="us-ascii"
+  MIME-Version: 1.0
+  Content-Transfer-Encoding: 7bit
+  Subject: [PATCH 2 of 2] b
+  X-Mercurial-Node: 97d72e5f12c7e84f85064aa72e5a297142c36ed9
+  Message-Id: <97d72e5f12c7e84f8506.61@
+  In-Reply-To: <8580ff50825a50c8f716.60@
+  References: <8580ff50825a50c8f716.60@
+  User-Agent: Mercurial-patchbomb
+  Date: Thu, 01 Jan 1970 00:01:01 +0000
+  From: quux
+  To: foo
+  Cc: bar
+  
+  # HG changeset patch
+  # User test
+  # Date 2 0
+  # Node ID 97d72e5f12c7e84f85064aa72e5a297142c36ed9
+  # Parent  8580ff50825a50c8f716709acdf8de0deddcd6ab
+  b
+  
+  diff -r 8580ff50825a -r 97d72e5f12c7 b
+  --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  +++ b/b	Thu Jan 01 00:00:02 1970 +0000
+  @@ -0,0 +1,1 @@
+  +b
+  
+
+
 
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar --in-reply-to baz \
   >  -s test -r 0:1 | fixheaders

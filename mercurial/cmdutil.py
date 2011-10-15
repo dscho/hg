@@ -8,7 +8,7 @@
 from node import hex, nullid, nullrev, short
 from i18n import _
 import os, sys, errno, re, tempfile
-import util, scmutil, templater, patch, error, templatekw, revlog
+import util, scmutil, templater, patch, error, templatekw, revlog, copies
 import match as matchmod
 import subrepo
 
@@ -75,6 +75,10 @@ def bailifchanged(repo):
     modified, added, removed, deleted = repo.status()[:4]
     if modified or added or removed or deleted:
         raise util.Abort(_("outstanding uncommitted changes"))
+    ctx = repo[None]
+    for s in ctx.substate:
+        if ctx.sub(s).dirty():
+            raise util.Abort(_("uncommitted changes in subrepo %s") % s)
 
 def logmessage(ui, opts):
     """ get the log message according to -m and -l option """
@@ -109,12 +113,13 @@ def loglimit(opts):
         limit = None
     return limit
 
-def makefilename(repo, pat, node,
+def makefilename(repo, pat, node, desc=None,
                   total=None, seqno=None, revwidth=None, pathname=None):
     node_expander = {
         'H': lambda: hex(node),
         'R': lambda: str(repo.changelog.rev(node)),
         'h': lambda: short(node),
+        'm': lambda: re.sub('[^\w]', '_', str(desc))
         }
     expander = {
         '%': lambda: '%',
@@ -154,14 +159,14 @@ def makefilename(repo, pat, node,
         raise util.Abort(_("invalid format spec '%%%s' in output filename") %
                          inst.args[0])
 
-def makefileobj(repo, pat, node=None, total=None,
+def makefileobj(repo, pat, node=None, desc=None, total=None,
                 seqno=None, revwidth=None, mode='wb', pathname=None):
 
     writable = mode not in ('r', 'rb')
 
     if not pat or pat == '-':
         fp = writable and repo.ui.fout or repo.ui.fin
-        if hasattr(fp, 'fileno'):
+        if util.safehasattr(fp, 'fileno'):
             return os.fdopen(os.dup(fp.fileno()), mode)
         else:
             # if this fp can't be duped properly, return
@@ -177,11 +182,11 @@ def makefileobj(repo, pat, node=None, total=None,
                         return getattr(self.f, attr)
 
             return wrappedfileobj(fp)
-    if hasattr(pat, 'write') and writable:
+    if util.safehasattr(pat, 'write') and writable:
         return pat
-    if hasattr(pat, 'read') and 'r' in mode:
+    if util.safehasattr(pat, 'read') and 'r' in mode:
         return pat
-    return open(makefilename(repo, pat, node, total, seqno, revwidth,
+    return open(makefilename(repo, pat, node, desc, total, seqno, revwidth,
                               pathname),
                 mode)
 
@@ -516,11 +521,13 @@ def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
 
         shouldclose = False
         if not fp:
-            fp = makefileobj(repo, template, node, total=total, seqno=seqno,
-                             revwidth=revwidth, mode='ab')
+            desc_lines = ctx.description().rstrip().split('\n')
+            desc = desc_lines[0]    #Commit always has a first line.
+            fp = makefileobj(repo, template, node, desc=desc, total=total,
+                             seqno=seqno, revwidth=revwidth, mode='ab')
             if fp != template:
                 shouldclose = True
-        if fp != sys.stdout and hasattr(fp, 'name'):
+        if fp != sys.stdout and util.safehasattr(fp, 'name'):
             repo.ui.note("%s\n" % fp.name)
 
         fp.write("# HG changeset patch\n")
@@ -1172,6 +1179,19 @@ def add(ui, repo, match, dryrun, listsubrepos, prefix):
         rejected = wctx.add(names, prefix)
         bad.extend(f for f in rejected if f in match.files())
     return bad
+
+def duplicatecopies(repo, rev, p1, p2):
+    "Reproduce copies found in the source revision in the dirstate for grafts"
+    # Here we simulate the copies and renames in the source changeset
+    cop, diver = copies.copies(repo, repo[rev], repo[p1], repo[p2], True)
+    m1 = repo[rev].manifest()
+    m2 = repo[p1].manifest()
+    for k, v in cop.iteritems():
+        if k in m1:
+            if v in m1 or v in m2:
+                repo.dirstate.copy(v, k)
+                if v in m2 and v not in m1 and k in m2:
+                    repo.dirstate.remove(v)
 
 def commit(ui, repo, commitfunc, pats, opts):
     '''commit the specified files or all outstanding changes'''

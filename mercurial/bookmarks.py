@@ -26,7 +26,13 @@ def read(repo):
     bookmarks = {}
     try:
         for line in repo.opener('bookmarks'):
-            sha, refspec = line.strip().split(' ', 1)
+            line = line.strip()
+            if not line:
+                continue
+            if ' ' not in line:
+                repo.ui.warn(_('malformed line in .hg/bookmarks: %r\n') % line)
+                continue
+            sha, refspec = line.split(' ', 1)
             refspec = encoding.tolocal(refspec)
             try:
                 bookmarks[refspec] = repo.changelog.lookup(sha)
@@ -84,7 +90,7 @@ def write(repo):
         file = repo.opener('bookmarks', 'w', atomictemp=True)
         for refspec, node in refs.iteritems():
             file.write("%s %s\n" % (hex(node), encoding.fromlocal(refspec)))
-        file.rename()
+        file.close()
 
         # touch 00changelog.i so hgweb reloads bookmarks (no lock needed)
         try:
@@ -115,7 +121,7 @@ def setcurrent(repo, mark):
     try:
         file = repo.opener('bookmarks.current', 'w', atomictemp=True)
         file.write(encoding.fromlocal(mark))
-        file.rename()
+        file.close()
     finally:
         wlock.release()
     repo._bookmarkcurrent = mark
@@ -140,16 +146,15 @@ def update(repo, parents, node):
             marks[mark] = new.node()
             update = True
     if update:
-        write(repo)
+        repo._writebookmarks(marks)
 
 def listbookmarks(repo):
     # We may try to list bookmarks on a repo type that does not
     # support it (e.g., statichttprepository).
-    if not hasattr(repo, '_bookmarks'):
-        return {}
+    marks = getattr(repo, '_bookmarks', {})
 
     d = {}
-    for k, v in repo._bookmarks.iteritems():
+    for k, v in marks.iteritems():
         d[k] = hex(v)
     return d
 

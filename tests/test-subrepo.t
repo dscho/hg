@@ -34,6 +34,18 @@ Issue2232: committing a subrepo without .hgsub
   $ hg ci -m1
   committing subrepository s
 
+Revert can't (yet) revert subrepos:
+
+  $ echo b > s/a
+  $ hg revert s
+  s: reverting subrepos is unsupported
+
+Revert currently ignores subrepos by default
+
+  $ hg revert -a
+  $ hg revert -R s -a -C
+  reverting s/a
+
 Issue2022: update -C
 
   $ echo b > s/a
@@ -51,6 +63,14 @@ Issue2022: update -C
   branch: default
   commit: (clean)
   update: (current)
+
+commands that require a clean repo should respect subrepos
+
+  $ echo b >> s/a
+  $ hg backout tip
+  abort: uncommitted changes in subrepo s
+  [255]
+  $ hg revert -C -R s s/a
 
 add sub sub
 

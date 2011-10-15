@@ -199,7 +199,6 @@ import two patches in one stream
   $ hg init b
   $ hg --cwd a export 0:tip | hg --cwd b import -
   applying patch from stdin
-  applied 80971e65b431
   $ hg --cwd a id
   1d4bd90af0e4 tip
   $ hg --cwd b id
@@ -356,15 +355,20 @@ patches: import patch1 patch2; rollback
   $ hg clone -qr0 a b
   $ hg --cwd b parents --template 'parent: {rev}\n'
   parent: 0
-  $ hg --cwd b import ../patch1 ../patch2
+  $ hg --cwd b import -v ../patch1 ../patch2
   applying ../patch1
+  patching file a
+  a
+  created 1d4bd90af0e4
   applying ../patch2
-  applied 1d4bd90af0e4
+  patching file a
+  a
+  created 6d019af21222
   $ hg --cwd b rollback
-  repository tip rolled back to revision 1 (undo commit)
-  working directory now based on revision 1
+  repository tip rolled back to revision 0 (undo import)
+  working directory now based on revision 0
   $ hg --cwd b parents --template 'parent: {rev}\n'
-  parent: 1
+  parent: 0
   $ rm -r b
 
 
@@ -433,6 +437,7 @@ Test fuzziness (ambiguous patch location, fuzz=2)
   applying fuzzy-tip.patch
   patching file a
   Hunk #1 succeeded at 1 with fuzz 2 (offset -2 lines).
+  applied to working directory
   $ hg revert -a
   reverting a
 
@@ -449,6 +454,7 @@ test fuzziness with eol=auto
   applying fuzzy-tip.patch
   patching file a
   Hunk #1 succeeded at 1 with fuzz 2 (offset -2 lines).
+  applied to working directory
   $ cd ..
 
 
@@ -651,6 +657,7 @@ test import with similarity and git and strip (issue295 et al.)
   removing a
   adding b
   recording removal of a as rename to b (88% similar)
+  applied to working directory
   $ hg st -C
   A b
     a
@@ -665,6 +672,7 @@ test import with similarity and git and strip (issue295 et al.)
   patching file b
   removing a
   adding b
+  applied to working directory
   $ hg st -C
   A b
   R a
@@ -680,6 +688,7 @@ Issue1495: add empty file from the end of patch
   adding a
   $ hg ci -m "commit"
   $ cat > a.patch <<EOF
+  > add a, b
   > diff --git a/a b/a
   > --- a/a
   > +++ b/a
@@ -690,8 +699,24 @@ Issue1495: add empty file from the end of patch
   > EOF
   $ hg import --no-commit a.patch
   applying a.patch
-  $ cd ..
 
+apply a good patch followed by an empty patch (mainly to ensure
+that dirstate is *not* updated when import crashes)
+  $ hg update -q -C .
+  $ rm b
+  $ touch empty.patch
+  $ hg import a.patch empty.patch
+  applying a.patch
+  applying empty.patch
+  transaction abort!
+  rollback completed
+  abort: empty.patch: no diffs found
+  [255]
+  $ hg tip --template '{rev}  {desc|firstline}\n'
+  0  commit
+  $ hg -q status
+  M a
+  $ cd ..
 
 create file when source is not /dev/null
 

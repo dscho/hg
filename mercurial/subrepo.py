@@ -50,15 +50,7 @@ def state(ctx, ui):
             if err.errno != errno.ENOENT:
                 raise
 
-    state = {}
-    for path, src in p[''].items():
-        kind = 'hg'
-        if src.startswith('['):
-            if ']' not in src:
-                raise util.Abort(_('missing ] in subrepo source'))
-            kind, src = src.split(']', 1)
-            kind = kind[1:]
-
+    def remap(src):
         for pattern, repl in p.items('subpaths'):
             # Turn r'C:\foo\bar' into r'C:\\foo\\bar' since re.sub
             # does a string decode.
@@ -72,7 +64,34 @@ def state(ctx, ui):
             except re.error, e:
                 raise util.Abort(_("bad subrepository pattern in %s: %s")
                                  % (p.source('subpaths', pattern), e))
+        return src
 
+    state = {}
+    for path, src in p[''].items():
+        kind = 'hg'
+        if src.startswith('['):
+            if ']' not in src:
+                raise util.Abort(_('missing ] in subrepo source'))
+            kind, src = src.split(']', 1)
+            kind = kind[1:]
+            src = src.lstrip() # strip any extra whitespace after ']'
+
+        if not util.url(src).isabs():
+            parent = _abssource(ctx._repo, abort=False)
+            if parent:
+                parent = util.url(parent)
+                parent.path = posixpath.join(parent.path or '', src)
+                parent.path = posixpath.normpath(parent.path)
+                joined = str(parent)
+                # Remap the full joined path and use it if it changes,
+                # else remap the original source.
+                remapped = remap(joined)
+                if remapped == joined:
+                    src = remap(src)
+                else:
+                    src = remapped
+
+        src = remap(src)
         state[path] = (src.strip(), rev.get(path, ''), kind)
 
     return state
@@ -181,23 +200,23 @@ def _updateprompt(ui, sub, dirty, local, remote):
 def reporelpath(repo):
     """return path to this (sub)repo as seen from outermost repo"""
     parent = repo
-    while hasattr(parent, '_subparent'):
+    while util.safehasattr(parent, '_subparent'):
         parent = parent._subparent
     p = parent.root.rstrip(os.sep)
     return repo.root[len(p) + 1:]
 
 def subrelpath(sub):
     """return path to this subrepo as seen from outermost repo"""
-    if hasattr(sub, '_relpath'):
+    if util.safehasattr(sub, '_relpath'):
         return sub._relpath
-    if not hasattr(sub, '_repo'):
+    if not util.safehasattr(sub, '_repo'):
         return sub._path
     return reporelpath(sub._repo)
 
 def _abssource(repo, push=False, abort=True):
     """return pull/push path of repo - either based on parent repo .hgsub info
     or on the top repo config. Abort or return None if no source found."""
-    if hasattr(repo, '_subparent'):
+    if util.safehasattr(repo, '_subparent'):
         source = util.url(repo._subsource)
         if source.isabs():
             return str(source)
@@ -209,7 +228,7 @@ def _abssource(repo, push=False, abort=True):
             parent.path = posixpath.normpath(parent.path)
             return str(parent)
     else: # recursion reached top repo
-        if hasattr(repo, '_subtoppath'):
+        if util.safehasattr(repo, '_subtoppath'):
             return repo._subtoppath
         if push and repo.ui.config('paths', 'default-push'):
             return repo.ui.config('paths', 'default-push')
@@ -530,9 +549,13 @@ class svnsubrepo(abstractsubrepo):
         self._state = state
         self._ctx = ctx
         self._ui = ctx._repo.ui
+        self._exe = util.findexe('svn')
+        if not self._exe:
+            raise util.Abort(_("'svn' executable not found for subrepo '%s'")
+                             % self._path)
 
     def _svncommand(self, commands, filename='', failok=False):
-        cmd = ['svn']
+        cmd = [self._exe]
         extrakw = {}
         if not self._ui.interactive():
             # Making stdin be a pipe should prevent svn from behaving
@@ -810,9 +833,10 @@ class gitsubrepo(abstractsubrepo):
         for b in branches:
             if b.startswith('refs/remotes/'):
                 continue
-            remote = self._gitcommand(['config', 'branch.%s.remote' % b])
+            bname = b.split('/', 2)[2]
+            remote = self._gitcommand(['config', 'branch.%s.remote' % bname])
             if remote:
-                ref = self._gitcommand(['config', 'branch.%s.merge' % b])
+                ref = self._gitcommand(['config', 'branch.%s.merge' % bname])
                 tracking['refs/remotes/%s/%s' %
                          (remote, ref.split('/', 2)[2])] = b
         return tracking

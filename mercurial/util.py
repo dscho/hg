@@ -19,6 +19,58 @@ import errno, re, shutil, sys, tempfile, traceback
 import os, time, calendar, textwrap, signal
 import imp, socket, urllib
 
+if os.name == 'nt':
+    import windows as platform
+else:
+    import posix as platform
+
+cachestat = platform.cachestat
+checkexec = platform.checkexec
+checklink = platform.checklink
+copymode = platform.copymode
+executablepath = platform.executablepath
+expandglobs = platform.expandglobs
+explainexit = platform.explainexit
+findexe = platform.findexe
+gethgcmd = platform.gethgcmd
+getuser = platform.getuser
+groupmembers = platform.groupmembers
+groupname = platform.groupname
+hidewindow = platform.hidewindow
+isexec = platform.isexec
+isowner = platform.isowner
+localpath = platform.localpath
+lookupreg = platform.lookupreg
+makedir = platform.makedir
+nlinks = platform.nlinks
+normpath = platform.normpath
+nulldev = platform.nulldev
+openhardlinks = platform.openhardlinks
+oslink = platform.oslink
+parsepatchoutput = platform.parsepatchoutput
+pconvert = platform.pconvert
+popen = platform.popen
+posixfile = platform.posixfile
+quotecommand = platform.quotecommand
+realpath = platform.realpath
+rename = platform.rename
+samedevice = platform.samedevice
+samefile = platform.samefile
+samestat = platform.samestat
+setbinary = platform.setbinary
+setflags = platform.setflags
+setsignalhandler = platform.setsignalhandler
+shellquote = platform.shellquote
+spawndetached = platform.spawndetached
+sshargs = platform.sshargs
+statfiles = platform.statfiles
+termwidth = platform.termwidth
+testpid = platform.testpid
+umask = platform.umask
+unlink = platform.unlink
+unlinkpath = platform.unlinkpath
+username = platform.username
+
 # Python compatibility
 
 def sha1(s):
@@ -307,8 +359,8 @@ def mainfrozen():
     The code supports py2exe (most common, Windows only) and tools/freeze
     (portable, not much used).
     """
-    return (hasattr(sys, "frozen") or # new py2exe
-            hasattr(sys, "importers") or # old py2exe
+    return (safehasattr(sys, "frozen") or # new py2exe
+            safehasattr(sys, "importers") or # old py2exe
             imp.is_frozen("__main__")) # tools/freeze
 
 def hgexecutable():
@@ -318,10 +370,13 @@ def hgexecutable():
     """
     if _hgexecutable is None:
         hg = os.environ.get('HG')
+        mainmod = sys.modules['__main__']
         if hg:
             _sethgexecutable(hg)
         elif mainfrozen():
             _sethgexecutable(sys.executable)
+        elif os.path.basename(getattr(mainmod, '__file__', '')) == 'hg':
+            _sethgexecutable(mainmod.__file__)
         else:
             exe = findexe('hg') or os.path.basename(sys.argv[0])
             _sethgexecutable(exe)
@@ -393,18 +448,6 @@ def checksignature(func):
             raise
 
     return check
-
-def makedir(path, notindexed):
-    os.mkdir(path)
-
-def unlinkpath(f):
-    """unlink and remove the directory if it is empty"""
-    os.unlink(f)
-    # try removing directories that might now be empty
-    try:
-        os.removedirs(os.path.dirname(f))
-    except OSError:
-        pass
 
 def copyfile(src, dest):
     "copy a file, preserving mode and atime/mtime"
@@ -491,22 +534,10 @@ def checkwinfilename(path):
             return _("filename ends with '%s', which is not allowed "
                      "on Windows") % t
 
-def lookupreg(key, name=None, scope=None):
-    return None
-
-def hidewindow():
-    """Hide current shell window.
-
-    Used to hide the window opened when starting asynchronous
-    child process under Windows, unneeded on other systems.
-    """
-    pass
-
 if os.name == 'nt':
     checkosfilename = checkwinfilename
-    from windows import *
 else:
-    from posix import *
+    checkosfilename = platform.checkosfilename
 
 def makelock(info, pathname):
     try:
@@ -690,16 +721,7 @@ def mktempcopy(name, emptyok=False, createmode=None):
     # Temporary files are created with mode 0600, which is usually not
     # what we want.  If the original file already exists, just copy
     # its mode.  Otherwise, manually obey umask.
-    try:
-        st_mode = os.lstat(name).st_mode & 0777
-    except OSError, inst:
-        if inst.errno != errno.ENOENT:
-            raise
-        st_mode = createmode
-        if st_mode is None:
-            st_mode = ~umask
-        st_mode &= 0666
-    os.chmod(temp, st_mode)
+    copymode(name, temp, createmode)
     if emptyok:
         return temp
     try:
@@ -726,11 +748,10 @@ class atomictempfile(object):
     '''writeable file object that atomically updates a file
 
     All writes will go to a temporary copy of the original file. Call
-    rename() when you are done writing, and atomictempfile will rename
-    the temporary copy to the original name, making the changes visible.
-
-    Unlike other file-like objects, close() discards your writes by
-    simply deleting the temporary file.
+    close() when you are done writing, and atomictempfile will rename
+    the temporary copy to the original name, making the changes
+    visible. If the object is destroyed without being closed, all your
+    writes are discarded.
     '''
     def __init__(self, name, mode='w+b', createmode=None):
         self.__name = name      # permanent name
@@ -742,12 +763,12 @@ class atomictempfile(object):
         self.write = self._fp.write
         self.fileno = self._fp.fileno
 
-    def rename(self):
+    def close(self):
         if not self._fp.closed:
             self._fp.close()
             rename(self._tempname, localpath(self.__name))
 
-    def close(self):
+    def discard(self):
         if not self._fp.closed:
             try:
                 os.unlink(self._tempname)
@@ -756,24 +777,25 @@ class atomictempfile(object):
             self._fp.close()
 
     def __del__(self):
-        if hasattr(self, '_fp'): # constructor actually did something
-            self.close()
+        if safehasattr(self, '_fp'): # constructor actually did something
+            self.discard()
 
 def makedirs(name, mode=None):
     """recursive directory creation with parent mode inheritance"""
-    parent = os.path.abspath(os.path.dirname(name))
     try:
         os.mkdir(name)
-        if mode is not None:
-            os.chmod(name, mode)
-        return
     except OSError, err:
         if err.errno == errno.EEXIST:
             return
-        if not name or parent == name or err.errno != errno.ENOENT:
+        if err.errno != errno.ENOENT or not name:
             raise
-    makedirs(parent, mode)
-    makedirs(name, mode)
+        parent = os.path.dirname(os.path.abspath(name))
+        if parent == name:
+            raise
+        makedirs(parent, mode)
+        os.mkdir(name)
+    if mode is not None:
+        os.chmod(name, mode)
 
 def readfile(path):
     fp = open(path, 'rb')
@@ -1303,8 +1325,9 @@ def rundetached(args, condfn):
     def handler(signum, frame):
         terminated.add(os.wait())
     prevhandler = None
-    if hasattr(signal, 'SIGCHLD'):
-        prevhandler = signal.signal(signal.SIGCHLD, handler)
+    SIGCHLD = getattr(signal, 'SIGCHLD', None)
+    if SIGCHLD is not None:
+        prevhandler = signal.signal(SIGCHLD, handler)
     try:
         pid = spawndetached(args)
         while not condfn():
@@ -1648,8 +1671,10 @@ class url(object):
             self.user, self.passwd = user, passwd
         if not self.user:
             return (s, None)
-        # authinfo[1] is passed to urllib2 password manager, and its URIs
-        # must not contain credentials.
+        # authinfo[1] is passed to urllib2 password manager, and its
+        # URIs must not contain credentials. The host is passed in the
+        # URIs list because Python < 2.4.3 uses only that to search for
+        # a password.
         return (s, (None, (s, self.host),
                     self.user, self.passwd or ''))
 

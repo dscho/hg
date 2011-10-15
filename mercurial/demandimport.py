@@ -27,6 +27,17 @@ These imports will not be delayed:
 import __builtin__
 _origimport = __import__
 
+nothing = object()
+
+try:
+    _origimport(__builtin__.__name__, {}, {}, None, -1)
+except TypeError: # no level argument
+    def _import(name, globals, locals, fromlist, level):
+        "call _origimport with no level argument"
+        return _origimport(name, globals, locals, fromlist)
+else:
+    _import = _origimport
+
 class _demandmod(object):
     """module demand-loader and proxy"""
     def __init__(self, name, globals, locals):
@@ -50,7 +61,7 @@ class _demandmod(object):
                 h, t = p, None
                 if '.' in p:
                     h, t = p.split('.', 1)
-                if not hasattr(mod, h):
+                if getattr(mod, h, nothing) is nothing:
                     setattr(mod, h, _demandmod(p, mod.__dict__, mod.__dict__))
                 elif t:
                     subload(getattr(mod, h), t)
@@ -81,20 +92,14 @@ class _demandmod(object):
 def _demandimport(name, globals=None, locals=None, fromlist=None, level=-1):
     if not locals or name in ignore or fromlist == ('*',):
         # these cases we can't really delay
-        if level == -1:
-            return _origimport(name, globals, locals, fromlist)
-        else:
-            return _origimport(name, globals, locals, fromlist, level)
+        return _import(name, globals, locals, fromlist, level)
     elif not fromlist:
         # import a [as b]
         if '.' in name: # a.b
             base, rest = name.split('.', 1)
             # email.__init__ loading email.mime
             if globals and globals.get('__name__', None) == base:
-                if level != -1:
-                    return _origimport(name, globals, locals, fromlist, level)
-                else:
-                    return _origimport(name, globals, locals, fromlist)
+                return _import(name, globals, locals, fromlist, level)
             # if a is already demand-loaded, add b to its submodule list
             if base in locals:
                 if isinstance(locals[base], _demandmod):
@@ -109,12 +114,12 @@ def _demandimport(name, globals=None, locals=None, fromlist=None, level=-1):
         mod = _origimport(name, globals, locals)
         # recurse down the module chain
         for comp in name.split('.')[1:]:
-            if not hasattr(mod, comp):
+            if getattr(mod, comp, nothing) is nothing:
                 setattr(mod, comp, _demandmod(comp, mod.__dict__, mod.__dict__))
             mod = getattr(mod, comp)
         for x in fromlist:
             # set requested submodules for demand load
-            if not hasattr(mod, x):
+            if getattr(mod, x, nothing) is nothing:
                 setattr(mod, x, _demandmod(x, mod.__dict__, locals))
         return mod
 
@@ -137,6 +142,8 @@ ignore = [
     # raise ImportError if x not defined
     '__main__',
     '_ssl', # conditional imports in the stdlib, issue1964
+    'rfc822',
+    'mimetools',
     ]
 
 def enable():
@@ -146,4 +153,3 @@ def enable():
 def disable():
     "disable global demand-loading of modules"
     __builtin__.__import__ = _origimport
-

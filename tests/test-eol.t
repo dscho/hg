@@ -441,3 +441,82 @@ Test handling of a broken .hgeol file:
   warning: ignoring .hgeol file due to parse error at .hgeol:1: bad
   $ hg status
   ? .hgeol.orig
+
+Test eol.only-consistent can be specified in .hgeol
+
+  $ cd $TESTTMP
+  $ hg init only-consistent
+  $ cd only-consistent
+  $ printf "first\nsecond\r\n" > a.txt
+  $ hg add a.txt
+  $ cat > .hgeol << EOF
+  > [eol]
+  > only-consistent = True
+  > EOF
+  $ hg commit -m 'inconsistent'
+  abort: inconsistent newline style in a.txt
+  
+  [255]
+  $ cat > .hgeol << EOF
+  > [eol]
+  > only-consistent = False
+  > EOF
+  $ hg commit -m 'consistent'
+
+
+Test trailing newline
+
+  $ cat >> $HGRCPATH <<EOF
+  > [extensions]
+  > eol=
+  > EOF
+
+setup repository
+
+  $ cd $TESTTMP
+  $ hg init trailing
+  $ cd trailing
+  $ cat > .hgeol <<EOF
+  > [patterns]
+  > **.txt = native
+  > [eol]
+  > fix-trailing-newline = False
+  > EOF
+
+add text without trailing newline
+
+  $ printf "first\nsecond" > a.txt
+  $ hg commit --addremove -m 'checking in'
+  adding .hgeol
+  adding a.txt
+  $ rm a.txt
+  $ hg update -C -q
+  $ cat a.txt
+  first
+  second (no-eol)
+
+  $ cat > .hgeol <<EOF
+  > [patterns]
+  > **.txt = native
+  > [eol]
+  > fix-trailing-newline = True
+  > EOF
+  $ printf "third\nfourth" > a.txt
+  $ hg commit -m 'checking in with newline fix'
+  $ rm a.txt
+  $ hg update -C -q
+  $ cat a.txt
+  third
+  fourth
+
+append a line without trailing newline
+
+  $ printf "fifth" >> a.txt
+  $ hg commit -m 'adding another line line'
+  $ rm a.txt
+  $ hg update -C -q
+  $ cat a.txt
+  third
+  fourth
+  fifth
+

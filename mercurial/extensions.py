@@ -69,7 +69,9 @@ def load(ui, name, path):
             return mod
         try:
             mod = importh("hgext.%s" % name)
-        except ImportError:
+        except ImportError, err:
+            ui.debug('could not import hgext.%s (%s): trying %s\n'
+                     % (name, err, name))
             mod = importh(name)
     _extensions[shortname] = mod
     _order.append(shortname)
@@ -124,7 +126,7 @@ def wrapcommand(table, command, wrapper):
     where orig is the original (wrapped) function, and *args, **kwargs
     are the arguments passed to it.
     '''
-    assert hasattr(wrapper, '__call__')
+    assert util.safehasattr(wrapper, '__call__')
     aliases, entry = cmdutil.findcmd(command, table)
     for alias, e in table.iteritems():
         if e is entry:
@@ -177,12 +179,12 @@ def wrapfunction(container, funcname, wrapper):
     your end users, you should play nicely with others by using the
     subclass trick.
     '''
-    assert hasattr(wrapper, '__call__')
+    assert util.safehasattr(wrapper, '__call__')
     def wrap(*args, **kwargs):
         return wrapper(origfn, *args, **kwargs)
 
     origfn = getattr(container, funcname)
-    assert hasattr(origfn, '__call__')
+    assert util.safehasattr(origfn, '__call__')
     setattr(container, funcname, wrap)
     return origfn
 

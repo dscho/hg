@@ -98,9 +98,9 @@ def repository(ui, path='', create=False):
             hook(ui, repo)
     return repo
 
-def peer(ui, opts, path, create=False):
+def peer(uiorrepo, opts, path, create=False):
     '''return a repository peer for the specified path'''
-    rui = remoteui(ui, opts)
+    rui = remoteui(uiorrepo, opts)
     return repository(rui, path, create)
 
 def defaultdest(source):
@@ -173,6 +173,36 @@ def share(ui, source, dest=None, update=True):
             except error.RepoLookupError:
                 continue
         _update(r, uprev)
+
+def copystore(ui, srcrepo, destpath):
+    '''copy files from store of srcrepo in destpath
+
+    returns destlock
+    '''
+    destlock = None
+    try:
+        hardlink = None
+        num = 0
+        for f in srcrepo.store.copylist():
+            src = os.path.join(srcrepo.sharedpath, f)
+            dst = os.path.join(destpath, f)
+            dstbase = os.path.dirname(dst)
+            if dstbase and not os.path.exists(dstbase):
+                os.mkdir(dstbase)
+            if os.path.exists(src):
+                if dst.endswith('data'):
+                    # lock to avoid premature writing to the target
+                    destlock = lock.lock(os.path.join(dstbase, "lock"))
+                hardlink, n = util.copyfiles(src, dst, hardlink)
+                num += n
+        if hardlink:
+            ui.debug("linked %d files\n" % num)
+        else:
+            ui.debug("copied %d files\n" % num)
+        return destlock
+    except:
+        release(destlock)
+        raise
 
 def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
           update=True, stream=False, branch=None):
@@ -287,24 +317,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
                                      % dest)
                 raise
 
-            hardlink = None
-            num = 0
-            for f in srcrepo.store.copylist():
-                src = os.path.join(srcrepo.sharedpath, f)
-                dst = os.path.join(destpath, f)
-                dstbase = os.path.dirname(dst)
-                if dstbase and not os.path.exists(dstbase):
-                    os.mkdir(dstbase)
-                if os.path.exists(src):
-                    if dst.endswith('data'):
-                        # lock to avoid premature writing to the target
-                        destlock = lock.lock(os.path.join(dstbase, "lock"))
-                    hardlink, n = util.copyfiles(src, dst, hardlink)
-                    num += n
-            if hardlink:
-                ui.debug("linked %d files\n" % num)
-            else:
-                ui.debug("copied %d files\n" % num)
+            destlock = copystore(ui, srcrepo, destpath)
 
             # we need to re-init the repo after manually copying the data
             # into it
@@ -537,7 +550,7 @@ def verify(repo):
 
 def remoteui(src, opts):
     'build a remote ui from ui or repo and opts'
-    if hasattr(src, 'baseui'): # looks like a repository
+    if util.safehasattr(src, 'baseui'): # looks like a repository
         dst = src.baseui.copy() # drop repo-specific config
         src = src.ui # copy target options from repo
     else: # assume it's a global ui object

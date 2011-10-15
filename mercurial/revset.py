@@ -6,7 +6,7 @@
 # GNU General Public License version 2 or any later version.
 
 import re
-import parser, util, error, discovery, hbisect
+import parser, util, error, discovery, hbisect, node
 import bookmarks as bookmarksmod
 import match as matchmod
 from i18n import _
@@ -235,15 +235,24 @@ def author(repo, subset, x):
     n = getstring(x, _("author requires a string")).lower()
     return [r for r in subset if n in repo[r].user().lower()]
 
-def bisected(repo, subset, x):
-    """``bisected(string)``
-    Changesets marked in the specified bisect state (good, bad, skip).
+def bisect(repo, subset, x):
+    """``bisect(string)``
+    Changesets marked in the specified bisect status:
+
+    - ``good``, ``bad``, ``skip``: csets explicitly marked as good/bad/skip
+    - ``goods``, ``bads``      : csets topologicaly good/bad
+    - ``range``              : csets taking part in the bisection
+    - ``pruned``             : csets that are goods, bads or skipped
+    - ``untested``           : csets whose fate is yet unknown
+    - ``ignored``            : csets ignored due to DAG topology
     """
-    state = getstring(x, _("bisect requires a string")).lower()
-    if state not in ('good', 'bad', 'skip', 'unknown'):
-        raise error.ParseError(_('invalid bisect state'))
-    marked = set(repo.changelog.rev(n) for n in hbisect.load_state(repo)[state])
-    return [r for r in subset if r in marked]
+    status = getstring(x, _("bisect requires a string")).lower()
+    return [r for r in subset if r in hbisect.get(repo, status)]
+
+# Backward-compatibility
+# - no help entry so that we do not advertise it any more
+def bisected(repo, subset, x):
+    return bisect(repo, subset, x)
 
 def bookmark(repo, subset, x):
     """``bookmark([name])``
@@ -407,6 +416,12 @@ def filelog(repo, subset, x):
 
     return [r for r in subset if r in s]
 
+def first(repo, subset, x):
+    """``first(set, [n])``
+    An alias for limit().
+    """
+    return limit(repo, subset, x)
+
 def follow(repo, subset, x):
     """``follow([file])``
     An alias for ``::.`` (ancestors of the working copy's first parent).
@@ -513,14 +528,16 @@ def keyword(repo, subset, x):
     return l
 
 def limit(repo, subset, x):
-    """``limit(set, n)``
-    First n members of set.
+    """``limit(set, [n])``
+    First n members of set, defaulting to 1.
     """
     # i18n: "limit" is a keyword
-    l = getargs(x, 2, 2, _("limit requires two arguments"))
+    l = getargs(x, 1, 2, _("limit requires one or two arguments"))
     try:
-        # i18n: "limit" is a keyword
-        lim = int(getstring(l[1], _("limit requires a number")))
+        lim = 1
+        if len(l) == 2:
+            # i18n: "limit" is a keyword
+            lim = int(getstring(l[1], _("limit requires a number")))
     except (TypeError, ValueError):
         # i18n: "limit" is a keyword
         raise error.ParseError(_("limit expects a number"))
@@ -529,14 +546,16 @@ def limit(repo, subset, x):
     return [r for r in os if r in ss]
 
 def last(repo, subset, x):
-    """``last(set, n)``
-    Last n members of set.
+    """``last(set, [n])``
+    Last n members of set, defaulting to 1.
     """
     # i18n: "last" is a keyword
-    l = getargs(x, 2, 2, _("last requires two arguments"))
+    l = getargs(x, 1, 2, _("last requires one or two arguments"))
     try:
-        # i18n: "last" is a keyword
-        lim = int(getstring(l[1], _("last requires a number")))
+        lim = 1
+        if len(l) == 2:
+            # i18n: "last" is a keyword
+            lim = int(getstring(l[1], _("last requires a number")))
     except (TypeError, ValueError):
         # i18n: "last" is a keyword
         raise error.ParseError(_("last expects a number"))
@@ -827,6 +846,7 @@ symbols = {
     "ancestor": ancestor,
     "ancestors": ancestors,
     "author": author,
+    "bisect": bisect,
     "bisected": bisected,
     "bookmark": bookmark,
     "branch": branch,
@@ -838,6 +858,7 @@ symbols = {
     "descendants": descendants,
     "file": hasfile,
     "filelog": filelog,
+    "first": first,
     "follow": follow,
     "grep": grep,
     "head": head,
@@ -951,7 +972,7 @@ def optimize(x, small):
             w = 100 # very slow
         elif f == "ancestor":
             w = 1 * smallbonus
-        elif f in "reverse limit":
+        elif f in "reverse limit first":
             w = 0
         elif f in "sort":
             w = 10 # assume most sorts look at changelog
@@ -1019,11 +1040,87 @@ def match(ui, spec):
     tree, pos = parse(spec)
     if (pos != len(spec)):
         raise error.ParseError(_("invalid token"), pos)
-    tree = findaliases(ui, tree)
+    if ui:
+        tree = findaliases(ui, tree)
     weight, tree = optimize(tree, True)
     def mfunc(repo, subset):
         return getset(repo, subset, tree)
     return mfunc
+
+def formatspec(expr, *args):
+    '''
+    This is a convenience function for using revsets internally, and
+    escapes arguments appropriately. Aliases are intentionally ignored
+    so that intended expression behavior isn't accidentally subverted.
+
+    Supported arguments:
+
+    %r = revset expression, parenthesized
+    %d = int(arg), no quoting
+    %s = string(arg), escaped and single-quoted
+    %b = arg.branch(), escaped and single-quoted
+    %n = hex(arg), single-quoted
+    %% = a literal '%'
+
+    Prefixing the type with 'l' specifies a parenthesized list of that type.
+
+    >>> formatspec('%r:: and %lr', '10 or 11', ("this()", "that()"))
+    '(10 or 11):: and ((this()) or (that()))'
+    >>> formatspec('%d:: and not %d::', 10, 20)
+    '10:: and not 20::'
+    >>> formatspec('keyword(%s)', 'foo\\xe9')
+    "keyword('foo\\\\xe9')"
+    >>> b = lambda: 'default'
+    >>> b.branch = b
+    >>> formatspec('branch(%b)', b)
+    "branch('default')"
+    >>> formatspec('root(%ls)', ['a', 'b', 'c', 'd'])
+    "root(('a' or 'b' or 'c' or 'd'))"
+    '''
+
+    def quote(s):
+        return repr(str(s))
+
+    def argtype(c, arg):
+        if c == 'd':
+            return str(int(arg))
+        elif c == 's':
+            return quote(arg)
+        elif c == 'r':
+            parse(arg) # make sure syntax errors are confined
+            return '(%s)' % arg
+        elif c == 'n':
+            return quote(node.hex(arg))
+        elif c == 'b':
+            return quote(arg.branch())
+
+    ret = ''
+    pos = 0
+    arg = 0
+    while pos < len(expr):
+        c = expr[pos]
+        if c == '%':
+            pos += 1
+            d = expr[pos]
+            if d == '%':
+                ret += d
+            elif d in 'dsnbr':
+                ret += argtype(d, args[arg])
+                arg += 1
+            elif d == 'l':
+                # a list of some type
+                pos += 1
+                d = expr[pos]
+                lv = ' or '.join(argtype(d, e) for e in args[arg])
+                ret += '(%s)' % lv
+                arg += 1
+            else:
+                raise util.Abort('unexpected revspec format character %s' % d)
+        else:
+            ret += c
+        pos += 1
+
+    return ret
 
 # tell hggettext to extract docstrings from these functions:
 i18nfunctions = symbols.values()

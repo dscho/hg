@@ -10,14 +10,13 @@ from i18n import _
 from node import bin, hex
 import changegroup as changegroupmod
 import repo, error, encoding, util, store
-import pushkey as pushkeymod
 
 # abstract batching support
 
 class future(object):
     '''placeholder for a value to be set later'''
     def set(self, value):
-        if hasattr(self, 'value'):
+        if util.safehasattr(self, 'value'):
             raise error.RepoError("future is already set")
         self.value = value
 
@@ -58,8 +57,9 @@ class remotebatch(batcher):
         req, rsp = [], []
         for name, args, opts, resref in self.calls:
             mtd = getattr(self.remote, name)
-            if hasattr(mtd, 'batchable'):
-                batchable = getattr(mtd, 'batchable')(mtd.im_self, *args, **opts)
+            batchablefn = getattr(mtd, 'batchable', None)
+            if batchablefn is not None:
+                batchable = batchablefn(mtd.im_self, *args, **opts)
                 encargsorres, encresref = batchable.next()
                 if encresref:
                     req.append((name, encargsorres,))
@@ -334,6 +334,10 @@ class pusherr(object):
     def __init__(self, res):
         self.res = res
 
+class ooberror(object):
+    def __init__(self, message):
+        self.message = message
+
 def dispatch(repo, proto, command):
     func, spec = commands[command]
     args = proto.getargs(spec)
@@ -375,6 +379,8 @@ def batch(repo, proto, cmds, others):
             result = func(repo, proto, *[data[k] for k in keys])
         else:
             result = func(repo, proto)
+        if isinstance(result, ooberror):
+            return result
         res.append(escapearg(result))
     return ';'.join(res)
 
@@ -454,7 +460,7 @@ def hello(repo, proto):
     return "capabilities: %s\n" % (capabilities(repo, proto))
 
 def listkeys(repo, proto, namespace):
-    d = pushkeymod.list(repo, encoding.tolocal(namespace)).items()
+    d = repo.listkeys(encoding.tolocal(namespace)).items()
     t = '\n'.join(['%s\t%s' % (encoding.fromlocal(k), encoding.fromlocal(v))
                    for k, v in d])
     return t
@@ -484,9 +490,8 @@ def pushkey(repo, proto, namespace, key, old, new):
     else:
         new = encoding.tolocal(new) # normal path
 
-    r = pushkeymod.push(repo,
-                        encoding.tolocal(namespace), encoding.tolocal(key),
-                        encoding.tolocal(old), new)
+    r = repo.pushkey(encoding.tolocal(namespace), encoding.tolocal(key),
+                     encoding.tolocal(old), new)
     return '%s\n' % int(r)
 
 def _allowstream(ui):

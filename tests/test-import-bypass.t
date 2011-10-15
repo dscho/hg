@@ -61,8 +61,7 @@ Test --user, --date and --message
   @  0:07f494440405 test 0 0 - default - adda
   
   $ hg rollback
-  repository tip rolled back to revision 1 (undo commit)
-  working directory now based on revision 0
+  repository tip rolled back to revision 1 (undo import)
 
 Test --import-branch
 
@@ -74,8 +73,7 @@ Test --import-branch
   @  0:07f494440405 test 0 0 - default - adda
   
   $ hg rollback
-  repository tip rolled back to revision 1 (undo commit)
-  working directory now based on revision 0
+  repository tip rolled back to revision 1 (undo import)
 
 Test --strip
 
@@ -97,8 +95,7 @@ Test --strip
   > EOF
   applying patch from stdin
   $ hg rollback
-  repository tip rolled back to revision 1 (undo commit)
-  working directory now based on revision 0
+  repository tip rolled back to revision 1 (undo import)
 
 Test unsupported combinations
 
@@ -174,7 +171,6 @@ Test applying multiple patches
   $ hg import --bypass ../patch1.diff ../patch2.diff
   applying ../patch1.diff
   applying ../patch2.diff
-  applied 16581080145e
   $ shortlog
   o  3:bc8ca3f8a7c4 test 0 0 - default - addf
   |
@@ -199,7 +195,6 @@ Test applying multiple patches with --exact
   $ hg import --bypass --exact ../patch1.diff ../patch2.diff
   applying ../patch1.diff
   applying ../patch2.diff
-  applied 16581080145e
   $ shortlog
   o  3:d60cb8989666 test 0 0 - foo - addf
   |

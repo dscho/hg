@@ -28,6 +28,7 @@ class httprepository(wireproto.wirerepository):
         self.path = path
         self.caps = None
         self.handler = None
+        self.urlopener = None
         u = util.url(path)
         if u.query or u.fragment:
             raise util.Abort(_('unsupported URL component: "%s"') %
@@ -42,10 +43,10 @@ class httprepository(wireproto.wirerepository):
         self.urlopener = url.opener(ui, authinfo)
 
     def __del__(self):
-        for h in self.urlopener.handlers:
-            h.close()
-            if hasattr(h, "close_all"):
-                h.close_all()
+        if self.urlopener:
+            for h in self.urlopener.handlers:
+                h.close()
+                getattr(h, "close_all", lambda : None)()
 
     def url(self):
         return self.path
@@ -139,6 +140,8 @@ class httprepository(wireproto.wirerepository):
             proto = resp.headers.get('content-type', '')
 
         safeurl = util.hidepassword(self._url)
+        if proto.startswith('application/hg-error'):
+            raise error.OutOfBandError(resp.read())
         # accept old "text/plain" and "application/hg-changegroup" for now
         if not (proto.startswith('application/mercurial-') or
                 proto.startswith('text/plain') or
