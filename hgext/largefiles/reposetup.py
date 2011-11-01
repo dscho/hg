@@ -12,8 +12,7 @@ import types
 import os
 import re
 
-from mercurial import context, error, manifest, match as match_, \
-        node, util
+from mercurial import context, error, manifest, match as match_, node, util
 from mercurial.i18n import _
 
 import lfcommands
@@ -229,7 +228,7 @@ def reposetup(ui, repo):
             for filename in ctx.files():
                 if lfutil.isstandin(filename) and filename in ctx.manifest():
                     realfile = lfutil.splitstandin(filename)
-                    lfutil.copytocache(self, ctx.node(), realfile)
+                    lfutil.copytostore(self, ctx.node(), realfile)
 
             return node
 
@@ -347,7 +346,7 @@ def reposetup(ui, repo):
                         fstandin += os.sep
 
                     # prevalidate matching standin directories
-                    if lfutil.any_(st for st in match._files
+                    if util.any(st for st in match._files
                                    if st.startswith(fstandin)):
                         continue
                     actualfiles.append(f)
@@ -401,16 +400,10 @@ def reposetup(ui, repo):
     repo.__class__ = lfiles_repo
 
     def checkrequireslfiles(ui, repo, **kwargs):
-        if 'largefiles' not in repo.requirements and lfutil.any_(
+        if 'largefiles' not in repo.requirements and util.any(
                 lfutil.shortname+'/' in f[0] for f in repo.store.datafiles()):
-            # workaround bug in Mercurial 1.9 whereby requirements is
-            # a list on newly-cloned repos
-            repo.requirements = set(repo.requirements)
-
-            repo.requirements |= set(['largefiles'])
+            repo.requirements.add('largefiles')
             repo._writerequirements()
-
-    checkrequireslfiles(ui, repo)
 
     ui.setconfig('hooks', 'changegroup.lfiles', checkrequireslfiles)
     ui.setconfig('hooks', 'commit.lfiles', checkrequireslfiles)

@@ -29,7 +29,7 @@ bandwidth, since you don't need to retrieve all historical revisions
 of large files when you clone or pull.
 
 To start a new repository or add new large binary files, just add
---large to your ``hg add`` command. For example::
+--large to your :hg:`add` command. For example::
 
   $ dd if=/dev/urandom of=randomdata count=2000
   $ hg add --large randomdata
@@ -49,24 +49,24 @@ not previously updated to.
 
 If you already have large files tracked by Mercurial without the
 largefiles extension, you will need to convert your repository in
-order to benefit from largefiles. This is done with the 'hg lfconvert'
-command::
+order to benefit from largefiles. This is done with the
+:hg:`lfconvert` command::
 
   $ hg lfconvert --size 10 oldrepo newrepo
 
 In repositories that already have largefiles in them, any new file
 over 10MB will automatically be added as a largefile. To change this
-threshhold, set ``largefiles.size`` in your Mercurial config file to
-the minimum size in megabytes to track as a largefile, or use the
+threshold, set ``largefiles.minsize`` in your Mercurial config file
+to the minimum size in megabytes to track as a largefile, or use the
 --lfsize option to the add command (also in megabytes)::
 
   [largefiles]
-  size = 2           XXX wouldn't minsize be a better name?
+  minsize = 2
 
   $ hg add --lfsize 2
 
 The ``largefiles.patterns`` config option allows you to specify a list
-of filename patterns (see ``hg help patterns``) that should always be
+of filename patterns (see :hg:`help patterns`) that should always be
 tracked as largefiles::
 
   [largefiles]

@@ -9,7 +9,7 @@
 '''setup for largefiles extension: uisetup'''
 
 from mercurial import archival, cmdutil, commands, extensions, filemerge, hg, \
-    httprepo, localrepo, sshrepo, sshserver, util, wireproto
+    httprepo, localrepo, sshrepo, sshserver, wireproto
 from mercurial.i18n import _
 from mercurial.hgweb import hgweb_mod, protocol
 
@@ -23,7 +23,7 @@ def uisetup(ui):
     entry = extensions.wrapcommand(commands.table, 'add',
                                    overrides.override_add)
     addopt = [('', 'large', None, _('add as largefile')),
-            ('', 'lfsize', '', _('add all files above this size (in megabytes)'
+            ('', 'lfsize', '', _('add all files above this size (in megabytes) '
                                  'as largefiles (default: 10)'))]
     entry[1].extend(addopt)
 
@@ -82,12 +82,8 @@ def uisetup(ui):
     extensions.wrapfunction(hg, 'merge', overrides.hg_merge)
 
     extensions.wrapfunction(archival, 'archive', overrides.override_archive)
-    if util.safehasattr(cmdutil, 'bailifchanged'):
-        extensions.wrapfunction(cmdutil, 'bailifchanged',
-            overrides.override_bailifchanged)
-    else:
-        extensions.wrapfunction(cmdutil, 'bail_if_changed',
-            overrides.override_bailifchanged)
+    extensions.wrapfunction(cmdutil, 'bailifchanged',
+                            overrides.override_bailifchanged)
 
     # create the new wireproto commands ...
     wireproto.commands['putlfile'] = (proto.putlfile, 'sha')
@@ -136,3 +132,6 @@ def uisetup(ui):
         if name == 'rebase':
             extensions.wrapcommand(getattr(module, 'cmdtable'), 'rebase',
                 overrides.override_rebase)
+        if name == 'transplant':
+            extensions.wrapcommand(getattr(module, 'cmdtable'), 'transplant',
+                overrides.override_transplant)

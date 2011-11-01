@@ -131,17 +131,19 @@ class dirstate(object):
         # it's safe because f is always a relative path
         return self._rootdir + f
 
-    def flagfunc(self, fallback):
+    def flagfunc(self, buildfallback):
+        if self._checklink and self._checkexec:
+            def f(x):
+                p = self._join(x)
+                if os.path.islink(p):
+                    return 'l'
+                if util.isexec(p):
+                    return 'x'
+                return ''
+            return f
+
+        fallback = buildfallback()
         if self._checklink:
-            if self._checkexec:
-                def f(x):
-                    p = self._join(x)
-                    if os.path.islink(p):
-                        return 'l'
-                    if util.isexec(p):
-                        return 'x'
-                    return ''
-                return f
             def f(x):
                 if os.path.islink(self._join(x)):
                     return 'l'
@@ -157,7 +159,8 @@ class dirstate(object):
                     return 'x'
                 return ''
             return f
-        return fallback
+        else:
+            return fallback
 
     def getcwd(self):
         cwd = os.getcwd()
@@ -367,9 +370,10 @@ class dirstate(object):
 
     def drop(self, f):
         '''Drop a file from the dirstate'''
-        self._dirty = True
-        self._droppath(f)
-        del self._map[f]
+        if f in self._map:
+            self._dirty = True
+            self._droppath(f)
+            del self._map[f]
 
     def _normalize(self, path, isknown):
         normed = os.path.normcase(path)

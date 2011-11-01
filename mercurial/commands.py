@@ -1143,7 +1143,7 @@ def clone(ui, source, dest=None, **opts):
      _('mark new/missing files as added/removed before committing')),
     ('', 'close-branch', None,
      _('mark a branch as closed, hiding it from the branch list')),
-    ] + walkopts + commitopts + commitopts2,
+    ] + walkopts + commitopts + commitopts2 + subrepoopts,
     _('[OPTION]... [FILE]...'))
 def commit(ui, repo, *pats, **opts):
     """commit the specified files or all outstanding changes
@@ -1167,6 +1167,10 @@ def commit(ui, repo, *pats, **opts):
 
     Returns 0 on success, 1 if nothing changed.
     """
+    if opts.get('subrepos'):
+        # Let --subrepos on the command line overide config setting.
+        ui.setconfig('ui', 'commitsubrepos', True)
+
     extra = {}
     if opts.get('close_branch'):
         if repo['.'].node() not in repo.branchheads():
@@ -2544,19 +2548,20 @@ def graft(ui, repo, *revs, **opts):
         return -1
 
     # check ancestors for earlier grafts
-    ui.debug('scanning for existing transplants')
+    ui.debug('scanning for duplicate grafts\n')
     for ctx in repo.set("::. - ::%ld", revs):
         n = ctx.extra().get('source')
         if n and n in repo:
             r = repo[n].rev()
-            ui.warn(_('skipping already grafted revision %s\n') % r)
-            revs.remove(r)
+            if r in revs:
+                ui.warn(_('skipping already grafted revision %s\n') % r)
+                revs.remove(r)
     if not revs:
         return -1
 
     for pos, ctx in enumerate(repo.set("%ld", revs)):
         current = repo['.']
-        ui.status('grafting revision %s', ctx.rev())
+        ui.status('grafting revision %s\n' % ctx.rev())
 
         # we don't merge the first commit when continuing
         if not cont:
@@ -2660,7 +2665,7 @@ def grep(ui, repo, pattern, *pats, **opts):
             mstart, mend = match.span()
             linenum += body.count('\n', begin, mstart) + 1
             lstart = body.rfind('\n', begin, mstart) + 1 or begin
-            begin = body.find('\n', mend) + 1 or len(body)
+            begin = body.find('\n', mend) + 1 or len(body) + 1
             lend = begin - 1
             yield linenum, mstart - lstart, mend - lstart, body[lstart:lend]
 
@@ -3352,7 +3357,7 @@ def identify(ui, repo, source=None, rev=None,
      _('use any branch information in patch (implied by --exact)'))] +
     commitopts + commitopts2 + similarityopts,
     _('[OPTION]... PATCH...'))
-def import_(ui, repo, patch1, *patches, **opts):
+def import_(ui, repo, patch1=None, *patches, **opts):
     """import an ordered set of patches
 
     Import a list of patches and commit them individually (unless
@@ -3414,6 +3419,10 @@ def import_(ui, repo, patch1, *patches, **opts):
 
     Returns 0 on success.
     """
+
+    if not patch1:
+        raise util.Abort(_('need at least one patch to import'))
+
     patches = (patch1,) + patches
 
     date = opts.get('date')
@@ -3537,49 +3546,51 @@ def import_(ui, repo, patch1, *patches, **opts):
                 finally:
                     store.close()
             if n:
+                # i18n: refers to a short changeset id
                 msg = _('created %s') % short(n)
             return (msg, n)
         finally:
             os.unlink(tmpname)
 
     try:
-        wlock = repo.wlock()
-        lock = repo.lock()
-        tr = repo.transaction('import')
-        parents = repo.parents()
-        for patchurl in patches:
-            if patchurl == '-':
-                ui.status(_('applying patch from stdin\n'))
-                patchfile = ui.fin
-                patchurl = 'stdin'      # for error message
-            else:
-                patchurl = os.path.join(base, patchurl)
-                ui.status(_('applying %s\n') % patchurl)
-                patchfile = url.open(ui, patchurl)
-
-            haspatch = False
-            for hunk in patch.split(patchfile):
-                (msg, node) = tryone(ui, hunk, parents)
-                if msg:
-                    haspatch = True
-                    ui.note(msg + '\n')
-                if update or opts.get('exact'):
-                    parents = repo.parents()
+        try:
+            wlock = repo.wlock()
+            lock = repo.lock()
+            tr = repo.transaction('import')
+            parents = repo.parents()
+            for patchurl in patches:
+                if patchurl == '-':
+                    ui.status(_('applying patch from stdin\n'))
+                    patchfile = ui.fin
+                    patchurl = 'stdin'      # for error message
                 else:
-                    parents = [repo[node]]
+                    patchurl = os.path.join(base, patchurl)
+                    ui.status(_('applying %s\n') % patchurl)
+                    patchfile = url.open(ui, patchurl)
 
-            if not haspatch:
-                raise util.Abort(_('%s: no diffs found') % patchurl)
+                haspatch = False
+                for hunk in patch.split(patchfile):
+                    (msg, node) = tryone(ui, hunk, parents)
+                    if msg:
+                        haspatch = True
+                        ui.note(msg + '\n')
+                    if update or opts.get('exact'):
+                        parents = repo.parents()
+                    else:
+                        parents = [repo[node]]
 
-        tr.close()
-        if msgs:
-            repo.savecommitmessage('\n* * *\n'.join(msgs))
-    except:
-        # wlock.release() indirectly calls dirstate.write(): since
-        # we're crashing, we do not want to change the working dir
-        # parent after all, so make sure it writes nothing
-        repo.dirstate.invalidate()
-        raise
+                if not haspatch:
+                    raise util.Abort(_('%s: no diffs found') % patchurl)
+
+            tr.close()
+            if msgs:
+                repo.savecommitmessage('\n* * *\n'.join(msgs))
+        except:
+            # wlock.release() indirectly calls dirstate.write(): since
+            # we're crashing, we do not want to change the working dir
+            # parent after all, so make sure it writes nothing
+            repo.dirstate.invalidate()
+            raise
     finally:
         if tr:
             tr.release()
@@ -4745,15 +4756,14 @@ def revert(ui, repo, *pats, **opts):
                     # only need parent manifest in this unlikely case,
                     # so do not read by default
                     pmf = repo[parent].manifest()
-                if abs in pmf:
-                    if mfentry:
-                        # if version of file is same in parent and target
-                        # manifests, do nothing
-                        if (pmf[abs] != mfentry or
-                            pmf.flags(abs) != mf.flags(abs)):
-                            handle(revert, False)
-                    else:
-                        handle(remove, False)
+                if abs in pmf and mfentry:
+                    # if version of file is same in parent and target
+                    # manifests, do nothing
+                    if (pmf[abs] != mfentry or
+                        pmf.flags(abs) != mf.flags(abs)):
+                        handle(revert, False)
+                else:
+                    handle(remove, False)
 
         if not opts.get('dry_run'):
             def checkout(f):

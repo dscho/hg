@@ -58,7 +58,14 @@ Test recursive diff without committing anything:
 
 Commits:
 
-  $ hg commit -m 0-0-0
+  $ hg commit -m fails
+  abort: uncommitted changes in subrepo foo
+  (use --subrepos for recursive commit)
+  [255]
+
+The --subrepos flag overwrite the config setting:
+
+  $ hg commit -m 0-0-0 --config ui.commitsubrepos=No --subrepos
   committing subrepository foo
   committing subrepository foo/bar
 
@@ -177,7 +184,7 @@ Status with relative path:
 Cleanup and final commit:
 
   $ rm -r dir
-  $ hg commit -m 2-3-2
+  $ hg commit --subrepos -m 2-3-2
   committing subrepository foo
   committing subrepository foo/bar
 
@@ -304,9 +311,62 @@ Test archiving to zip file (unzip output is unstable):
   archiving (foo/bar) [================================>] 1/1
                                                               \r (esc)
 
+Test archiving a revision that references a subrepo that is not yet
+cloned:
+
+  $ hg clone -U . ../empty
+  $ cd ../empty
+  $ hg archive --subrepos -r tip ../archive.tar.gz 2>&1 | $TESTDIR/filtercr.py
+  
+  archiving [                                           ] 0/3
+  archiving [                                           ] 0/3
+  archiving [=============>                             ] 1/3
+  archiving [=============>                             ] 1/3
+  archiving [===========================>               ] 2/3
+  archiving [===========================>               ] 2/3
+  archiving [==========================================>] 3/3
+  archiving [==========================================>] 3/3
+                                                              
+  archiving (foo) [                                     ] 0/3
+  archiving (foo) [                                     ] 0/3
+  archiving (foo) [===========>                         ] 1/3
+  archiving (foo) [===========>                         ] 1/3
+  archiving (foo) [=======================>             ] 2/3
+  archiving (foo) [=======================>             ] 2/3
+  archiving (foo) [====================================>] 3/3
+  archiving (foo) [====================================>] 3/3
+                                                              
+  archiving (foo/bar) [                                 ] 0/1
+  archiving (foo/bar) [                                 ] 0/1
+  archiving (foo/bar) [================================>] 1/1
+  archiving (foo/bar) [================================>] 1/1
+                                                              
+  cloning subrepo foo from $TESTTMP/repo/foo
+  cloning subrepo foo/bar from $TESTTMP/repo/foo/bar
+  
+The newly cloned subrepos contain no working copy:
+
+  $ hg -R foo summary
+  parent: -1:000000000000  (no revision checked out)
+  branch: default
+  commit: (clean)
+  update: 4 new changesets (update)
+
 Disable progress extension and cleanup:
 
   $ mv $HGRCPATH.no-progress $HGRCPATH
+
+Test archiving when there is a directory in the way for a subrepo
+created by archive:
+
+  $ hg clone -U . ../almost-empty
+  $ cd ../almost-empty
+  $ mkdir foo
+  $ echo f > foo/f
+  $ hg archive --subrepos -r tip archive
+  cloning subrepo foo from $TESTTMP/empty/foo
+  abort: destination '$TESTTMP/almost-empty/foo' is not empty
+  [255]
 
 Clone and test outgoing:
 
@@ -341,7 +401,7 @@ Make nested change:
    y2
    y3
   +y4
-  $ hg commit -m 3-4-2
+  $ hg commit --subrepos -m 3-4-2
   committing subrepository foo
   $ hg outgoing -S
   comparing with $TESTTMP/repo

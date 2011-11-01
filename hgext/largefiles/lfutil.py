@@ -10,9 +10,10 @@
 
 import os
 import errno
+import platform
 import shutil
 import stat
-import hashlib
+import tempfile
 
 from mercurial import dirstate, httpconnection, match as match_, util, scmutil
 from mercurial.i18n import _
@@ -61,7 +62,7 @@ def findoutgoing(repo, remote, force):
 def getminsize(ui, assumelfiles, opt, default=10):
     lfsize = opt
     if not lfsize and assumelfiles:
-        lfsize = ui.config(longname, 'size', default=default)
+        lfsize = ui.config(longname, 'minsize', default=default)
     if lfsize:
         try:
             lfsize = float(lfsize)
@@ -80,31 +81,39 @@ def link(src, dest):
         shutil.copyfile(src, dest)
         os.chmod(dest, os.stat(src).st_mode)
 
-def systemcachepath(ui, hash):
-    path = ui.config(longname, 'systemcache', None)
+def usercachepath(ui, hash):
+    path = ui.configpath(longname, 'usercache', None)
     if path:
         path = os.path.join(path, hash)
     else:
         if os.name == 'nt':
             appdata = os.getenv('LOCALAPPDATA', os.getenv('APPDATA'))
             path = os.path.join(appdata, longname, hash)
+        elif platform.system() == 'Darwin':
+            path = os.path.join(os.getenv('HOME'), 'Library', 'Caches',
+                                longname, hash)
         elif os.name == 'posix':
-            path = os.path.join(os.getenv('HOME'), '.' + longname, hash)
+            path = os.getenv('XDG_CACHE_HOME')
+            if path:
+                path = os.path.join(path, longname, hash)
+            else:
+                path = os.path.join(os.getenv('HOME'), '.cache', longname, hash)
         else:
             raise util.Abort(_('unknown operating system: %s\n') % os.name)
     return path
 
-def insystemcache(ui, hash):
-    return os.path.exists(systemcachepath(ui, hash))
+def inusercache(ui, hash):
+    return os.path.exists(usercachepath(ui, hash))
 
 def findfile(repo, hash):
-    if incache(repo, hash):
-        repo.ui.note(_('Found %s in cache\n') % hash)
-        return cachepath(repo, hash)
-    if insystemcache(repo.ui, hash):
+    if instore(repo, hash):
+        repo.ui.note(_('Found %s in store\n') % hash)
+    elif inusercache(repo.ui, hash):
         repo.ui.note(_('Found %s in system cache\n') % hash)
-        return systemcachepath(repo.ui, hash)
-    return None
+        link(usercachepath(repo.ui, hash), storepath(repo, hash))
+    else:
+        return None
+    return storepath(repo, hash)
 
 class largefiles_dirstate(dirstate.dirstate):
     def __getitem__(self, key):
@@ -127,11 +136,8 @@ def openlfdirstate(ui, repo):
     '''
     admin = repo.join(longname)
     opener = scmutil.opener(admin)
-    if util.safehasattr(repo.dirstate, '_validate'):
-        lfdirstate = largefiles_dirstate(opener, ui, repo.root,
-            repo.dirstate._validate)
-    else:
-        lfdirstate = largefiles_dirstate(opener, ui, repo.root)
+    lfdirstate = largefiles_dirstate(opener, ui, repo.root,
+                                     repo.dirstate._validate)
 
     # If the largefiles dirstate does not exist, populate and create
     # it. This ensures that we create it on the first meaningful
@@ -188,14 +194,10 @@ def listlfiles(repo, rev=None, matcher=None):
             for f in repo[rev].walk(matcher)
             if rev is not None or repo.dirstate[f] != '?']
 
-def incache(repo, hash):
-    return os.path.exists(cachepath(repo, hash))
+def instore(repo, hash):
+    return os.path.exists(storepath(repo, hash))
 
-def createdir(dir):
-    if not os.path.exists(dir):
-        os.makedirs(dir)
-
-def cachepath(repo, hash):
+def storepath(repo, hash):
     return repo.join(os.path.join(longname, hash))
 
 def copyfromcache(repo, hash, filename):
@@ -211,24 +213,24 @@ def copyfromcache(repo, hash, filename):
     shutil.copy(path, repo.wjoin(filename))
     return True
 
-def copytocache(repo, rev, file, uploaded=False):
+def copytostore(repo, rev, file, uploaded=False):
     hash = readstandin(repo, file)
-    if incache(repo, hash):
+    if instore(repo, hash):
         return
-    copytocacheabsolute(repo, repo.wjoin(file), hash)
+    copytostoreabsolute(repo, repo.wjoin(file), hash)
 
-def copytocacheabsolute(repo, file, hash):
-    createdir(os.path.dirname(cachepath(repo, hash)))
-    if insystemcache(repo.ui, hash):
-        link(systemcachepath(repo.ui, hash), cachepath(repo, hash))
+def copytostoreabsolute(repo, file, hash):
+    util.makedirs(os.path.dirname(storepath(repo, hash)))
+    if inusercache(repo.ui, hash):
+        link(usercachepath(repo.ui, hash), storepath(repo, hash))
     else:
-        shutil.copyfile(file, cachepath(repo, hash))
-        os.chmod(cachepath(repo, hash), os.stat(file).st_mode)
-        linktosystemcache(repo, hash)
+        shutil.copyfile(file, storepath(repo, hash))
+        os.chmod(storepath(repo, hash), os.stat(file).st_mode)
+        linktousercache(repo, hash)
 
-def linktosystemcache(repo, hash):
-    createdir(os.path.dirname(systemcachepath(repo.ui, hash)))
-    link(cachepath(repo, hash), systemcachepath(repo.ui, hash))
+def linktousercache(repo, hash):
+    util.makedirs(os.path.dirname(usercachepath(repo.ui, hash)))
+    link(storepath(repo, hash), usercachepath(repo.ui, hash))
 
 def getstandinmatcher(repo, pats=[], opts={}):
     '''Return a match object that applies pats to the standin directory'''
@@ -421,7 +423,7 @@ def urljoin(first, second, *arg):
 def hexsha1(data):
     """hexsha1 returns the hex-encoded sha1 sum of the data in the file-like
     object data"""
-    h = hashlib.sha1()
+    h = util.sha1()
     for chunk in util.filechunkiter(data):
         h.update(chunk)
     return h.hexdigest()
@@ -435,14 +437,15 @@ def unixpath(path):
 
 def islfilesrepo(repo):
     return ('largefiles' in repo.requirements and
-            any_(shortname + '/' in f[0] for f in repo.store.datafiles()))
+            util.any(shortname + '/' in f[0] for f in repo.store.datafiles()))
 
-def any_(gen):
-    for x in gen:
-        if x:
-            return True
-    return False
+def mkstemp(repo, prefix):
+    '''Returns a file descriptor and a filename corresponding to a temporary
+    file in the repo's largefiles store.'''
+    path = repo.join(longname)
+    util.makedirs(path)
+    return tempfile.mkstemp(prefix=prefix, dir=path)
 
-class storeprotonotcapable(BaseException):
+class storeprotonotcapable(Exception):
     def __init__(self, storetypes):
         self.storetypes = storetypes

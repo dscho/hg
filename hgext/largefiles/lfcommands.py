@@ -35,34 +35,23 @@ def lfconvert(ui, src, dest, *pats, **opts):
     largefiles is enabled anywhere you intend to push the new
     repository.
 
-    Use --tonormal to convert largefiles back to normal files; after
+    Use --to-normal to convert largefiles back to normal files; after
     this, the DEST repository can be used without largefiles at all.'''
 
-    if opts['tonormal']:
+    if opts['to_normal']:
         tolfile = False
     else:
         tolfile = True
         size = lfutil.getminsize(ui, True, opts.get('size'), default=None)
-    try:
-        rsrc = hg.repository(ui, src)
-        if not rsrc.local():
-            raise util.Abort(_('%s is not a local Mercurial repo') % src)
-    except error.RepoError, err:
-        ui.traceback()
-        raise util.Abort(err.args[0])
-    if os.path.exists(dest):
-        if not os.path.isdir(dest):
-            raise util.Abort(_('destination %s already exists') % dest)
-        elif os.listdir(dest):
-            raise util.Abort(_('destination %s is not empty') % dest)
-    try:
-        ui.status(_('initializing destination %s\n') % dest)
-        rdst = hg.repository(ui, dest, create=True)
-        if not rdst.local():
-            raise util.Abort(_('%s is not a local Mercurial repo') % dest)
-    except error.RepoError:
-        ui.traceback()
-        raise util.Abort(_('%s is not a repo') % dest)
+
+    if not hg.islocal(src):
+        raise util.Abort(_('%s is not a local Mercurial repo') % src)
+    if not hg.islocal(dest):
+        raise util.Abort(_('%s is not a local Mercurial repo') % dest)
+
+    rsrc = hg.repository(ui, src)
+    ui.status(_('initializing destination %s\n') % dest)
+    rdst = hg.repository(ui, dest, create=True)
 
     success = False
     try:
@@ -109,6 +98,11 @@ def lfconvert(ui, src, dest, *pats, **opts):
                 except OSError:
                     pass
 
+            # If there were any files converted to largefiles, add largefiles
+            # to the destination repository's requirements.
+            if lfiles:
+                rdst.requirements.add('largefiles')
+                rdst._writerequirements()
         else:
             for ctx in ctxs:
                 ui.progress(_('converting revisions'), ctx.rev(),
@@ -233,7 +227,7 @@ def _lfconvert_addchangeset(rsrc, rdst, ctx, revmap, lfiles, normalfiles,
                 if 'l' in fctx.flags():
                     if renamedlfile:
                         raise util.Abort(
-                            _('Renamed/copied largefile %s becomes symlink')
+                            _('renamed/copied largefile %s becomes symlink')
                             % f)
                     islfile = False
             if islfile:
@@ -251,7 +245,7 @@ def _lfconvert_addchangeset(rsrc, rdst, ctx, revmap, lfiles, normalfiles,
 
                 # largefile was modified, update standins
                 fullpath = rdst.wjoin(f)
-                lfutil.createdir(os.path.dirname(fullpath))
+                util.makedirs(os.path.dirname(fullpath))
                 m = util.sha1('')
                 m.update(ctx[f].data())
                 hash = m.hexdigest()
@@ -286,7 +280,7 @@ def _lfconvert_addchangeset(rsrc, rdst, ctx, revmap, lfiles, normalfiles,
                 # doesn't change after rename or copy
                 renamed = lfutil.standin(renamed[0])
 
-            return context.memfilectx(f, lfiletohash[srcfname], 'l' in
+            return context.memfilectx(f, lfiletohash[srcfname] + '\n', 'l' in
                 fctx.flags(), 'x' in fctx.flags(), renamed)
         else:
             try:
@@ -331,9 +325,7 @@ def _islfile(file, ctx, matcher, size):
 def uploadlfiles(ui, rsrc, rdst, files):
     '''upload largefiles to the central store'''
 
-    # Don't upload locally. All largefiles are in the system wide cache
-    # so the other repo can just get them from there.
-    if not files or rdst.local():
+    if not files:
         return
 
     store = basestore._openstore(rsrc, rdst, put=True)
@@ -474,7 +466,7 @@ cmdtable = {
                     _('minimum size (MB) for files to be converted '
                       'as largefiles'),
                     'SIZE'),
-                  ('', 'tonormal', False,
+                  ('', 'to-normal', False,
                    _('convert from a largefiles repo to a normal repo')),
                   ],
                   _('hg lfconvert SOURCE DEST [FILE ...]')),
