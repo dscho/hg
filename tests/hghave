@@ -45,7 +45,7 @@ def has_bzr114():
 
 def has_cvs():
     re = r'Concurrent Versions System.*?server'
-    return matchoutput('cvs --version 2>&1', re)
+    return matchoutput('cvs --version 2>&1', re) and not has_msys()
 
 def has_darcs():
     return matchoutput('darcs --version', r'2\.[2-9]', True)
@@ -161,7 +161,7 @@ def has_p4():
     return matchoutput('p4 -V', r'Rev\. P4/') and matchoutput('p4d -V', r'Rev\. P4D/')
 
 def has_symlink():
-    return hasattr(os, "symlink")
+    return hasattr(os, "symlink") # FIXME: should also check file system and os
 
 def has_tla():
     return matchoutput('tla --version 2>&1', r'The GNU Arch Revision')
@@ -209,6 +209,21 @@ def has_ssl():
     except ImportError:
         return False
 
+def has_windows():
+    return os.name == 'nt'
+
+def has_system_sh():
+    return os.name != 'nt'
+
+def has_serve():
+    return os.name != 'nt' # gross approximation
+
+def has_tic():
+    return matchoutput('test -x "`which tic`"', '')
+
+def has_msys():
+    return os.getenv('MSYSTEM')
+
 checks = {
     "baz": (has_baz, "GNU Arch baz client"),
     "bzr": (has_bzr, "Canonical's Bazaar client"),
@@ -231,14 +246,19 @@ checks = {
     "p4": (has_p4, "Perforce server and client"),
     "pyflakes": (has_pyflakes, "Pyflakes python linter"),
     "pygments": (has_pygments, "Pygments source highlighting library"),
+    "serve": (has_serve, "platform and python can manage 'hg serve -d'"),
     "ssl": (has_ssl, "python >= 2.6 ssl module and python OpenSSL"),
     "svn": (has_svn, "subversion client and admin tools"),
     "svn13": (has_svn13, "subversion client and admin tools >= 1.3"),
     "svn15": (has_svn15, "subversion client and admin tools >= 1.5"),
     "svn-bindings": (has_svn_bindings, "subversion python bindings"),
     "symlink": (has_symlink, "symbolic links"),
+    "system-sh": (has_system_sh, "system() uses sh"),
+    "tic": (has_tic, "terminfo compiler"),
     "tla": (has_tla, "GNU Arch tla client"),
     "unix-permissions": (has_unix_permissions, "unix-style permissions"),
+    "windows": (has_windows, "Windows"),
+    "msys": (has_msys, "Windows with MSYS"),
 }
 
 def list_features():

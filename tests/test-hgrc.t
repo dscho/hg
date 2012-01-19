@@ -26,12 +26,12 @@ Issue1199: Can't use '%' in hgrc (eg url encoded username)
   $ cd foobar
   $ cat .hg/hgrc
   [paths]
-  default = $TESTTMP/foo%bar
+  default = $TESTTMP/foo%bar (glob)
   $ hg paths
-  default = $TESTTMP/foo%bar
+  default = $TESTTMP/foo%bar (glob)
   $ hg showconfig
-  bundle.mainreporoot=$TESTTMP/foobar
-  paths.default=$TESTTMP/foo%bar
+  bundle.mainreporoot=$TESTTMP/foobar (glob)
+  paths.default=$TESTTMP/foo%bar (glob)
   $ cd ..
 
 issue1829: wrong indentation
@@ -55,7 +55,7 @@ issue1829: wrong indentation
   Mercurial Distributed SCM (version *) (glob)
   (see http://mercurial.selenic.com for more information)
   
-  Copyright (C) 2005-2011 Matt Mackall and others
+  Copyright (C) 2005-2012 Matt Mackall and others
   This is free software; see the source for copying conditions. There is NO
   warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
   $ unset FAKEPATH

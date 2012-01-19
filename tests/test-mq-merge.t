@@ -56,7 +56,7 @@ Create a patch removing a:
 Save the patch queue so we can merge it later:
 
   $ hg qsave -c -e
-  copy $TESTTMP/t/.hg/patches to $TESTTMP/t/.hg/patches.1
+  copy $TESTTMP/t/.hg/patches to $TESTTMP/t/.hg/patches.1 (glob)
   $ checkundo
 
 Update b and commit in an "update" changeset:
@@ -76,7 +76,7 @@ Update b and commit in an "update" changeset:
   b
 
   $ hg qpush -a -m
-  merging with queue at: $TESTTMP/t/.hg/patches.1
+  merging with queue at: $TESTTMP/t/.hg/patches.1 (glob)
   applying rm_a
   now at: rm_a
 
@@ -115,14 +115,14 @@ Classic MQ merge sequence *with an explicit named queue*:
 Create the reference queue:
 
   $ hg qsave -c -e -n refqueue
-  copy $TESTTMP/t2/.hg/patches to $TESTTMP/t2/.hg/refqueue
+  copy $TESTTMP/t2/.hg/patches to $TESTTMP/t2/.hg/refqueue (glob)
   $ hg up -C 1
   1 files updated, 0 files merged, 1 files removed, 0 files unresolved
 
 Merge:
 
   $ HGMERGE=internal:other hg qpush -a -m -n refqueue
-  merging with queue at: $TESTTMP/t2/.hg/refqueue
+  merging with queue at: $TESTTMP/t2/.hg/refqueue (glob)
   applying patcha
   patching file a
   Hunk #1 FAILED at 0
@@ -149,13 +149,11 @@ Check patcha is still a git patch:
   -b
   +a
   +c
-  diff --git a/a b/aa
-  copy from a
-  copy to aa
-  --- a/a
+  diff --git a/aa b/aa
+  new file mode 100644
+  --- /dev/null
   +++ b/aa
-  @@ -1,1 +1,1 @@
-  -b
+  @@ -0,0 +1,1 @@
   +a
 
 Check patcha2 is still a regular patch:

@@ -12,7 +12,7 @@ from mercurial.node import short, hex
 from mercurial.util import binary
 from common import paritygen, staticfile, get_contact, ErrorResponse
 from common import HTTP_OK, HTTP_FORBIDDEN, HTTP_NOT_FOUND
-from mercurial import graphmod
+from mercurial import graphmod, patch
 from mercurial import help as helpmod
 from mercurial.i18n import _
 
@@ -124,7 +124,8 @@ def _search(web, req, tmpl):
 
     def changelist(**map):
         count = 0
-        qw = query.lower().split()
+        lower = encoding.lower
+        qw = lower(query).split()
 
         def revgen():
             for i in xrange(len(web.repo) - 1, 0, -100):
@@ -139,9 +140,9 @@ def _search(web, req, tmpl):
         for ctx in revgen():
             miss = 0
             for q in qw:
-                if not (q in ctx.user().lower() or
-                        q in ctx.description().lower() or
-                        q in " ".join(ctx.files()).lower()):
+                if not (q in lower(ctx.user()) or
+                        q in lower(ctx.description()) or
+                        q in lower(" ".join(ctx.files()))):
                     miss = 1
                     break
             if miss:
@@ -576,6 +577,7 @@ def annotate(web, req, tmpl):
     fctx = webutil.filectx(web.repo, req)
     f = fctx.path()
     parity = paritygen(web.stripecount)
+    diffopts = patch.diffopts(web.repo.ui, untrusted=True, section='annotate')
 
     def annotate(**map):
         last = None
@@ -585,7 +587,8 @@ def annotate(web, req, tmpl):
             lines = enumerate([((fctx.filectx(fctx.filerev()), 1),
                                 '(binary:%s)' % mt)])
         else:
-            lines = enumerate(fctx.annotate(follow=True, linenumber=True))
+            lines = enumerate(fctx.annotate(follow=True, linenumber=True,
+                                            diffopts=diffopts))
         for lineno, ((f, targetline), l) in lines:
             fnode = f.filenode()
 

@@ -65,6 +65,8 @@ new directories are setgid
   $ python ../printmodes.py .
   00700 ./.hg/
   00600 ./.hg/00changelog.i
+  00770 ./.hg/cache/
+  00660 ./.hg/cache/branchheads
   00660 ./.hg/dirstate
   00660 ./.hg/last-message.txt
   00600 ./.hg/requires
@@ -76,7 +78,9 @@ new directories are setgid
   00660 ./.hg/store/data/dir/bar.i
   00660 ./.hg/store/data/foo.i
   00660 ./.hg/store/fncache
+  00660 ./.hg/store/phaseroots
   00660 ./.hg/store/undo
+  00660 ./.hg/store/undo.phaseroots
   00660 ./.hg/undo.bookmarks
   00660 ./.hg/undo.branch
   00660 ./.hg/undo.desc
@@ -118,6 +122,7 @@ group can still write everything
   00660 ../push/.hg/store/data/foo.i
   00660 ../push/.hg/store/fncache
   00660 ../push/.hg/store/undo
+  00660 ../push/.hg/store/undo.phaseroots
   00660 ../push/.hg/undo.bookmarks
   00660 ../push/.hg/undo.branch
   00660 ../push/.hg/undo.desc

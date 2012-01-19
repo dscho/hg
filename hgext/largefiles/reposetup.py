@@ -10,9 +10,9 @@
 import copy
 import types
 import os
-import re
 
-from mercurial import context, error, manifest, match as match_, node, util
+from mercurial import context, error, manifest, match as match_, util
+from mercurial import node as node_
 from mercurial.i18n import _
 
 import lfcommands
@@ -27,8 +27,6 @@ def reposetup(ui, repo):
 
     for name in ('status', 'commitctx', 'commit', 'push'):
         method = getattr(repo, name)
-        #if not (isinstance(method, types.MethodType) and
-        #        method.im_func is repo.__class__.commitctx.im_func):
         if (isinstance(method, types.FunctionType) and
             method.func_name == 'wrap'):
             ui.warn(_('largefiles: repo method %r appears to have already been'
@@ -54,12 +52,11 @@ def reposetup(ui, repo):
                                 self).__contains__(filename):
                             return True
                         return super(lfiles_manifestdict,
-                            self).__contains__(lfutil.shortname+'/' + filename)
+                            self).__contains__(lfutil.standin(filename))
                 class lfiles_ctx(ctx.__class__):
                     def files(self):
                         filenames = super(lfiles_ctx, self).files()
-                        return [re.sub('^\\'+lfutil.shortname+'/', '',
-                                       filename) for filename in filenames]
+                        return [lfutil.splitstandin(f) or f for f in filenames]
                     def manifest(self):
                         man1 = super(lfiles_ctx, self).manifest()
                         man1.__class__ = lfiles_manifestdict
@@ -72,8 +69,7 @@ def reposetup(ui, repo):
                             # Adding a null character will cause Mercurial to
                             # identify this as a binary file.
                             result = super(lfiles_ctx, self).filectx(
-                                lfutil.shortname + '/' + path, fileid,
-                                filelog)
+                                lfutil.standin(path), fileid, filelog)
                             olddata = result.data
                             result.data = lambda: olddata() + '\0'
                         return result
@@ -88,12 +84,8 @@ def reposetup(ui, repo):
                 clean=False, unknown=False, listsubrepos=False):
             listignored, listclean, listunknown = ignored, clean, unknown
             if not self.lfstatus:
-                try:
-                    return super(lfiles_repo, self).status(node1, node2, match,
-                        listignored, listclean, listunknown, listsubrepos)
-                except TypeError:
-                    return super(lfiles_repo, self).status(node1, node2, match,
-                        listignored, listclean, listunknown)
+                return super(lfiles_repo, self).status(node1, node2, match,
+                    listignored, listclean, listunknown, listsubrepos)
             else:
                 # some calls in this function rely on the old version of status
                 self.lfstatus = False
@@ -120,6 +112,18 @@ def reposetup(ui, repo):
                 if match is None:
                     match = match_.always(self.root, self.getcwd())
 
+                # First check if there were files specified on the
+                # command line.  If there were, and none of them were
+                # largefiles, we should just bail here and let super
+                # handle it -- thus gaining a big performance boost.
+                lfdirstate = lfutil.openlfdirstate(ui, self)
+                if match.files() and not match.anypats():
+                    matchedfiles = [f for f in match.files() if f in lfdirstate]
+                    if not matchedfiles:
+                        return super(lfiles_repo, self).status(node1, node2,
+                                match, listignored, listclean,
+                                listunknown, listsubrepos)
+
                 # Create a copy of match that matches standins instead
                 # of largefiles.
                 def tostandin(file):
@@ -127,33 +131,46 @@ def reposetup(ui, repo):
                         return lfutil.standin(file)
                     return file
 
+                # Create a function that we can use to override what is
+                # normally the ignore matcher.  We've already checked
+                # for ignored files on the first dirstate walk, and
+                # unecessarily re-checking here causes a huge performance
+                # hit because lfdirstate only knows about largefiles
+                def _ignoreoverride(self):
+                    return False
+
                 m = copy.copy(match)
                 m._files = [tostandin(f) for f in m._files]
 
-                # get ignored, clean, and unknown but remove them
-                # later if they were not asked for
-                try:
-                    result = super(lfiles_repo, self).status(node1, node2, m,
-                        True, True, True, listsubrepos)
-                except TypeError:
-                    result = super(lfiles_repo, self).status(node1, node2, m,
-                        True, True, True)
+                # Get ignored files here even if we weren't asked for them; we
+                # must use the result here for filtering later
+                result = super(lfiles_repo, self).status(node1, node2, m,
+                    True, clean, unknown, listsubrepos)
                 if working:
-                    # hold the wlock while we read largefiles and
-                    # update the lfdirstate
-                    wlock = repo.wlock()
                     try:
                         # Any non-largefiles that were explicitly listed must be
                         # taken out or lfdirstate.status will report an error.
                         # The status of these files was already computed using
                         # super's status.
-                        lfdirstate = lfutil.openlfdirstate(ui, self)
+                        # Override lfdirstate's ignore matcher to not do
+                        # anything
+                        orig_ignore = lfdirstate._ignore
+                        lfdirstate._ignore = _ignoreoverride
+
                         match._files = [f for f in match._files if f in
                             lfdirstate]
-                        s = lfdirstate.status(match, [], listignored,
-                                listclean, listunknown)
+                        # Don't waste time getting the ignored and unknown
+                        # files again; we already have them
+                        s = lfdirstate.status(match, [], False,
+                                listclean, False)
                         (unsure, modified, added, removed, missing, unknown,
                                 ignored, clean) = s
+                        # Replace the list of ignored and unknown files with
+                        # the previously caclulated lists, and strip out the
+                        # largefiles
+                        lfiles = set(lfdirstate._map)
+                        ignored = set(result[5]).difference(lfiles)
+                        unknown = set(result[4]).difference(lfiles)
                         if parentworking:
                             for lfile in unsure:
                                 standin = lfutil.standin(lfile)
@@ -166,7 +183,6 @@ def reposetup(ui, repo):
                                 else:
                                     clean.append(lfile)
                                     lfdirstate.normal(lfile)
-                            lfdirstate.write()
                         else:
                             tocheck = unsure + modified + added + clean
                             modified, added, clean = [], [], []
@@ -182,7 +198,8 @@ def reposetup(ui, repo):
                                 else:
                                     added.append(lfile)
                     finally:
-                        wlock.release()
+                        # Replace the original ignore function
+                        lfdirstate._ignore = orig_ignore
 
                     for standin in ctx1.manifest():
                         if not lfutil.isstandin(standin):
@@ -205,12 +222,13 @@ def reposetup(ui, repo):
                     result[2] = [f for f in result[2] if f not in lfdirstate]
 
                     # Unknown files
+                    unknown = set(unknown).difference(ignored)
                     result[4] = [f for f in unknown
                                  if (repo.dirstate[f] == '?' and
                                      not lfutil.isstandin(f))]
-                    # Ignored files must be ignored by both the dirstate and
-                    # lfdirstate
-                    result[5] = set(ignored).intersection(set(result[5]))
+                    # Ignored files were calculated earlier by the dirstate,
+                    # and we already stripped out the largefiles from the list
+                    result[5] = ignored
                     # combine normal files and largefiles
                     normals = [[fn for fn in filelist
                                 if not lfutil.isstandin(fn)]
@@ -238,12 +256,7 @@ def reposetup(ui, repo):
         # cache.
         def commitctx(self, *args, **kwargs):
             node = super(lfiles_repo, self).commitctx(*args, **kwargs)
-            ctx = self[node]
-            for filename in ctx.files():
-                if lfutil.isstandin(filename) and filename in ctx.manifest():
-                    realfile = lfutil.splitstandin(filename)
-                    lfutil.copytostore(self, ctx.node(), realfile)
-
+            lfutil.copyalltostore(self, node)
             return node
 
         # Before commit, largefile standins have not had their
@@ -255,14 +268,18 @@ def reposetup(ui, repo):
 
             wlock = repo.wlock()
             try:
+                # Case 0: Rebase
+                # We have to take the time to pull down the new largefiles now.
+                # Otherwise if we are rebasing, any largefiles that were
+                # modified in the destination changesets get overwritten, either
+                # by the rebase or in the first commit after the rebase.
+                # updatelfiles will update the dirstate to mark any pulled
+                # largefiles as modified
                 if getattr(repo, "_isrebasing", False):
-                    # We have to take the time to pull down the new
-                    # largefiles now. Otherwise if we are rebasing,
-                    # any largefiles that were modified in the
-                    # destination changesets get overwritten, either
-                    # by the rebase or in the first commit after the
-                    # rebase.
                     lfcommands.updatelfiles(repo.ui, repo)
+                    result = orig(text=text, user=user, date=date, match=match,
+                                    force=force, editor=editor, extra=extra)
+                    return result
                 # Case 1: user calls commit with no specific files or
                 # include/exclude patterns: refresh and commit all files that
                 # are "dirty".
@@ -297,10 +314,13 @@ def reposetup(ui, repo):
                             if not os.path.exists(
                                     repo.wjoin(lfutil.standin(lfile))):
                                 lfdirstate.drop(lfile)
-                    lfdirstate.write()
 
-                    return orig(text=text, user=user, date=date, match=match,
+                    result = orig(text=text, user=user, date=date, match=match,
                                     force=force, editor=editor, extra=extra)
+                    # This needs to be after commit; otherwise precommit hooks
+                    # get the wrong status
+                    lfdirstate.write()
+                    return result
 
                 for f in match.files():
                     if lfutil.isstandin(f):
@@ -332,7 +352,6 @@ def reposetup(ui, repo):
                         lfdirstate.normal(lfile)
                     else:
                         lfdirstate.drop(lfile)
-                lfdirstate.write()
 
                 # Cook up a new matcher that only matches regular files or
                 # standins corresponding to the big files requested by the
@@ -373,8 +392,12 @@ def reposetup(ui, repo):
                         return f in standins
 
                 match.matchfn = matchfn
-                return orig(text=text, user=user, date=date, match=match,
+                result = orig(text=text, user=user, date=date, match=match,
                                 force=force, editor=editor, extra=extra)
+                # This needs to be after commit; otherwise precommit hooks
+                # get the wrong status
+                lfdirstate.write()
+                return result
             finally:
                 wlock.release()
 
@@ -385,7 +408,7 @@ def reposetup(ui, repo):
                 o = repo.changelog.nodesbetween(o, revs)[0]
                 for n in o:
                     parents = [p for p in repo.changelog.parents(n)
-                               if p != node.nullid]
+                               if p != node_.nullid]
                     ctx = repo[n]
                     files = set(ctx.files())
                     if len(parents) == 2:

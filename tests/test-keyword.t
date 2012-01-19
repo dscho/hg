@@ -1,3 +1,5 @@
+  $ "$TESTDIR/hghave" symlink unix-permissions serve || exit 80
+
   $ cat <<EOF >> $HGRCPATH
   > [extensions]
   > keyword =
@@ -226,7 +228,7 @@ Pull from bundle and trigger notify
   Message-Id: <hg.a2392c293916*> (glob)
   To: Test
   
-  changeset a2392c293916 in $TESTTMP/Test
+  changeset a2392c293916 in $TESTTMP/Test (glob)
   details: $TESTTMP/Test?cmd=changeset;node=a2392c293916
   description:
   	addsym
@@ -249,7 +251,7 @@ Pull from bundle and trigger notify
   Message-Id: <hg.ef63ca68695b*> (glob)
   To: Test
   
-  changeset ef63ca68695b in $TESTTMP/Test
+  changeset ef63ca68695b in $TESTTMP/Test (glob)
   details: $TESTTMP/Test?cmd=changeset;node=ef63ca68695b
   description:
   	absym
@@ -325,8 +327,10 @@ record
 
 record chunk
 
-  $ python -c \
-  > 'l=open("a").readlines();l.insert(1,"foo\n");l.append("bar\n");open("a","w").writelines(l);'
+  >>> lines = open('a').readlines()
+  >>> lines.insert(1, 'foo\n')
+  >>> lines.append('bar\n')
+  >>> open('a', 'w').writelines(lines)
   $ hg record -d '1 10' -m rectest a<<EOF
   > y
   > y
@@ -552,6 +556,7 @@ Copy and show added kwfiles
 Commit and show expansion in original and copy
 
   $ hg --debug commit -ma2c -d '1 0' -u 'User Name <user@example.com>'
+  invalidating branch cache (tip differs)
   c
    c: copy a:0045e12f6c5791aac80ca6cbfd97709a88307292
   overwriting c expanding keywords
@@ -815,7 +820,7 @@ Clone to test incoming
   > default = ../Test
   > EOF
   $ hg incoming
-  comparing with $TESTTMP/Test
+  comparing with $TESTTMP/Test (glob)
   searching for changes
   changeset:   2:bb948857c743
   tag:         tip
@@ -825,8 +830,9 @@ Clone to test incoming
   
 Imported patch should not be rejected
 
-  $ python -c \
-  > 'import re; s=re.sub("(Id.*)","\\1 rejecttest",open("a").read()); open("a","wb").write(s);'
+  >>> import re
+  >>> text = re.sub(r'(Id.*)', r'\1 rejecttest', open('a').read())
+  >>> open('a', 'wb').write(text)
   $ hg --debug commit -m'rejects?' -d '3 0' -u 'User Name <user@example.com>'
   a
   overwriting a expanding keywords
@@ -992,7 +998,7 @@ conflict: keyword should stay outside conflict zone
   $ hg merge
   merging m
   warning: conflicts during merge.
-  merging m failed!
+  merging m incomplete! (edit conflicts, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]

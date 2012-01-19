@@ -6,11 +6,12 @@
 # GNU General Public License version 2 or any later version.
 
 import re
-import parser, util, error, discovery, hbisect
+import parser, util, error, discovery, hbisect, phases
 import node as nodemod
 import bookmarks as bookmarksmod
 import match as matchmod
 from i18n import _
+import encoding
 
 elements = {
     "(": (20, ("group", 1, ")"), ("func", 1, ")")),
@@ -233,8 +234,8 @@ def author(repo, subset, x):
     Alias for ``user(string)``.
     """
     # i18n: "author" is a keyword
-    n = getstring(x, _("author requires a string")).lower()
-    return [r for r in subset if n in repo[r].user().lower()]
+    n = encoding.lower(getstring(x, _("author requires a string")))
+    return [r for r in subset if n in encoding.lower(repo[r].user())]
 
 def bisect(repo, subset, x):
     """``bisect(string)``
@@ -320,17 +321,22 @@ def checkstatus(repo, subset, pat, field):
                     break
     return s
 
+def _children(repo, narrow, s):
+    cs = set()
+    pr = repo.changelog.parentrevs
+    s = set(s)
+    for r in xrange(len(repo)):
+        for p in pr(r):
+            if p in s:
+                cs.add(r)
+    return cs
+
 def children(repo, subset, x):
     """``children(set)``
     Child changesets of changesets in set.
     """
-    cs = set()
-    cl = repo.changelog
-    s = set(getset(repo, range(len(repo)), x))
-    for r in xrange(0, len(repo)):
-        for p in cl.parentrevs(r):
-            if p in s:
-                cs.add(r)
+    s = getset(repo, range(len(repo)), x)
+    cs = _children(repo, subset, s)
     return [r for r in subset if r in cs]
 
 def closed(repo, subset, x):
@@ -376,11 +382,11 @@ def desc(repo, subset, x):
     Search commit message for string. The match is case-insensitive.
     """
     # i18n: "desc" is a keyword
-    ds = getstring(x, _("desc requires a string")).lower()
+    ds = encoding.lower(getstring(x, _("desc requires a string")))
     l = []
     for r in subset:
         c = repo[r]
-        if ds in c.description().lower():
+        if ds in encoding.lower(c.description()):
             l.append(r)
     return l
 
@@ -393,6 +399,12 @@ def descendants(repo, subset, x):
         return []
     s = set(repo.changelog.descendants(*args)) | set(args)
     return [r for r in subset if r in s]
+
+def draft(repo, subset, x):
+    """``draft()``
+    Changeset in draft phase."""
+    getargs(x, 0, 0, _("draft takes no arguments"))
+    return [r for r in subset if repo._phaserev[r] == phases.draft]
 
 def filelog(repo, subset, x):
     """``filelog(pattern)``
@@ -522,12 +534,12 @@ def keyword(repo, subset, x):
     string. The match is case-insensitive.
     """
     # i18n: "keyword" is a keyword
-    kw = getstring(x, _("keyword requires a string")).lower()
+    kw = encoding.lower(getstring(x, _("keyword requires a string")))
     l = []
     for r in subset:
         c = repo[r]
         t = " ".join(c.files() + [c.user(), c.description()])
-        if kw in t.lower():
+        if kw in encoding.lower(t):
             l.append(r)
     return l
 
@@ -637,10 +649,10 @@ def outgoing(repo, subset, x):
         revs = [repo.lookup(rev) for rev in revs]
     other = hg.peer(repo, {}, dest)
     repo.ui.pushbuffer()
-    common, outheads = discovery.findcommonoutgoing(repo, other, onlyheads=revs)
+    outgoing = discovery.findcommonoutgoing(repo, other, onlyheads=revs)
     repo.ui.popbuffer()
     cl = repo.changelog
-    o = set([cl.rev(r) for r in repo.changelog.findmissing(common, outheads)])
+    o = set([cl.rev(r) for r in outgoing.missing])
     return [r for r in subset if r in o]
 
 def p1(repo, subset, x):
@@ -724,6 +736,47 @@ def present(repo, subset, x):
     except error.RepoLookupError:
         return []
 
+def public(repo, subset, x):
+    """``public()``
+    Changeset in public phase."""
+    getargs(x, 0, 0, _("public takes no arguments"))
+    return [r for r in subset if repo._phaserev[r] == phases.public]
+
+def remote(repo, subset, x):
+    """``remote([id], [path])``
+    Local revision that corresponds to the given identifier in a
+    remote repository, if present. Here, the '.' identifier is a
+    synonym for the current local branch.
+    """
+
+    import hg # avoid start-up nasties
+    # i18n: "remote" is a keyword
+    l = getargs(x, 0, 2, _("outgoing takes one or two arguments"))
+
+    q = '.'
+    if len(l) > 0:
+    # i18n: "remote" is a keyword
+        q = getstring(l[0], _("remote requires a string id"))
+    if q == '.':
+        q = repo['.'].branch()
+
+    dest = ''
+    if len(l) > 1:
+        # i18n: "remote" is a keyword
+        dest = getstring(l[1], _("remote requires a repository path"))
+    dest = repo.ui.expandpath(dest or 'default')
+    dest, branches = hg.parseurl(dest)
+    revs, checkout = hg.addbranchrevs(repo, repo, branches, [])
+    if revs:
+        revs = [repo.lookup(rev) for rev in revs]
+    other = hg.peer(repo, {}, dest)
+    n = other.lookup(q)
+    if n in repo:
+        r = repo[n].rev()
+    if r in subset:
+        return [r]
+    return []
+
 def removes(repo, subset, x):
     """``removes(pattern)``
     Changesets which remove files matching pattern.
@@ -758,9 +811,15 @@ def roots(repo, subset, x):
     """``roots(set)``
     Changesets with no parent changeset in set.
     """
-    s = getset(repo, subset, x)
-    cs = set(children(repo, subset, x))
+    s = getset(repo, xrange(len(repo)), x)
+    cs = _children(repo, s, s)
     return [r for r in s if r not in cs]
+
+def secret(repo, subset, x):
+    """``secret()``
+    Changeset in secret phase."""
+    getargs(x, 0, 0, _("secret takes no arguments"))
+    return [r for r in subset if repo._phaserev[r] == phases.secret]
 
 def sort(repo, subset, x):
     """``sort(set[, [-]key...])``
@@ -844,6 +903,16 @@ def user(repo, subset, x):
     """
     return author(repo, subset, x)
 
+# for internal use
+def _list(repo, subset, x):
+    s = getstring(x, "internal error")
+    if not s:
+        return []
+    if not isinstance(subset, set):
+        subset = set(subset)
+    ls = [repo[r].rev() for r in s.split('\0')]
+    return [r for r in ls if r in subset]
+
 symbols = {
     "adds": adds,
     "all": getall,
@@ -860,6 +929,7 @@ symbols = {
     "date": date,
     "desc": desc,
     "descendants": descendants,
+    "draft": draft,
     "file": hasfile,
     "filelog": filelog,
     "first": first,
@@ -880,14 +950,18 @@ symbols = {
     "p2": p2,
     "parents": parents,
     "present": present,
+    "public": public,
+    "remote": remote,
     "removes": removes,
     "rev": rev,
     "reverse": reverse,
     "roots": roots,
     "sort": sort,
+    "secret": secret,
     "tag": tag,
     "tagged": tagged,
     "user": user,
+    "_list": _list,
 }
 
 methods = {
@@ -1073,7 +1147,7 @@ def formatspec(expr, *args):
     >>> formatspec('%d:: and not %d::', 10, 20)
     '10:: and not 20::'
     >>> formatspec('%ld or %ld', [], [1])
-    '(0-0) or 1'
+    "_list('') or 1"
     >>> formatspec('keyword(%s)', 'foo\\xe9')
     "keyword('foo\\\\xe9')"
     >>> b = lambda: 'default'
@@ -1081,7 +1155,7 @@ def formatspec(expr, *args):
     >>> formatspec('branch(%b)', b)
     "branch('default')"
     >>> formatspec('root(%ls)', ['a', 'b', 'c', 'd'])
-    "root((('a' or 'b') or ('c' or 'd')))"
+    "root(_list('a\\x00b\\x00c\\x00d'))"
     '''
 
     def quote(s):
@@ -1101,13 +1175,21 @@ def formatspec(expr, *args):
             return quote(arg.branch())
 
     def listexp(s, t):
-        "balance a list s of type t to limit parse tree depth"
         l = len(s)
         if l == 0:
-            return '(0-0)' # a minimal way to represent an empty set
-        if l == 1:
+            return "_list('')"
+        elif l == 1:
             return argtype(t, s[0])
-        m = l / 2
+        elif t == 'd':
+            return "_list('%s')" % "\0".join(str(int(a)) for a in s)
+        elif t == 's':
+            return "_list('%s')" % "\0".join(s)
+        elif t == 'n':
+            return "_list('%s')" % "\0".join(nodemod.hex(a) for a in s)
+        elif t == 'b':
+            return "_list('%s')" % "\0".join(a.branch() for a in s)
+
+        m = l // 2
         return '(%s or %s)' % (listexp(s[:m], t), listexp(s[m:], t))
 
     ret = ''
@@ -1127,7 +1209,7 @@ def formatspec(expr, *args):
                 # a list of some type
                 pos += 1
                 d = expr[pos]
-                ret += listexp(args[arg], d)
+                ret += listexp(list(args[arg]), d)
                 arg += 1
             else:
                 raise util.Abort('unexpected revspec format character %s' % d)

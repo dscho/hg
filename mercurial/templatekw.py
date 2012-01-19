@@ -275,6 +275,14 @@ def shownode(repo, ctx, templ, **args):
     """
     return ctx.hex()
 
+def showphase(repo, ctx, templ, **args):
+    """:rev: String. The changeset phase name."""
+    return ctx.phasestr()
+
+def showphaseidx(repo, ctx, templ, **args):
+    """:rev: Integer. The changeset phase index."""
+    return ctx.phase()
+
 def showrev(repo, ctx, templ, **args):
     """:rev: Integer. The repository-local changeset revision number."""
     return ctx.rev()
@@ -312,6 +320,8 @@ keywords = {
     'latesttagdistance': showlatesttagdistance,
     'manifest': showmanifest,
     'node': shownode,
+    'phase': showphase,
+    'phaseidx': showphaseidx,
     'rev': showrev,
     'tags': showtags,
 }

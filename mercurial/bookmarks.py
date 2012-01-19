@@ -128,10 +128,10 @@ def setcurrent(repo, mark):
 
 def updatecurrentbookmark(repo, oldnode, curbranch):
     try:
-        update(repo, oldnode, repo.branchtags()[curbranch])
+        return update(repo, oldnode, repo.branchtags()[curbranch])
     except KeyError:
         if curbranch == "default": # no default branch!
-            update(repo, oldnode, repo.lookup("tip"))
+            return update(repo, oldnode, repo.lookup("tip"))
         else:
             raise util.Abort(_("branch %s not found") % curbranch)
 
@@ -147,6 +147,7 @@ def update(repo, parents, node):
             update = True
     if update:
         repo._writebookmarks(marks)
+    return update
 
 def listbookmarks(repo):
     # We may try to list bookmarks on a repo type that does not
@@ -155,7 +156,9 @@ def listbookmarks(repo):
 
     d = {}
     for k, v in marks.iteritems():
-        d[k] = hex(v)
+        # don't expose local divergent bookmarks
+        if '@' not in k and not k.endswith('@'):
+            d[k] = hex(v)
     return d
 
 def pushbookmark(repo, key, old, new):
@@ -175,7 +178,7 @@ def pushbookmark(repo, key, old, new):
     finally:
         w.release()
 
-def updatefromremote(ui, repo, remote):
+def updatefromremote(ui, repo, remote, path):
     ui.debug("checking for updated bookmarks\n")
     rb = remote.listkeys('bookmarks')
     changed = False
@@ -192,8 +195,21 @@ def updatefromremote(ui, repo, remote):
                     changed = True
                     ui.status(_("updating bookmark %s\n") % k)
                 else:
-                    ui.warn(_("not updating divergent"
-                                   " bookmark %s\n") % k)
+                    # find a unique @ suffix
+                    for x in range(1, 100):
+                        n = '%s@%d' % (k, x)
+                        if n not in repo._bookmarks:
+                            break
+                    # try to use an @pathalias suffix
+                    # if an @pathalias already exists, we overwrite (update) it
+                    for p, u in ui.configitems("paths"):
+                        if path == u:
+                            n = '%s@%s' % (k, p)
+
+                    repo._bookmarks[n] = cr.node()
+                    changed = True
+                    ui.warn(_("divergent bookmark %s stored as %s\n") % (k, n))
+
     if changed:
         write(repo)
 

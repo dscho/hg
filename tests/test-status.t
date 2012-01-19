@@ -127,7 +127,7 @@ hg status:
 hg status modified added removed deleted unknown never-existed ignored:
 
   $ hg status modified added removed deleted unknown never-existed ignored
-  never-existed: No such file or directory
+  never-existed: * (glob)
   A added
   R removed
   ! deleted
@@ -263,9 +263,9 @@ hg status -C --change 1 added modified copied removed deleted:
     modified
   R removed
 
-hg status -A --change 1:
+hg status -A --change 1 and revset:
 
-  $ hg status -A --change 1
+  $ hg status -A --change '1|1'
   M modified
   A added
   A copied

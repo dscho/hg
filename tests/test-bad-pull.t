@@ -1,9 +1,11 @@
+  $ "$TESTDIR/hghave" serve || exit 80
+
   $ hg clone http://localhost:$HGPORT/ copy
   abort: error: Connection refused
   [255]
 
-  $ test -d copy || echo copy: No such file or directory
-  copy: No such file or directory
+  $ test -d copy
+  [1]
 
   $ cat > dumb.py <<EOF
   > import BaseHTTPServer, SimpleHTTPServer, os, signal

@@ -3,8 +3,12 @@
   > graphlog=
   > rebase=
   > 
+  > [phases]
+  > publish=False
+  > 
   > [alias]
   > tglog = log -G --template "{rev}: '{desc}' {branches}\n"
+  > tglogp = log -G --template "{rev}:{phase} '{desc}' {branches}\n"
   > EOF
 
 
@@ -56,7 +60,7 @@ Rebasing B onto E:
   $ hg rebase -s 1 -d 4
   merging A
   warning: conflicts during merge.
-  merging A failed!
+  merging A incomplete! (edit conflicts, then use 'hg resolve --mark')
   abort: unresolved conflicts (see hg resolve, then hg rebase --continue)
   [255]
 
@@ -68,27 +72,31 @@ Force a commit on C during the interruption:
   $ hg add Extra
   $ hg ci -m 'Extra'
 
-  $ hg tglog
-  @  6: 'Extra'
+Force this commit onto secret phase
+
+  $ hg phase --force --secret 6
+
+  $ hg tglogp
+  @  6:secret 'Extra'
   |
-  | o  5: 'B'
+  | o  5:draft 'B'
   | |
-  | o  4: 'E'
+  | o  4:draft 'E'
   | |
-  | o  3: 'D'
+  | o  3:draft 'D'
   | |
-  o |  2: 'C'
+  o |  2:draft 'C'
   | |
-  o |  1: 'B'
+  o |  1:draft 'B'
   |/
-  o  0: 'A'
+  o  0:draft 'A'
   
 Resume the rebasing:
 
   $ hg rebase --continue
   merging A
   warning: conflicts during merge.
-  merging A failed!
+  merging A incomplete! (edit conflicts, then use 'hg resolve --mark')
   abort: unresolved conflicts (see hg resolve, then hg rebase --continue)
   [255]
 
@@ -101,22 +109,22 @@ Solve the conflict and go on:
   $ hg rebase --continue
   warning: new changesets detected on source branch, not stripping
 
-  $ hg tglog
-  @  7: 'C'
+  $ hg tglogp
+  @  7:draft 'C'
   |
-  | o  6: 'Extra'
+  | o  6:secret 'Extra'
   | |
-  o |  5: 'B'
+  o |  5:draft 'B'
   | |
-  o |  4: 'E'
+  o |  4:draft 'E'
   | |
-  o |  3: 'D'
+  o |  3:draft 'D'
   | |
-  | o  2: 'C'
+  | o  2:draft 'C'
   | |
-  | o  1: 'B'
+  | o  1:draft 'B'
   |/
-  o  0: 'A'
+  o  0:draft 'A'
   
   $ cd ..
 
@@ -142,7 +150,7 @@ Rebasing B onto E:
   $ hg rebase -s 1 -d 4
   merging A
   warning: conflicts during merge.
-  merging A failed!
+  merging A incomplete! (edit conflicts, then use 'hg resolve --mark')
   abort: unresolved conflicts (see hg resolve, then hg rebase --continue)
   [255]
 
@@ -192,3 +200,68 @@ Abort the rebasing:
   
   $ cd ..
 
+Changes during an interruption - abort (again):
+
+  $ hg clone -q -u . a a3
+  $ cd a3
+
+  $ hg tglogp
+  @  4:draft 'E'
+  |
+  o  3:draft 'D'
+  |
+  | o  2:draft 'C'
+  | |
+  | o  1:draft 'B'
+  |/
+  o  0:draft 'A'
+  
+Rebasing B onto E:
+
+  $ hg rebase -s 1 -d 4
+  merging A
+  warning: conflicts during merge.
+  merging A incomplete! (edit conflicts, then use 'hg resolve --mark')
+  abort: unresolved conflicts (see hg resolve, then hg rebase --continue)
+  [255]
+
+Change phase on B and B'
+
+  $ hg up -q -C 5
+  $ hg phase --public 1
+  $ hg phase --public 5
+  $ hg phase --secret -f 2
+
+  $ hg tglogp
+  @  5:public 'B'
+  |
+  o  4:public 'E'
+  |
+  o  3:public 'D'
+  |
+  | o  2:secret 'C'
+  | |
+  | o  1:public 'B'
+  |/
+  o  0:public 'A'
+  
+Abort the rebasing:
+
+  $ hg rebase --abort
+  warning: immutable rebased changeset detected, can't abort
+  [255]
+
+  $ hg tglogp
+  @  5:public 'B'
+  |
+  o  4:public 'E'
+  |
+  o  3:public 'D'
+  |
+  | o  2:secret 'C'
+  | |
+  | o  1:public 'B'
+  |/
+  o  0:public 'A'
+  
+  $ cd ..

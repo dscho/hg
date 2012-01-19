@@ -23,10 +23,10 @@ Add files --- .hgsub files must go first to trigger subrepos:
   $ hg add -S .hgsub
   $ hg add -S foo/.hgsub
   $ hg add -S foo/bar
-  adding foo/bar/z.txt
+  adding foo/bar/z.txt (glob)
   $ hg add -S
   adding x.txt
-  adding foo/y.txt
+  adding foo/y.txt (glob)
 
 Test recursive status without committing anything:
 
@@ -67,7 +67,7 @@ The --subrepos flag overwrite the config setting:
 
   $ hg commit -m 0-0-0 --config ui.commitsubrepos=No --subrepos
   committing subrepository foo
-  committing subrepository foo/bar
+  committing subrepository foo/bar (glob)
 
   $ cd foo
   $ echo y2 >> y.txt
@@ -186,7 +186,20 @@ Cleanup and final commit:
   $ rm -r dir
   $ hg commit --subrepos -m 2-3-2
   committing subrepository foo
-  committing subrepository foo/bar
+  committing subrepository foo/bar (glob)
+
+Test explicit path commands within subrepos: add/forget
+  $ echo z1 > foo/bar/z2.txt
+  $ hg status -S
+  ? foo/bar/z2.txt
+  $ hg add foo/bar/z2.txt
+  $ hg status -S
+  A foo/bar/z2.txt
+This is expected to forget the file, but is currently broken
+  $ hg forget foo/bar/z2.txt
+  $ hg status -S
+  ? foo/bar/z2.txt
+  $ rm foo/bar/z2.txt
 
 Log with the relationships between repo and its subrepo:
 
@@ -265,10 +278,10 @@ only show up in the test output, not in real usage):
   archiving (foo) [====================================>] 3/3
   archiving (foo) [====================================>] 3/3
                                                               
-  archiving (foo/bar) [                                 ] 0/1
-  archiving (foo/bar) [                                 ] 0/1
-  archiving (foo/bar) [================================>] 1/1
-  archiving (foo/bar) [================================>] 1/1
+  archiving (foo/bar) [                                 ] 0/1 (glob)
+  archiving (foo/bar) [                                 ] 0/1 (glob)
+  archiving (foo/bar) [================================>] 1/1 (glob)
+  archiving (foo/bar) [================================>] 1/1 (glob)
                                                               \r (esc)
   $ find ../archive | sort
   ../archive
@@ -305,10 +318,10 @@ Test archiving to zip file (unzip output is unstable):
   archiving (foo) [====================================>] 3/3
   archiving (foo) [====================================>] 3/3
                                                               
-  archiving (foo/bar) [                                 ] 0/1
-  archiving (foo/bar) [                                 ] 0/1
-  archiving (foo/bar) [================================>] 1/1
-  archiving (foo/bar) [================================>] 1/1
+  archiving (foo/bar) [                                 ] 0/1 (glob)
+  archiving (foo/bar) [                                 ] 0/1 (glob)
+  archiving (foo/bar) [================================>] 1/1 (glob)
+  archiving (foo/bar) [================================>] 1/1 (glob)
                                                               \r (esc)
 
 Test archiving a revision that references a subrepo that is not yet
@@ -336,13 +349,13 @@ cloned:
   archiving (foo) [====================================>] 3/3
   archiving (foo) [====================================>] 3/3
                                                               
-  archiving (foo/bar) [                                 ] 0/1
-  archiving (foo/bar) [                                 ] 0/1
-  archiving (foo/bar) [================================>] 1/1
-  archiving (foo/bar) [================================>] 1/1
+  archiving (foo/bar) [                                 ] 0/1 (glob)
+  archiving (foo/bar) [                                 ] 0/1 (glob)
+  archiving (foo/bar) [================================>] 1/1 (glob)
+  archiving (foo/bar) [================================>] 1/1 (glob)
                                                               
   cloning subrepo foo from $TESTTMP/repo/foo
-  cloning subrepo foo/bar from $TESTTMP/repo/foo/bar
+  cloning subrepo foo/bar from $TESTTMP/repo/foo/bar (glob)
   
 The newly cloned subrepos contain no working copy:
 
@@ -365,7 +378,7 @@ created by archive:
   $ echo f > foo/f
   $ hg archive --subrepos -r tip archive
   cloning subrepo foo from $TESTTMP/empty/foo
-  abort: destination '$TESTTMP/almost-empty/foo' is not empty
+  abort: destination '$TESTTMP/almost-empty/foo' is not empty (glob)
   [255]
 
 Clone and test outgoing:
@@ -374,11 +387,11 @@ Clone and test outgoing:
   $ hg clone repo repo2
   updating to branch default
   cloning subrepo foo from $TESTTMP/repo/foo
-  cloning subrepo foo/bar from $TESTTMP/repo/foo/bar
+  cloning subrepo foo/bar from $TESTTMP/repo/foo/bar (glob)
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd repo2
   $ hg outgoing -S
-  comparing with $TESTTMP/repo
+  comparing with $TESTTMP/repo (glob)
   searching for changes
   no changes found
   comparing with $TESTTMP/repo/foo
@@ -404,7 +417,7 @@ Make nested change:
   $ hg commit --subrepos -m 3-4-2
   committing subrepository foo
   $ hg outgoing -S
-  comparing with $TESTTMP/repo
+  comparing with $TESTTMP/repo (glob)
   searching for changes
   changeset:   3:2655b8ecc4ee
   tag:         tip
@@ -434,7 +447,7 @@ Switch to original repo and setup default path:
 Test incoming:
 
   $ hg incoming -S
-  comparing with $TESTTMP/repo2
+  comparing with $TESTTMP/repo2 (glob)
   searching for changes
   changeset:   3:2655b8ecc4ee
   tag:         tip

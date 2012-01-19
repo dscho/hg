@@ -142,18 +142,12 @@ def filemerge(repo, mynode, orig, fcd, fco, fca):
         f.close()
         return name
 
-    def isbin(ctx):
-        try:
-            return util.binary(ctx.data())
-        except IOError:
-            return False
-
     if not fco.cmp(fcd): # files identical?
         return None
 
     ui = repo.ui
     fd = fcd.path()
-    binary = isbin(fcd) or isbin(fco) or isbin(fca)
+    binary = fcd.isbinary() or fco.isbinary() or fca.isbinary()
     symlink = 'l' in fcd.flags() + fco.flags()
     tool, toolpath = _picktool(repo, ui, fd, binary, symlink)
     ui.debug("picked tool '%s' for %s (binary %s symlink %s)\n" %
@@ -262,7 +256,11 @@ def filemerge(repo, mynode, orig, fcd, fco, fca):
         _matcheol(repo.wjoin(fd), back)
 
     if r:
-        ui.warn(_("merging %s failed!\n") % fd)
+        if tool == "internal:merge":
+            ui.warn(_("merging %s incomplete! "
+                      "(edit conflicts, then use 'hg resolve --mark')\n") % fd)
+        else:
+            ui.warn(_("merging %s failed!\n") % fd)
     else:
         os.unlink(back)
 

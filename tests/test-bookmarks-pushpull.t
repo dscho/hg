@@ -1,3 +1,5 @@
+  $ "$TESTDIR/hghave" serve || exit 80
+
 initialize
 
   $ hg init a
@@ -32,6 +34,7 @@ import bookmark by name
      Y                         0:4e3505fd9583
   $ hg debugpushkey ../a namespaces
   bookmarks	
+  phases	
   namespaces	
   $ hg debugpushkey ../a bookmarks
   Y	4e3505fd95835d721066b76e75dbb8cc554d7f77
@@ -106,22 +109,23 @@ divergent bookmarks
    * X                         1:9b140be10808
      Y                         0:4e3505fd9583
      foo                       -1:000000000000
-     foobar                    -1:000000000000
+     foobar                    1:9b140be10808
 
-  $ hg pull ../a
-  pulling from ../a
+  $ hg pull --config paths.foo=../a foo
+  pulling from $TESTTMP/a
   searching for changes
   adding changesets
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files (+1 heads)
-  not updating divergent bookmark X
+  divergent bookmark X stored as X@foo
   (run 'hg heads' to see heads, 'hg merge' to merge)
   $ hg book
    * X                         1:9b140be10808
+     X@foo                     2:0d2164f0ce0d
      Y                         0:4e3505fd9583
      foo                       -1:000000000000
-     foobar                    -1:000000000000
+     foobar                    1:9b140be10808
   $ hg push -f ../a
   pushing to ../a
   searching for changes
@@ -148,12 +152,13 @@ hgweb
 
   $ hg debugpushkey http://localhost:$HGPORT/ namespaces 
   bookmarks	
+  phases	
   namespaces	
   $ hg debugpushkey http://localhost:$HGPORT/ bookmarks
   Y	4e3505fd95835d721066b76e75dbb8cc554d7f77
   X	9b140be1080824d768c5a4691a564088eede71f9
   foo	0000000000000000000000000000000000000000
-  foobar	0000000000000000000000000000000000000000
+  foobar	9b140be1080824d768c5a4691a564088eede71f9
   $ hg out -B http://localhost:$HGPORT/
   comparing with http://localhost:$HGPORT/
   searching for changed bookmarks
@@ -169,11 +174,11 @@ hgweb
   searching for changed bookmarks
      Z                         0d2164f0ce0d
      foo                       000000000000
-     foobar                    000000000000
+     foobar                    9b140be10808
   $ hg pull -B Z http://localhost:$HGPORT/
   pulling from http://localhost:$HGPORT/
   no changes found
-  not updating divergent bookmark X
+  divergent bookmark X stored as X@1
   importing bookmark Z
   $ hg clone http://localhost:$HGPORT/ cloned-bookmarks
   requesting all changes
@@ -188,6 +193,6 @@ hgweb
      Y                         0:4e3505fd9583
      Z                         2:0d2164f0ce0d
      foo                       -1:000000000000
-     foobar                    -1:000000000000
+     foobar                    1:9b140be10808
 
   $ kill `cat ../hg.pid`

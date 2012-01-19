@@ -49,7 +49,7 @@ Revert currently ignores subrepos by default
 
   $ hg revert -a
   $ hg revert -R s -a -C
-  reverting s/a
+  reverting s/a (glob)
 
 Issue2022: update -C
 
@@ -92,7 +92,7 @@ add sub sub
   update: (current)
   $ hg ci -m2
   committing subrepository s
-  committing subrepository s/ss
+  committing subrepository s/ss (glob)
   $ hg sum
   parent: 2:df30734270ae tip
    2
@@ -147,7 +147,7 @@ new branch for merge tests
   $ hg init t
   $ echo t > t/t
   $ hg -R t add t
-  adding t/t
+  adding t/t (glob)
 
 5
 
@@ -199,16 +199,16 @@ merge tests
   $ hg merge 6 --debug # test change
     searching for copies back to rev 2
   resolving manifests
-   overwrite None partial False
-   ancestor 1f14a2e2d3ec local f0d2028bf86d+ remote 1831e14459c4
+   overwrite: False, partial: False
+   ancestor: 1f14a2e2d3ec, local: f0d2028bf86d+, remote: 1831e14459c4
    .hgsubstate: versions differ -> m
   updating: .hgsubstate 1/1 files (100.00%)
   subrepo merge f0d2028bf86d+ 1831e14459c4 1f14a2e2d3ec
     subrepo t: other changed, get t:6747d179aa9a688023c4b0cad32e4c92bb7f34ad:hg
   getting subrepo t
   resolving manifests
-   overwrite True partial False
-   ancestor 60ca1237c194+ local 60ca1237c194+ remote 6747d179aa9a
+   overwrite: True, partial: False
+   ancestor: 60ca1237c194+, local: 60ca1237c194+, remote: 6747d179aa9a
    t: remote is newer -> g
   updating: t 1/1 files (100.00%)
   getting t
@@ -227,8 +227,8 @@ merge tests
   $ HGMERGE=internal:merge hg merge --debug 7 # test conflict
     searching for copies back to rev 2
   resolving manifests
-   overwrite None partial False
-   ancestor 1831e14459c4 local e45c8b14af55+ remote f94576341bcf
+   overwrite: False, partial: False
+   ancestor: 1831e14459c4, local: e45c8b14af55+, remote: f94576341bcf
    .hgsubstate: versions differ -> m
   updating: .hgsubstate 1/1 files (100.00%)
   subrepo merge e45c8b14af55+ f94576341bcf 1831e14459c4
@@ -236,8 +236,8 @@ merge tests
   merging subrepo t
     searching for copies back to rev 2
   resolving manifests
-   overwrite None partial False
-   ancestor 6747d179aa9a local 20a0db6fbf6c+ remote 7af322bc1198
+   overwrite: False, partial: False
+   ancestor: 6747d179aa9a, local: 20a0db6fbf6c+, remote: 7af322bc1198
    t: versions differ -> m
   preserving t for resolve of t
   updating: t 1/1 files (100.00%)
@@ -245,7 +245,7 @@ merge tests
   merging t
   my t@20a0db6fbf6c+ other t@7af322bc1198 ancestor t@6747d179aa9a
   warning: conflicts during merge.
-  merging t failed!
+  merging t incomplete! (edit conflicts, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -265,9 +265,9 @@ clone
   $ cd ..
   $ hg clone t tc
   updating to branch default
-  cloning subrepo s from $TESTTMP/sub/t/s
-  cloning subrepo s/ss from $TESTTMP/sub/t/s/ss
-  cloning subrepo t from $TESTTMP/sub/t/t
+  cloning subrepo s from $TESTTMP/sub/t/s (glob)
+  cloning subrepo s/ss from $TESTTMP/sub/t/s/ss (glob)
+  cloning subrepo t from $TESTTMP/sub/t/t (glob)
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd tc
   $ hg debugsub
@@ -284,14 +284,14 @@ push
   $ hg ci -m11
   committing subrepository t
   $ hg push
-  pushing to $TESTTMP/sub/t
-  pushing subrepo s/ss to $TESTTMP/sub/t/s/ss
+  pushing to $TESTTMP/sub/t (glob)
+  pushing subrepo s/ss to $TESTTMP/sub/t/s/ss (glob)
   searching for changes
   no changes found
-  pushing subrepo s to $TESTTMP/sub/t/s
+  pushing subrepo s to $TESTTMP/sub/t/s (glob)
   searching for changes
   no changes found
-  pushing subrepo t to $TESTTMP/sub/t/t
+  pushing subrepo t to $TESTTMP/sub/t/t (glob)
   searching for changes
   adding changesets
   adding manifests
@@ -309,27 +309,27 @@ push -f
   $ hg ci -m12
   committing subrepository s
   $ hg push
-  pushing to $TESTTMP/sub/t
-  pushing subrepo s/ss to $TESTTMP/sub/t/s/ss
+  pushing to $TESTTMP/sub/t (glob)
+  pushing subrepo s/ss to $TESTTMP/sub/t/s/ss (glob)
   searching for changes
   no changes found
-  pushing subrepo s to $TESTTMP/sub/t/s
+  pushing subrepo s to $TESTTMP/sub/t/s (glob)
   searching for changes
   abort: push creates new remote head 12a213df6fa9!
   (did you forget to merge? use push -f to force)
   [255]
   $ hg push -f
-  pushing to $TESTTMP/sub/t
-  pushing subrepo s/ss to $TESTTMP/sub/t/s/ss
+  pushing to $TESTTMP/sub/t (glob)
+  pushing subrepo s/ss to $TESTTMP/sub/t/s/ss (glob)
   searching for changes
   no changes found
-  pushing subrepo s to $TESTTMP/sub/t/s
+  pushing subrepo s to $TESTTMP/sub/t/s (glob)
   searching for changes
   adding changesets
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files (+1 heads)
-  pushing subrepo t to $TESTTMP/sub/t/t
+  pushing subrepo t to $TESTTMP/sub/t/t (glob)
   searching for changes
   no changes found
   searching for changes
@@ -351,7 +351,7 @@ pull
 
   $ cd ../tc
   $ hg pull
-  pulling from $TESTTMP/sub/t
+  pulling from $TESTTMP/sub/t (glob)
   searching for changes
   adding changesets
   adding manifests
@@ -362,7 +362,7 @@ pull
 should pull t
 
   $ hg up
-  pulling subrepo t from $TESTTMP/sub/t/t
+  pulling subrepo t from $TESTTMP/sub/t/t (glob)
   searching for changes
   adding changesets
   adding manifests
@@ -509,15 +509,15 @@ test subrepo delete from .hgsubstate
   $ echo test > testdelete/nested/foo
   $ echo test > testdelete/nested2/foo
   $ hg -R testdelete/nested add
-  adding testdelete/nested/foo
+  adding testdelete/nested/foo (glob)
   $ hg -R testdelete/nested2 add
-  adding testdelete/nested2/foo
+  adding testdelete/nested2/foo (glob)
   $ hg -R testdelete/nested ci -m test
   $ hg -R testdelete/nested2 ci -m test
   $ echo nested = nested > testdelete/.hgsub
   $ echo nested2 = nested2 >> testdelete/.hgsub
   $ hg -R testdelete add
-  adding testdelete/.hgsub
+  adding testdelete/.hgsub (glob)
   $ hg -R testdelete ci -m "nested 1 & 2 added"
   committing subrepository nested
   committing subrepository nested2
@@ -536,19 +536,19 @@ test repository cloning
   $ hg init nested_absolute
   $ echo test > nested_absolute/foo
   $ hg -R nested_absolute add
-  adding nested_absolute/foo
+  adding nested_absolute/foo (glob)
   $ hg -R nested_absolute ci -mtest
   $ cd mercurial
   $ hg init nested_relative
   $ echo test2 > nested_relative/foo2
   $ hg -R nested_relative add
-  adding nested_relative/foo2
+  adding nested_relative/foo2 (glob)
   $ hg -R nested_relative ci -mtest2
   $ hg init main
   $ echo "nested_relative = ../nested_relative" > main/.hgsub
   $ echo "nested_absolute = `pwd`/nested_absolute" >> main/.hgsub
   $ hg -R main add
-  adding main/.hgsub
+  adding main/.hgsub (glob)
   $ hg -R main ci -m "add subrepos"
   committing subrepository nested_absolute
   committing subrepository nested_relative
@@ -577,7 +577,7 @@ Issue1977: multirepo push should fail if subrepo push fails
   committing subrepository s
   $ hg clone repo repo2
   updating to branch default
-  cloning subrepo s from $TESTTMP/sub/repo/s
+  cloning subrepo s from $TESTTMP/sub/repo/s (glob)
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg -q -R repo2 pull -u
   $ echo 1 > repo2/s/a
@@ -611,10 +611,10 @@ Prepare a repo with subrepo
   $ echo sub/repo = sub/repo > .hgsub
   $ hg add .hgsub
   $ hg ci -mtest
-  committing subrepository sub/repo
+  committing subrepository sub/repo (glob)
   $ echo test >> sub/repo/foo
   $ hg ci -mtest
-  committing subrepository sub/repo
+  committing subrepository sub/repo (glob)
   $ cd ..
 
 Create repo without default path, pull top repo, and see what happens on update
@@ -629,7 +629,7 @@ Create repo without default path, pull top repo, and see what happens on update
   added 2 changesets with 3 changes to 2 files
   (run 'hg update' to get a working copy)
   $ hg -R issue1852b update
-  abort: default path for subrepository sub/repo not found
+  abort: default path for subrepository sub/repo not found (glob)
   [255]
 
 Pull -u now doesn't help
@@ -648,14 +648,14 @@ Try the same, but with pull -u
   adding manifests
   adding file changes
   added 1 changesets with 2 changes to 2 files
-  cloning subrepo sub/repo from issue1852a/sub/repo
+  cloning subrepo sub/repo from issue1852a/sub/repo (glob)
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
 Try to push from the other side
 
   $ hg -R issue1852a push `pwd`/issue1852c
   pushing to $TESTTMP/sub/issue1852c
-  pushing subrepo sub/repo to $TESTTMP/sub/issue1852c/sub/repo
+  pushing subrepo sub/repo to $TESTTMP/sub/issue1852c/sub/repo (glob)
   searching for changes
   no changes found
   searching for changes
@@ -900,3 +900,136 @@ Test issue3153: diff -S with deleted subrepos
   @@ -1,2 +0,0 @@
   -fc627a69481fcbe5f1135069e8a3881c023e4cf5 s
   -e95bcfa18a358dc4936da981ebf4147b4cad1362 t
+
+Test behavior of add for explicit path in subrepo:
+  $ cd ..
+  $ hg init explicit
+  $ cd explicit
+  $ echo s = s > .hgsub
+  $ hg add .hgsub
+  $ hg init s
+  $ hg ci -m0
+  committing subrepository s
+Adding with an explicit path in a subrepo adds the file
+  $ echo c1 > f1
+  $ echo c2 > s/f2
+  $ hg st -S
+  ? f1
+  ? s/f2
+  $ hg add s/f2
+  $ hg st -S
+  A s/f2
+  ? f1
+  $ hg ci -R s -m0
+  $ hg ci -Am1
+  adding f1
+  committing subrepository s
+Adding with an explicit path in a subrepo with -S has the same behavior
+  $ echo c3 > f3
+  $ echo c4 > s/f4
+  $ hg st -S
+  ? f3
+  ? s/f4
+  $ hg add -S s/f4
+  $ hg st -S
+  A s/f4
+  ? f3
+  $ hg ci -R s -m1
+  $ hg ci -Ama2
+  adding f3
+  committing subrepository s
+Adding without a path or pattern silently ignores subrepos
+  $ echo c5 > f5
+  $ echo c6 > s/f6
+  $ echo c7 > s/f7
+  $ hg st -S
+  ? f5
+  ? s/f6
+  ? s/f7
+  $ hg add
+  adding f5
+  $ hg st -S
+  A f5
+  ? s/f6
+  ? s/f7
+  $ hg ci -R s -Am2
+  adding f6
+  adding f7
+  $ hg ci -m3
+  committing subrepository s
+Adding without a path or pattern with -S also adds files in subrepos
+  $ echo c8 > f8
+  $ echo c9 > s/f9
+  $ echo c10 > s/f10
+  $ hg st -S
+  ? f8
+  ? s/f10
+  ? s/f9
+  $ hg add -S
+  adding f8
+  adding s/f10 (glob)
+  adding s/f9 (glob)
+  $ hg st -S
+  A f8
+  A s/f10
+  A s/f9
+  $ hg ci -R s -m3
+  $ hg ci -m4
+  committing subrepository s
+Adding with a pattern silently ignores subrepos
+  $ echo c11 > fm11
+  $ echo c12 > fn12
+  $ echo c13 > s/fm13
+  $ echo c14 > s/fn14
+  $ hg st -S
+  ? fm11
+  ? fn12
+  ? s/fm13
+  ? s/fn14
+  $ hg add 'glob:**fm*'
+  adding fm11
+  $ hg st -S
+  A fm11
+  ? fn12
+  ? s/fm13
+  ? s/fn14
+  $ hg ci -R s -Am4
+  adding fm13
+  adding fn14
+  $ hg ci -Am5
+  adding fn12
+  committing subrepository s
+Adding with a pattern with -S also adds matches in subrepos
+  $ echo c15 > fm15
+  $ echo c16 > fn16
+  $ echo c17 > s/fm17
+  $ echo c18 > s/fn18
+  $ hg st -S
+  ? fm15
+  ? fn16
+  ? s/fm17
+  ? s/fn18
+  $ hg add -S 'glob:**fm*'
+  adding fm15
+  adding s/fm17 (glob)
+  $ hg st -S
+  A fm15
+  A s/fm17
+  ? fn16
+  ? s/fn18
+  $ hg ci -R s -Am5
+  adding fn18
+  $ hg ci -Am6
+  adding fn16
+  committing subrepository s
+
+Test behavior of forget for explicit path in subrepo:
+Forgetting an explicit path in a subrepo untracks the file
+  $ echo c19 > s/f19
+  $ hg add s/f19
+  $ hg st -S
+  A s/f19
+  $ hg forget s/f19
+  $ hg st -S
+  ? s/f19
+  $ rm s/f19

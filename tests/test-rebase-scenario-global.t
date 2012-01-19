@@ -3,6 +3,9 @@
   > graphlog=
   > rebase=
   > 
+  > [phases]
+  > publish=False
+  > 
   > [alias]
   > tglog = log -G --template "{rev}: '{desc}' {branches}\n"
   > EOF
@@ -251,7 +254,7 @@ F onto G - rebase onto a descendant:
 C onto A - rebase onto an ancestor:
 
   $ hg rebase -d 0 -s 2
-  saved backup bundle to $TESTTMP/a7/.hg/strip-backup/5fddd98957c8-backup.hg
+  saved backup bundle to $TESTTMP/a7/.hg/strip-backup/5fddd98957c8-backup.hg (glob)
   $ hg tglog
   @  7: 'D'
   |
@@ -269,6 +272,42 @@ C onto A - rebase onto an ancestor:
   |/
   o  0: 'A'
   
+
+Check rebasing public changeset
+
+  $ hg pull --config phases.publish=True -q -r 6 . # update phase of 6
+  $ hg rebase -d 5 -b 6
+  abort: Can't rebase immutable changeset e1c4361dd923
+  (see hg help phases for details)
+  [255]
+
+  $ hg rebase -d 5 -b 6 --keep
+
+Check rebasing mutable changeset
+Source phase greater or equal to destination phase: new changeset get the phase of source:
+  $ hg rebase -s9 -d0
+  saved backup bundle to $TESTTMP/a7/.hg/strip-backup/2b23e52411f4-backup.hg
+  $ hg log --template "{phase}\n" -r 9
+  draft
+  $ hg rebase -s9 -d1
+  saved backup bundle to $TESTTMP/a7/.hg/strip-backup/2cb10d0cfc6c-backup.hg
+  $ hg log --template "{phase}\n" -r 9
+  draft
+  $ hg phase --force --secret 9
+  $ hg rebase -s9 -d0
+  saved backup bundle to $TESTTMP/a7/.hg/strip-backup/c5b12b67163a-backup.hg
+  $ hg log --template "{phase}\n" -r 9
+  secret
+  $ hg rebase -s9 -d1
+  saved backup bundle to $TESTTMP/a7/.hg/strip-backup/2a0524f868ac-backup.hg
+  $ hg log --template "{phase}\n" -r 9
+  secret
+Source phase lower than destination phase: new changeset get the phase of destination:
+  $ hg rebase -s7 -d9
+  saved backup bundle to $TESTTMP/a7/.hg/strip-backup/c9659aac0000-backup.hg
+  $ hg log --template "{phase}\n" -r 9
+  secret
+
   $ cd ..
 
 Test for revset
@@ -473,7 +512,7 @@ rebase on ancestor with revset
   $ hg clone -q -u . ah ah5
   $ cd ah5
   $ hg rebase -r '6::' -d 2
-  saved backup bundle to $TESTTMP/ah5/.hg/strip-backup/3d8a618087a7-backup.hg
+  saved backup bundle to $TESTTMP/ah5/.hg/strip-backup/3d8a618087a7-backup.hg (glob)
   $ hg tglog
   @  8: 'I'
   |

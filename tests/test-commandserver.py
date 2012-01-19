@@ -26,6 +26,7 @@ def readchannel(server):
         return channel, server.stdout.read(length)
 
 def runcommand(server, args, output=sys.stdout, error=sys.stderr, input=None):
+    print ' runcommand', ' '.join(args)
     server.stdin.write('runcommand\n')
     writeblock(server, '\0'.join(args))
 
@@ -52,6 +53,9 @@ def runcommand(server, args, output=sys.stdout, error=sys.stderr, input=None):
                 return
 
 def check(func, repopath=None):
+    print
+    print 'testing %s:' % func.__name__
+    print
     server = connect(repopath)
     try:
         return func(server)
@@ -124,7 +128,7 @@ def cwd(server):
     """ check that --cwd doesn't persist between requests """
     readchannel(server)
     os.mkdir('foo')
-    f = open('foo/bar', 'w')
+    f = open('foo/bar', 'wb')
     f.write('a')
     f.close()
     runcommand(server, ['--cwd', 'foo', 'st', 'bar'])
@@ -141,7 +145,7 @@ def localhgrc(server):
 
     # but not for this repo
     runcommand(server, ['init', 'foo'])
-    runcommand(server, ['-R', 'foo', 'showconfig'])
+    runcommand(server, ['-R', 'foo', 'showconfig', 'ui', 'defaults'])
     shutil.rmtree('foo')
 
 def hook(**args):
@@ -156,7 +160,10 @@ def hookoutput(server):
 
 def outsidechanges(server):
     readchannel(server)
-    os.system('echo a >> a && hg ci -Am2')
+    f = open('a', 'ab')
+    f.write('a\n')
+    f.close()
+    os.system('hg ci -Am2')
     runcommand(server, ['tip'])
 
 def bookmarks(server):

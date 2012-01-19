@@ -1,3 +1,5 @@
+  $ "$TESTDIR/hghave" tic || exit 80
+
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "color=" >> $HGRCPATH
   $ echo "[color]" >> $HGRCPATH
@@ -134,7 +136,7 @@ hg status:
 hg status modified added removed deleted unknown never-existed ignored:
 
   $ hg status --color=always modified added removed deleted unknown never-existed ignored
-  never-existed: No such file or directory
+  never-existed: * (glob)
   \x1b[0;32;1mA added\x1b[0m (esc)
   \x1b[0;31;1mR removed\x1b[0m (esc)
   \x1b[0;36;1;4m! deleted\x1b[0m (esc)
@@ -280,10 +282,10 @@ test 'resolve -l'
   $ hg merge
   merging a
   warning: conflicts during merge.
-  merging a failed!
+  merging a incomplete! (edit conflicts, then use 'hg resolve --mark')
   merging b
   warning: conflicts during merge.
-  merging b failed!
+  merging b incomplete! (edit conflicts, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 2 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]

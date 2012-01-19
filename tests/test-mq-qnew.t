@@ -123,7 +123,7 @@ plain headers
   A series
   A uncommitted.patch
   % qnew missing
-  abort: missing: No such file or directory
+  abort: missing: * (glob)
   % qnew -m
   foo bar
   
@@ -155,7 +155,7 @@ plain headers
   created new head
   merging a
   warning: conflicts during merge.
-  merging a failed!
+  merging a incomplete! (edit conflicts, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   abort: cannot manage merge changesets
@@ -190,7 +190,7 @@ hg headers
   A series
   A uncommitted.patch
   % qnew missing
-  abort: missing: No such file or directory
+  abort: missing: * (glob)
   % qnew -m
   # HG changeset patch
   # Parent 
@@ -228,7 +228,7 @@ hg headers
   created new head
   merging a
   warning: conflicts during merge.
-  merging a failed!
+  merging a incomplete! (edit conflicts, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   abort: cannot manage merge changesets

@@ -50,7 +50,7 @@ class dirstate(object):
         self._rootdir = os.path.join(root, '')
         self._dirty = False
         self._dirtypl = False
-        self._lastnormaltime = None
+        self._lastnormaltime = 0
         self._ui = ui
 
     @propertycache
@@ -254,7 +254,7 @@ class dirstate(object):
                 "_ignore"):
             if a in self.__dict__:
                 delattr(self, a)
-        self._lastnormaltime = None
+        self._lastnormaltime = 0
         self._dirty = False
 
     def copy(self, source, dest):
@@ -418,7 +418,7 @@ class dirstate(object):
             delattr(self, "_dirs")
         self._copymap = {}
         self._pl = [nullid, nullid]
-        self._lastnormaltime = None
+        self._lastnormaltime = 0
         self._dirty = True
 
     def rebuild(self, parent, files):
@@ -466,7 +466,7 @@ class dirstate(object):
             write(f)
         st.write(cs.getvalue())
         st.close()
-        self._lastnormaltime = None
+        self._lastnormaltime = 0
         self._dirty = self._dirtypl = False
 
     def _dirignore(self, f):

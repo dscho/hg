@@ -87,7 +87,7 @@ def Popen4(cmd, wd, timeout):
 SKIPPED_STATUS = 80
 SKIPPED_PREFIX = 'skipped: '
 FAILED_PREFIX  = 'hghave check failed: '
-PYTHON = sys.executable
+PYTHON = sys.executable.replace('\\', '/')
 IMPL_PATH = 'PYTHONPATH'
 if 'java' in sys.platform:
     IMPL_PATH = 'JYTHONPATH'
@@ -141,6 +141,8 @@ def parseargs():
              " rather than capturing and diff'ing it (disables timeout)")
     parser.add_option("-f", "--first", action="store_true",
         help="exit on the first test failure")
+    parser.add_option("-H", "--htmlcov", action="store_true",
+        help="create an HTML report of the coverage of the files")
     parser.add_option("--inotify", action="store_true",
         help="enable inotify extension when running tests")
     parser.add_option("-i", "--interactive", action="store_true",
@@ -211,7 +213,7 @@ def parseargs():
                          % hgbin)
         options.with_hg = hgbin
 
-    options.anycoverage = options.cover or options.annotate
+    options.anycoverage = options.cover or options.annotate or options.htmlcov
     if options.anycoverage:
         try:
             import coverage
@@ -493,8 +495,11 @@ def outputcoverage(options):
         return
 
     covrun('-c')
-    omit = ','.join([BINDIR, TESTDIR])
+    omit = ','.join(os.path.join(x, '*') for x in [BINDIR, TESTDIR])
     covrun('-i', '-r', '"--omit=%s"' % omit) # report
+    if options.htmlcov:
+        htmldir = os.path.join(TESTDIR, 'htmlcov')
+        covrun('-i', '-b', '"--directory=%s"' % htmldir, '"--omit=%s"' % omit)
     if options.annotate:
         adir = os.path.join(TESTDIR, 'annotated')
         if not os.path.isdir(adir):
@@ -508,7 +513,7 @@ def pytest(test, wd, options, replacements):
     return run(cmd, wd, options, replacements)
 
 def shtest(test, wd, options, replacements):
-    cmd = '"%s"' % test
+    cmd = '%s "%s"' % (options.shell, test)
     vlog("# Running", cmd)
     return run(cmd, wd, options, replacements)
 
@@ -521,43 +526,105 @@ def escapef(m):
 def stringescape(s):
     return escapesub(escapef, s)
 
-def transformtst(lines):
-    inblock = False
-    for l in lines:
-        if inblock:
-            if l.startswith('  $ ') or not l.startswith('  '):
-                inblock = False
-                yield '  > EOF\n'
-                yield l
-            else:
-                yield '  > ' + l[2:]
+def rematch(el, l):
+    try:
+        # ensure that the regex matches to the end of the string
+        return re.match(el + r'\Z', l)
+    except re.error:
+        # el is an invalid regex
+        return False
+
+def globmatch(el, l):
+    # The only supported special characters are * and ? plus / which also
+    # matches \ on windows. Escaping of these caracters is supported.
+    i, n = 0, len(el)
+    res = ''
+    while i < n:
+        c = el[i]
+        i += 1
+        if c == '\\' and el[i] in '*?\\/':
+            res += el[i - 1:i + 1]
+            i += 1
+        elif c == '*':
+            res += '.*'
+        elif c == '?':
+            res += '.'
+        elif c == '/' and os.name == 'nt':
+            res += '[/\\\\]'
         else:
-            if l.startswith('  >>> '):
-                inblock = True
-                yield '  $ %s -m heredoctest <<EOF\n' % PYTHON
-                yield '  > ' + l[2:]
-            else:
-                yield l
-    if inblock:
-        yield '  > EOF\n'
+            res += re.escape(c)
+    return rematch(res, l)
+
+def linematch(el, l):
+    if el == l: # perfect match (fast)
+        return True
+    if (el and
+        (el.endswith(" (re)\n") and rematch(el[:-6] + '\n', l) or
+         el.endswith(" (glob)\n") and globmatch(el[:-8] + '\n', l) or
+         el.endswith(" (esc)\n") and
+             (el[:-7].decode('string-escape') + '\n' == l or
+              el[:-7].decode('string-escape').replace('\r', '') +
+                  '\n' == l and os.name == 'nt'))):
+        return True
+    return False
 
 def tsttest(test, wd, options, replacements):
-    t = open(test)
-    out = []
-    script = []
+    # We generate a shell script which outputs unique markers to line
+    # up script results with our source. These markers include input
+    # line number and the last return code
     salt = "SALT" + str(time.time())
+    def addsalt(line, inpython):
+        if inpython:
+            script.append('%s %d 0\n' % (salt, line))
+        else:
+            script.append('echo %s %s $?\n' % (salt, line))
 
-    pos = prepos = -1
+    # After we run the shell script, we re-unify the script output
+    # with non-active parts of the source, with synchronization by our
+    # SALT line number markers. The after table contains the
+    # non-active components, ordered by line number
     after = {}
+    pos = prepos = -1
+
+    # Expected shellscript output
     expected = {}
-    for n, l in enumerate(transformtst(t)):
+
+    # We keep track of whether or not we're in a Python block so we
+    # can generate the surrounding doctest magic
+    inpython = False
+
+    f = open(test)
+    t = f.readlines()
+    f.close()
+
+    script = []
+    if os.getenv('MSYSTEM'):
+        script.append('alias pwd="pwd -W"\n')
+    for n, l in enumerate(t):
         if not l.endswith('\n'):
             l += '\n'
-        if l.startswith('  $ '): # commands
+        if l.startswith('  >>> '): # python inlines
             after.setdefault(pos, []).append(l)
             prepos = pos
             pos = n
-            script.append('echo %s %s $?\n' % (salt, n))
+            if not inpython:
+                # we've just entered a Python block, add the header
+                inpython = True
+                addsalt(prepos, False) # make sure we report the exit code
+                script.append('%s -m heredoctest <<EOF\n' % PYTHON)
+            addsalt(n, True)
+            script.append(l[2:])
+        if l.startswith('  ... '): # python inlines
+            after.setdefault(prepos, []).append(l)
+            script.append(l[2:])
+        elif l.startswith('  $ '): # commands
+            if inpython:
+                script.append("EOF\n")
+                inpython = False
+            after.setdefault(pos, []).append(l)
+            prepos = pos
+            pos = n
+            addsalt(n, False)
             script.append(l[4:])
         elif l.startswith('  > '): # continuations
             after.setdefault(prepos, []).append(l)
@@ -566,21 +633,24 @@ def tsttest(test, wd, options, replacements):
             # queue up a list of expected results
             expected.setdefault(pos, []).append(l[2:])
         else:
+            if inpython:
+                script.append("EOF\n")
+                inpython = False
             # non-command/result - queue up for merged output
             after.setdefault(pos, []).append(l)
 
-    t.close()
+    if inpython:
+        script.append("EOF\n")
+    addsalt(n + 1, False)
 
-    script.append('echo %s %s $?\n' % (salt, n + 1))
-
+    # Write out the script and execute it
     fd, name = tempfile.mkstemp(suffix='hg-tst')
-
     try:
         for l in script:
             os.write(fd, l)
         os.close(fd)
 
-        cmd = '"%s" "%s"' % (options.shell, name)
+        cmd = '%s "%s"' % (options.shell, name)
         vlog("# Running", cmd)
         exitcode, output = run(cmd, wd, options, replacements)
         # do not merge output if skipped, return hghave message instead
@@ -590,32 +660,7 @@ def tsttest(test, wd, options, replacements):
     finally:
         os.remove(name)
 
-    def rematch(el, l):
-        try:
-            # ensure that the regex matches to the end of the string
-            return re.match(el + r'\Z', l)
-        except re.error:
-            # el is an invalid regex
-            return False
-
-    def globmatch(el, l):
-        # The only supported special characters are * and ?. Escaping is
-        # supported.
-        i, n = 0, len(el)
-        res = ''
-        while i < n:
-            c = el[i]
-            i += 1
-            if c == '\\' and el[i] in '*?\\':
-                res += el[i - 1:i + 1]
-                i += 1
-            elif c == '*':
-                res += '.*'
-            elif c == '?':
-                res += '.'
-            else:
-                res += re.escape(c)
-        return rematch(res, l)
+    # Merge the script output back into a unified test
 
     pos = -1
     postout = []
@@ -627,20 +672,16 @@ def tsttest(test, wd, options, replacements):
 
         if lout:
             if lcmd:
+                # output block had no trailing newline, clean up
                 lout += ' (no-eol)\n'
 
+            # find the expected output at the current position
             el = None
             if pos in expected and expected[pos]:
                 el = expected[pos].pop(0)
 
-            if el == lout: # perfect match (fast)
-                postout.append("  " + lout)
-            elif (el and
-                  (el.endswith(" (re)\n") and rematch(el[:-6] + '\n', lout) or
-                   el.endswith(" (glob)\n") and globmatch(el[:-8] + '\n', lout)
-                   or el.endswith(" (esc)\n") and
-                      el.decode('string-escape') == l)):
-                postout.append("  " + el) # fallback regex/glob/esc match
+            if linematch(el, lout):
+                postout.append("  " + el)
             else:
                 if needescape(lout):
                     lout = stringescape(lout.rstrip('\n')) + " (esc)\n"
@@ -652,6 +693,7 @@ def tsttest(test, wd, options, replacements):
             if ret != 0:
                 postout.append("  [%s]\n" % ret)
             if pos in after:
+                # merge in non-active test bits
                 postout += after.pop(pos)
             pos = int(lcmd.split()[0])
 
@@ -832,15 +874,26 @@ def runone(options, test):
 
     # Make a tmp subdirectory to work in
     testtmp = os.environ["TESTTMP"] = os.environ["HOME"] = \
-        os.path.join(HGTMP, os.path.basename(test))
+        os.path.join(HGTMP, os.path.basename(test)).replace('\\', '/')
 
-    os.mkdir(testtmp)
-    ret, out = runner(testpath, testtmp, options, [
-        (re.escape(testtmp), '$TESTTMP'),
+    replacements = [
         (r':%s\b' % options.port, ':$HGPORT'),
         (r':%s\b' % (options.port + 1), ':$HGPORT1'),
         (r':%s\b' % (options.port + 2), ':$HGPORT2'),
-        ])
+        ]
+    if os.name == 'nt':
+        replacements.append((r'\r\n', '\n'))
+        replacements.append(
+            (''.join(c.isalpha() and '[%s%s]' % (c.lower(), c.upper()) or
+                     c in '/\\' and r'[/\\]' or
+                     c.isdigit() and c or
+                     '\\' + c
+                     for c in testtmp), '$TESTTMP'))
+    else:
+        replacements.append((re.escape(testtmp), '$TESTTMP'))
+
+    os.mkdir(testtmp)
+    ret, out = runner(testpath, testtmp, options, replacements)
     vlog("# Ret was:", ret)
 
     mark = '.'
@@ -853,7 +906,7 @@ def runone(options, test):
         refout = None                   # to match "out is None"
     elif os.path.exists(ref):
         f = open(ref, "r")
-        refout = list(transformtst(splitnewlines(f.read())))
+        refout = list(splitnewlines(f.read()))
         f.close()
     else:
         refout = []

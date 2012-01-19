@@ -7,7 +7,7 @@
 
 from i18n import _
 import util, encoding
-import os, smtplib, socket, quopri
+import os, smtplib, socket, quopri, time
 import email.Header, email.MIMEText, email.Utils
 
 _oldheaderinit = email.Header.Header.__init__
@@ -93,15 +93,29 @@ def _sendmail(ui, sender, recipients, msg):
             os.path.basename(program.split(None, 1)[0]),
             util.explainexit(ret)[0]))
 
-def connect(ui):
+def _mbox(mbox, sender, recipients, msg):
+    '''write mails to mbox'''
+    fp = open(mbox, 'ab+')
+    # Should be time.asctime(), but Windows prints 2-characters day
+    # of month instead of one. Make them print the same thing.
+    date = time.strftime('%a %b %d %H:%M:%S %Y', time.localtime())
+    fp.write('From %s %s\n' % (sender, date))
+    fp.write(msg)
+    fp.write('\n\n')
+    fp.close()
+
+def connect(ui, mbox=None):
     '''make a mail connection. return a function to send mail.
     call as sendmail(sender, list-of-recipients, msg).'''
+    if mbox:
+        open(mbox, 'wb').close()
+        return lambda s, r, m: _mbox(mbox, s, r, m)
     if ui.config('email', 'method', 'smtp') == 'smtp':
         return _smtp(ui)
     return lambda s, r, m: _sendmail(ui, s, r, m)
 
-def sendmail(ui, sender, recipients, msg):
-    send = connect(ui)
+def sendmail(ui, sender, recipients, msg, mbox=None):
+    send = connect(ui, mbox=mbox)
     return send(sender, recipients, msg)
 
 def validateconfig(ui):
@@ -117,14 +131,9 @@ def validateconfig(ui):
                                'but not in PATH') % method)
 
 def mimetextpatch(s, subtype='plain', display=False):
-    '''If patch in utf-8 transfer-encode it.'''
-
-    enc = None
-    for line in s.splitlines():
-        if len(line) > 950:
-            s = quopri.encodestring(s)
-            enc = "quoted-printable"
-            break
+    '''Return MIME message suitable for a patch.
+    Charset will be detected as utf-8 or (possibly fake) us-ascii.
+    Transfer encodings will be used if necessary.'''
 
     cs = 'us-ascii'
     if not display:
@@ -138,7 +147,20 @@ def mimetextpatch(s, subtype='plain', display=False):
                 # We'll go with us-ascii as a fallback.
                 pass
 
-    msg = email.MIMEText.MIMEText(s, subtype, cs)
+    return mimetextqp(s, subtype, cs)
+
+def mimetextqp(body, subtype, charset):
+    '''Return MIME message.
+    Qouted-printable transfer encoding will be used if necessary.
+    '''
+    enc = None
+    for line in body.splitlines():
+        if len(line) > 950:
+            body = quopri.encodestring(body)
+            enc = "quoted-printable"
+            break
+
+    msg = email.MIMEText.MIMEText(body, subtype, charset)
     if enc:
         del msg['Content-Transfer-Encoding']
         msg['Content-Transfer-Encoding'] = enc
@@ -230,4 +252,4 @@ def mimeencode(ui, s, charsets=None, display=False):
     cs = 'us-ascii'
     if not display:
         s, cs = _encode(ui, s, charsets)
-    return email.MIMEText.MIMEText(s, 'plain', cs)
+    return mimetextqp(s, 'plain', cs)

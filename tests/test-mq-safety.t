@@ -39,7 +39,7 @@ qpop/qrefresh on the wrong revision
   abort: popping would remove a revision not managed by this patch queue
   [255]
   $ hg qpop -n patches
-  using patch queue: $TESTTMP/repo/.hg/patches
+  using patch queue: $TESTTMP/repo/.hg/patches (glob)
   abort: popping would remove a revision not managed by this patch queue
   [255]
   $ hg qrefresh
@@ -168,6 +168,11 @@ Pushing revs excluding applied patch
 
 Pushing applied patch with --force
 
+  $ hg push --force -r default ../forcepush2
+  pushing to ../forcepush2
+  searching for changes
+  no changes found
+  $ hg phase -d 'mq()'
   $ hg push --force -r default ../forcepush2
   pushing to ../forcepush2
   searching for changes

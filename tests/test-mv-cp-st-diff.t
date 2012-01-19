@@ -560,6 +560,7 @@ $4 - test description
   
   - parent to root: --rev . --rev 0
   M a
+    b
   R b
   
   diff --git a/a b/a
@@ -611,6 +612,7 @@ $4 - test description
   
   - parent to branch: --rev . --rev 2
   M a
+    b
   A x/y
   R b
   
@@ -906,6 +908,7 @@ $4 - test description
   
   - parent to root: --rev . --rev 0
   M a
+    b
   R b
   R c
   
@@ -975,6 +978,7 @@ $4 - test description
   
   - parent to branch: --rev . --rev 2
   M a
+    b
   A x/y
   R b
   R c
@@ -1138,7 +1142,7 @@ $4 - test description
   updating to branch default
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   created new head
-  moving x/x to y/x
+  moving x/x to y/x (glob)
   ** directory move **
   ** hg mv x y / add y/x x1 / add y/x x2
   - working to parent: 

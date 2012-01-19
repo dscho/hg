@@ -19,6 +19,7 @@ syntax: glob
 tests/.coverage*
 tests/annotated
 tests/*.err
+tests/htmlcov
 build
 contrib/hgsh/hgsh
 dist
@@ -49,3 +50,8 @@ mercurial/parsers.py
 syntax: regexp
 ^\.pc/
 ^\.(pydev)?project
+
+# hackable windows distribution additions
+^hg-python26/
+^hg.exe$
+^hg.py$

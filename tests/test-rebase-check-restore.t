@@ -3,8 +3,11 @@
   > graphlog=
   > rebase=
   > 
+  > [phases]
+  > publish=False
+  > 
   > [alias]
-  > tglog = log -G --template "{rev}: '{desc}' {branches}\n"
+  > tglog = log -G --template "{rev}:{phase} '{desc}' {branches}\n"
   > EOF
 
 
@@ -43,28 +46,29 @@
   $ cd ..
 
 
-Rebasing B onto E - check keep:
+Rebasing B onto E - check keep: and phases
 
   $ hg clone -q -u . a a1
   $ cd a1
+  $ hg phase --force --secret 2
 
   $ hg tglog
-  @  5: 'F' notdefault
+  @  5:draft 'F' notdefault
   |
-  | o  4: 'E'
+  | o  4:draft 'E'
   | |
-  | o  3: 'D'
+  | o  3:draft 'D'
   |/
-  | o  2: 'C'
+  | o  2:secret 'C'
   | |
-  | o  1: 'B'
+  | o  1:draft 'B'
   |/
-  o  0: 'A'
+  o  0:draft 'A'
   
   $ hg rebase -s 1 -d 4 --keep
   merging A
   warning: conflicts during merge.
-  merging A failed!
+  merging A incomplete! (edit conflicts, then use 'hg resolve --mark')
   abort: unresolved conflicts (see hg resolve, then hg rebase --continue)
   [255]
 
@@ -76,21 +80,21 @@ Solve the conflict and go on:
   $ hg rebase --continue
 
   $ hg tglog
-  @  7: 'C'
+  @  7:secret 'C'
   |
-  o  6: 'B'
+  o  6:draft 'B'
   |
-  | o  5: 'F' notdefault
+  | o  5:draft 'F' notdefault
   | |
-  o |  4: 'E'
+  o |  4:draft 'E'
   | |
-  o |  3: 'D'
+  o |  3:draft 'D'
   |/
-  | o  2: 'C'
+  | o  2:secret 'C'
   | |
-  | o  1: 'B'
+  | o  1:draft 'B'
   |/
-  o  0: 'A'
+  o  0:draft 'A'
   
   $ cd ..
 
@@ -99,24 +103,25 @@ Rebase F onto E - check keepbranches:
 
   $ hg clone -q -u . a a2
   $ cd a2
+  $ hg phase --force --secret 2
 
   $ hg tglog
-  @  5: 'F' notdefault
+  @  5:draft 'F' notdefault
   |
-  | o  4: 'E'
+  | o  4:draft 'E'
   | |
-  | o  3: 'D'
+  | o  3:draft 'D'
   |/
-  | o  2: 'C'
+  | o  2:secret 'C'
   | |
-  | o  1: 'B'
+  | o  1:draft 'B'
   |/
-  o  0: 'A'
+  o  0:draft 'A'
   
   $ hg rebase -s 5 -d 4 --keepbranches
   merging A
   warning: conflicts during merge.
-  merging A failed!
+  merging A incomplete! (edit conflicts, then use 'hg resolve --mark')
   abort: unresolved conflicts (see hg resolve, then hg rebase --continue)
   [255]
 
@@ -129,15 +134,15 @@ Solve the conflict and go on:
   saved backup bundle to $TESTTMP/a2/.hg/strip-backup/*-backup.hg (glob)
 
   $ hg tglog
-  @  5: 'F' notdefault
+  @  5:draft 'F' notdefault
   |
-  o  4: 'E'
+  o  4:draft 'E'
   |
-  o  3: 'D'
+  o  3:draft 'D'
   |
-  | o  2: 'C'
+  | o  2:secret 'C'
   | |
-  | o  1: 'B'
+  | o  1:draft 'B'
   |/
-  o  0: 'A'
+  o  0:draft 'A'
   

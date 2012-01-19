@@ -219,7 +219,7 @@ def test_url():
     >>> u
     <url scheme: 'file', path: 'f:oo/bar/baz'>
     >>> str(u)
-    'file:///f%3Aoo/bar/baz'
+    'file:///f:oo/bar/baz'
     >>> u.localpath()
     'f:oo/bar/baz'
 
@@ -227,7 +227,7 @@ def test_url():
     >>> u
     <url scheme: 'file', host: 'localhost', path: 'f:oo/bar/baz'>
     >>> str(u)
-    'file://localhost/f%3Aoo/bar/baz'
+    'file://localhost/f:oo/bar/baz'
     >>> u.localpath()
     'f:oo/bar/baz'
 

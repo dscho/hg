@@ -3,6 +3,7 @@
   > largefiles =
   > share =
   > graphlog =
+  > mq =
   > [largefiles]
   > minsize = 0.5
   > patterns = **.other
@@ -18,19 +19,45 @@
   > EOF
   $ mkdir sub
   $ dd if=/dev/zero bs=1k count=256 > large 2> /dev/null
+  $ dd if=/dev/zero bs=1k count=256 > large2 2> /dev/null
   $ echo normal > normal1
   $ echo alsonormal > sub/normal2
   $ dd if=/dev/zero bs=1k count=10 > sub/maybelarge.dat 2> /dev/null
   $ hg addremove
   adding large
+  adding large2
   adding normal1
   adding sub/maybelarge.dat
   adding sub/normal2
   $ hg commit -m"add large, normal1" large normal1
   $ hg commit -m"add sub/*" sub
+Test tag parsing
+  $ cat >> .hgtags <<EOF
+  > IncorrectlyFormattedTag!
+  > invalidhash sometag
+  > 0123456789abcdef anothertag
+  > EOF
+  $ hg add .hgtags
+  $ hg commit -m"add large2" large2 .hgtags
+  $ hg rename large2 large3
+Test link+rename largefile codepath
+  $ ln -sf large large3
+  $ hg commit -m"make large2 a symlink" large2 large3
   $ [ -d .hg/largefiles ] && echo fail || echo pass
   pass
   $ cd ..
+  $ hg lfconvert --size 0.2 bigfile-repo largefiles-repo
+  initializing destination largefiles-repo
+  skipping incorrectly formatted tag IncorrectlyFormattedTag!
+  skipping incorrectly formatted id invalidhash
+  no mapping for id 0123456789abcdef
+  abort: renamed/copied largefile large3 becomes symlink
+  [255]
+  $ cd bigfile-repo
+  $ hg strip --no-backup 2
+  0 files updated, 0 files merged, 2 files removed, 0 files unresolved
+  $ cd ..
+  $ rm -rf largefiles-repo
   $ hg lfconvert --size 0.2 bigfile-repo largefiles-repo
   initializing destination largefiles-repo
 
@@ -84,8 +111,8 @@ add some changesets to rename/remove/merge
   $ hg commit -q -m"remove large, normal3"
   $ hg merge
   merging sub/maybelarge.dat and stuff/maybelarge.dat to stuff/maybelarge.dat
-  warning: $TESTTMP/bigfile-repo/stuff/maybelarge.dat looks like a binary file.
-  merging stuff/maybelarge.dat failed!
+  warning: $TESTTMP/bigfile-repo/stuff/maybelarge.dat looks like a binary file. (glob)
+  merging stuff/maybelarge.dat incomplete! (edit conflicts, then use 'hg resolve --mark')
   merging sub/normal2 and stuff/normal2 to stuff/normal2
   0 files updated, 1 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
@@ -171,7 +198,7 @@ lfconvert with rename, merge, and remove
   $ hg share -q -U bigfile-repo shared
   $ printf 'bogus' > shared/.hg/sharedpath
   $ hg lfconvert shared foo
-  abort: .hg/sharedpath points to nonexistent directory $TESTTMP/bogus!
+  abort: .hg/sharedpath points to nonexistent directory $TESTTMP/bogus! (glob)
   [255]
   $ hg lfconvert bigfile-repo largefiles-repo
   initializing destination largefiles-repo

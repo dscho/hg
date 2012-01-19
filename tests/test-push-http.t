@@ -1,3 +1,4 @@
+  $ "$TESTDIR/hghave" serve || exit 80
 
   $ hg init test
   $ cd test
@@ -27,6 +28,8 @@ expect ssl error
   pushing to http://localhost:$HGPORT/
   searching for changes
   remote: ssl required
+  remote: ssl required
+  updating cb9a9f314b8b to public failed!
   % serve errors
 
 expect authorization error

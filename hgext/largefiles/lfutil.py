@@ -117,14 +117,14 @@ def inusercache(ui, hash):
 def findfile(repo, hash):
     if instore(repo, hash):
         repo.ui.note(_('Found %s in store\n') % hash)
+        return storepath(repo, hash)
     elif inusercache(repo.ui, hash):
         repo.ui.note(_('Found %s in system cache\n') % hash)
         path = storepath(repo, hash)
         util.makedirs(os.path.dirname(path))
         link(usercachepath(repo.ui, hash), path)
-    else:
-        return None
-    return storepath(repo, hash)
+        return path
+    return None
 
 class largefiles_dirstate(dirstate.dirstate):
     def __getitem__(self, key):
@@ -139,6 +139,8 @@ class largefiles_dirstate(dirstate.dirstate):
         return super(largefiles_dirstate, self).drop(unixpath(f))
     def forget(self, f):
         return super(largefiles_dirstate, self).forget(unixpath(f))
+    def normallookup(self, f):
+        return super(largefiles_dirstate, self).normallookup(unixpath(f))
 
 def openlfdirstate(ui, repo):
     '''
@@ -152,11 +154,7 @@ def openlfdirstate(ui, repo):
 
     # If the largefiles dirstate does not exist, populate and create
     # it. This ensures that we create it on the first meaningful
-    # largefiles operation in a new clone. It also gives us an easy
-    # way to forcibly rebuild largefiles state:
-    #   rm .hg/largefiles/dirstate && hg status
-    # Or even, if things are really messed up:
-    #   rm -rf .hg/largefiles && hg status
+    # largefiles operation in a new clone.
     if not os.path.exists(os.path.join(admin, 'dirstate')):
         util.makedirs(admin)
         matcher = getstandinmatcher(repo)
@@ -170,27 +168,19 @@ def openlfdirstate(ui, repo):
             except OSError, err:
                 if err.errno != errno.ENOENT:
                     raise
-
-        lfdirstate.write()
-
     return lfdirstate
 
 def lfdirstate_status(lfdirstate, repo, rev):
-    wlock = repo.wlock()
-    try:
-        match = match_.always(repo.root, repo.getcwd())
-        s = lfdirstate.status(match, [], False, False, False)
-        unsure, modified, added, removed, missing, unknown, ignored, clean = s
-        for lfile in unsure:
-            if repo[rev][standin(lfile)].data().strip() != \
-                    hashfile(repo.wjoin(lfile)):
-                modified.append(lfile)
-            else:
-                clean.append(lfile)
-                lfdirstate.normal(lfile)
-        lfdirstate.write()
-    finally:
-        wlock.release()
+    match = match_.always(repo.root, repo.getcwd())
+    s = lfdirstate.status(match, [], False, False, False)
+    unsure, modified, added, removed, missing, unknown, ignored, clean = s
+    for lfile in unsure:
+        if repo[rev][standin(lfile)].data().strip() != \
+                hashfile(repo.wjoin(lfile)):
+            modified.append(lfile)
+        else:
+            clean.append(lfile)
+            lfdirstate.normal(lfile)
     return (modified, added, removed, missing, unknown, ignored, clean)
 
 def listlfiles(repo, rev=None, matcher=None):
@@ -231,6 +221,16 @@ def copytostore(repo, rev, file, uploaded=False):
     if instore(repo, hash):
         return
     copytostoreabsolute(repo, repo.wjoin(file), hash)
+
+def copyalltostore(repo, node):
+    '''Copy all largefiles in a given revision to the store'''
+
+    ctx = repo[node]
+    for filename in ctx.files():
+        if isstandin(filename) and filename in ctx.manifest():
+            realfile = splitstandin(filename)
+            copytostore(repo, ctx.node(), realfile)
+
 
 def copytostoreabsolute(repo, file, hash):
     util.makedirs(os.path.dirname(storepath(repo, hash)))
@@ -390,28 +390,10 @@ def blockstream(infile, blocksize=128 * 1024):
     # same blecch as copyandhash() above
     infile.close()
 
-def readhash(filename):
-    rfile = open(filename, 'rb')
-    hash = rfile.read(40)
-    rfile.close()
-    if len(hash) < 40:
-        raise util.Abort(_('bad hash in \'%s\' (only %d bytes long)')
-                         % (filename, len(hash)))
-    return hash
-
 def writehash(hash, filename, executable):
     util.makedirs(os.path.dirname(filename))
-    if os.path.exists(filename):
-        os.unlink(filename)
-    wfile = open(filename, 'wb')
-
-    try:
-        wfile.write(hash)
-        wfile.write('\n')
-    finally:
-        wfile.close()
-    if os.path.exists(filename):
-        os.chmod(filename, getmode(executable))
+    util.writefile(filename, hash + '\n')
+    os.chmod(filename, getmode(executable))
 
 def getexecutable(filename):
     mode = os.stat(filename).st_mode

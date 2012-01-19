@@ -32,6 +32,7 @@ Show all commands except debug commands
   outgoing
   parents
   paths
+  phase
   pull
   push
   recover
@@ -189,7 +190,7 @@ Show an error if we use --options with an ambiguous abbreviation
 Show all commands + options
   $ hg debugcommands
   add: include, exclude, subrepos, dry-run
-  annotate: rev, follow, no-follow, text, user, file, date, number, changeset, line-number, include, exclude
+  annotate: rev, follow, no-follow, text, user, file, date, number, changeset, line-number, ignore-all-space, ignore-space-change, ignore-blank-lines, include, exclude
   clone: noupdate, updaterev, rev, branch, pull, uncompressed, ssh, remotecmd, insecure
   commit: addremove, close-branch, include, exclude, message, logfile, date, user, subrepos
   diff: rev, change, text, git, nodates, show-function, reverse, ignore-all-space, ignore-space-change, ignore-blank-lines, unified, stat, include, exclude, subrepos
@@ -198,6 +199,7 @@ Show all commands + options
   init: ssh, remotecmd, insecure
   log: follow, follow-first, date, copies, keyword, rev, removed, only-merges, user, only-branch, branch, prune, hidden, patch, git, limit, no-merges, stat, style, template, include, exclude
   merge: force, rev, preview, tool
+  phase: public, draft, secret, force, rev
   pull: update, force, rev, bookmark, branch, ssh, remotecmd, insecure
   push: force, rev, bookmark, branch, new-branch, ssh, remotecmd, insecure
   remove: after, force, include, exclude
@@ -247,7 +249,7 @@ Show all commands + options
   grep: print0, all, text, follow, ignore-case, files-with-matches, line-number, rev, user, date, include, exclude
   heads: rev, topo, active, closed, style, template
   help: extension, command
-  identify: rev, num, id, branch, tags, bookmarks
+  identify: rev, num, id, branch, tags, bookmarks, ssh, remotecmd, insecure
   import: strip, base, edit, force, no-commit, bypass, exact, import-branch, message, logfile, date, user, similarity
   incoming: force, newest-first, bundle, rev, bookmarks, branch, patch, git, limit, no-merges, stat, style, template, ssh, remotecmd, insecure, subrepos
   locate: rev, print0, fullpath, include, exclude

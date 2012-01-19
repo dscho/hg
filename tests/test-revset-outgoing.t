@@ -40,7 +40,7 @@
   $ cd b
   $ cat .hg/hgrc
   [paths]
-  default = $TESTTMP/a#stable
+  default = $TESTTMP/a#stable (glob)
 
   $ echo red >> a
   $ hg ci -qm3
@@ -61,7 +61,7 @@
   
 
   $ hg tout
-  comparing with $TESTTMP/a
+  comparing with $TESTTMP/a (glob)
   searching for changes
   2:1d4099801a4e: '3' stable
 
@@ -80,11 +80,11 @@
 
   $ cat .hg/hgrc
   [paths]
-  default = $TESTTMP/a#stable
+  default = $TESTTMP/a#stable (glob)
   green = ../a#default
 
   $ hg tout green
-  comparing with $TESTTMP/a
+  comparing with $TESTTMP/a (glob)
   searching for changes
   3:f0461977a3db: '4' 
 

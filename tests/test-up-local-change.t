@@ -44,8 +44,8 @@
     unmatched files in other:
      b
   resolving manifests
-   overwrite False partial False
-   ancestor c19d34741b0a local c19d34741b0a+ remote 1e71731e6fbb
+   overwrite: False, partial: False
+   ancestor: c19d34741b0a, local: c19d34741b0a+, remote: 1e71731e6fbb
    a: versions differ -> m
    b: remote created -> g
   preserving a for resolve of a
@@ -65,8 +65,8 @@
   
   $ hg --debug up 0
   resolving manifests
-   overwrite False partial False
-   ancestor 1e71731e6fbb local 1e71731e6fbb+ remote c19d34741b0a
+   overwrite: False, partial: False
+   ancestor: 1e71731e6fbb, local: 1e71731e6fbb+, remote: c19d34741b0a
    a: versions differ -> m
    b: other deleted -> r
   preserving a for resolve of a
@@ -84,7 +84,8 @@
   summary:     1
   
   $ hg --debug merge
-  abort: there is nothing to merge - use "hg update" instead
+  abort: nothing to merge
+  (use 'hg update' instead)
   [255]
   $ hg parents
   changeset:   0:c19d34741b0a
@@ -97,8 +98,8 @@
     unmatched files in other:
      b
   resolving manifests
-   overwrite False partial False
-   ancestor c19d34741b0a local c19d34741b0a+ remote 1e71731e6fbb
+   overwrite: False, partial: False
+   ancestor: c19d34741b0a, local: c19d34741b0a+, remote: 1e71731e6fbb
    a: versions differ -> m
    b: remote created -> g
   preserving a for resolve of a
@@ -169,13 +170,14 @@ create a second head
   abort: crosses branches (merge branches or use --clean to discard changes)
   [255]
   $ hg --debug merge
-  abort: outstanding uncommitted changes (use 'hg status' to list changes)
+  abort: outstanding uncommitted changes
+  (use 'hg status' to list changes)
   [255]
   $ hg --debug merge -f
     searching for copies back to rev 1
   resolving manifests
-   overwrite False partial False
-   ancestor c19d34741b0a local 1e71731e6fbb+ remote 83c51d0caff4
+   overwrite: False, partial: False
+   ancestor: c19d34741b0a, local: 1e71731e6fbb+, remote: 83c51d0caff4
    a: versions differ -> m
    b: versions differ -> m
   preserving a for resolve of a

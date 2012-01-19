@@ -1,6 +1,6 @@
 Test hangup signal in the middle of transaction
 
-  $ "$TESTDIR/hghave" fifo || exit 80
+  $ "$TESTDIR/hghave" serve fifo || exit 80
   $ hg init
   $ mkfifo p
   $ hg serve --stdio < p &
@@ -17,4 +17,4 @@ Test hangup signal in the middle of transaction
   rollback completed
   killed!
   $ echo .hg/* .hg/store/*
-  .hg/00changelog.i .hg/journal.bookmarks .hg/journal.branch .hg/journal.desc .hg/journal.dirstate .hg/requires .hg/store .hg/store/00changelog.i .hg/store/00changelog.i.a
+  .hg/00changelog.i .hg/journal.bookmarks .hg/journal.branch .hg/journal.desc .hg/journal.dirstate .hg/requires .hg/store .hg/store/00changelog.i .hg/store/00changelog.i.a .hg/store/journal.phaseroots

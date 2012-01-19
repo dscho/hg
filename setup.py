@@ -44,7 +44,7 @@ except:
     pass
 
 if isironpython:
-    print "warning: IronPython detected (no bz2 support)"
+    sys.stderr.write("warning: IronPython detected (no bz2 support)\n")
 else:
     try:
         import bz2
@@ -67,6 +67,19 @@ from distutils.ccompiler import new_compiler
 from distutils.errors import CCompilerError, DistutilsExecError
 from distutils.sysconfig import get_python_inc
 from distutils.version import StrictVersion
+
+convert2to3 = '--c2to3' in sys.argv
+if convert2to3:
+    try:
+        from distutils.command.build_py import build_py_2to3 as build_py
+        from lib2to3.refactor import get_fixers_from_package as getfixers
+    except ImportError:
+        if sys.version_info[0] < 3:
+            raise SystemExit("--c2to3 is only compatible with python3.")
+        raise
+    sys.path.append('contrib')
+elif sys.version_info[0] >= 3:
+    raise SystemExit("setup.py with python3 needs --c2to3 (experimental)")
 
 scripts = ['hg']
 if os.name == 'nt':
@@ -108,6 +121,8 @@ def hasfunction(cc, funcname):
 try:
     import py2exe
     py2exeloaded = True
+    # import py2exe's patched Distribution class
+    from distutils.core import Distribution
 except ImportError:
     py2exeloaded = False
 
@@ -186,6 +201,17 @@ try:
 except ImportError:
     version = 'unknown'
 
+class hgbuild(build):
+    # Insert hgbuildmo first so that files in mercurial/locale/ are found
+    # when build_py is run next.
+    sub_commands = [('build_mo', None),
+    # We also need build_ext before build_py. Otherwise, when 2to3 is called (in
+    # build_py), it will not find osutil & friends, thinking that those modules are
+    # global and, consequently, making a mess, now that all module imports are
+    # global.
+                    ('build_ext', build.has_ext_modules),
+                   ] + build.sub_commands
+
 class hgbuildmo(build):
 
     description = "build translations (.mo files)"
@@ -217,13 +243,20 @@ class hgbuildmo(build):
             self.make_file([pofile], mobuildfile, spawn, (cmd,))
 
 
-# Insert hgbuildmo first so that files in mercurial/locale/ are found
-# when build_py is run next.
-build.sub_commands.insert(0, ('build_mo', None))
+class hgdist(Distribution):
+    pure = 0
 
-Distribution.pure = 0
-Distribution.global_options.append(('pure', None, "use pure (slow) Python "
-                                    "code instead of C extensions"))
+    global_options = Distribution.global_options + \
+                     [('pure', None, "use pure (slow) Python "
+                        "code instead of C extensions"),
+                      ('c2to3', None, "(experimental!) convert "
+                        "code with 2to3"),
+                     ]
+
+    def has_ext_modules(self):
+        # self.ext_modules is emptied in hgbuildpy.finalize_options which is
+        # too late for some cases
+        return not self.pure and Distribution.has_ext_modules(self)
 
 class hgbuildext(build_ext):
 
@@ -237,6 +270,9 @@ class hgbuildext(build_ext):
                      ext.name)
 
 class hgbuildpy(build_py):
+    if convert2to3:
+        fixer_names = sorted(set(getfixers("lib2to3.fixes") +
+                                 getfixers("hgfixes")))
 
     def finalize_options(self):
         build_py.finalize_options(self)
@@ -327,7 +363,7 @@ class hginstallscripts(install_scripts):
             fp.close()
 
             # skip binary files
-            if '\0' in data:
+            if b('\0') in data:
                 continue
 
             data = data.replace('@LIBDIR@', libdir.encode('string_escape'))
@@ -335,7 +371,8 @@ class hginstallscripts(install_scripts):
             fp.write(data)
             fp.close()
 
-cmdclass = {'build_mo': hgbuildmo,
+cmdclass = {'build': hgbuild,
+            'build_mo': hgbuildmo,
             'build_ext': hgbuildext,
             'build_py': hgbuildpy,
             'build_hgextindex': buildhgextindex,
@@ -435,6 +472,7 @@ setup(name='mercurial',
       data_files=datafiles,
       package_data=packagedata,
       cmdclass=cmdclass,
+      distclass=hgdist,
       options=dict(py2exe=dict(packages=['hgext', 'email']),
                    bdist_mpkg=dict(zipdist=True,
                                    license='COPYING',

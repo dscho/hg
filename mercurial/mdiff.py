@@ -67,13 +67,80 @@ defaultopts = diffopts()
 
 def wsclean(opts, text, blank=True):
     if opts.ignorews:
-        text = re.sub('[ \t\r]+', '', text)
+        text = bdiff.fixws(text, 1)
     elif opts.ignorewsamount:
-        text = re.sub('[ \t\r]+', ' ', text)
-        text = text.replace(' \n', '\n')
+        text = bdiff.fixws(text, 0)
     if blank and opts.ignoreblanklines:
         text = re.sub('\n+', '\n', text).strip('\n')
     return text
+
+def splitblock(base1, lines1, base2, lines2, opts):
+    # The input lines matches except for interwoven blank lines. We
+    # transform it into a sequence of matching blocks and blank blocks.
+    lines1 = [(wsclean(opts, l) and 1 or 0) for l in lines1]
+    lines2 = [(wsclean(opts, l) and 1 or 0) for l in lines2]
+    s1, e1 = 0, len(lines1)
+    s2, e2 = 0, len(lines2)
+    while s1 < e1 or s2 < e2:
+        i1, i2, btype = s1, s2, '='
+        if (i1 >= e1 or lines1[i1] == 0
+            or i2 >= e2 or lines2[i2] == 0):
+            # Consume the block of blank lines
+            btype = '~'
+            while i1 < e1 and lines1[i1] == 0:
+                i1 += 1
+            while i2 < e2 and lines2[i2] == 0:
+                i2 += 1
+        else:
+            # Consume the matching lines
+            while i1 < e1 and lines1[i1] == 1 and lines2[i2] == 1:
+                i1 += 1
+                i2 += 1
+        yield [base1 + s1, base1 + i1, base2 + s2, base2 + i2], btype
+        s1 = i1
+        s2 = i2
+
+def allblocks(text1, text2, opts=None, lines1=None, lines2=None, refine=False):
+    """Return (block, type) tuples, where block is an mdiff.blocks
+    line entry. type is '=' for blocks matching exactly one another
+    (bdiff blocks), '!' for non-matching blocks and '~' for blocks
+    matching only after having filtered blank lines. If refine is True,
+    then '~' blocks are refined and are only made of blank lines.
+    line1 and line2 are text1 and text2 split with splitnewlines() if
+    they are already available.
+    """
+    if opts is None:
+        opts = defaultopts
+    if opts.ignorews or opts.ignorewsamount:
+        text1 = wsclean(opts, text1, False)
+        text2 = wsclean(opts, text2, False)
+    diff = bdiff.blocks(text1, text2)
+    for i, s1 in enumerate(diff):
+        # The first match is special.
+        # we've either found a match starting at line 0 or a match later
+        # in the file.  If it starts later, old and new below will both be
+        # empty and we'll continue to the next match.
+        if i > 0:
+            s = diff[i - 1]
+        else:
+            s = [0, 0, 0, 0]
+        s = [s[1], s1[0], s[3], s1[2]]
+
+        # bdiff sometimes gives huge matches past eof, this check eats them,
+        # and deals with the special first match case described above
+        if s[0] != s[1] or s[2] != s[3]:
+            type = '!'
+            if opts.ignoreblanklines:
+                if lines1 is None:
+                    lines1 = splitnewlines(text1)
+                if lines2 is None:
+                    lines2 = splitnewlines(text2)
+                old = wsclean(opts, "".join(lines1[s[0]:s[1]]))
+                new = wsclean(opts, "".join(lines2[s[2]:s[3]]))
+                if old == new:
+                    type = '~'
+            yield s, type
+        yield s1, '='
 
 def diffline(revs, a, b, opts):
     parts = ['diff']
@@ -99,6 +166,9 @@ def unidiff(a, ad, b, bd, fn1, fn2, r=None, opts=defaultopts):
     if not a and not b:
         return ""
     epoch = util.datestr((0, 0))
+
+    fn1 = util.pconvert(fn1)
+    fn2 = util.pconvert(fn2)
 
     if not opts.text and (util.binary(a) or util.binary(b)):
         if a and b and len(a) == len(b) and a == b:
@@ -197,38 +267,14 @@ def _unidiff(t1, t2, l1, l2, opts=defaultopts):
     # below finds the spaces between those matching sequences and translates
     # them into diff output.
     #
-    if opts.ignorews or opts.ignorewsamount:
-        t1 = wsclean(opts, t1, False)
-        t2 = wsclean(opts, t2, False)
-
-    diff = bdiff.blocks(t1, t2)
     hunk = None
-    for i, s1 in enumerate(diff):
-        # The first match is special.
-        # we've either found a match starting at line 0 or a match later
-        # in the file.  If it starts later, old and new below will both be
-        # empty and we'll continue to the next match.
-        if i > 0:
-            s = diff[i - 1]
-        else:
-            s = [0, 0, 0, 0]
+    for s, stype in allblocks(t1, t2, opts, l1, l2):
+        if stype != '!':
+            continue
         delta = []
-        a1 = s[1]
-        a2 = s1[0]
-        b1 = s[3]
-        b2 = s1[2]
-
+        a1, a2, b1, b2 = s
         old = l1[a1:a2]
         new = l2[b1:b2]
-
-        # bdiff sometimes gives huge matches past eof, this check eats them,
-        # and deals with the special first match case described above
-        if not old and not new:
-            continue
-
-        if opts.ignoreblanklines:
-            if wsclean(opts, "".join(old)) == wsclean(opts, "".join(new)):
-                continue
 
         astart = contextstart(a1)
         bstart = contextstart(b1)
@@ -272,7 +318,7 @@ def patchtext(bin):
 def patch(a, bin):
     if len(a) == 0:
         # skip over trivial delta header
-        return buffer(bin, 12)
+        return util.buffer(bin, 12)
     return mpatch.patches(a, [bin])
 
 # similar to difflib.SequenceMatcher.get_matching_blocks

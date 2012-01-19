@@ -90,11 +90,16 @@ def _checkunknown(wctx, mctx, folding):
     folded = {}
     for fn in mctx:
         folded[foldf(fn)] = fn
+
+    error = False
     for fn in wctx.unknown():
         f = foldf(fn)
         if f in folded and mctx[folded[f]].cmp(wctx[f]):
-            raise util.Abort(_("untracked file in working directory differs"
-                               " from file in requested revision: '%s'") % fn)
+            error = True
+            wctx._repo.ui.warn(_("%s: untracked file differs\n") % fn)
+    if error:
+        raise util.Abort(_("untracked files in working directory differ "
+                           "from files in requested revision"))
 
 def _checkcollision(mctx, wctx):
     "check for case folding collisions in the destination context"
@@ -183,13 +188,14 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
         pa = p1.p1()
     elif pa and repo.ui.configbool("merge", "followcopies", True):
         dirs = repo.ui.configbool("merge", "followdirs", True)
-        copy, diverge = copies.copies(repo, p1, p2, pa, dirs)
+        copy, diverge = copies.mergecopies(repo, p1, p2, pa, dirs)
         for of, fl in diverge.iteritems():
             act("divergent renames", "dr", of, fl)
 
     repo.ui.note(_("resolving manifests\n"))
-    repo.ui.debug(" overwrite %s partial %s\n" % (overwrite, bool(partial)))
-    repo.ui.debug(" ancestor %s local %s remote %s\n" % (pa, p1, p2))
+    repo.ui.debug(" overwrite: %s, partial: %s\n"
+                  % (bool(overwrite), bool(partial)))
+    repo.ui.debug(" ancestor: %s, local: %s, remote: %s\n" % (pa, p1, p2))
 
     m1, m2, ma = p1.manifest(), p2.manifest(), pa.manifest()
     copied = set(copy.values())
@@ -527,11 +533,12 @@ def update(repo, node, branchmerge, force, partial, ancestor=None):
                                    " has no effect"))
             elif pa == p1:
                 if p1.branch() == p2.branch():
-                    raise util.Abort(_("nothing to merge (use 'hg update'"
-                                       " or check 'hg heads')"))
+                    raise util.Abort(_("nothing to merge"),
+                                     hint=_("use 'hg update' "
+                                            "or check 'hg heads'"))
             if not force and (wc.files() or wc.deleted()):
-                raise util.Abort(_("outstanding uncommitted changes "
-                                   "(use 'hg status' to list changes)"))
+                raise util.Abort(_("outstanding uncommitted changes"),
+                                 hint=_("use 'hg status' to list changes"))
             for s in wc.substate:
                 if wc.sub(s).dirty():
                     raise util.Abort(_("outstanding uncommitted changes in "

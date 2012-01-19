@@ -131,7 +131,8 @@ pypats = [
     (r'[^\n]\Z', "no trailing newline"),
     (r'(\S[ \t]+|^[ \t]+)\n', "trailing whitespace"),
 #    (r'^\s+[^_ \n][^_. \n]+_[^_\n]+\s*=', "don't use underbars in identifiers"),
-#    (r'\w*[a-z][A-Z]\w*\s*=', "don't use camelcase in identifiers"),
+    (r'^\s+(self\.)?[A-za-z][a-z0-9]+[A-Z]\w* = ',
+     "don't use camelcase in identifiers"),
     (r'^\s*(if|while|def|class|except|try)\s[^[\n]*:\s*[^\\n]#\s]+',
      "linebreak after :"),
     (r'class\s[^( \n]+:', "old-style class, use class foo(object)"),
@@ -301,14 +302,14 @@ def getblame(f):
     return lines
 
 def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
-              blame=False, debug=False):
+              blame=False, debug=False, lineno=True):
     """checks style and portability of a given file
 
     :f: filepath
     :logfunc: function used to report error
               logfunc(filename, linenumber, linecontent, errormessage)
     :maxerr: number of error to display before arborting.
-             Set to None (default) to report all errors
+             Set to false (default) to report all errors
 
     return True if no error is found, False otherwise.
     """
@@ -384,14 +385,14 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
                         bl, bu, br = blamecache[n]
                         if bl == l:
                             bd = '%s@%s' % (bu, br)
-                errors.append((f, n + 1, l, msg, bd))
+                errors.append((f, lineno and n + 1, l, msg, bd))
                 result = False
 
         errors.sort()
         for e in errors:
             logfunc(*e)
             fc += 1
-            if maxerr is not None and fc >= maxerr:
+            if maxerr and fc >= maxerr:
                 print " (too many errors, giving up)"
                 break
 
@@ -407,8 +408,11 @@ if __name__ == "__main__":
                       help="use annotate to generate blame info")
     parser.add_option("", "--debug", action="store_true",
                       help="show debug information")
+    parser.add_option("", "--nolineno", action="store_false",
+                      dest='lineno', help="don't show line numbers")
 
-    parser.set_defaults(per_file=15, warnings=False, blame=False, debug=False)
+    parser.set_defaults(per_file=15, warnings=False, blame=False, debug=False,
+                        lineno=True)
     (options, args) = parser.parse_args()
 
     if len(args) == 0:
@@ -416,9 +420,10 @@ if __name__ == "__main__":
     else:
         check = args
 
+    ret = 0
     for f in check:
-        ret = 0
         if not checkfile(f, maxerr=options.per_file, warnings=options.warnings,
-                         blame=options.blame, debug=options.debug):
+                         blame=options.blame, debug=options.debug,
+                         lineno=options.lineno):
             ret = 1
     sys.exit(ret)

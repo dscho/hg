@@ -22,6 +22,24 @@ Create a repo with some stuff in it:
   $ hg merge -q default --tool internal:local
   $ hg branch -q default
   $ hg ci -m6
+  $ hg phase --public 3
+  $ hg phase --force --secret 6
+
+  $ hg --config extensions.graphlog= log -G --template '{author}@{rev}.{phase}: {desc}\n'
+  @    test@6.secret: 6
+  |\
+  | o  test@5.draft: 5
+  | |
+  o |  test@4.draft: 4
+  |/
+  o  baz@3.public: 3
+  |
+  o  test@2.public: 2
+  |
+  o  bar@1.public: 1
+  |
+  o  test@0.public: 0
+  
 
 Need to specify a rev:
 
@@ -72,6 +90,7 @@ Look for extra:source
   $ hg log --debug -r tip
   changeset:   7:d2e44c99fd3f31c176ea4efb9eca9f6306c81756
   tag:         tip
+  phase:       draft
   parent:      0:68795b066622ca79a25816a662041d8f78f3cd9e
   parent:      -1:0000000000000000000000000000000000000000
   manifest:    7:5d59766436fd8fbcd38e7bebef0f6eaf3eebe637
@@ -101,19 +120,11 @@ Graft out of order, skipping a merge and a duplicate
      b -> a *
     checking for directory renames
   resolving manifests
-   overwrite False partial False
-   ancestor 68795b066622 local d2e44c99fd3f+ remote 5d205f8b35b6
+   overwrite: False, partial: False
+   ancestor: 68795b066622, local: d2e44c99fd3f+, remote: 5d205f8b35b6
    b: local copied/moved to a -> m
   preserving b for resolve of b
   updating: b 1/1 files (100.00%)
-    searching for copies back to rev 1
-    unmatched files in local:
-     a
-    unmatched files in other:
-     b
-    all copies found (* = to merge, ! = divergent):
-     b -> a *
-    checking for directory renames
   b
    b: searching for copy revision for a
    b: copy a:b789fdd96dc2f3bd229c1dd8eedf0fc60e2b68e3
@@ -122,25 +133,19 @@ Graft out of order, skipping a merge and a duplicate
     unmatched files in local:
      a.orig
   resolving manifests
-   overwrite False partial False
-   ancestor 4c60f11aa304 local 6f5ea6ac8b70+ remote 97f8bfe72746
+   overwrite: False, partial: False
+   ancestor: 4c60f11aa304, local: 6f5ea6ac8b70+, remote: 97f8bfe72746
    e: remote is newer -> g
   updating: e 1/1 files (100.00%)
   getting e
-    searching for copies back to rev 1
-    unmatched files in local:
-     c
-    all copies found (* = to merge, ! = divergent):
-     c -> b *
-    checking for directory renames
   e
   grafting revision 4
     searching for copies back to rev 1
     unmatched files in local:
      a.orig
   resolving manifests
-   overwrite False partial False
-   ancestor 4c60f11aa304 local 77eb504366ab+ remote 9c233e8e184d
+   overwrite: False, partial: False
+   ancestor: 4c60f11aa304, local: 77eb504366ab+, remote: 9c233e8e184d
    e: versions differ -> m
    d: remote is newer -> g
   preserving e for resolve of e
@@ -151,13 +156,7 @@ Graft out of order, skipping a merge and a duplicate
   merging e
   my e@77eb504366ab+ other e@9c233e8e184d ancestor e@68795b066622
   warning: conflicts during merge.
-  merging e failed!
-    searching for copies back to rev 1
-    unmatched files in local:
-     c
-    all copies found (* = to merge, ! = divergent):
-     c -> b *
-    checking for directory renames
+  merging e incomplete! (edit conflicts, then use 'hg resolve --mark')
   abort: unresolved conflicts, can't continue
   (use hg resolve and hg graft --continue)
   [255]
@@ -200,30 +199,30 @@ Compare with original:
 
 View graph:
 
-  $ hg --config extensions.graphlog= log -G --template '{author}@{rev}: {desc}\n'
-  @  test@11: 3
+  $ hg --config extensions.graphlog= log -G --template '{author}@{rev}.{phase}: {desc}\n'
+  @  test@11.draft: 3
   |
-  o  test@10: 4
+  o  test@10.draft: 4
   |
-  o  test@9: 5
+  o  test@9.draft: 5
   |
-  o  bar@8: 1
+  o  bar@8.draft: 1
   |
-  o  foo@7: 2
+  o  foo@7.draft: 2
   |
-  | o    test@6: 6
+  | o    test@6.secret: 6
   | |\
-  | | o  test@5: 5
+  | | o  test@5.draft: 5
   | | |
-  | o |  test@4: 4
+  | o |  test@4.draft: 4
   | |/
-  | o  baz@3: 3
+  | o  baz@3.public: 3
   | |
-  | o  test@2: 2
+  | o  test@2.public: 2
   | |
-  | o  bar@1: 1
+  | o  bar@1.public: 1
   |/
-  o  test@0: 0
+  o  test@0.public: 0
   
 Graft again onto another branch should preserve the original source
   $ hg up -q 0
@@ -242,6 +241,7 @@ Graft again onto another branch should preserve the original source
   $ hg log --debug -r tip
   changeset:   13:39bb1d13572759bd1e6fc874fed1b12ece047a18
   tag:         tip
+  phase:       draft
   parent:      12:b592ea63bb0c19a6c5c44685ee29a2284f9f1b8f
   parent:      -1:0000000000000000000000000000000000000000
   manifest:    13:0780e055d8f4cd12eadd5a2719481648f336f7a9

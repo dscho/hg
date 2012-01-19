@@ -15,7 +15,7 @@ http://mercurial.selenic.com/wiki/RebaseExtension
 '''
 
 from mercurial import hg, util, repair, merge, cmdutil, commands, bookmarks
-from mercurial import extensions, patch, scmutil
+from mercurial import extensions, patch, scmutil, phases
 from mercurial.commands import templateopts
 from mercurial.node import nullrev
 from mercurial.lock import release
@@ -47,7 +47,7 @@ command = cmdutil.command(cmdtable)
      _('read collapse commit message from file'), _('FILE')),
     ('', 'keep', False, _('keep original changesets')),
     ('', 'keepbranches', False, _('keep original branch names')),
-    ('', 'detach', False, _('force detaching of source from its original '
+    ('D', 'detach', False, _('force detaching of source from its original '
                             'branch')),
     ('t', 'tool', '', _('specify merge tool')),
     ('c', 'continue', False, _('continue an interrupted rebase')),
@@ -115,8 +115,8 @@ def rebase(ui, repo, **opts):
 
     lock = wlock = None
     try:
-        lock = repo.lock()
         wlock = repo.wlock()
+        lock = repo.lock()
 
         # Validate input and define rebasing points
         destf = opts.get('dest', None)
@@ -168,7 +168,7 @@ def rebase(ui, repo, **opts):
                 raise util.Abort(_('cannot specify both a '
                                    'revision and a source'))
             if detachf:
-                if not srcf:
+                if not (srcf or revf):
                     raise util.Abort(
                         _('detach requires a revision to be specified'))
                 if basef:
@@ -185,26 +185,34 @@ def rebase(ui, repo, **opts):
                 dest = repo[destf]
 
             if revf:
-                revgen = repo.set('%lr', revf)
+                rebaseset = repo.revs('%lr', revf)
             elif srcf:
                 src = scmutil.revrange(repo, [srcf])
-                revgen = repo.set('(%ld)::', src)
+                rebaseset = repo.revs('(%ld)::', src)
             else:
                 base = scmutil.revrange(repo, [basef or '.'])
-                revgen = repo.set('(children(ancestor(%ld, %d)) and ::(%ld))::',
-                                  base, dest, base)
+                rebaseset = repo.revs(
+                    '(children(ancestor(%ld, %d)) and ::(%ld))::',
+                    base, dest, base)
 
-            rebaseset = [c.rev() for c in revgen]
+            if rebaseset:
+                root = min(rebaseset)
+            else:
+                root = None
 
             if not rebaseset:
                 repo.ui.debug('base is ancestor of destination')
                 result = None
-            elif not keepf and list(repo.set('first(children(%ld) - %ld)',
-                                            rebaseset, rebaseset)):
+            elif not keepf and list(repo.revs('first(children(%ld) - %ld)',
+                                              rebaseset, rebaseset)):
                 raise util.Abort(
                     _("can't remove original changesets with"
                       " unrebased descendants"),
                     hint=_('use --keep to keep original changesets'))
+            elif not keepf and not repo[root].mutable():
+                raise util.Abort(_("Can't rebase immutable changeset %s")
+                                 % repo[root],
+                                 hint=_('see hg help phases for details'))
             else:
                 result = buildstate(repo, dest, rebaseset, detachf)
 
@@ -263,7 +271,7 @@ def rebase(ui, repo, **opts):
                                         'resolve, then hg rebase --continue)'))
                     finally:
                         ui.setconfig('ui', 'forcemerge', '')
-                cmdutil.duplicatecopies(repo, rev, target, p2)
+                cmdutil.duplicatecopies(repo, rev, target)
                 if not collapsef:
                     newrev = concludenode(repo, rev, p1, p2, extrafn=extrafn,
                                           editor=editor)
@@ -364,6 +372,11 @@ def concludenode(repo, rev, p1, p2, commitmsg=None, editor=None, extrafn=None):
         newrev = repo.commit(text=commitmsg, user=ctx.user(),
                              date=ctx.date(), extra=extra, editor=editor)
         repo.dirstate.setbranch(repo[newrev].branch())
+        targetphase = max(ctx.phase(), phases.draft)
+        # retractboundary doesn't overwrite upper phase inherited from parent
+        newnode = repo[newrev].node()
+        if newnode:
+            phases.retractboundary(repo, targetphase, [newnode])
         return newrev
     except util.Abort:
         # Invalidate the previous setparents
@@ -452,9 +465,13 @@ def updatemq(repo, state, skipped, **opts):
                 mq.qimport(repo, (), patchname=name, git=isgit,
                                 rev=[str(state[rev])])
 
-        # restore old series to preserve guards
-        mq.fullseries = original_series
-        mq.series_dirty = True
+        # restore missing guards
+        for s in original_series:
+            pname = mq.guard_re.split(s, 1)[0]
+            if pname in mq.fullseries:
+                repo.ui.debug('restoring guard for patch %s' % (pname))
+                mq.fullseries[mq.fullseries.index(pname)] = s
+                mq.series_dirty = True
         mq.savedirty()
 
 def updatebookmarks(repo, nstate, originalbookmarks, **opts):
@@ -540,7 +557,13 @@ def restorestatus(repo):
 
 def abort(repo, originalwd, target, state):
     'Restore the repository to its original state'
-    if set(repo.changelog.descendants(target)) - set(state.values()):
+    descendants = repo.changelog.descendants
+    ispublic = lambda r: repo._phaserev[r] == phases.public
+    if filter(ispublic, descendants(target)):
+        repo.ui.warn(_("warning: immutable rebased changeset detected, "
+                       "can't abort\n"))
+        return -1
+    elif set(descendants(target)) - set(state.values()):
         repo.ui.warn(_("warning: new changesets detected on target branch, "
                                                     "can't abort\n"))
         return -1
@@ -590,8 +613,7 @@ def buildstate(repo, dest, rebaseset, detach):
         # rebase on ancestor, force detach
         detach = True
     if detach:
-        detachset = [c.rev() for c in repo.set('::%d - ::%d - %d',
-                                                root, commonbase, root)]
+        detachset = repo.revs('::%d - ::%d - %d', root, commonbase, root)
 
     repo.ui.debug('rebase onto %d starting from %d\n' % (dest, root))
     state = dict.fromkeys(rebaseset, nullrev)
