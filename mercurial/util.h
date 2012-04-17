@@ -101,5 +101,65 @@
 
 #endif /* PY_VERSION_HEX */
 
-#endif /* _HG_UTIL_H_ */
+#if (PY_VERSION_HEX < 0x02050000)
+/* Definitions to get compatibility with python 2.4 and earlier which
+   does not have Py_ssize_t. See also PEP 353.
+   Note: msvc (8 or earlier) does not have ssize_t, so we use Py_ssize_t.
+*/
+typedef int Py_ssize_t;
+typedef Py_ssize_t (*lenfunc)(PyObject *);
+typedef PyObject *(*ssizeargfunc)(PyObject *, Py_ssize_t);
 
+#if !defined(PY_SSIZE_T_MIN)
+#define PY_SSIZE_T_MAX INT_MAX
+#define PY_SSIZE_T_MIN INT_MIN
+#endif
+#endif
+
+#ifdef _WIN32
+#ifdef _MSC_VER
+/* msvc 6.0 has problems */
+#define inline __inline
+typedef unsigned long uint32_t;
+typedef unsigned __int64 uint64_t;
+#else
+#include <stdint.h>
+#endif
+#else
+/* not windows */
+#include <sys/types.h>
+#if defined __BEOS__ && !defined __HAIKU__
+#include <ByteOrder.h>
+#else
+#include <arpa/inet.h>
+#endif
+#include <inttypes.h>
+#endif
+
+#if defined __hpux || defined __SUNPRO_C || defined _AIX
+#define inline
+#endif
+
+#ifdef __linux
+#define inline __inline
+#endif
+
+static inline uint32_t getbe32(const char *c)
+{
+	const unsigned char *d = (const unsigned char *)c;
+
+	return ((d[0] << 24) |
+		(d[1] << 16) |
+		(d[2] << 8) |
+		(d[3]));
+}
+
+static inline void putbe32(uint32_t x, char *c)
+{
+	c[0] = (x >> 24) & 0xff;
+	c[1] = (x >> 16) & 0xff;
+	c[2] = (x >> 8) & 0xff;
+	c[3] = (x) & 0xff;
+}
+
+#endif /* _HG_UTIL_H_ */

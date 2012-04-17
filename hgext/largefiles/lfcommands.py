@@ -11,7 +11,7 @@
 import os
 import shutil
 
-from mercurial import util, match as match_, hg, node, context, error
+from mercurial import util, match as match_, hg, node, context, error, cmdutil
 from mercurial.i18n import _
 
 import lfutil
@@ -58,7 +58,7 @@ def lfconvert(ui, src, dest, *pats, **opts):
         # Lock destination to prevent modification while it is converted to.
         # Don't need to lock src because we are just reading from its history
         # which can't change.
-        dst_lock = rdst.lock()
+        dstlock = rdst.lock()
 
         # Get a list of all changesets in the source.  The easy way to do this
         # is to simply walk the changelog, using changelog.nodesbewteen().
@@ -113,7 +113,7 @@ def lfconvert(ui, src, dest, *pats, **opts):
         if not success:
             # we failed, remove the new directory
             shutil.rmtree(rdst.root)
-        dst_lock.release()
+        dstlock.release()
 
 def _addchangeset(ui, rsrc, rdst, ctx, revmap):
  # Convert src parents to dst parents
@@ -451,7 +451,7 @@ def _updatelfile(repo, lfdirstate, lfile):
              expecthash != lfutil.hashfile(abslfile))):
             if not lfutil.copyfromcache(repo, expecthash, lfile):
                 # use normallookup() to allocate entry in largefiles dirstate,
-                # because lack of it misleads lfiles_repo.status() into
+                # because lack of it misleads lfilesrepo.status() into
                 # recognition that such cache missing files are REMOVED.
                 lfdirstate.normallookup(lfile)
                 return None # don't try to set the mode
@@ -484,6 +484,23 @@ def _updatelfile(repo, lfdirstate, lfile):
     elif state == '?':
         lfdirstate.drop(lfile)
     return ret
+
+def catlfile(repo, lfile, rev, filename):
+    hash = lfutil.readstandin(repo, lfile, rev)
+    if not lfutil.inusercache(repo.ui, hash):
+        store = basestore._openstore(repo)
+        success, missing = store.get([(lfile, hash)])
+        if len(success) != 1:
+            raise util.Abort(
+                _('largefile %s is not in cache and could not be downloaded')
+                    % lfile)
+    path = lfutil.usercachepath(repo.ui, hash)
+    fpout = cmdutil.makefileobj(repo, filename)
+    fpin = open(path, "rb")
+    fpout.write(fpin.read())
+    fpout.close()
+    fpin.close()
+    return 0
 
 # -- hg commands declarations ------------------------------------------------
 

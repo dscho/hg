@@ -275,6 +275,11 @@ class abstractsubrepo(object):
         """
         raise NotImplementedError
 
+    def basestate(self):
+        """current working directory base state, disregarding .hgsubstate
+        state and working directory modifications"""
+        raise NotImplementedError
+
     def checknested(self, path):
         """check if path is a subrepository within this repository"""
         return False
@@ -363,6 +368,9 @@ class abstractsubrepo(object):
     def forget(self, ui, match, prefix):
         return []
 
+    def revert(self, ui, substate, *pats, **opts):
+        return []
+
 class hgsubrepo(abstractsubrepo):
     def __init__(self, ctx, path, state):
         self._path = path
@@ -445,6 +453,9 @@ class hgsubrepo(abstractsubrepo):
             # different version checked out
             return True
         return w.dirty() # working directory changed
+
+    def basestate(self):
+        return self._repo['.'].hex()
 
     def checknested(self, path):
         return self._repo._checknested(self._repo.wjoin(path))
@@ -565,6 +576,38 @@ class hgsubrepo(abstractsubrepo):
         return cmdutil.forget(ui, self._repo, match,
                               os.path.join(prefix, self._path), True)
 
+    def revert(self, ui, substate, *pats, **opts):
+        # reverting a subrepo is a 2 step process:
+        # 1. if the no_backup is not set, revert all modified
+        #    files inside the subrepo
+        # 2. update the subrepo to the revision specified in
+        #    the corresponding substate dictionary
+        ui.status(_('reverting subrepo %s\n') % substate[0])
+        if not opts.get('no_backup'):
+            # Revert all files on the subrepo, creating backups
+            # Note that this will not recursively revert subrepos
+            # We could do it if there was a set:subrepos() predicate
+            opts = opts.copy()
+            opts['date'] = None
+            opts['rev'] = substate[1]
+
+            pats = []
+            if not opts['all']:
+                pats = ['set:modified()']
+            self.filerevert(ui, *pats, **opts)
+
+        # Update the repo to the revision specified in the given substate
+        self.get(substate, overwrite=True)
+
+    def filerevert(self, ui, *pats, **opts):
+        ctx = self._repo[opts['rev']]
+        parents = self._repo.dirstate.parents()
+        if opts['all']:
+            pats = ['set:modified()']
+        else:
+            pats = []
+        cmdutil.revert(ui, self._repo, ctx, parents, *pats, **opts)
+
 class svnsubrepo(abstractsubrepo):
     def __init__(self, ctx, path, state):
         self._path = path
@@ -665,6 +708,9 @@ class svnsubrepo(abstractsubrepo):
             if self._state[1] in self._wcrevs() or ignoreupdate:
                 return False
         return True
+
+    def basestate(self):
+        return self._wcrev()
 
     def commit(self, text, user, date):
         # user and date are out of our hands since svn is centralized
@@ -915,6 +961,9 @@ class gitsubrepo(abstractsubrepo):
         self._gitupdatestat()
         out, code = self._gitdir(['diff-index', '--quiet', 'HEAD'])
         return code == 1
+
+    def basestate(self):
+        return self._gitstate()
 
     def get(self, state, overwrite=False):
         source, revision, kind = state

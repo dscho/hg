@@ -127,6 +127,29 @@ Test moving largefiles and verify that normal files are also unaffected.
   $ cat sub/large4
   large22
 
+Test display of largefiles in hgweb
+
+  $ hg serve -d -p $HGPORT --pid-file ../hg.pid
+  $ cat ../hg.pid >> $DAEMON_PIDS
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/file/tip/?style=raw'
+  200 Script output follows
+  
+  
+  drwxr-xr-x sub
+  -rw-r--r-- 41 large3
+  -rw-r--r-- 9 normal3
+  
+  
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/file/tip/sub/?style=raw'
+  200 Script output follows
+  
+  
+  -rw-r--r-- 41 large4
+  -rw-r--r-- 9 normal4
+  
+  
+  $ "$TESTDIR/killdaemons.py"
+
 Test archiving the various revisions.  These hit corner cases known with
 archiving.
 
@@ -737,6 +760,8 @@ Test that transplanting a largefile change works correctly.
   adding manifests
   adding file changes
   added 1 changesets with 2 changes to 2 files
+  getting changed largefiles
+  1 largefiles updated, 0 removed
   $ hg log --template '{rev}:{node|short}  {desc|firstline}\n'
   9:598410d3eb9a  modify normal file largefile in repo d
   8:a381d2c8c80e  modify normal file and largefile in repo b
@@ -758,6 +783,19 @@ Test that transplanting a largefile change works correctly.
   large6-modified
   $ cat sub2/large7
   large7
+
+Cat a largefile
+  $ hg cat normal3
+  normal3-modified
+  $ hg cat sub/large4
+  large4-modified
+  $ rm ${USERCACHE}/*
+  $ hg cat -r a381d2c8c80e -o cat.out sub/large4
+  $ cat cat.out
+  large4-modified
+  $ rm cat.out
+  $ hg cat -r a381d2c8c80e normal3
+  normal3-modified
 
 Test that renaming a largefile results in correct output for status
 

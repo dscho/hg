@@ -16,7 +16,7 @@ This is *not* safe to run on a changelog.
 # e.g. by comparing "before" and "after" states of random changesets
 # (maybe: export before, shrink, export after, diff).
 
-import os, tempfile, errno
+import os, errno
 from mercurial import revlog, transaction, node, util, scmutil
 from mercurial import changegroup
 from mercurial.i18n import _
@@ -191,7 +191,6 @@ def shrink(ui, repo, **opts):
                            'will corrupt your repository'))
 
     ui.write(_('shrinking %s\n') % indexfn)
-    prefix = os.path.basename(indexfn)[:-1]
     tmpindexfn = util.mktempcopy(indexfn, emptyok=True)
 
     r1 = revlog.revlog(scmutil.opener(os.getcwd(), audit=False), indexfn)
@@ -270,19 +269,23 @@ def shrink(ui, repo, **opts):
         lock.release()
 
     if not opts.get('dry_run'):
-        ui.write(_('note: old revlog saved in:\n'
-                   '  %s\n'
-                   '  %s\n'
-                   '(You can delete those files when you are satisfied that your\n'
-                   'repository is still sane.  '
-                   'Running \'hg verify\' is strongly recommended.)\n')
-                 % (oldindexfn, olddatafn))
+        ui.write(
+            _('note: old revlog saved in:\n'
+              '  %s\n'
+              '  %s\n'
+              '(You can delete those files when you are satisfied that your\n'
+              'repository is still sane.  '
+              'Running \'hg verify\' is strongly recommended.)\n')
+            % (oldindexfn, olddatafn))
 
 cmdtable = {
     'shrink': (shrink,
-               [('', 'revlog', '', _('index (.i) file of the revlog to shrink')),
-                ('n', 'dry-run', None, _('do not shrink, simulate only')),
-                ('', 'sort', 'reversepostorder', 'name of sort algorithm to use'),
+               [('', 'revlog', '',
+                 _('the revlog to shrink (.i)')),
+                ('n', 'dry-run', None,
+                 _('do not shrink, simulate only')),
+                ('', 'sort', 'reversepostorder',
+                 _('name of sort algorithm to use')),
                 ],
                _('hg shrink [--revlog PATH]'))
 }

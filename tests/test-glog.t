@@ -83,8 +83,30 @@ o  (0) root
   >   hg commit -Aqd "$rev 0" -m "($rev) $msg"
   > }
 
+  $ cat > printrevset.py <<EOF
+  > from mercurial import extensions, revset, commands
+  > from hgext import graphlog
+  >  
+  > def uisetup(ui):
+  >     def printrevset(orig, ui, repo, *pats, **opts):
+  >         if opts.get('print_revset'):
+  >             expr = graphlog.getlogrevs(repo, pats, opts)[1]
+  >             if expr:
+  >                 tree = revset.parse(expr)[0]
+  >             else:
+  >                 tree = []
+  >             ui.write('%r\n' % (opts.get('rev', []),))
+  >             ui.write(revset.prettyformat(tree) + '\n')
+  >             return 0
+  >         return orig(ui, repo, *pats, **opts)
+  >     entry = extensions.wrapcommand(commands.table, 'log', printrevset)
+  >     entry[1].append(('', 'print-revset', False,
+  >                      'print generated revset and exit (DEPRECATED)'))
+  > EOF
+
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "graphlog=" >> $HGRCPATH
+  $ echo "printrevset=`pwd`/printrevset.py" >> $HGRCPATH
 
   $ hg init repo
   $ cd repo
@@ -1359,9 +1381,13 @@ File + limit + -ra:b, b < tip, (b - a) < limit:
 
 Do not crash or produce strange graphs if history is buggy
 
+  $ hg branch branch
+  marked working directory as branch branch
+  (branches are permanent and global, did you want a bookmark?)
   $ commit 36 "buggy merge: identical parents" 35 35
   $ hg glog -l5
-  @  changeset:   36:95fa8febd08a
+  @  changeset:   36:08a19a744424
+  |  branch:      branch
   |  tag:         tip
   |  parent:      35:9159c3644c5e
   |  parent:      35:9159c3644c5e
@@ -1396,76 +1422,640 @@ Do not crash or produce strange graphs if history is buggy
 
 Test log -G options
 
-  $ hg log -G -u 'something nice'
-  $ hg log -G -b 'something nice'
-  abort: unknown revision 'something nice'!
-  [255]
-  $ hg log -G -k 'something nice'
-  $ hg log -G --only-branch 'something nice'
-  abort: unknown revision 'something nice'!
-  [255]
-  $ hg log -G --include 'some file' --exclude 'another file'
-  $ hg log -G --follow  --template 'nodetag {rev}\n' | grep nodetag | wc -l
-  \s*36 (re)
-  $ hg log -G --removed --template 'nodetag {rev}\n' | grep nodetag | wc -l
-  \s*0 (re)
-  $ hg log -G --only-merges --template 'nodetag {rev}\n' | grep nodetag | wc -l
-  \s*28 (re)
-  $ hg log -G --no-merges --template 'nodetag {rev}\n'
-  o  nodetag 35
-  |
-  o    nodetag 34
-  |\
-  | \
-  | |\
-  | | \
-  | | |\
-  | | | \
-  | | | |\
-  | | | | \
-  | | | | |\
-  +-+-+-+-----o  nodetag 33
-  | | | | | |
-  +---------o  nodetag 29
-  | | | | |
-  +-+-+---o  nodetag 27
-  | | | |/
-  | | | o  nodetag 3
-  | | |/
-  | | o  nodetag 2
-  | |/
-  | o  nodetag 1
-  |/
-  o  nodetag 0
-  
+  $ testlog() {
+  >   hg log -G --print-revset "$@"
+  >   hg log --template 'nodetag {rev}\n' "$@" | grep nodetag \
+  >     | sed 's/.*nodetag/nodetag/' > log.nodes
+  >   hg log -G --template 'nodetag {rev}\n' "$@" | grep nodetag \
+  >     | sed 's/.*nodetag/nodetag/' > glog.nodes
+  >   diff -u log.nodes glog.nodes
+  > }
+
+glog always reorders nodes which explains the difference with log
+
+  $ testlog -r 27 -r 25 -r 21 -r 34 -r 32 -r 31
+  ['27', '25', '21', '34', '32', '31']
+  []
+  --- log.nodes	* (glob)
+  +++ glog.nodes	* (glob)
+  @@ -1,6 +1,6 @@
+  -nodetag 27
+  -nodetag 25
+  -nodetag 21
+   nodetag 34
+   nodetag 32
+   nodetag 31
+  +nodetag 27
+  +nodetag 25
+  +nodetag 21
+  [1]
+  $ testlog -u test -u not-a-user
+  []
+  (group
+    (group
+      (or
+        (func
+          ('symbol', 'user')
+          ('string', 'test'))
+        (func
+          ('symbol', 'user')
+          ('string', 'not-a-user')))))
+  $ testlog -b not-a-branch
+  abort: unknown revision 'not-a-branch'!
+  abort: unknown revision 'not-a-branch'!
+  abort: unknown revision 'not-a-branch'!
+  $ testlog -b 35 -b 36 --only-branch branch
+  []
+  (group
+    (group
+      (or
+        (or
+          (func
+            ('symbol', 'branch')
+            ('string', 'default'))
+          (func
+            ('symbol', 'branch')
+            ('string', 'branch')))
+        (func
+          ('symbol', 'branch')
+          ('string', 'branch')))))
+  $ testlog -k expand -k merge
+  []
+  (group
+    (group
+      (or
+        (func
+          ('symbol', 'keyword')
+          ('string', 'expand'))
+        (func
+          ('symbol', 'keyword')
+          ('string', 'merge')))))
+  $ testlog --only-merges
+  []
+  (group
+    (func
+      ('symbol', 'merge')
+      None))
+  $ testlog --no-merges
+  []
+  (group
+    (not
+      (func
+        ('symbol', 'merge')
+        None)))
+  $ testlog --date '2 0 to 4 0'
+  []
+  (group
+    (func
+      ('symbol', 'date')
+      ('string', '2 0 to 4 0')))
   $ hg log -G -d 'brace ) in a date'
   abort: invalid date: 'brace ) in a date'
   [255]
-  $ hg log -G -P 32 --template '{rev}\n'
-  @  36
+  $ testlog --prune 31 --prune 32
+  []
+  (group
+    (group
+      (and
+        (not
+          (group
+            (or
+              ('string', '31')
+              (func
+                ('symbol', 'ancestors')
+                ('string', '31')))))
+        (not
+          (group
+            (or
+              ('string', '32')
+              (func
+                ('symbol', 'ancestors')
+                ('string', '32'))))))))
+
+Dedicated repo for --follow and paths filtering. The g is crafted to
+have 2 filelog topological heads in a linear changeset graph.
+
+  $ cd ..
+  $ hg init follow
+  $ cd follow
+  $ testlog --follow
+  []
+  []
+  $ echo a > a
+  $ echo aa > aa
+  $ echo f > f
+  $ hg ci -Am "add a" a aa f
+  $ hg cp a b
+  $ hg cp f g
+  $ hg ci -m "copy a b"
+  $ mkdir dir
+  $ hg mv b dir
+  $ echo g >> g
+  $ echo f >> f
+  $ hg ci -m "mv b dir/b"
+  $ hg mv a b
+  $ hg cp -f f g
+  $ echo a > d
+  $ hg add d
+  $ hg ci -m "mv a b; add d"
+  $ hg mv dir/b e
+  $ hg ci -m "mv dir/b e"
+  $ hg glog --template '({rev}) {desc|firstline}\n'
+  @  (4) mv dir/b e
   |
-  o  35
+  o  (3) mv a b; add d
   |
-  o  34
+  o  (2) mv b dir/b
   |
-  | o  33
+  o  (1) copy a b
+  |
+  o  (0) add a
+  
+
+  $ testlog a
+  []
+  (group
+    (group
+      (func
+        ('symbol', 'filelog')
+        ('string', 'a'))))
+  $ testlog a b
+  []
+  (group
+    (group
+      (or
+        (func
+          ('symbol', 'filelog')
+          ('string', 'a'))
+        (func
+          ('symbol', 'filelog')
+          ('string', 'b')))))
+
+Test falling back to slow path for non-existing files
+
+  $ testlog a c
+  []
+  (group
+    (func
+      ('symbol', '_matchfiles')
+      (list
+        (list
+          (list
+            ('string', 'r:')
+            ('string', 'd:relpath'))
+          ('string', 'p:a'))
+        ('string', 'p:c'))))
+
+Test multiple --include/--exclude/paths
+
+  $ testlog --include a --include e --exclude b --exclude e a e
+  []
+  (group
+    (func
+      ('symbol', '_matchfiles')
+      (list
+        (list
+          (list
+            (list
+              (list
+                (list
+                  (list
+                    ('string', 'r:')
+                    ('string', 'd:relpath'))
+                  ('string', 'p:a'))
+                ('string', 'p:e'))
+              ('string', 'i:a'))
+            ('string', 'i:e'))
+          ('string', 'x:b'))
+        ('string', 'x:e'))))
+
+Test glob expansion of pats
+
+  $ expandglobs=`python -c "import mercurial.util; \
+  >   print mercurial.util.expandglobs and 'true' or 'false'"`
+  $ if [ $expandglobs = "true" ]; then
+  >    testlog 'a*';
+  > else
+  >    testlog a*;
+  > fi;
+  []
+  (group
+    (group
+      (func
+        ('symbol', 'filelog')
+        ('string', 'aa'))))
+
+Test --follow on a directory
+
+  $ testlog -f dir
+  abort: cannot follow file not in parent revision: "dir"
+  abort: cannot follow file not in parent revision: "dir"
+  abort: cannot follow file not in parent revision: "dir"
+
+Test --follow on file not in parent revision
+
+  $ testlog -f a
+  abort: cannot follow file not in parent revision: "a"
+  abort: cannot follow file not in parent revision: "a"
+  abort: cannot follow file not in parent revision: "a"
+
+Test --follow and patterns
+
+  $ testlog -f 'glob:*'
+  abort: can only follow copies/renames for explicit filenames
+  abort: can only follow copies/renames for explicit filenames
+  abort: can only follow copies/renames for explicit filenames
+
+Test --follow on a single rename
+
+  $ hg up -q 2
+  $ testlog -f a
+  []
+  (group
+    (group
+      (func
+        ('symbol', 'follow')
+        ('string', 'a'))))
+
+Test --follow and multiple renames
+
+  $ hg up -q tip
+  $ testlog -f e
+  []
+  (group
+    (group
+      (func
+        ('symbol', 'follow')
+        ('string', 'e'))))
+
+Test --follow and multiple filelog heads
+
+  $ hg up -q 2
+  $ testlog -f g
+  []
+  (group
+    (group
+      (func
+        ('symbol', 'follow')
+        ('string', 'g'))))
+  $ cat log.nodes
+  nodetag 2
+  nodetag 1
+  nodetag 0
+  $ hg up -q tip
+  $ testlog -f g
+  []
+  (group
+    (group
+      (func
+        ('symbol', 'follow')
+        ('string', 'g'))))
+  $ cat log.nodes
+  nodetag 3
+  nodetag 2
+  nodetag 0
+
+Test --follow and multiple files
+
+  $ testlog -f g e
+  []
+  (group
+    (group
+      (or
+        (func
+          ('symbol', 'follow')
+          ('string', 'g'))
+        (func
+          ('symbol', 'follow')
+          ('string', 'e')))))
+  $ cat log.nodes
+  nodetag 4
+  nodetag 3
+  nodetag 2
+  nodetag 1
+  nodetag 0
+
+Test --follow-first
+
+  $ hg up -q 3
+  $ echo ee > e
+  $ hg ci -Am "add another e" e
+  created new head
+  $ hg merge --tool internal:other 4
+  0 files updated, 1 files merged, 1 files removed, 0 files unresolved
+  (branch merge, don't forget to commit)
+  $ echo merge > e
+  $ hg ci -m "merge 5 and 4"
+  $ testlog --follow-first
+  []
+  (group
+    (func
+      ('symbol', '_firstancestors')
+      ('symbol', '6')))
+
+Cannot compare with log --follow-first FILE as it never worked
+
+  $ hg log -G --print-revset --follow-first e
+  []
+  (group
+    (group
+      (func
+        ('symbol', '_followfirst')
+        ('string', 'e'))))
+  $ hg log -G --follow-first e --template '{rev} {desc|firstline}\n'
+  @    6 merge 5 and 4
+  |\
+  o |  5 add another e
   | |
-  $ hg log -G --follow a
-  abort: -G/--graph option is incompatible with --follow with file argument
-  [255]
 
-Test multiple revision specifications are correctly handled
+Test --copies
 
-  $ hg log -G -r 27 -r 25 -r 21 -r 34 -r 32 -r 31 --template '{rev}\n'
-  o  34
-  |
-  o    32
+  $ hg log -G --copies --template "{rev} {desc|firstline} \
+  >   copies: {file_copies_switch}\n"
+  @    6 merge 5 and 4   copies:
   |\
-  | o    31
-  | |\
-  o | |  27
-  |/ /
-  | o  25
+  | o  5 add another e   copies:
+  | |
+  o |  4 mv dir/b e   copies: e (dir/b)
   |/
-  o    21
+  o  3 mv a b; add d   copies: b (a)g (f)
+  |
+  o  2 mv b dir/b   copies: dir/b (b)
+  |
+  o  1 copy a b   copies: b (a)g (f)
+  |
+  o  0 add a   copies:
+  
+Test "set:..." and parent revision
+
+  $ hg up -q 4
+  $ testlog "set:copied()"
+  []
+  (group
+    (func
+      ('symbol', '_matchfiles')
+      (list
+        (list
+          ('string', 'r:')
+          ('string', 'd:relpath'))
+        ('string', 'p:set:copied()'))))
+  $ testlog --include "set:copied()"
+  []
+  (group
+    (func
+      ('symbol', '_matchfiles')
+      (list
+        (list
+          ('string', 'r:')
+          ('string', 'd:relpath'))
+        ('string', 'i:set:copied()'))))
+  $ testlog -r "sort(file('set:copied()'), -rev)"
+  ["sort(file('set:copied()'), -rev)"]
+  []
+
+Test --removed
+
+  $ testlog --removed
+  []
+  []
+  $ testlog --removed a
+  []
+  (group
+    (func
+      ('symbol', '_matchfiles')
+      (list
+        (list
+          ('string', 'r:')
+          ('string', 'd:relpath'))
+        ('string', 'p:a'))))
+  $ testlog --removed --follow a
+  abort: can only follow copies/renames for explicit filenames
+  abort: can only follow copies/renames for explicit filenames
+  abort: can only follow copies/renames for explicit filenames
+
+Test --patch and --stat with --follow and --follow-first
+
+  $ hg up -q 3
+  $ hg log -G --git --patch b
+  o  changeset:   1:216d4c92cf98
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     copy a b
+  |
+  |  diff --git a/a b/b
+  |  copy from a
+  |  copy to b
+  |
+
+  $ hg log -G --git --stat b
+  o  changeset:   1:216d4c92cf98
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     copy a b
+  |
+  |   a |  0
+  |   1 files changed, 0 insertions(+), 0 deletions(-)
+  |
+
+  $ hg log -G --git --patch --follow b
+  o  changeset:   1:216d4c92cf98
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     copy a b
+  |
+  |  diff --git a/a b/b
+  |  copy from a
+  |  copy to b
+  |
+  o  changeset:   0:f8035bb17114
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     add a
+  
+     diff --git a/a b/a
+     new file mode 100644
+     --- /dev/null
+     +++ b/a
+     @@ -0,0 +1,1 @@
+     +a
+  
+
+  $ hg log -G --git --stat --follow b
+  o  changeset:   1:216d4c92cf98
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     copy a b
+  |
+  |   a |  0
+  |   1 files changed, 0 insertions(+), 0 deletions(-)
+  |
+  o  changeset:   0:f8035bb17114
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     add a
+  
+      a |  1 +
+      1 files changed, 1 insertions(+), 0 deletions(-)
+  
+
+  $ hg up -q 6
+  $ hg log -G --git --patch --follow-first e
+  @    changeset:   6:fc281d8ff18d
+  |\   tag:         tip
+  | |  parent:      5:99b31f1c2782
+  | |  parent:      4:17d952250a9d
+  | |  user:        test
+  | |  date:        Thu Jan 01 00:00:00 1970 +0000
+  | |  summary:     merge 5 and 4
+  | |
+  | |  diff --git a/e b/e
+  | |  --- a/e
+  | |  +++ b/e
+  | |  @@ -1,1 +1,1 @@
+  | |  -ee
+  | |  +merge
+  | |
+  o |  changeset:   5:99b31f1c2782
+  | |  parent:      3:5918b8d165d1
+  | |  user:        test
+  | |  date:        Thu Jan 01 00:00:00 1970 +0000
+  | |  summary:     add another e
+  | |
+  | |  diff --git a/e b/e
+  | |  new file mode 100644
+  | |  --- /dev/null
+  | |  +++ b/e
+  | |  @@ -0,0 +1,1 @@
+  | |  +ee
+  | |
+
+Test old-style --rev
+
+  $ hg tag 'foo-bar'
+  $ testlog -r 'foo-bar'
+  ['foo-bar']
+  []
+
+Test --follow and forward --rev
+
+  $ hg up -q 6
+  $ echo g > g
+  $ hg ci -Am 'add g' g
+  created new head
+  $ hg up -q 2
+  $ hg log -G --template "{rev} {desc|firstline}\n"
+  o  8 add g
+  |
+  | o  7 Added tag foo-bar for changeset fc281d8ff18d
+  |/
+  o    6 merge 5 and 4
   |\
+  | o  5 add another e
+  | |
+  o |  4 mv dir/b e
+  |/
+  o  3 mv a b; add d
+  |
+  @  2 mv b dir/b
+  |
+  o  1 copy a b
+  |
+  o  0 add a
+  
+  $ testlog --follow -r6 -r8 -r5 -r7 -r4
+  ['6', '8', '5', '7', '4']
+  (group
+    (func
+      ('symbol', 'descendants')
+      ('symbol', '6')))
+  --- log.nodes	* (glob)
+  +++ glog.nodes	* (glob)
+  @@ -1,3 +1,3 @@
+  -nodetag 6
+   nodetag 8
+   nodetag 7
+  +nodetag 6
+  [1]
+
+Test --follow-first and forward --rev
+
+  $ testlog --follow-first -r6 -r8 -r5 -r7 -r4
+  ['6', '8', '5', '7', '4']
+  (group
+    (func
+      ('symbol', '_firstdescendants')
+      ('symbol', '6')))
+  --- log.nodes	* (glob)
+  +++ glog.nodes	* (glob)
+  @@ -1,3 +1,3 @@
+  -nodetag 6
+   nodetag 8
+   nodetag 7
+  +nodetag 6
+  [1]
+
+Test --follow and backward --rev
+
+  $ testlog --follow -r6 -r5 -r7 -r8 -r4
+  ['6', '5', '7', '8', '4']
+  (group
+    (func
+      ('symbol', 'ancestors')
+      ('symbol', '6')))
+
+Test --follow-first and backward --rev
+
+  $ testlog --follow-first -r6 -r5 -r7 -r8 -r4
+  ['6', '5', '7', '8', '4']
+  (group
+    (func
+      ('symbol', '_firstancestors')
+      ('symbol', '6')))
+
+Test subdir
+
+  $ hg up -q 3
+  $ cd dir
+  $ testlog .
+  []
+  (group
+    (func
+      ('symbol', '_matchfiles')
+      (list
+        (list
+          ('string', 'r:')
+          ('string', 'd:relpath'))
+        ('string', 'p:.'))))
+  $ testlog ../b
+  []
+  (group
+    (group
+      (func
+        ('symbol', 'filelog')
+        ('string', '../b'))))
+  $ testlog -f ../b
+  []
+  (group
+    (group
+      (func
+        ('symbol', 'follow')
+        ('string', 'b'))))
+  $ cd ..
+
+Test --hidden
+
+  $ cat > $HGTMP/testhidden.py << EOF
+  > def reposetup(ui, repo):
+  >     for line in repo.opener('hidden'):
+  >         ctx = repo[line.strip()]
+  >         repo.changelog.hiddenrevs.add(ctx.rev())
+  > EOF
+  $ echo '[extensions]' >> .hg/hgrc
+  $ echo "hidden=$HGTMP/testhidden.py" >> .hg/hgrc
+  $ hg id --debug -i -r 0 > .hg/hidden
+  $ testlog
+  []
+  []
+  $ testlog --hidden
+  []
+  []

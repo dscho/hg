@@ -262,10 +262,10 @@ def changeset(web, req, tmpl):
 
     files = []
     parity = paritygen(web.stripecount)
-    for f in ctx.files():
+    for blockno, f in enumerate(ctx.files()):
         template = f in ctx and 'filenodelink' or 'filenolink'
         files.append(tmpl(template,
-                          node=ctx.hex(), file=f,
+                          node=ctx.hex(), file=f, blockno=blockno + 1,
                           parity=parity.next()))
 
     style = web.config('web', 'style', 'paper')
@@ -303,6 +303,14 @@ def changeset(web, req, tmpl):
 
 rev = changeset
 
+def decodepath(path):
+    """Hook for mapping a path in the repository to a path in the
+    working copy.
+
+    Extensions (e.g., largefiles) can override this to remap files in
+    the virtual file system presented by the manifest command below."""
+    return path
+
 def manifest(web, req, tmpl):
     ctx = webutil.changectx(web.repo, req)
     path = webutil.cleanpath(web.repo, req.form.get('file', [''])[0])
@@ -318,13 +326,17 @@ def manifest(web, req, tmpl):
     l = len(path)
     abspath = "/" + path
 
-    for f, n in mf.iteritems():
+    for full, n in mf.iteritems():
+        # the virtual path (working copy path) used for the full
+        # (repository) path
+        f = decodepath(full)
+
         if f[:l] != path:
             continue
         remain = f[l:]
         elements = remain.split('/')
         if len(elements) == 1:
-            files[remain] = f
+            files[remain] = full
         else:
             h = dirs # need to retain ref to dirs (root)
             for elem in elements[0:-1]:
@@ -770,7 +782,7 @@ def graph(web, req, tmpl):
         startrev = uprev
 
     dag = graphmod.dagwalker(web.repo, range(startrev, downrev - 1, -1))
-    tree = list(graphmod.colored(dag))
+    tree = list(graphmod.colored(dag, web.repo))
     canvasheight = (len(tree) + 1) * bg_height - 27
     data = []
     for (id, type, ctx, vtx, edges) in tree:

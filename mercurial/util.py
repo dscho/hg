@@ -422,22 +422,29 @@ def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None, out=None):
         return str(val)
     origcmd = cmd
     cmd = quotecommand(cmd)
-    env = dict(os.environ)
-    env.update((k, py2shell(v)) for k, v in environ.iteritems())
-    env['HG'] = hgexecutable()
-    if out is None or out == sys.__stdout__:
-        rc = subprocess.call(cmd, shell=True, close_fds=closefds,
-                             env=env, cwd=cwd)
+    if sys.platform == 'plan9':
+        # subprocess kludge to work around issues in half-baked Python
+        # ports, notably bichued/python:
+        if not cwd is None:
+            os.chdir(cwd)
+        rc = os.system(cmd)
     else:
-        proc = subprocess.Popen(cmd, shell=True, close_fds=closefds,
-                                env=env, cwd=cwd, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT)
-        for line in proc.stdout:
-            out.write(line)
-        proc.wait()
-        rc = proc.returncode
-    if sys.platform == 'OpenVMS' and rc & 1:
-        rc = 0
+        env = dict(os.environ)
+        env.update((k, py2shell(v)) for k, v in environ.iteritems())
+        env['HG'] = hgexecutable()
+        if out is None or out == sys.__stdout__:
+            rc = subprocess.call(cmd, shell=True, close_fds=closefds,
+                                 env=env, cwd=cwd)
+        else:
+            proc = subprocess.Popen(cmd, shell=True, close_fds=closefds,
+                                    env=env, cwd=cwd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT)
+            for line in proc.stdout:
+                out.write(line)
+            proc.wait()
+            rc = proc.returncode
+        if sys.platform == 'OpenVMS' and rc & 1:
+            rc = 0
     if rc and onerr:
         errmsg = '%s %s' % (os.path.basename(origcmd.split(None, 1)[0]),
                             explainexit(rc)[0])
@@ -1125,6 +1132,16 @@ def shortuser(user):
         user = user[:f]
     return user
 
+def emailuser(user):
+    """Return the user portion of an email address."""
+    f = user.find('@')
+    if f >= 0:
+        user = user[:f]
+    f = user.find('<')
+    if f >= 0:
+        user = user[f + 1:]
+    return user
+
 def email(author):
     '''get email of author.'''
     r = author.find('>')
@@ -1150,23 +1167,23 @@ def ellipsis(text, maxlength=400):
     except (UnicodeDecodeError, UnicodeEncodeError):
         return _ellipsis(text, maxlength)[0]
 
+_byteunits = (
+    (100, 1 << 30, _('%.0f GB')),
+    (10, 1 << 30, _('%.1f GB')),
+    (1, 1 << 30, _('%.2f GB')),
+    (100, 1 << 20, _('%.0f MB')),
+    (10, 1 << 20, _('%.1f MB')),
+    (1, 1 << 20, _('%.2f MB')),
+    (100, 1 << 10, _('%.0f KB')),
+    (10, 1 << 10, _('%.1f KB')),
+    (1, 1 << 10, _('%.2f KB')),
+    (1, 1, _('%.0f bytes')),
+    )
+
 def bytecount(nbytes):
     '''return byte count formatted as readable string, with units'''
 
-    units = (
-        (100, 1 << 30, _('%.0f GB')),
-        (10, 1 << 30, _('%.1f GB')),
-        (1, 1 << 30, _('%.2f GB')),
-        (100, 1 << 20, _('%.0f MB')),
-        (10, 1 << 20, _('%.1f MB')),
-        (1, 1 << 20, _('%.2f MB')),
-        (100, 1 << 10, _('%.0f KB')),
-        (10, 1 << 10, _('%.1f KB')),
-        (1, 1 << 10, _('%.2f KB')),
-        (1, 1, _('%.0f bytes')),
-        )
-
-    for multiplier, divisor, format in units:
+    for multiplier, divisor, format in _byteunits:
         if nbytes >= divisor * multiplier:
             return format % (nbytes / float(divisor))
     return units[-1][2] % nbytes

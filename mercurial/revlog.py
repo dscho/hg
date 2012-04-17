@@ -174,7 +174,7 @@ class revlogio(object):
     def parseindex(self, data, inline):
         # call the C implementation to parse the index data
         index, cache = parsers.parse_index2(data, inline)
-        return index, None, cache
+        return index, getattr(index, 'nodemap', None), cache
 
     def packentry(self, entry, node, version, rev):
         p = _pack(indexformatng, *entry)
@@ -288,10 +288,28 @@ class revlog(object):
         self.rev(self.node(0))
         return self._nodecache
 
+    def hasnode(self, node):
+        try:
+            self.rev(node)
+            return True
+        except KeyError:
+            return False
+
+    def clearcaches(self):
+        try:
+            self._nodecache.clearcaches()
+        except AttributeError:
+            self._nodecache = {nullid: nullrev}
+            self._nodepos = None
+
     def rev(self, node):
         try:
             return self._nodecache[node]
+        except RevlogError:
+            # parsers.c radix tree lookup failed
+            raise LookupError(node, self.indexfile, _('no node'))
         except KeyError:
+            # pure python cache lookup failed
             n = self._nodecache
             i = self.index
             p = self._nodepos
@@ -794,13 +812,13 @@ class revlog(object):
         else:
             df = self.opener(self.datafile)
 
-        readahead = max(65536, length)
+        readahead = max(_chunksize, length)
         df.seek(offset)
         d = df.read(readahead)
         df.close()
         self._addchunk(offset, d)
         if readahead > length:
-            return d[:length]
+            return util.buffer(d, 0, length)
         return d
 
     def _getchunk(self, offset, length):
@@ -813,7 +831,7 @@ class revlog(object):
         if cachestart >= 0 and cacheend <= l:
             if cachestart == 0 and cacheend == l:
                 return d # avoid a copy
-            return d[cachestart:cacheend]
+            return util.buffer(d, cachestart, cacheend - cachestart)
 
         return self._loadchunk(offset, length)
 
@@ -846,13 +864,22 @@ class revlog(object):
     def revdiff(self, rev1, rev2):
         """return or calculate a delta between two revisions"""
         if rev1 != nullrev and self.deltaparent(rev2) == rev1:
-            return self._chunk(rev2)
+            return str(self._chunk(rev2))
 
-        return mdiff.textdiff(self.revision(self.node(rev1)),
-                              self.revision(self.node(rev2)))
+        return mdiff.textdiff(self.revision(rev1),
+                              self.revision(rev2))
 
-    def revision(self, node):
-        """return an uncompressed revision of a given node"""
+    def revision(self, nodeorrev):
+        """return an uncompressed revision of a given node or revision
+        number.
+        """
+        if isinstance(nodeorrev, int):
+            rev = nodeorrev
+            node = self.node(rev)
+        else:
+            node = nodeorrev
+            rev = None
+
         cachedrev = None
         if node == nullid:
             return ""
@@ -863,7 +890,8 @@ class revlog(object):
 
         # look up what we need to read
         text = None
-        rev = self.rev(node)
+        if rev is None:
+            rev = self.rev(node)
 
         # check rev flags
         if self.flags(rev) & ~REVIDX_KNOWN_FLAGS:
@@ -895,7 +923,7 @@ class revlog(object):
 
         self._chunkraw(base, rev)
         if text is None:
-            text = self._chunkbase(base)
+            text = str(self._chunkbase(base))
 
         bins = [self._chunk(r) for r in chain]
         text = mdiff.patches(text, bins)

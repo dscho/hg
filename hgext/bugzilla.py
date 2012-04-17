@@ -1,7 +1,7 @@
 # bugzilla.py - bugzilla integration for mercurial
 #
 # Copyright 2006 Vadim Gelfer <vadim.gelfer@gmail.com>
-# Copyright 2011 Jim Hague <jim.hague@acm.org>
+# Copyright 2011-2 Jim Hague <jim.hague@acm.org>
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
@@ -12,7 +12,8 @@ This hook extension adds comments on bugs in Bugzilla when changesets
 that refer to bugs by Bugzilla ID are seen. The comment is formatted using
 the Mercurial template mechanism.
 
-The hook does not change bug status.
+The bug references can optionally include an update for Bugzilla of the
+hours spent working on the bug. Bugs can also be marked fixed.
 
 Three basic modes of access to Bugzilla are provided:
 
@@ -32,13 +33,13 @@ permission to read Bugzilla configuration details and the necessary
 MySQL user and password to have full access rights to the Bugzilla
 database. For these reasons this access mode is now considered
 deprecated, and will not be updated for new Bugzilla versions going
-forward.
+forward. Only adding comments is supported in this access mode.
 
 Access via XMLRPC needs a Bugzilla username and password to be specified
 in the configuration. Comments are added under that username. Since the
 configuration must be readable by all Mercurial users, it is recommended
 that the rights of that user are restricted in Bugzilla to the minimum
-necessary to add comments.
+necessary to add comments. Marking bugs fixed requires Bugzilla 4.0 and later.
 
 Access via XMLRPC/email uses XMLRPC to query Bugzilla, but sends
 email to the Bugzilla email interface to submit comments to bugs.
@@ -46,7 +47,8 @@ The From: address in the email is set to the email address of the Mercurial
 user, so the comment appears to come from the Mercurial user. In the event
 that the Mercurial user email is not recognised by Bugzilla as a Bugzilla
 user, the email associated with the Bugzilla username used to log into
-Bugzilla is used instead as the source of the comment.
+Bugzilla is used instead as the source of the comment. Marking bugs fixed
+works on all supported Bugzilla versions.
 
 Configuration items common to all access modes:
 
@@ -62,11 +64,34 @@ bugzilla.version
                      including 2.18.
 
 bugzilla.regexp
-  Regular expression to match bug IDs in changeset commit message.
-  Must contain one "()" group. The default expression matches ``Bug
-  1234``, ``Bug no. 1234``, ``Bug number 1234``, ``Bugs 1234,5678``,
-  ``Bug 1234 and 5678`` and variations thereof. Matching is case
-  insensitive.
+  Regular expression to match bug IDs for update in changeset commit message.
+  It must contain one "()" named group ``<ids>`` containing the bug
+  IDs separated by non-digit characters. It may also contain
+  a named group ``<hours>`` with a floating-point number giving the
+  hours worked on the bug. If no named groups are present, the first
+  "()" group is assumed to contain the bug IDs, and work time is not
+  updated. The default expression matches ``Bug 1234``, ``Bug no. 1234``,
+  ``Bug number 1234``, ``Bugs 1234,5678``, ``Bug 1234 and 5678`` and
+  variations thereof, followed by an hours number prefixed by ``h`` or
+  ``hours``, e.g. ``hours 1.5``. Matching is case insensitive.
+
+bugzilla.fixregexp
+  Regular expression to match bug IDs for marking fixed in changeset
+  commit message. This must contain a "()" named group ``<ids>` containing
+  the bug IDs separated by non-digit characters. It may also contain
+  a named group ``<hours>`` with a floating-point number giving the
+  hours worked on the bug. If no named groups are present, the first
+  "()" group is assumed to contain the bug IDs, and work time is not
+  updated. The default expression matches ``Fixes 1234``, ``Fixes bug 1234``,
+  ``Fixes bugs 1234,5678``, ``Fixes 1234 and 5678`` and
+  variations thereof, followed by an hours number prefixed by ``h`` or
+  ``hours``, e.g. ``hours 1.5``. Matching is case insensitive.
+
+bugzilla.fixstatus
+  The status to set a bug to when marking fixed. Default ``RESOLVED``.
+
+bugzilla.fixresolution
+  The resolution to set a bug to when marking fixed. Default ``FIXED``.
 
 bugzilla.style
   The style file to use when formatting comments.
@@ -274,24 +299,35 @@ class bzaccess(object):
         return user
 
     # Methods to be implemented by access classes.
-    def filter_real_bug_ids(self, ids):
-        '''remove bug IDs that do not exist in Bugzilla from set.'''
+    #
+    # 'bugs' is a dict keyed on bug id, where values are a dict holding
+    # updates to bug state. Recognised dict keys are:
+    #
+    # 'hours': Value, float containing work hours to be updated.
+    # 'fix':   If key present, bug is to be marked fixed. Value ignored.
+
+    def filter_real_bug_ids(self, bugs):
+        '''remove bug IDs that do not exist in Bugzilla from bugs.'''
         pass
 
-    def filter_cset_known_bug_ids(self, node, ids):
-        '''remove bug IDs where node occurs in comment text from set.'''
+    def filter_cset_known_bug_ids(self, node, bugs):
+        '''remove bug IDs where node occurs in comment text from bugs.'''
         pass
 
-    def add_comment(self, bugid, text, committer):
-        '''add comment to bug.
+    def updatebug(self, bugid, newstate, text, committer):
+        '''update the specified bug. Add comment text and set new states.
 
         If possible add the comment as being from the committer of
         the changeset. Otherwise use the default Bugzilla user.
         '''
         pass
 
-    def notify(self, ids, committer):
-        '''Force sending of Bugzilla notification emails.'''
+    def notify(self, bugs, committer):
+        '''Force sending of Bugzilla notification emails.
+
+        Only required if the access method does not trigger notification
+        emails automatically.
+        '''
         pass
 
 # Bugzilla via direct access to MySQL database.
@@ -353,30 +389,31 @@ class bzmysql(bzaccess):
             raise util.Abort(_('unknown database schema'))
         return ids[0][0]
 
-    def filter_real_bug_ids(self, ids):
-        '''filter not-existing bug ids from set.'''
+    def filter_real_bug_ids(self, bugs):
+        '''filter not-existing bugs from set.'''
         self.run('select bug_id from bugs where bug_id in %s' %
-                 bzmysql.sql_buglist(ids))
-        return set([c[0] for c in self.cursor.fetchall()])
+                 bzmysql.sql_buglist(bugs.keys()))
+        existing = [id for (id,) in self.cursor.fetchall()]
+        for id in bugs.keys():
+            if id not in existing:
+                self.ui.status(_('bug %d does not exist\n') % id)
+                del bugs[id]
 
-    def filter_cset_known_bug_ids(self, node, ids):
+    def filter_cset_known_bug_ids(self, node, bugs):
         '''filter bug ids that already refer to this changeset from set.'''
-
         self.run('''select bug_id from longdescs where
                     bug_id in %s and thetext like "%%%s%%"''' %
-                 (bzmysql.sql_buglist(ids), short(node)))
+                 (bzmysql.sql_buglist(bugs.keys()), short(node)))
         for (id,) in self.cursor.fetchall():
             self.ui.status(_('bug %d already knows about changeset %s\n') %
                            (id, short(node)))
-            ids.discard(id)
-        return ids
+            del bugs[id]
 
-    def notify(self, ids, committer):
+    def notify(self, bugs, committer):
         '''tell bugzilla to send mail.'''
-
         self.ui.status(_('telling bugzilla to send mail:\n'))
         (user, userid) = self.get_bugzilla_user(committer)
-        for id in ids:
+        for id in bugs.keys():
             self.ui.status(_('  bug %s\n') % id)
             cmdfmt = self.ui.config('bugzilla', 'notify', self.default_notify)
             bzdir = self.ui.config('bugzilla', 'bzdir', '/var/www/html/bugzilla')
@@ -435,9 +472,14 @@ class bzmysql(bzaccess):
                                  (user, defaultuser))
         return (user, userid)
 
-    def add_comment(self, bugid, text, committer):
-        '''add comment to bug. try adding comment as committer of
-        changeset, otherwise as default bugzilla user.'''
+    def updatebug(self, bugid, newstate, text, committer):
+        '''update bug state with comment text.
+
+        Try adding comment as committer of changeset, otherwise as
+        default bugzilla user.'''
+        if len(newstate) > 0:
+            self.ui.warn(_("Bugzilla/MySQL cannot update bug state\n"))
+
         (user, userid) = self.get_bugzilla_user(committer)
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         self.run('''insert into longdescs
@@ -565,7 +607,14 @@ class bzxmlrpc(bzaccess):
         user = self.ui.config('bugzilla', 'user', 'bugs')
         passwd = self.ui.config('bugzilla', 'password')
 
+        self.fixstatus = self.ui.config('bugzilla', 'fixstatus', 'RESOLVED')
+        self.fixresolution = self.ui.config('bugzilla', 'fixresolution',
+                                            'FIXED')
+
         self.bzproxy = xmlrpclib.ServerProxy(bzweb, self.transport(bzweb))
+        ver = self.bzproxy.Bugzilla.version()['version'].split('.')
+        self.bzvermajor = int(ver[0])
+        self.bzverminor = int(ver[1])
         self.bzproxy.User.login(dict(login=user, password=passwd))
 
     def transport(self, uri):
@@ -576,35 +625,63 @@ class bzxmlrpc(bzaccess):
 
     def get_bug_comments(self, id):
         """Return a string with all comment text for a bug."""
-        c = self.bzproxy.Bug.comments(dict(ids=[id]))
+        c = self.bzproxy.Bug.comments(dict(ids=[id], include_fields=['text']))
         return ''.join([t['text'] for t in c['bugs'][str(id)]['comments']])
 
-    def filter_real_bug_ids(self, ids):
-        res = set()
-        bugs = self.bzproxy.Bug.get(dict(ids=sorted(ids), permissive=True))
-        for bug in bugs['bugs']:
-            res.add(bug['id'])
-        return res
+    def filter_real_bug_ids(self, bugs):
+        probe = self.bzproxy.Bug.get(dict(ids=sorted(bugs.keys()),
+                                          include_fields=[],
+                                          permissive=True))
+        for badbug in probe['faults']:
+            id = badbug['id']
+            self.ui.status(_('bug %d does not exist\n') % id)
+            del bugs[id]
 
-    def filter_cset_known_bug_ids(self, node, ids):
-        for id in sorted(ids):
+    def filter_cset_known_bug_ids(self, node, bugs):
+        for id in sorted(bugs.keys()):
             if self.get_bug_comments(id).find(short(node)) != -1:
                 self.ui.status(_('bug %d already knows about changeset %s\n') %
                                (id, short(node)))
-                ids.discard(id)
-        return ids
+                del bugs[id]
 
-    def add_comment(self, bugid, text, committer):
-        self.bzproxy.Bug.add_comment(dict(id=bugid, comment=text))
+    def updatebug(self, bugid, newstate, text, committer):
+        args = {}
+        if 'hours' in newstate:
+            args['work_time'] = newstate['hours']
+
+        if self.bzvermajor >= 4:
+            args['ids'] = [bugid]
+            args['comment'] = {'body' : text}
+            args['status'] = self.fixstatus
+            args['resolution'] = self.fixresolution
+            self.bzproxy.Bug.update(args)
+        else:
+            if 'fix' in newstate:
+                self.ui.warn(_("Bugzilla/XMLRPC needs Bugzilla 4.0 or later "
+                               "to mark bugs fixed\n"))
+            args['id'] = bugid
+            args['comment'] = text
+            self.bzproxy.Bug.add_comment(args)
 
 class bzxmlrpcemail(bzxmlrpc):
     """Read data from Bugzilla via XMLRPC, send updates via email.
 
     Advantages of sending updates via email:
       1. Comments can be added as any user, not just logged in user.
-      2. Bug statuses and other fields not accessible via XMLRPC can
-        be updated. This is not currently used.
+      2. Bug statuses or other fields not accessible via XMLRPC can
+         potentially be updated.
+
+    There is no XMLRPC function to change bug status before Bugzilla
+    4.0, so bugs cannot be marked fixed via XMLRPC before Bugzilla 4.0.
+    But bugs can be marked fixed via email from 3.4 onwards.
     """
+
+    # The email interface changes subtly between 3.4 and 3.6. In 3.4,
+    # in-email fields are specified as '@<fieldname> = <value>'. In
+    # 3.6 this becomes '@<fieldname> <value>'. And fieldname @bug_id
+    # in 3.4 becomes @id in 3.6. 3.6 and 4.0 both maintain backwards
+    # compatibility, but rather than rely on this use the new format for
+    # 4.0 onwards.
 
     def __init__(self, ui):
         bzxmlrpc.__init__(self, ui)
@@ -613,6 +690,14 @@ class bzxmlrpcemail(bzxmlrpc):
         if not self.bzemail:
             raise util.Abort(_("configuration 'bzemail' missing"))
         mail.validateconfig(self.ui)
+
+    def makecommandline(self, fieldname, value):
+        if self.bzvermajor >= 4:
+            return "@%s %s" % (fieldname, str(value))
+        else:
+            if fieldname == "id":
+                fieldname = "bug_id"
+            return "@%s = %s" % (fieldname, str(value))
 
     def send_bug_modify_email(self, bugid, commands, comment, committer):
         '''send modification message to Bugzilla bug via email.
@@ -634,8 +719,9 @@ class bzxmlrpcemail(bzxmlrpc):
                 raise util.Abort(_("default bugzilla user %s email not found") %
                                  user)
         user = matches['users'][0]['email']
+        commands.append(self.makecommandline("id", bugid))
 
-        text = "\n".join(commands) + "\n@bug_id = %d\n\n" % bugid + comment
+        text = "\n".join(commands) + "\n\n" + comment
 
         _charsets = mail._charsets(self.ui)
         user = mail.addressencode(self.ui, user, _charsets)
@@ -647,8 +733,14 @@ class bzxmlrpcemail(bzxmlrpc):
         sendmail = mail.connect(self.ui)
         sendmail(user, bzemail, msg.as_string())
 
-    def add_comment(self, bugid, text, committer):
-        self.send_bug_modify_email(bugid, [], text, committer)
+    def updatebug(self, bugid, newstate, text, committer):
+        cmds = []
+        if 'hours' in newstate:
+            cmds.append(self.makecommandline("work_time", newstate['hours']))
+        if 'fix' in newstate:
+            cmds.append(self.makecommandline("bug_status", self.fixstatus))
+            cmds.append(self.makecommandline("resolution", self.fixresolution))
+        self.send_bug_modify_email(bugid, cmds, text, committer)
 
 class bugzilla(object):
     # supported versions of bugzilla. different versions have
@@ -662,7 +754,13 @@ class bugzilla(object):
         }
 
     _default_bug_re = (r'bugs?\s*,?\s*(?:#|nos?\.?|num(?:ber)?s?)?\s*'
-                       r'((?:\d+\s*(?:,?\s*(?:and)?)?\s*)+)')
+                       r'(?P<ids>(?:\d+\s*(?:,?\s*(?:and)?)?\s*)+)'
+                       r'\.?\s*(?:h(?:ours?)?\s*(?P<hours>\d*(?:\.\d+)?))?')
+
+    _default_fix_re = (r'fix(?:es)?\s*(?:bugs?\s*)?,?\s*'
+                       r'(?:nos?\.?|num(?:ber)?s?)?\s*'
+                       r'(?P<ids>(?:#?\d+\s*(?:,?\s*(?:and)?)?\s*)+)'
+                       r'\.?\s*(?:h(?:ours?)?\s*(?P<hours>\d*(?:\.\d+)?))?')
 
     _bz = None
 
@@ -688,38 +786,76 @@ class bugzilla(object):
         return getattr(self.bz(), key)
 
     _bug_re = None
+    _fix_re = None
     _split_re = None
 
-    def find_bug_ids(self, ctx):
-        '''return set of integer bug IDs from commit comment.
+    def find_bugs(self, ctx):
+        '''return bugs dictionary created from commit comment.
 
-        Extract bug IDs from changeset comments. Filter out any that are
+        Extract bug info from changeset comments. Filter out any that are
         not known to Bugzilla, and any that already have a reference to
         the given changeset in their comments.
         '''
         if bugzilla._bug_re is None:
             bugzilla._bug_re = re.compile(
-                self.ui.config('bugzilla', 'regexp', bugzilla._default_bug_re),
-                re.IGNORECASE)
+                self.ui.config('bugzilla', 'regexp',
+                               bugzilla._default_bug_re), re.IGNORECASE)
+            bugzilla._fix_re = re.compile(
+                self.ui.config('bugzilla', 'fixregexp',
+                               bugzilla._default_fix_re), re.IGNORECASE)
             bugzilla._split_re = re.compile(r'\D+')
         start = 0
-        ids = set()
+        hours = 0.0
+        bugs = {}
+        bugmatch = bugzilla._bug_re.search(ctx.description(), start)
+        fixmatch = bugzilla._fix_re.search(ctx.description(), start)
         while True:
-            m = bugzilla._bug_re.search(ctx.description(), start)
-            if not m:
+            bugattribs = {}
+            if not bugmatch and not fixmatch:
                 break
+            if not bugmatch:
+                m = fixmatch
+            elif not fixmatch:
+                m = bugmatch
+            else:
+                if bugmatch.start() < fixmatch.start():
+                    m = bugmatch
+                else:
+                    m = fixmatch
             start = m.end()
-            for id in bugzilla._split_re.split(m.group(1)):
+            if m is bugmatch:
+                bugmatch = bugzilla._bug_re.search(ctx.description(), start)
+                if 'fix' in bugattribs:
+                    del bugattribs['fix']
+            else:
+                fixmatch = bugzilla._fix_re.search(ctx.description(), start)
+                bugattribs['fix'] = None
+
+            try:
+                ids = m.group('ids')
+            except IndexError:
+                ids = m.group(1)
+            try:
+                hours = float(m.group('hours'))
+                bugattribs['hours'] = hours
+            except IndexError:
+                pass
+            except TypeError:
+                pass
+            except ValueError:
+                self.ui.status(_("%s: invalid hours\n") % m.group('hours'))
+
+            for id in bugzilla._split_re.split(ids):
                 if not id:
                     continue
-                ids.add(int(id))
-        if ids:
-            ids = self.filter_real_bug_ids(ids)
-        if ids:
-            ids = self.filter_cset_known_bug_ids(ctx.node(), ids)
-        return ids
+                bugs[int(id)] = bugattribs
+        if bugs:
+            self.filter_real_bug_ids(bugs)
+        if bugs:
+            self.filter_cset_known_bug_ids(ctx.node(), bugs)
+        return bugs
 
-    def update(self, bugid, ctx):
+    def update(self, bugid, newstate, ctx):
         '''update bugzilla bug with reference to changeset.'''
 
         def webroot(root):
@@ -752,7 +888,7 @@ class bugzilla(object):
                root=self.repo.root,
                webroot=webroot(self.repo.root))
         data = self.ui.popbuffer()
-        self.add_comment(bugid, data, util.email(ctx.user()))
+        self.updatebug(bugid, newstate, data, util.email(ctx.user()))
 
 def hook(ui, repo, hooktype, node=None, **kwargs):
     '''add comment to bugzilla for each changeset that refers to a
@@ -764,11 +900,11 @@ def hook(ui, repo, hooktype, node=None, **kwargs):
     try:
         bz = bugzilla(ui, repo)
         ctx = repo[node]
-        ids = bz.find_bug_ids(ctx)
-        if ids:
-            for id in ids:
-                bz.update(id, ctx)
-            bz.notify(ids, util.email(ctx.user()))
+        bugs = bz.find_bugs(ctx)
+        if bugs:
+            for bug in bugs:
+                bz.update(bug, bugs[bug], ctx)
+            bz.notify(bugs, util.email(ctx.user()))
     except Exception, e:
         raise util.Abort(_('Bugzilla error: %s') % e)
 

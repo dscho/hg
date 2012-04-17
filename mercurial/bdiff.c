@@ -14,38 +14,6 @@
 #include <string.h>
 #include <limits.h>
 
-#if defined __hpux || defined __SUNPRO_C || defined _AIX
-#define inline
-#endif
-
-#ifdef __linux
-#define inline __inline
-#endif
-
-#ifdef _WIN32
-#ifdef _MSC_VER
-#define inline __inline
-typedef unsigned long uint32_t;
-#else
-#include <stdint.h>
-#endif
-static uint32_t htonl(uint32_t x)
-{
-	return ((x & 0x000000ffUL) << 24) |
-		((x & 0x0000ff00UL) <<  8) |
-		((x & 0x00ff0000UL) >>  8) |
-		((x & 0xff000000UL) >> 24);
-}
-#else
-#include <sys/types.h>
-#if defined __BEOS__ && !defined __HAIKU__
-#include <ByteOrder.h>
-#else
-#include <arpa/inet.h>
-#endif
-#include <inttypes.h>
-#endif
-
 #include "util.h"
 
 struct line {
@@ -370,7 +338,6 @@ static PyObject *bdiff(PyObject *self, PyObject *args)
 	PyObject *result = NULL;
 	struct line *al, *bl;
 	struct hunk l, *h;
-	uint32_t encode[3];
 	int an, bn, len = 0, la, lb, count;
 
 	if (!PyArg_ParseTuple(args, "s#s#:bdiff", &sa, &la, &sb, &lb))
@@ -407,10 +374,9 @@ static PyObject *bdiff(PyObject *self, PyObject *args)
 	for (h = l.next; h; h = h->next) {
 		if (h->a1 != la || h->b1 != lb) {
 			len = bl[h->b1].l - bl[lb].l;
-			encode[0] = htonl(al[la].l - al->l);
-			encode[1] = htonl(al[h->a1].l - al->l);
-			encode[2] = htonl(len);
-			memcpy(rb, encode, 12);
+			putbe32(al[la].l - al->l, rb);
+			putbe32(al[h->a1].l - al->l, rb + 4);
+			putbe32(len, rb + 8);
 			memcpy(rb + 12, bl[lb].l, len);
 			rb += 12 + len;
 		}

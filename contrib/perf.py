@@ -1,7 +1,7 @@
 # perf.py - performance test routines
 '''helper extension to measure performance'''
 
-from mercurial import cmdutil, scmutil, match, commands
+from mercurial import cmdutil, scmutil, util, match, commands
 import time, os, sys
 
 def timer(func, title=None):
@@ -46,7 +46,7 @@ def perfstatus(ui, repo, *pats):
     timer(lambda: sum(map(len, repo.status())))
 
 def perfheads(ui, repo):
-    timer(lambda: len(repo.changelog.heads()))
+    timer(lambda: len(repo.changelog.headrevs()))
 
 def perftags(ui, repo):
     import mercurial.changelog, mercurial.manifest
@@ -79,13 +79,20 @@ def perfmanifest(ui, repo):
         repo.manifest._cache = None
     timer(d)
 
+def perfchangeset(ui, repo, rev):
+    n = repo[rev].node()
+    def d():
+        c = repo.changelog.read(n)
+        #repo.changelog._cache = None
+    timer(d)
+
 def perfindex(ui, repo):
     import mercurial.revlog
     mercurial.revlog._prereadsize = 2**24 # disable lazy parser in old hg
     n = repo["tip"].node()
     def d():
-        repo.invalidate()
-        repo[n]
+        cl = mercurial.revlog.revlog(repo.sopener, "00changelog.i")
+        cl.rev(n)
     timer(d)
 
 def perfstartup(ui, repo):
@@ -104,6 +111,36 @@ def perfparents(ui, repo):
 def perflookup(ui, repo, rev):
     timer(lambda: len(repo.lookup(rev)))
 
+def perfnodelookup(ui, repo, rev):
+    import mercurial.revlog
+    mercurial.revlog._prereadsize = 2**24 # disable lazy parser in old hg
+    n = repo[rev].node()
+    def d():
+        cl = mercurial.revlog.revlog(repo.sopener, "00changelog.i")
+        cl.rev(n)
+    timer(d)
+
+def perfnodelookup(ui, repo, rev):
+    import mercurial.revlog
+    mercurial.revlog._prereadsize = 2**24 # disable lazy parser in old hg
+    n = repo[rev].node()
+    cl = mercurial.revlog.revlog(repo.sopener, "00changelog.i")
+    # behave somewhat consistently across internal API changes
+    if util.safehasattr(cl, 'clearcaches'):
+        clearcaches = cl.clearcaches
+    elif util.safehasattr(cl, '_nodecache'):
+        from mercurial.node import nullid, nullrev
+        def clearcaches():
+            cl._nodecache = {nullid: nullrev}
+            cl._nodepos = None
+    else:
+        def clearcaches():
+            pass
+    def d():
+        cl.rev(n)
+        clearcaches()
+    timer(d)
+
 def perflog(ui, repo, **opts):
     ui.pushbuffer()
     timer(lambda: commands.log(ui, repo, rev=[], date='', user='',
@@ -116,6 +153,25 @@ def perftemplating(ui, repo):
                                template='{date|shortdate} [{rev}:{node|short}]'
                                ' {author|person}: {desc|firstline}\n'))
     ui.popbuffer()
+
+def perfcca(ui, repo):
+    timer(lambda: scmutil.casecollisionauditor(ui, False, repo[None]))
+
+def perffncacheload(ui, repo):
+    from mercurial import scmutil, store
+    s = store.store(set(['store','fncache']), repo.path, scmutil.opener)
+    def d():
+        s.fncache._load()
+    timer(d)
+
+def perffncachewrite(ui, repo):
+    from mercurial import scmutil, store
+    s = store.store(set(['store','fncache']), repo.path, scmutil.opener)
+    s.fncache._load()
+    def d():
+        s.fncache._dirty = True
+        s.fncache.write()
+    timer(d)
 
 def perfdiffwd(ui, repo):
     """Profile diff of working directory changes"""
@@ -145,12 +201,17 @@ def perfrevlog(ui, repo, file_, **opts):
     timer(d)
 
 cmdtable = {
+    'perfcca': (perfcca, []),
+    'perffncacheload': (perffncacheload, []),
+    'perffncachewrite': (perffncachewrite, []),
     'perflookup': (perflookup, []),
+    'perfnodelookup': (perfnodelookup, []),
     'perfparents': (perfparents, []),
     'perfstartup': (perfstartup, []),
     'perfstatus': (perfstatus, []),
     'perfwalk': (perfwalk, []),
     'perfmanifest': (perfmanifest, []),
+    'perfchangeset': (perfchangeset, []),
     'perfindex': (perfindex, []),
     'perfheads': (perfheads, []),
     'perftags': (perftags, []),

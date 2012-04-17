@@ -18,6 +18,7 @@ Data depends on type.
 """
 
 from mercurial.node import nullrev
+import util
 
 CHANGESET = 'C'
 
@@ -67,7 +68,7 @@ def nodes(repo, nodes):
         parents = set([p.rev() for p in ctx.parents() if p.node() in include])
         yield (ctx.rev(), CHANGESET, ctx, sorted(parents))
 
-def colored(dag):
+def colored(dag, repo):
     """annotates a DAG with colored edge information
 
     For each DAG node this function emits tuples::
@@ -83,6 +84,23 @@ def colored(dag):
     seen = []
     colors = {}
     newcolor = 1
+    config = {}
+
+    for key, val in repo.ui.configitems('graph'):
+        if '.' in key:
+            branch, setting = key.rsplit('.', 1)
+            # Validation
+            if setting == "width" and val.isdigit():
+                config.setdefault(branch, {})[setting] = int(val)
+            elif setting == "color" and val.isalnum():
+                config.setdefault(branch, {})[setting] = val
+
+    if config:
+        getconf = util.lrucachefunc(
+            lambda rev: config.get(repo[rev].branch(), {}))
+    else:
+        getconf = lambda rev: {}
+
     for (cur, type, data, parents) in dag:
 
         # Compute seen and next
@@ -111,10 +129,18 @@ def colored(dag):
         edges = []
         for ecol, eid in enumerate(seen):
             if eid in next:
-                edges.append((ecol, next.index(eid), colors[eid]))
+                bconf = getconf(eid)
+                edges.append((
+                    ecol, next.index(eid), colors[eid],
+                    bconf.get('width', -1),
+                    bconf.get('color', '')))
             elif eid == cur:
                 for p in parents:
-                    edges.append((ecol, next.index(p), color))
+                    bconf = getconf(p)
+                    edges.append((
+                        ecol, next.index(p), color,
+                        bconf.get('width', -1),
+                        bconf.get('color', '')))
 
         # Yield and move on
         yield (cur, type, data, (col, color), edges)

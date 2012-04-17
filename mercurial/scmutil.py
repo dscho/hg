@@ -159,6 +159,15 @@ class abstractopener(object):
         '''Prevent instantiation; don't call this from subclasses.'''
         raise NotImplementedError('attempted instantiating ' + str(type(self)))
 
+    def tryread(self, path):
+        'gracefully return an empty string for missing files'
+        try:
+            return self.read(path)
+        except IOError, inst:
+            if inst.errno != errno.ENOENT:
+                raise
+        return ""
+
     def read(self, path):
         fp = self(path, 'rb')
         try:
@@ -436,15 +445,22 @@ if os.name != 'nt':
 
     def systemrcpath():
         path = []
+        if sys.platform == 'plan9':
+            root = 'lib/mercurial'
+        else:
+            root = 'etc/mercurial'
         # old mod_python does not set sys.argv
         if len(getattr(sys, 'argv', [])) > 0:
             p = os.path.dirname(os.path.dirname(sys.argv[0]))
-            path.extend(rcfiles(os.path.join(p, 'etc/mercurial')))
-        path.extend(rcfiles('/etc/mercurial'))
+            path.extend(rcfiles(os.path.join(p, root)))
+        path.extend(rcfiles('/' + root))
         return path
 
     def userrcpath():
-        return [os.path.expanduser('~/.hgrc')]
+        if sys.platform == 'plan9':
+            return [os.environ['home'] + '/lib/hgrc']
+        else:
+            return [os.path.expanduser('~/.hgrc')]
 
 else:
 
@@ -523,10 +539,12 @@ def revrange(repo, revs):
     def revfix(repo, val, defval):
         if not val and val != 0 and defval is not None:
             return defval
-        return repo.changelog.rev(repo.lookup(val))
+        return repo[val].rev()
 
     seen, l = set(), []
     for spec in revs:
+        if l and not seen:
+            seen = set(l)
         # attempt to parse old-style ranges first to deal with
         # things like old-tag which contain query metacharacters
         try:
@@ -540,11 +558,18 @@ def revrange(repo, revs):
                 start = revfix(repo, start, 0)
                 end = revfix(repo, end, len(repo) - 1)
                 step = start > end and -1 or 1
-                for rev in xrange(start, end + step, step):
-                    if rev in seen:
-                        continue
-                    seen.add(rev)
-                    l.append(rev)
+                if not seen and not l:
+                    # by far the most common case: revs = ["-1:0"]
+                    l = range(start, end + step, step)
+                    # defer syncing seen until next iteration
+                    continue
+                newrevs = set(xrange(start, end + step, step))
+                if seen:
+                    newrevs.difference_update(seen)
+                    seen.union(newrevs)
+                else:
+                    seen = newrevs
+                l.extend(sorted(newrevs, reverse=start > end))
                 continue
             elif spec and spec in repo: # single unquoted rev
                 rev = revfix(repo, spec, None)
@@ -582,7 +607,7 @@ def expandpats(pats):
         ret.append(p)
     return ret
 
-def match(ctx, pats=[], opts={}, globbed=False, default='relpath'):
+def matchandpats(ctx, pats=[], opts={}, globbed=False, default='relpath'):
     if pats == ("",):
         pats = []
     if not globbed and default == 'relpath':
@@ -593,7 +618,10 @@ def match(ctx, pats=[], opts={}, globbed=False, default='relpath'):
     def badfn(f, msg):
         ctx._repo.ui.warn("%s: %s\n" % (m.rel(f), msg))
     m.bad = badfn
-    return m
+    return m, pats
+
+def match(ctx, pats=[], opts={}, globbed=False, default='relpath'):
+    return matchandpats(ctx, pats, opts, globbed, default)[0]
 
 def matchall(repo):
     return matchmod.always(repo.root, repo.getcwd())
@@ -610,6 +638,9 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
     added, unknown, deleted, removed = [], [], [], []
     audit_path = pathauditor(repo.root)
     m = match(repo[None], pats, opts)
+    rejected = []
+    m.bad = lambda x, y: rejected.append(x)
+
     for abs in repo.walk(m):
         target = repo.wjoin(abs)
         good = True
@@ -653,6 +684,11 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
                 wctx.copy(old, new)
         finally:
             wlock.release()
+
+    for f in rejected:
+        if f in m.files():
+            return 1
+    return 0
 
 def updatedir(ui, repo, patches, similarity=0):
     '''Update dirstate after patch application according to metadata'''

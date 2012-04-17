@@ -107,6 +107,14 @@ Look for extra:source
 
 Graft out of order, skipping a merge and a duplicate
 
+  $ hg graft 1 5 4 3 'merge()' 2 -n
+  skipping ungraftable merge revision 6
+  skipping already grafted revision 2
+  grafting revision 1
+  grafting revision 5
+  grafting revision 4
+  grafting revision 3
+
   $ hg graft 1 5 4 3 'merge()' 2 --debug
   skipping ungraftable merge revision 6
   scanning for duplicate grafts
@@ -114,7 +122,6 @@ Graft out of order, skipping a merge and a duplicate
   grafting revision 1
     searching for copies back to rev 1
     unmatched files in local:
-     a.orig
      b
     all copies found (* = to merge, ! = divergent):
      b -> a *
@@ -130,8 +137,6 @@ Graft out of order, skipping a merge and a duplicate
    b: copy a:b789fdd96dc2f3bd229c1dd8eedf0fc60e2b68e3
   grafting revision 5
     searching for copies back to rev 1
-    unmatched files in local:
-     a.orig
   resolving manifests
    overwrite: False, partial: False
    ancestor: 4c60f11aa304, local: 6f5ea6ac8b70+, remote: 97f8bfe72746
@@ -141,8 +146,6 @@ Graft out of order, skipping a merge and a duplicate
   e
   grafting revision 4
     searching for copies back to rev 1
-    unmatched files in local:
-     a.orig
   resolving manifests
    overwrite: False, partial: False
    ancestor: 4c60f11aa304, local: 77eb504366ab+, remote: 9c233e8e184d

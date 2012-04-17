@@ -242,12 +242,29 @@ def permissions(flags):
     return "-rw-r--r--"
 
 def person(author):
-    """:person: Any text. Returns the text before an email address."""
+    """:person: Any text. Returns the name before an email address,
+    interpreting it as per RFC 5322.
+
+    >>> person('foo@bar')
+    'foo'
+    >>> person('Foo Bar <foo@bar>')
+    'Foo Bar'
+    >>> person('"Foo Bar" <foo@bar>')
+    'Foo Bar'
+    >>> person('"Foo \"buz\" Bar" <foo@bar>')
+    'Foo "buz" Bar'
+    >>> # The following are invalid, but do exist in real-life
+    ...
+    >>> person('Foo "buz" Bar <foo@bar>')
+    'Foo "buz" Bar'
+    >>> person('"Foo Bar <foo@bar>')
+    'Foo Bar'
+    """
     if not '@' in author:
         return author
     f = author.find('<')
     if f != -1:
-        return author[:f].rstrip()
+        return author[:f].strip(' "').replace('\\"', '"')
     f = author.find('@')
     return author[:f].replace('.', ' ')
 
@@ -319,8 +336,13 @@ def urlescape(text):
     return urllib.quote(text)
 
 def userfilter(text):
-    """:user: Any text. Returns the user portion of an email address."""
+    """:user: Any text. Returns a short representation of a user name or email
+    address."""
     return util.shortuser(text)
+
+def emailuser(text):
+    """:emailuser: Any text. Returns the user portion of an email address."""
+    return util.emailuser(text)
 
 def xmlescape(text):
     text = (text
@@ -365,6 +387,7 @@ filters = {
     "tabindent": tabindent,
     "urlescape": urlescape,
     "user": userfilter,
+    "emailuser": emailuser,
     "xmlescape": xmlescape,
 }
 

@@ -252,7 +252,6 @@ def checkheadshook(ui, repo, node, hooktype, **kwargs):
 hook = checkheadshook
 
 def preupdate(ui, repo, hooktype, parent1, parent2):
-    #print "preupdate for %s: %s -> %s" % (repo.root, parent1, parent2)
     repo.loadeol([parent1])
     return False
 
@@ -270,7 +269,6 @@ def extsetup(ui):
 
 def reposetup(ui, repo):
     uisetup(repo.ui)
-    #print "reposetup for", repo.root
 
     if not repo.local():
         return
@@ -315,7 +313,7 @@ def reposetup(ui, repo):
                             # again since the new .hgeol file might no
                             # longer match a file it matched before
                             self.dirstate.normallookup(f)
-                    # Touch the cache to update mtime.
+                    # Create or touch the cache to update mtime
                     self.opener("eol.cache", "w").close()
                     wlock.release()
                 except error.LockUnavailable:

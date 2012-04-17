@@ -270,6 +270,19 @@ if sys.platform == 'cygwin':
 
         return encodingupper(path)
 
+    # Cygwin translates native ACLs to POSIX permissions,
+    # but these translations are not supported by native
+    # tools, so the exec bit tends to be set erroneously.
+    # Therefore, disable executable bit access on Cygwin.
+    def checkexec(path):
+        return False
+
+    # Similarly, Cygwin's symlink emulation is likely to create
+    # problems when Mercurial is used from both Cygwin and native
+    # Windows, with other native tools, or on shared volumes
+    def checklink(path):
+        return False
+
 def shellquote(s):
     if os.sys.platform == 'OpenVMS':
         return '"%s"' % s
@@ -319,6 +332,9 @@ def findexe(command):
 
     if os.sep in command:
         return findexisting(command)
+
+    if sys.platform == 'plan9':
+        return findexisting(os.path.join('/bin', command))
 
     for path in os.environ.get('PATH', '').split(os.pathsep):
         executable = findexisting(os.path.join(path, command))

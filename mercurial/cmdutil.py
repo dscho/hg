@@ -10,7 +10,7 @@ from i18n import _
 import os, sys, errno, re, tempfile
 import util, scmutil, templater, patch, error, templatekw, revlog, copies
 import match as matchmod
-import subrepo
+import subrepo, context, repair, bookmarks
 
 def parsealiases(cmd):
     return cmd.lstrip("^").split("|")
@@ -1006,7 +1006,7 @@ def walkchangerevs(repo, match, opts, prepare):
         wanted = set(revs)
     copies = []
 
-    if not slowpath:
+    if not slowpath and match.files():
         # We only have to read through the filelog to find wanted revisions
 
         minrev, maxrev = min(revs), max(revs)
@@ -1150,7 +1150,7 @@ def walkchangerevs(repo, match, opts, prepare):
     # it might be worthwhile to do this in the iterator if the rev range
     # is descending and the prune args are all within that range
     for rev in opts.get('prune', ()):
-        rev = repo.changelog.rev(repo.lookup(rev))
+        rev = repo[rev].rev()
         ff = followfilter()
         stop = min(revs[0], revs[-1])
         for x in xrange(rev, stop - 1, -1):
@@ -1285,6 +1285,123 @@ def commit(ui, repo, commitfunc, pats, opts):
     return commitfunc(ui, repo, message,
                       scmutil.match(repo[None], pats, opts), opts)
 
+def amend(ui, repo, commitfunc, old, extra, pats, opts):
+    ui.note(_('amending changeset %s\n') % old)
+    base = old.p1()
+
+    wlock = repo.wlock()
+    try:
+        # Fix up dirstate for copies and renames
+        duplicatecopies(repo, None, base.node())
+
+        # First, do a regular commit to record all changes in the working
+        # directory (if there are any)
+        node = commit(ui, repo, commitfunc, pats, opts)
+        ctx = repo[node]
+
+        # Participating changesets:
+        #
+        # node/ctx o - new (intermediate) commit that contains changes from
+        #          |   working dir to go into amending commit (or a workingctx
+        #          |   if there were no changes)
+        #          |
+        # old      o - changeset to amend
+        #          |
+        # base     o - parent of amending changeset
+
+        files = set(old.files())
+
+        # Second, we use either the commit we just did, or if there were no
+        # changes the parent of the working directory as the version of the
+        # files in the final amend commit
+        if node:
+            ui.note(_('copying changeset %s to %s\n') % (ctx, base))
+
+            user = ctx.user()
+            date = ctx.date()
+            message = ctx.description()
+            extra = ctx.extra()
+
+            # Prune files which were reverted by the updates: if old introduced
+            # file X and our intermediate commit, node, renamed that file, then
+            # those two files are the same and we can discard X from our list
+            # of files. Likewise if X was deleted, it's no longer relevant
+            files.update(ctx.files())
+
+            def samefile(f):
+                if f in ctx.manifest():
+                    a = ctx.filectx(f)
+                    if f in base.manifest():
+                        b = base.filectx(f)
+                        return (a.data() == b.data()
+                                and a.flags() == b.flags()
+                                and a.renamed() == b.renamed())
+                    else:
+                        return False
+                else:
+                    return f not in base.manifest()
+            files = [f for f in files if not samefile(f)]
+
+            def filectxfn(repo, ctx_, path):
+                try:
+                    return ctx.filectx(path)
+                except KeyError:
+                    raise IOError()
+        else:
+            ui.note(_('copying changeset %s to %s\n') % (old, base))
+
+            # Use version of files as in the old cset
+            def filectxfn(repo, ctx_, path):
+                try:
+                    return old.filectx(path)
+                except KeyError:
+                    raise IOError()
+
+            # See if we got a message from -m or -l, if not, open the editor
+            # with the message of the changeset to amend
+            user = opts.get('user') or old.user()
+            date = opts.get('date') or old.date()
+            message = logmessage(ui, opts)
+            if not message:
+                cctx = context.workingctx(repo, old.description(), user, date,
+                                          extra,
+                                          repo.status(base.node(), old.node()))
+                message = commitforceeditor(repo, cctx, [])
+
+        new = context.memctx(repo,
+                             parents=[base.node(), nullid],
+                             text=message,
+                             files=files,
+                             filectxfn=filectxfn,
+                             user=user,
+                             date=date,
+                             extra=extra)
+        newid = repo.commitctx(new)
+        if newid != old.node():
+            # Reroute the working copy parent to the new changeset
+            repo.dirstate.setparents(newid, nullid)
+
+            # Move bookmarks from old parent to amend commit
+            bms = repo.nodebookmarks(old.node())
+            if bms:
+                for bm in bms:
+                    repo._bookmarks[bm] = newid
+                bookmarks.write(repo)
+
+            # Strip the intermediate commit (if there was one) and the amended
+            # commit
+            lock = repo.lock()
+            try:
+                if node:
+                    ui.note(_('stripping intermediate changeset %s\n') % ctx)
+                ui.note(_('stripping amended changeset %s\n') % old)
+                repair.strip(ui, repo, old.node(), topic='amend-backup')
+            finally:
+                lock.release()
+    finally:
+        wlock.release()
+    return newid
+
 def commiteditor(repo, ctx, subs):
     if ctx.description():
         return ctx.description()
@@ -1324,6 +1441,187 @@ def commitforceeditor(repo, ctx, subs):
         raise util.Abort(_("empty commit message"))
 
     return text
+
+def revert(ui, repo, ctx, parents, *pats, **opts):
+    parent, p2 = parents
+    node = ctx.node()
+
+    mf = ctx.manifest()
+    if node == parent:
+        pmf = mf
+    else:
+        pmf = None
+
+    # need all matching names in dirstate and manifest of target rev,
+    # so have to walk both. do not print errors if files exist in one
+    # but not other.
+
+    names = {}
+
+    wlock = repo.wlock()
+    try:
+        # walk dirstate.
+
+        m = scmutil.match(repo[None], pats, opts)
+        m.bad = lambda x, y: False
+        for abs in repo.walk(m):
+            names[abs] = m.rel(abs), m.exact(abs)
+
+        # walk target manifest.
+
+        def badfn(path, msg):
+            if path in names:
+                return
+            if path in repo[node].substate:
+                return
+            path_ = path + '/'
+            for f in names:
+                if f.startswith(path_):
+                    return
+            ui.warn("%s: %s\n" % (m.rel(path), msg))
+
+        m = scmutil.match(repo[node], pats, opts)
+        m.bad = badfn
+        for abs in repo[node].walk(m):
+            if abs not in names:
+                names[abs] = m.rel(abs), m.exact(abs)
+
+        # get the list of subrepos that must be reverted
+        targetsubs = [s for s in repo[node].substate if m(s)]
+        m = scmutil.matchfiles(repo, names)
+        changes = repo.status(match=m)[:4]
+        modified, added, removed, deleted = map(set, changes)
+
+        # if f is a rename, also revert the source
+        cwd = repo.getcwd()
+        for f in added:
+            src = repo.dirstate.copied(f)
+            if src and src not in names and repo.dirstate[src] == 'r':
+                removed.add(src)
+                names[src] = (repo.pathto(src, cwd), True)
+
+        def removeforget(abs):
+            if repo.dirstate[abs] == 'a':
+                return _('forgetting %s\n')
+            return _('removing %s\n')
+
+        revert = ([], _('reverting %s\n'))
+        add = ([], _('adding %s\n'))
+        remove = ([], removeforget)
+        undelete = ([], _('undeleting %s\n'))
+
+        disptable = (
+            # dispatch table:
+            #   file state
+            #   action if in target manifest
+            #   action if not in target manifest
+            #   make backup if in target manifest
+            #   make backup if not in target manifest
+            (modified, revert, remove, True, True),
+            (added, revert, remove, True, False),
+            (removed, undelete, None, False, False),
+            (deleted, revert, remove, False, False),
+            )
+
+        for abs, (rel, exact) in sorted(names.items()):
+            mfentry = mf.get(abs)
+            target = repo.wjoin(abs)
+            def handle(xlist, dobackup):
+                xlist[0].append(abs)
+                if (dobackup and not opts.get('no_backup') and
+                    os.path.lexists(target)):
+                    bakname = "%s.orig" % rel
+                    ui.note(_('saving current version of %s as %s\n') %
+                            (rel, bakname))
+                    if not opts.get('dry_run'):
+                        util.rename(target, bakname)
+                if ui.verbose or not exact:
+                    msg = xlist[1]
+                    if not isinstance(msg, basestring):
+                        msg = msg(abs)
+                    ui.status(msg % rel)
+            for table, hitlist, misslist, backuphit, backupmiss in disptable:
+                if abs not in table:
+                    continue
+                # file has changed in dirstate
+                if mfentry:
+                    handle(hitlist, backuphit)
+                elif misslist is not None:
+                    handle(misslist, backupmiss)
+                break
+            else:
+                if abs not in repo.dirstate:
+                    if mfentry:
+                        handle(add, True)
+                    elif exact:
+                        ui.warn(_('file not managed: %s\n') % rel)
+                    continue
+                # file has not changed in dirstate
+                if node == parent:
+                    if exact:
+                        ui.warn(_('no changes needed to %s\n') % rel)
+                    continue
+                if pmf is None:
+                    # only need parent manifest in this unlikely case,
+                    # so do not read by default
+                    pmf = repo[parent].manifest()
+                if abs in pmf and mfentry:
+                    # if version of file is same in parent and target
+                    # manifests, do nothing
+                    if (pmf[abs] != mfentry or
+                        pmf.flags(abs) != mf.flags(abs)):
+                        handle(revert, False)
+                else:
+                    handle(remove, False)
+
+        if not opts.get('dry_run'):
+            def checkout(f):
+                fc = ctx[f]
+                repo.wwrite(f, fc.data(), fc.flags())
+
+            audit_path = scmutil.pathauditor(repo.root)
+            for f in remove[0]:
+                if repo.dirstate[f] == 'a':
+                    repo.dirstate.drop(f)
+                    continue
+                audit_path(f)
+                try:
+                    util.unlinkpath(repo.wjoin(f))
+                except OSError:
+                    pass
+                repo.dirstate.remove(f)
+
+            normal = None
+            if node == parent:
+                # We're reverting to our parent. If possible, we'd like status
+                # to report the file as clean. We have to use normallookup for
+                # merges to avoid losing information about merged/dirty files.
+                if p2 != nullid:
+                    normal = repo.dirstate.normallookup
+                else:
+                    normal = repo.dirstate.normal
+            for f in revert[0]:
+                checkout(f)
+                if normal:
+                    normal(f)
+
+            for f in add[0]:
+                checkout(f)
+                repo.dirstate.add(f)
+
+            normal = repo.dirstate.normallookup
+            if node == parent and p2 == nullid:
+                normal = repo.dirstate.normal
+            for f in undelete[0]:
+                checkout(f)
+                normal(f)
+
+            if targetsubs:
+                # Revert the subrepos on the revert list
+                for sub in targetsubs:
+                    ctx.sub(sub).revert(ui, ctx.substate[sub], *pats, **opts)
+    finally:
+        wlock.release()
 
 def command(table):
     '''returns a function object bound to table which can be used as

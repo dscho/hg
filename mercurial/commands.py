@@ -16,7 +16,7 @@ import sshserver, hgweb, hgweb.server, commandserver
 import merge as mergemod
 import minirst, revset, fileset
 import dagparser, context, simplemerge
-import random, setdiscovery, treediscovery, dagutil
+import random, setdiscovery, treediscovery, dagutil, pvec
 import phases
 
 table = {}
@@ -972,6 +972,12 @@ def bundle(ui, repo, fname, dest=None, **opts):
     if 'rev' in opts:
         revs = scmutil.revrange(repo, opts['rev'])
 
+    bundletype = opts.get('type', 'bzip2').lower()
+    btypes = {'none': 'HG10UN', 'bzip2': 'HG10BZ', 'gzip': 'HG10GZ'}
+    bundletype = btypes.get(bundletype)
+    if bundletype not in changegroup.bundletypes:
+        raise util.Abort(_('unknown bundle type specified with --type'))
+
     if opts.get('all'):
         base = ['null']
     else:
@@ -997,12 +1003,6 @@ def bundle(ui, repo, fname, dest=None, **opts):
     if not cg:
         scmutil.nochangesfound(ui, outgoing and outgoing.excluded)
         return 1
-
-    bundletype = opts.get('type', 'bzip2').lower()
-    btypes = {'none': 'HG10UN', 'bzip2': 'HG10BZ', 'gzip': 'HG10GZ'}
-    bundletype = btypes.get(bundletype)
-    if bundletype not in changegroup.bundletypes:
-        raise util.Abort(_('unknown bundle type specified with --type'))
 
     changegroup.writebundle(cg, fname, bundletype)
 
@@ -1163,6 +1163,7 @@ def clone(ui, source, dest=None, **opts):
      _('mark new/missing files as added/removed before committing')),
     ('', 'close-branch', None,
      _('mark a branch as closed, hiding it from the branch list')),
+    ('', 'amend', None, _('amend the parent of the working dir')),
     ] + walkopts + commitopts + commitopts2 + subrepoopts,
     _('[OPTION]... [FILE]...'))
 def commit(ui, repo, *pats, **opts):
@@ -1183,6 +1184,20 @@ def commit(ui, repo, *pats, **opts):
     commit fails, you will find a backup of your message in
     ``.hg/last-message.txt``.
 
+    The --amend flag can be used to amend the parent of the
+    working directory with a new commit that contains the changes
+    in the parent in addition to those currently reported by :hg:`status`,
+    if there are any. The old commit is stored in a backup bundle in
+    ``.hg/strip-backup`` (see :hg:`help bundle` and :hg:`help unbundle`
+    on how to restore it).
+
+    Message, user and date are taken from the amended commit unless
+    specified. When a message isn't specified on the command line,
+    the editor will open with the message of the amended commit.
+
+    It is not possible to amend public changesets (see :hg:`help phases`)
+    or changesets that have children.
+
     See :hg:`help dates` for a list of formats valid for -d/--date.
 
     Returns 0 on success, 1 if nothing changed.
@@ -1198,31 +1213,70 @@ def commit(ui, repo, *pats, **opts):
             # current branch, so it's sufficient to test branchheads
             raise util.Abort(_('can only close branch heads'))
         extra['close'] = 1
-    e = cmdutil.commiteditor
-    if opts.get('force_editor'):
-        e = cmdutil.commitforceeditor
-
-    def commitfunc(ui, repo, message, match, opts):
-        return repo.commit(message, opts.get('user'), opts.get('date'), match,
-                           editor=e, extra=extra)
 
     branch = repo[None].branch()
     bheads = repo.branchheads(branch)
 
-    node = cmdutil.commit(ui, repo, commitfunc, pats, opts)
-    if not node:
-        stat = repo.status(match=scmutil.match(repo[None], pats, opts))
-        if stat[3]:
-            ui.status(_("nothing changed (%d missing files, see 'hg status')\n")
-                      % len(stat[3]))
-        else:
+    if opts.get('amend'):
+        if ui.config('ui', 'commitsubrepos'):
+            raise util.Abort(_('cannot amend recursively'))
+
+        old = repo['.']
+        if old.phase() == phases.public:
+            raise util.Abort(_('cannot amend public changesets'))
+        if len(old.parents()) > 1:
+            raise util.Abort(_('cannot amend merge changesets'))
+        if len(repo[None].parents()) > 1:
+            raise util.Abort(_('cannot amend while merging'))
+        if old.children():
+            raise util.Abort(_('cannot amend changeset with children'))
+
+        e = cmdutil.commiteditor
+        if opts.get('force_editor'):
+            e = cmdutil.commitforceeditor
+
+        def commitfunc(ui, repo, message, match, opts):
+            editor = e
+            # message contains text from -m or -l, if it's empty,
+            # open the editor with the old message
+            if not message:
+                message = old.description()
+                editor = cmdutil.commitforceeditor
+            return repo.commit(message,
+                               opts.get('user') or old.user(),
+                               opts.get('date') or old.date(),
+                               match,
+                               editor=editor,
+                               extra=extra)
+
+        node = cmdutil.amend(ui, repo, commitfunc, old, extra, pats, opts)
+        if node == old.node():
             ui.status(_("nothing changed\n"))
-        return 1
+            return 1
+    else:
+        e = cmdutil.commiteditor
+        if opts.get('force_editor'):
+            e = cmdutil.commitforceeditor
+
+        def commitfunc(ui, repo, message, match, opts):
+            return repo.commit(message, opts.get('user'), opts.get('date'),
+                               match, editor=e, extra=extra)
+
+        node = cmdutil.commit(ui, repo, commitfunc, pats, opts)
+
+        if not node:
+            stat = repo.status(match=scmutil.match(repo[None], pats, opts))
+            if stat[3]:
+                ui.status(_("nothing changed (%d missing files, see "
+                            "'hg status')\n") % len(stat[3]))
+            else:
+                ui.status(_("nothing changed\n"))
+            return 1
 
     ctx = repo[node]
     parents = ctx.parents()
 
-    if (bheads and node not in bheads and not
+    if (not opts.get('amend') and bheads and node not in bheads and not
         [x for x in parents if x.node() in bheads and x.branch() == branch]):
         ui.status(_('created new head\n'))
         # The message is not printed for initial roots. For the other
@@ -1963,6 +2017,27 @@ def debugpushkey(ui, repopath, namespace, *keyinfo, **opts):
             ui.write("%s\t%s\n" % (k.encode('string-escape'),
                                    v.encode('string-escape')))
 
+@command('debugpvec', [], _('A B'))
+def debugpvec(ui, repo, a, b=None):
+    ca = scmutil.revsingle(repo, a)
+    cb = scmutil.revsingle(repo, b)
+    pa = pvec.ctxpvec(ca)
+    pb = pvec.ctxpvec(cb)
+    if pa == pb:
+        rel = "="
+    elif pa > pb:
+        rel = ">"
+    elif pa < pb:
+        rel = "<"
+    elif pa | pb:
+        rel = "|"
+    ui.write(_("a: %s\n") % pa)
+    ui.write(_("b: %s\n") % pb)
+    ui.write(_("depth(a): %d depth(b): %d\n") % (pa._depth, pb._depth))
+    ui.write(_("delta: %d hdist: %d distance: %d relation: %s\n") %
+             (abs(pa._depth - pb._depth), pvec._hamming(pa._vec, pb._vec),
+              pa.distance(pb), rel))
+
 @command('debugrebuildstate',
     [('r', 'rev', '', _('revision to rebuild to'), _('REV'))],
     _('[-r REV] [REV]'))
@@ -2155,13 +2230,17 @@ def debugrevlog(ui, repo, file_ = None, **opts):
 
 @command('debugrevspec', [], ('REVSPEC'))
 def debugrevspec(ui, repo, expr):
-    '''parse and apply a revision specification'''
+    """parse and apply a revision specification
+
+    Use --verbose to print the parsed tree before and after aliases
+    expansion.
+    """
     if ui.verbose:
         tree = revset.parse(expr)[0]
-        ui.note(tree, "\n")
+        ui.note(revset.prettyformat(tree), "\n")
         newtree = revset.findaliases(ui, tree)
         if newtree != tree:
-            ui.note(newtree, "\n")
+            ui.note(revset.prettyformat(newtree), "\n")
     func = revset.match(ui, expr)
     for c in func(repo, range(len(repo))):
         ui.write("%s\n" % c)
@@ -2467,7 +2546,7 @@ def forget(ui, repo, *pats, **opts):
       _('record the current date as commit date')),
      ('U', 'currentuser', False,
       _('record the current user as committer'), _('DATE'))]
-    + commitopts2 + mergetoolopts,
+    + commitopts2 + mergetoolopts  + dryrunopts,
     _('[OPTION]... REVISION...'))
 def graft(ui, repo, *revs, **opts):
     '''copy changes from other branches onto the current branch
@@ -2586,7 +2665,10 @@ def graft(ui, repo, *revs, **opts):
 
     for pos, ctx in enumerate(repo.set("%ld", revs)):
         current = repo['.']
+
         ui.status(_('grafting revision %s\n') % ctx.rev())
+        if opts.get('dry_run'):
+            continue
 
         # we don't merge the first commit when continuing
         if not cont:
@@ -2629,7 +2711,7 @@ def graft(ui, repo, *revs, **opts):
                     date=date, extra=extra, editor=editor)
 
     # remove state when we complete successfully
-    if os.path.exists(repo.join('graftstate')):
+    if not opts.get('dry_run') and os.path.exists(repo.join('graftstate')):
         util.unlinkpath(repo.join('graftstate'))
 
     return 0
@@ -3597,8 +3679,9 @@ def import_(ui, repo, patch1=None, *patches, **opts):
     try:
         try:
             wlock = repo.wlock()
-            lock = repo.lock()
-            tr = repo.transaction('import')
+            if not opts.get('no_commit'):
+                lock = repo.lock()
+                tr = repo.transaction('import')
             parents = repo.parents()
             for patchurl in patches:
                 if patchurl == '-':
@@ -3624,7 +3707,8 @@ def import_(ui, repo, patch1=None, *patches, **opts):
                 if not haspatch:
                     raise util.Abort(_('%s: no diffs found') % patchurl)
 
-            tr.close()
+            if tr:
+                tr.close()
             if msgs:
                 repo.savecommitmessage('\n* * *\n'.join(msgs))
         except:
@@ -4212,7 +4296,8 @@ def phase(ui, repo, *revs, **opts):
 
         public < draft < secret
 
-    Return 0 on success, 1 if no phases were changed.
+    Return 0 on success, 1 if no phases were changed or some could not
+    be changed.
     """
     # search for a unique phase argument
     targetphase = None
@@ -4254,8 +4339,18 @@ def phase(ui, repo, *revs, **opts):
             changes = 0
             newdata = repo._phaserev
             changes = sum(o != newdata[i] for i, o in enumerate(olddata))
+            rejected = [n for n in nodes
+                        if newdata[repo[n].rev()] < targetphase]
+            if rejected:
+                ui.warn(_('cannot move %i changesets to a more permissive '
+                          'phase, use --force\n') % len(rejected))
+                ret = 1
             if changes:
-                ui.note(_('phase change for %i changesets\n') % changes)
+                msg = _('phase changed for %i changesets\n') % changes
+                if ret:
+                    ui.status(msg)
+                else:
+                    ui.note(msg)
             else:
                 ui.warn(_('no phases changed\n'))
                 ret = 1
@@ -4741,7 +4836,6 @@ def revert(ui, repo, *pats, **opts):
                          hint=_('use "hg update" or see "hg help revert"'))
 
     ctx = scmutil.revsingle(repo, opts.get('rev'))
-    node = ctx.node()
 
     if not pats and not opts.get('all'):
         msg = _("no files or directories specified")
@@ -4750,6 +4844,7 @@ def revert(ui, repo, *pats, **opts):
                      " or 'hg update -C .' to abort the merge")
             raise util.Abort(msg, hint=hint)
         dirty = util.any(repo.status())
+        node = ctx.node()
         if node != parent:
             if dirty:
                 hint = _("uncommitted changes, use --all to discard all"
@@ -4763,178 +4858,7 @@ def revert(ui, repo, *pats, **opts):
             hint = _("use --all to revert all files")
         raise util.Abort(msg, hint=hint)
 
-    mf = ctx.manifest()
-    if node == parent:
-        pmf = mf
-    else:
-        pmf = None
-
-    # need all matching names in dirstate and manifest of target rev,
-    # so have to walk both. do not print errors if files exist in one
-    # but not other.
-
-    names = {}
-
-    wlock = repo.wlock()
-    try:
-        # walk dirstate.
-
-        m = scmutil.match(repo[None], pats, opts)
-        m.bad = lambda x, y: False
-        for abs in repo.walk(m):
-            names[abs] = m.rel(abs), m.exact(abs)
-
-        # walk target manifest.
-
-        def badfn(path, msg):
-            if path in names:
-                return
-            if path in repo[node].substate:
-                ui.warn("%s: %s\n" % (m.rel(path),
-                    'reverting subrepos is unsupported'))
-                return
-            path_ = path + '/'
-            for f in names:
-                if f.startswith(path_):
-                    return
-            ui.warn("%s: %s\n" % (m.rel(path), msg))
-
-        m = scmutil.match(repo[node], pats, opts)
-        m.bad = badfn
-        for abs in repo[node].walk(m):
-            if abs not in names:
-                names[abs] = m.rel(abs), m.exact(abs)
-
-        m = scmutil.matchfiles(repo, names)
-        changes = repo.status(match=m)[:4]
-        modified, added, removed, deleted = map(set, changes)
-
-        # if f is a rename, also revert the source
-        cwd = repo.getcwd()
-        for f in added:
-            src = repo.dirstate.copied(f)
-            if src and src not in names and repo.dirstate[src] == 'r':
-                removed.add(src)
-                names[src] = (repo.pathto(src, cwd), True)
-
-        def removeforget(abs):
-            if repo.dirstate[abs] == 'a':
-                return _('forgetting %s\n')
-            return _('removing %s\n')
-
-        revert = ([], _('reverting %s\n'))
-        add = ([], _('adding %s\n'))
-        remove = ([], removeforget)
-        undelete = ([], _('undeleting %s\n'))
-
-        disptable = (
-            # dispatch table:
-            #   file state
-            #   action if in target manifest
-            #   action if not in target manifest
-            #   make backup if in target manifest
-            #   make backup if not in target manifest
-            (modified, revert, remove, True, True),
-            (added, revert, remove, True, False),
-            (removed, undelete, None, False, False),
-            (deleted, revert, remove, False, False),
-            )
-
-        for abs, (rel, exact) in sorted(names.items()):
-            mfentry = mf.get(abs)
-            target = repo.wjoin(abs)
-            def handle(xlist, dobackup):
-                xlist[0].append(abs)
-                if (dobackup and not opts.get('no_backup') and
-                    os.path.lexists(target)):
-                    bakname = "%s.orig" % rel
-                    ui.note(_('saving current version of %s as %s\n') %
-                            (rel, bakname))
-                    if not opts.get('dry_run'):
-                        util.rename(target, bakname)
-                if ui.verbose or not exact:
-                    msg = xlist[1]
-                    if not isinstance(msg, basestring):
-                        msg = msg(abs)
-                    ui.status(msg % rel)
-            for table, hitlist, misslist, backuphit, backupmiss in disptable:
-                if abs not in table:
-                    continue
-                # file has changed in dirstate
-                if mfentry:
-                    handle(hitlist, backuphit)
-                elif misslist is not None:
-                    handle(misslist, backupmiss)
-                break
-            else:
-                if abs not in repo.dirstate:
-                    if mfentry:
-                        handle(add, True)
-                    elif exact:
-                        ui.warn(_('file not managed: %s\n') % rel)
-                    continue
-                # file has not changed in dirstate
-                if node == parent:
-                    if exact:
-                        ui.warn(_('no changes needed to %s\n') % rel)
-                    continue
-                if pmf is None:
-                    # only need parent manifest in this unlikely case,
-                    # so do not read by default
-                    pmf = repo[parent].manifest()
-                if abs in pmf and mfentry:
-                    # if version of file is same in parent and target
-                    # manifests, do nothing
-                    if (pmf[abs] != mfentry or
-                        pmf.flags(abs) != mf.flags(abs)):
-                        handle(revert, False)
-                else:
-                    handle(remove, False)
-
-        if not opts.get('dry_run'):
-            def checkout(f):
-                fc = ctx[f]
-                repo.wwrite(f, fc.data(), fc.flags())
-
-            audit_path = scmutil.pathauditor(repo.root)
-            for f in remove[0]:
-                if repo.dirstate[f] == 'a':
-                    repo.dirstate.drop(f)
-                    continue
-                audit_path(f)
-                try:
-                    util.unlinkpath(repo.wjoin(f))
-                except OSError:
-                    pass
-                repo.dirstate.remove(f)
-
-            normal = None
-            if node == parent:
-                # We're reverting to our parent. If possible, we'd like status
-                # to report the file as clean. We have to use normallookup for
-                # merges to avoid losing information about merged/dirty files.
-                if p2 != nullid:
-                    normal = repo.dirstate.normallookup
-                else:
-                    normal = repo.dirstate.normal
-            for f in revert[0]:
-                checkout(f)
-                if normal:
-                    normal(f)
-
-            for f in add[0]:
-                checkout(f)
-                repo.dirstate.add(f)
-
-            normal = repo.dirstate.normallookup
-            if node == parent and p2 == nullid:
-                normal = repo.dirstate.normal
-            for f in undelete[0]:
-                checkout(f)
-                normal(f)
-
-    finally:
-        wlock.release()
+    return cmdutil.revert(ui, repo, ctx, (parent, p2), *pats, **opts)
 
 @command('rollback', dryrunopts +
          [('f', 'force', False, _('ignore safety measures'))])
@@ -5264,18 +5188,22 @@ def status(ui, repo, *pats, **opts):
     if (opts.get('all') or opts.get('copies')) and not opts.get('no_status'):
         copy = copies.pathcopies(repo[node1], repo[node2])
 
+    fm = ui.formatter('status', opts)
+    format = '%s %s' + end
+    if opts.get('no_status'):
+        format = '%.0s%s' + end
+
     for state, char, files in changestates:
         if state in show:
-            format = "%s %%s%s" % (char, end)
-            if opts.get('no_status'):
-                format = "%%s%s" % end
-
+            label = 'status.' + state
             for f in files:
-                ui.write(format % repo.pathto(f, cwd),
-                         label='status.' + state)
+                fm.startitem()
+                fm.write("status path", format, char,
+                         repo.pathto(f, cwd), label=label)
                 if f in copy:
-                    ui.write('  %s%s' % (repo.pathto(copy[f], cwd), end),
+                    fm.write("copy", '  %s' + end, repo.pathto(copy[f], cwd),
                              label='status.copied')
+    fm.end()
 
 @command('^summary|sum',
     [('', 'remote', None, _('check for push and pull'))], '[--remote]')
@@ -5712,18 +5640,21 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
     if check and clean:
         raise util.Abort(_("cannot specify both -c/--check and -C/--clean"))
 
-    if check:
-        # we could use dirty() but we can ignore merge and branch trivia
-        c = repo[None]
-        if c.modified() or c.added() or c.removed():
-            raise util.Abort(_("uncommitted local changes"))
-
     if date:
         if rev is not None:
             raise util.Abort(_("you can't specify a revision and a date"))
         rev = cmdutil.finddate(ui, repo, date)
 
-    if clean or check:
+    if check:
+        # we could use dirty() but we can ignore merge and branch trivia
+        c = repo[None]
+        if c.modified() or c.added() or c.removed():
+            raise util.Abort(_("uncommitted local changes"))
+        if not rev:
+            rev = repo[repo[None].branch()].rev()
+        mergemod._checkunknown(repo, repo[None], repo[rev])
+
+    if clean:
         ret = hg.clean(repo, rev)
     else:
         ret = hg.update(repo, rev)

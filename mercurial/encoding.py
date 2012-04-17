@@ -92,24 +92,32 @@ def tolocal(s):
     'foo: \\xc3\\xa4'
     """
 
-    for e in ('UTF-8', fallbackencoding):
+    try:
         try:
-            u = s.decode(e) # attempt strict decoding
+            # make sure string is actually stored in UTF-8
+            u = s.decode('UTF-8')
+            if encoding == 'UTF-8':
+                # fast path
+                return s
             r = u.encode(encoding, "replace")
             if u == r.decode(encoding):
                 # r is a safe, non-lossy encoding of s
                 return r
-            elif e == 'UTF-8':
-                return localstr(s, r)
-            else:
-                return localstr(u.encode('UTF-8'), r)
-
-        except LookupError, k:
-            raise error.Abort(k, hint="please check your locale settings")
+            return localstr(s, r)
         except UnicodeDecodeError:
-            pass
-    u = s.decode("utf-8", "replace") # last ditch
-    return u.encode(encoding, "replace") # can't round-trip
+            # we should only get here if we're looking at an ancient changeset
+            try:
+                u = s.decode(fallbackencoding)
+                r = u.encode(encoding, "replace")
+                if u == r.decode(encoding):
+                    # r is a safe, non-lossy encoding of s
+                    return r
+                return localstr(u.encode('UTF-8'), r)
+            except UnicodeDecodeError:
+                u = s.decode("utf-8", "replace") # last ditch
+                return u.encode(encoding, "replace") # can't round-trip
+    except LookupError, k:
+        raise error.Abort(k, hint="please check your locale settings")
 
 def fromlocal(s):
     """
@@ -160,6 +168,10 @@ def getcols(s, start, c):
 def lower(s):
     "best-effort encoding-aware case-folding of local string s"
     try:
+        return s.encode('ascii').lower()
+    except UnicodeDecodeError:
+        pass
+    try:
         if isinstance(s, localstr):
             u = s._utf8.decode("utf-8")
         else:
@@ -190,3 +202,80 @@ def upper(s):
         return s.upper() # we don't know how to fold this except in ASCII
     except LookupError, k:
         raise error.Abort(k, hint="please check your locale settings")
+
+def toutf8b(s):
+    '''convert a local, possibly-binary string into UTF-8b
+
+    This is intended as a generic method to preserve data when working
+    with schemes like JSON and XML that have no provision for
+    arbitrary byte strings. As Mercurial often doesn't know
+    what encoding data is in, we use so-called UTF-8b.
+
+    If a string is already valid UTF-8 (or ASCII), it passes unmodified.
+    Otherwise, unsupported bytes are mapped to UTF-16 surrogate range,
+    uDC00-uDCFF.
+
+    Principles of operation:
+
+    - ASCII and UTF-8 data sucessfully round-trips and is understood
+      by Unicode-oriented clients
+    - filenames and file contents in arbitrary other encodings can have
+      be round-tripped or recovered by clueful clients
+    - local strings that have a cached known UTF-8 encoding (aka
+      localstr) get sent as UTF-8 so Unicode-oriented clients get the
+      Unicode data they want
+    - because we must preserve UTF-8 bytestring in places such as
+      filenames, metadata can't be roundtripped without help
+
+    (Note: "UTF-8b" often refers to decoding a mix of valid UTF-8 and
+    arbitrary bytes into an internal Unicode format that can be
+    re-encoded back into the original. Here we are exposing the
+    internal surrogate encoding as a UTF-8 string.)
+    '''
+
+    if isinstance(s, localstr):
+        return s._utf8
+
+    try:
+        if s.decode('utf-8'):
+            return s
+    except UnicodeDecodeError:
+        # surrogate-encode any characters that don't round-trip
+        s2 = s.decode('utf-8', 'ignore').encode('utf-8')
+        r = ""
+        pos = 0
+        for c in s:
+            if s2[pos:pos + 1] == c:
+                r += c
+                pos += 1
+            else:
+                r += unichr(0xdc00 + ord(c)).encode('utf-8')
+        return r
+
+def fromutf8b(s):
+    '''Given a UTF-8b string, return a local, possibly-binary string.
+
+    return the original binary string. This
+    is a round-trip process for strings like filenames, but metadata
+    that's was passed through tolocal will remain in UTF-8.
+
+    >>> m = "\\xc3\\xa9\\x99abcd"
+    >>> n = toutf8b(m)
+    >>> n
+    '\\xc3\\xa9\\xed\\xb2\\x99abcd'
+    >>> fromutf8b(n) == m
+    True
+    '''
+
+    # fast path - look for uDxxx prefixes in s
+    if "\xed" not in s:
+        return s
+
+    u = s.decode("utf-8")
+    r = ""
+    for c in u:
+        if ord(c) & 0xff00 == 0xdc00:
+            r += chr(ord(c) & 0xff)
+        else:
+            r += c.encode("utf-8")
+    return r

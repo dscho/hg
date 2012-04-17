@@ -94,19 +94,25 @@ names that should work without quoting
   ('symbol', 'a')
   0
   $ try b-a
-  ('minus', ('symbol', 'b'), ('symbol', 'a'))
+  (minus
+    ('symbol', 'b')
+    ('symbol', 'a'))
   1
   $ try _a_b_c_
   ('symbol', '_a_b_c_')
   6
   $ try _a_b_c_-a
-  ('minus', ('symbol', '_a_b_c_'), ('symbol', 'a'))
+  (minus
+    ('symbol', '_a_b_c_')
+    ('symbol', 'a'))
   6
   $ try .a.b.c.
   ('symbol', '.a.b.c.')
   7
   $ try .a.b.c.-a
-  ('minus', ('symbol', '.a.b.c.'), ('symbol', 'a'))
+  (minus
+    ('symbol', '.a.b.c.')
+    ('symbol', 'a'))
   7
   $ try -- '-a-b-c-' # complains
   hg: parse error at 7: not a prefix: end
@@ -114,7 +120,15 @@ names that should work without quoting
   $ log -a-b-c- # succeeds with fallback
   4
   $ try -- -a-b-c--a # complains
-  ('minus', ('minus', ('minus', ('negate', ('symbol', 'a')), ('symbol', 'b')), ('symbol', 'c')), ('negate', ('symbol', 'a')))
+  (minus
+    (minus
+      (minus
+        (negate
+          ('symbol', 'a'))
+        ('symbol', 'b'))
+      ('symbol', 'c'))
+    (negate
+      ('symbol', 'a')))
   abort: unknown revision '-a'!
   [255]
   $ try é
@@ -124,7 +138,9 @@ names that should work without quoting
 quoting needed
 
   $ try '"-a-b-c-"-a'
-  ('minus', ('string', '-a-b-c-'), ('symbol', 'a'))
+  (minus
+    ('string', '-a-b-c-')
+    ('symbol', 'a'))
   4
 
   $ log '1 or 2'
@@ -136,15 +152,32 @@ quoting needed
   $ log '1 and 2'
   $ log '1&2'
   $ try '1&2|3' # precedence - and is higher
-  ('or', ('and', ('symbol', '1'), ('symbol', '2')), ('symbol', '3'))
+  (or
+    (and
+      ('symbol', '1')
+      ('symbol', '2'))
+    ('symbol', '3'))
   3
   $ try '1|2&3'
-  ('or', ('symbol', '1'), ('and', ('symbol', '2'), ('symbol', '3')))
+  (or
+    ('symbol', '1')
+    (and
+      ('symbol', '2')
+      ('symbol', '3')))
   1
   $ try '1&2&3' # associativity
-  ('and', ('and', ('symbol', '1'), ('symbol', '2')), ('symbol', '3'))
+  (and
+    (and
+      ('symbol', '1')
+      ('symbol', '2'))
+    ('symbol', '3'))
   $ try '1|(2|3)'
-  ('or', ('symbol', '1'), ('group', ('or', ('symbol', '2'), ('symbol', '3'))))
+  (or
+    ('symbol', '1')
+    (group
+      (or
+        ('symbol', '2')
+        ('symbol', '3'))))
   1
   2
   3
@@ -213,7 +246,7 @@ quoting needed
   7
   8
   9
-  $ log 'file(b)'
+  $ log 'file("b*")'
   1
   4
   $ log 'follow()'
@@ -226,13 +259,19 @@ quoting needed
   $ log 'grep("issue\d+")'
   6
   $ try 'grep("(")' # invalid regular expression
-  ('func', ('symbol', 'grep'), ('string', '('))
+  (func
+    ('symbol', 'grep')
+    ('string', '('))
   hg: parse error: invalid match pattern: unbalanced parenthesis
   [255]
   $ try 'grep("\bissue\d+")'
-  ('func', ('symbol', 'grep'), ('string', '\x08issue\\d+'))
+  (func
+    ('symbol', 'grep')
+    ('string', '\x08issue\\d+'))
   $ try 'grep(r"\bissue\d+")'
-  ('func', ('symbol', 'grep'), ('string', '\\bissue\\d+'))
+  (func
+    ('symbol', 'grep')
+    ('string', '\\bissue\\d+'))
   6
   $ try 'grep(r"\")'
   hg: parse error at 7: unterminated string
@@ -253,6 +292,11 @@ quoting needed
   6
   $ log 'limit(head(), 1)'
   0
+  $ log 'matching(6)'
+  6
+  $ log 'matching(6:7, "phase parents user date branch summary files description substate")'
+  6
+  7
   $ log 'max(contains(a))'
   5
   $ log 'min(contains(a))'
@@ -432,41 +476,158 @@ aliases:
 
   $ echo '[revsetalias]' >> .hg/hgrc
   $ echo 'm = merge()' >> .hg/hgrc
+  $ echo 'sincem = descendants(m)' >> .hg/hgrc
   $ echo 'd($1) = reverse(sort($1, date))' >> .hg/hgrc
   $ echo 'rs(ARG1, ARG2) = reverse(sort(ARG1, ARG2))' >> .hg/hgrc
   $ echo 'rs4(ARG1, ARGA, ARGB, ARG2) = reverse(sort(ARG1, ARG2))' >> .hg/hgrc
 
   $ try m
   ('symbol', 'm')
-  ('func', ('symbol', 'merge'), None)
+  (func
+    ('symbol', 'merge')
+    None)
   6
+
+test alias recursion
+
+  $ try sincem
+  ('symbol', 'sincem')
+  (func
+    ('symbol', 'descendants')
+    (func
+      ('symbol', 'merge')
+      None))
+  6
+  7
+
+test infinite recursion
+
+  $ echo 'recurse1 = recurse2' >> .hg/hgrc
+  $ echo 'recurse2 = recurse1' >> .hg/hgrc
+  $ try recurse1
+  ('symbol', 'recurse1')
+  hg: parse error: infinite expansion of revset alias "recurse1" detected
+  [255]
+
+test nesting and variable passing
+
+  $ echo 'nested($1) = nested2($1)' >> .hg/hgrc
+  $ echo 'nested2($1) = nested3($1)' >> .hg/hgrc
+  $ echo 'nested3($1) = max($1)' >> .hg/hgrc
+  $ try 'nested(2:5)'
+  (func
+    ('symbol', 'nested')
+    (range
+      ('symbol', '2')
+      ('symbol', '5')))
+  (func
+    ('symbol', 'max')
+    (range
+      ('symbol', '2')
+      ('symbol', '5')))
+  5
+
+test variable isolation, variable placeholders are rewritten as string
+then parsed and matched again as string. Check they do not leak too
+far away.
+
+  $ echo 'injectparamasstring = max("$1")' >> .hg/hgrc
+  $ echo 'callinjection($1) = descendants(injectparamasstring)' >> .hg/hgrc
+  $ try 'callinjection(2:5)'
+  (func
+    ('symbol', 'callinjection')
+    (range
+      ('symbol', '2')
+      ('symbol', '5')))
+  (func
+    ('symbol', 'descendants')
+    (func
+      ('symbol', 'max')
+      ('string', '$1')))
+  abort: unknown revision '$1'!
+  [255]
+
   $ try 'd(2:5)'
-  ('func', ('symbol', 'd'), ('range', ('symbol', '2'), ('symbol', '5')))
-  ('func', ('symbol', 'reverse'), ('func', ('symbol', 'sort'), ('list', ('range', ('symbol', '2'), ('symbol', '5')), ('symbol', 'date'))))
+  (func
+    ('symbol', 'd')
+    (range
+      ('symbol', '2')
+      ('symbol', '5')))
+  (func
+    ('symbol', 'reverse')
+    (func
+      ('symbol', 'sort')
+      (list
+        (range
+          ('symbol', '2')
+          ('symbol', '5'))
+        ('symbol', 'date'))))
   4
   5
   3
   2
   $ try 'rs(2 or 3, date)'
-  ('func', ('symbol', 'rs'), ('list', ('or', ('symbol', '2'), ('symbol', '3')), ('symbol', 'date')))
-  ('func', ('symbol', 'reverse'), ('func', ('symbol', 'sort'), ('list', ('or', ('symbol', '2'), ('symbol', '3')), ('symbol', 'date'))))
+  (func
+    ('symbol', 'rs')
+    (list
+      (or
+        ('symbol', '2')
+        ('symbol', '3'))
+      ('symbol', 'date')))
+  (func
+    ('symbol', 'reverse')
+    (func
+      ('symbol', 'sort')
+      (list
+        (or
+          ('symbol', '2')
+          ('symbol', '3'))
+        ('symbol', 'date'))))
   3
   2
   $ try 'rs()'
-  ('func', ('symbol', 'rs'), None)
+  (func
+    ('symbol', 'rs')
+    None)
   hg: parse error: invalid number of arguments: 0
   [255]
   $ try 'rs(2)'
-  ('func', ('symbol', 'rs'), ('symbol', '2'))
+  (func
+    ('symbol', 'rs')
+    ('symbol', '2'))
   hg: parse error: invalid number of arguments: 1
   [255]
   $ try 'rs(2, data, 7)'
-  ('func', ('symbol', 'rs'), ('list', ('list', ('symbol', '2'), ('symbol', 'data')), ('symbol', '7')))
+  (func
+    ('symbol', 'rs')
+    (list
+      (list
+        ('symbol', '2')
+        ('symbol', 'data'))
+      ('symbol', '7')))
   hg: parse error: invalid number of arguments: 3
   [255]
   $ try 'rs4(2 or 3, x, x, date)'
-  ('func', ('symbol', 'rs4'), ('list', ('list', ('list', ('or', ('symbol', '2'), ('symbol', '3')), ('symbol', 'x')), ('symbol', 'x')), ('symbol', 'date')))
-  ('func', ('symbol', 'reverse'), ('func', ('symbol', 'sort'), ('list', ('or', ('symbol', '2'), ('symbol', '3')), ('symbol', 'date'))))
+  (func
+    ('symbol', 'rs4')
+    (list
+      (list
+        (list
+          (or
+            ('symbol', '2')
+            ('symbol', '3'))
+          ('symbol', 'x'))
+        ('symbol', 'x'))
+      ('symbol', 'date')))
+  (func
+    ('symbol', 'reverse')
+    (func
+      ('symbol', 'sort')
+      (list
+        (or
+          ('symbol', '2')
+          ('symbol', '3'))
+        ('symbol', 'date'))))
   3
   2
 

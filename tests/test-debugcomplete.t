@@ -87,6 +87,7 @@ Show debug commands if there are no other candidates
   debuginstall
   debugknown
   debugpushkey
+  debugpvec
   debugrebuildstate
   debugrename
   debugrevlog
@@ -192,7 +193,7 @@ Show all commands + options
   add: include, exclude, subrepos, dry-run
   annotate: rev, follow, no-follow, text, user, file, date, number, changeset, line-number, ignore-all-space, ignore-space-change, ignore-blank-lines, include, exclude
   clone: noupdate, updaterev, rev, branch, pull, uncompressed, ssh, remotecmd, insecure
-  commit: addremove, close-branch, include, exclude, message, logfile, date, user, subrepos
+  commit: addremove, close-branch, amend, include, exclude, message, logfile, date, user, subrepos
   diff: rev, change, text, git, nodates, show-function, reverse, ignore-all-space, ignore-space-change, ignore-blank-lines, unified, stat, include, exclude, subrepos
   export: output, switch-parent, rev, text, git, nodates
   forget: include, exclude
@@ -236,6 +237,7 @@ Show all commands + options
   debuginstall: 
   debugknown: 
   debugpushkey: 
+  debugpvec: 
   debugrebuildstate: rev
   debugrename: rev
   debugrevlog: changelog, manifest, dump
@@ -245,7 +247,7 @@ Show all commands + options
   debugsub: rev
   debugwalk: include, exclude
   debugwireargs: three, four, five, ssh, remotecmd, insecure
-  graft: continue, edit, currentdate, currentuser, date, user, tool
+  graft: continue, edit, currentdate, currentuser, date, user, tool, dry-run
   grep: print0, all, text, follow, ignore-case, files-with-matches, line-number, rev, user, date, include, exclude
   heads: rev, topo, active, closed, style, template
   help: extension, command

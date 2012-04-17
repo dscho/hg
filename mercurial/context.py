@@ -5,7 +5,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from node import nullid, nullrev, short, hex
+from node import nullid, nullrev, short, hex, bin
 from i18n import _
 import ancestor, mdiff, error, util, scmutil, subrepo, patch, encoding, phases
 import match as matchmod
@@ -21,12 +21,84 @@ class changectx(object):
         if changeid == '':
             changeid = '.'
         self._repo = repo
-        if isinstance(changeid, (long, int)):
+
+        if isinstance(changeid, int):
             self._rev = changeid
-            self._node = self._repo.changelog.node(changeid)
-        else:
-            self._node = self._repo.lookup(changeid)
-            self._rev = self._repo.changelog.rev(self._node)
+            self._node = repo.changelog.node(changeid)
+            return
+        if changeid == '.':
+            self._node = repo.dirstate.p1()
+            self._rev = repo.changelog.rev(self._node)
+            return
+        if changeid == 'null':
+            self._node = nullid
+            self._rev = nullrev
+            return
+        if changeid == 'tip':
+            self._rev = len(repo.changelog) - 1
+            self._node = repo.changelog.node(self._rev)
+            return
+        if len(changeid) == 20:
+            try:
+                self._node = changeid
+                self._rev = repo.changelog.rev(changeid)
+                return
+            except LookupError:
+                pass
+
+        try:
+            r = int(changeid)
+            if str(r) != changeid:
+                raise ValueError
+            l = len(repo.changelog)
+            if r < 0:
+                r += l
+            if r < 0 or r >= l:
+                raise ValueError
+            self._rev = r
+            self._node = repo.changelog.node(r)
+            return
+        except (ValueError, OverflowError):
+            pass
+
+        if len(changeid) == 40:
+            try:
+                self._node = bin(changeid)
+                self._rev = repo.changelog.rev(self._node)
+                return
+            except (TypeError, LookupError):
+                pass
+
+        if changeid in repo._bookmarks:
+            self._node = repo._bookmarks[changeid]
+            self._rev = repo.changelog.rev(self._node)
+            return
+        if changeid in repo._tagscache.tags:
+            self._node = repo._tagscache.tags[changeid]
+            self._rev = repo.changelog.rev(self._node)
+            return
+        if changeid in repo.branchtags():
+            self._node = repo.branchtags()[changeid]
+            self._rev = repo.changelog.rev(self._node)
+            return
+
+        self._node = repo.changelog._partialmatch(changeid)
+        if self._node is not None:
+            self._rev = repo.changelog.rev(self._node)
+            return
+
+        # lookup failed
+        # check if it might have come from damaged dirstate
+        if changeid in repo.dirstate.parents():
+            raise error.Abort(_("working directory has unknown parent '%s'!")
+                              % short(changeid))
+        try:
+            if len(changeid) == 20:
+                changeid = hex(changeid)
+        except TypeError:
+            pass
+        raise error.RepoLookupError(
+            _("unknown revision '%s'") % changeid)
 
     def __str__(self):
         return short(self.node())
@@ -57,7 +129,7 @@ class changectx(object):
 
     @propertycache
     def _changeset(self):
-        return self._repo.changelog.read(self.node())
+        return self._repo.changelog.read(self.rev())
 
     @propertycache
     def _manifest(self):
@@ -611,11 +683,12 @@ class filectx(object):
 
         return None
 
-    def ancestors(self):
+    def ancestors(self, followfirst=False):
         visit = {}
         c = self
+        cut = followfirst and 1 or None
         while True:
-            for parent in c.parents():
+            for parent in c.parents()[:cut]:
                 visit[(parent.rev(), parent.node())] = parent
             if not visit:
                 break
@@ -715,9 +788,6 @@ class workingctx(changectx):
     def _manifest(self):
         """generate a manifest corresponding to the working directory"""
 
-        if self._unknown is None:
-            self.status(unknown=True)
-
         man = self._parents[0].manifest().copy()
         if len(self._parents) > 1:
             man2 = self.p2().manifest()
@@ -731,8 +801,7 @@ class workingctx(changectx):
         copied = self._repo.dirstate.copies()
         ff = self._flagfunc
         modified, added, removed, deleted = self._status
-        unknown = self._unknown
-        for i, l in (("a", added), ("m", modified), ("u", unknown)):
+        for i, l in (("a", added), ("m", modified)):
             for f in l:
                 orig = copied.get(f, f)
                 man[f] = getman(orig).get(orig, nullid) + i

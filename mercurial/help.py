@@ -7,7 +7,7 @@
 
 from i18n import gettext, _
 import sys, os
-import extensions, revset, fileset, templatekw, templatefilters
+import extensions, revset, fileset, templatekw, templatefilters, filemerge
 import util
 
 def listexts(header, exts, indent=1):
@@ -94,8 +94,13 @@ def makeitemsdoc(topic, doc, marker, items):
             continue
         text = gettext(text)
         lines = text.splitlines()
-        lines[1:] = [('  ' + l.strip()) for l in lines[1:]]
-        entries.append('\n'.join(lines))
+        doclines = [(lines[0])]
+        for l in lines[1:]:
+            # Stop once we find some Python doctest
+            if l.strip().startswith('>>>'):
+                break
+            doclines.append('  ' + l.strip())
+        entries.append('\n'.join(doclines))
     entries = '\n\n'.join(entries)
     return doc.replace(marker, entries)
 
@@ -105,6 +110,7 @@ def addtopicsymbols(topic, marker, symbols):
     addtopichook(topic, add)
 
 addtopicsymbols('filesets', '.. predicatesmarker', fileset.symbols)
+addtopicsymbols('merge-tools', '.. internaltoolsmarker', filemerge.internals)
 addtopicsymbols('revsets', '.. predicatesmarker', revset.symbols)
 addtopicsymbols('templates', '.. keywordsmarker', templatekw.keywords)
 addtopicsymbols('templates', '.. filtersmarker', templatefilters.filters)
