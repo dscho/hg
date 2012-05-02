@@ -449,42 +449,46 @@ def backout(ui, repo, node=None, rev=None, **opts):
         parent = p1
 
     # the backout should appear on the same branch
-    branch = repo.dirstate.branch()
-    hg.clean(repo, node, show_stats=False)
-    repo.dirstate.setbranch(branch)
-    revert_opts = opts.copy()
-    revert_opts['date'] = None
-    revert_opts['all'] = True
-    revert_opts['rev'] = hex(parent)
-    revert_opts['no_backup'] = None
-    revert(ui, repo, **revert_opts)
-    if not opts.get('merge') and op1 != node:
-        try:
-            ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
-            return hg.update(repo, op1)
-        finally:
-            ui.setconfig('ui', 'forcemerge', '')
+    wlock = repo.wlock()
+    try:
+        branch = repo.dirstate.branch()
+        hg.clean(repo, node, show_stats=False)
+        repo.dirstate.setbranch(branch)
+        revert_opts = opts.copy()
+        revert_opts['date'] = None
+        revert_opts['all'] = True
+        revert_opts['rev'] = hex(parent)
+        revert_opts['no_backup'] = None
+        revert(ui, repo, **revert_opts)
+        if not opts.get('merge') and op1 != node:
+            try:
+                ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
+                return hg.update(repo, op1)
+            finally:
+                ui.setconfig('ui', 'forcemerge', '')
 
-    commit_opts = opts.copy()
-    commit_opts['addremove'] = False
-    if not commit_opts['message'] and not commit_opts['logfile']:
-        # we don't translate commit messages
-        commit_opts['message'] = "Backed out changeset %s" % short(node)
-        commit_opts['force_editor'] = True
-    commit(ui, repo, **commit_opts)
-    def nice(node):
-        return '%d:%s' % (repo.changelog.rev(node), short(node))
-    ui.status(_('changeset %s backs out changeset %s\n') %
-              (nice(repo.changelog.tip()), nice(node)))
-    if opts.get('merge') and op1 != node:
-        hg.clean(repo, op1, show_stats=False)
-        ui.status(_('merging with changeset %s\n')
-                  % nice(repo.changelog.tip()))
-        try:
-            ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
-            return hg.merge(repo, hex(repo.changelog.tip()))
-        finally:
-            ui.setconfig('ui', 'forcemerge', '')
+        commit_opts = opts.copy()
+        commit_opts['addremove'] = False
+        if not commit_opts['message'] and not commit_opts['logfile']:
+            # we don't translate commit messages
+            commit_opts['message'] = "Backed out changeset %s" % short(node)
+            commit_opts['force_editor'] = True
+        commit(ui, repo, **commit_opts)
+        def nice(node):
+            return '%d:%s' % (repo.changelog.rev(node), short(node))
+        ui.status(_('changeset %s backs out changeset %s\n') %
+                  (nice(repo.changelog.tip()), nice(node)))
+        if opts.get('merge') and op1 != node:
+            hg.clean(repo, op1, show_stats=False)
+            ui.status(_('merging with changeset %s\n')
+                      % nice(repo.changelog.tip()))
+            try:
+                ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
+                return hg.merge(repo, hex(repo.changelog.tip()))
+            finally:
+                ui.setconfig('ui', 'forcemerge', '')
+    finally:
+        wlock.release()
     return 0
 
 @command('bisect',
@@ -859,23 +863,29 @@ def branch(ui, repo, label=None, **opts):
 
     Returns 0 on success.
     """
-
-    if opts.get('clean'):
-        label = repo[None].p1().branch()
-        repo.dirstate.setbranch(label)
-        ui.status(_('reset working directory to branch %s\n') % label)
-    elif label:
-        if not opts.get('force') and label in repo.branchtags():
-            if label not in [p.branch() for p in repo.parents()]:
-                raise util.Abort(_('a branch of the same name already exists'),
-                                 # i18n: "it" refers to an existing branch
-                                 hint=_("use 'hg update' to switch to it"))
-        repo.dirstate.setbranch(label)
-        ui.status(_('marked working directory as branch %s\n') % label)
-        ui.status(_('(branches are permanent and global, '
-                    'did you want a bookmark?)\n'))
-    else:
+    if not opts.get('clean') and not label:
         ui.write("%s\n" % repo.dirstate.branch())
+        return
+
+    wlock = repo.wlock()
+    try:
+        if opts.get('clean'):
+            label = repo[None].p1().branch()
+            repo.dirstate.setbranch(label)
+            ui.status(_('reset working directory to branch %s\n') % label)
+        elif label:
+            if not opts.get('force') and label in repo.branchtags():
+                if label not in [p.branch() for p in repo.parents()]:
+                    raise util.Abort(_('a branch of the same name already'
+                                       ' exists'),
+                                     # i18n: "it" refers to an existing branch
+                                     hint=_("use 'hg update' to switch to it"))
+            repo.dirstate.setbranch(label)
+            ui.status(_('marked working directory as branch %s\n') % label)
+            ui.status(_('(branches are permanent and global, '
+                        'did you want a bookmark?)\n'))
+    finally:
+        wlock.release()
 
 @command('branches',
     [('a', 'active', False, _('show only branches that have unmerged heads')),
@@ -1218,7 +1228,7 @@ def commit(ui, repo, *pats, **opts):
     bheads = repo.branchheads(branch)
 
     if opts.get('amend'):
-        if ui.config('ui', 'commitsubrepos'):
+        if ui.configbool('ui', 'commitsubrepos'):
             raise util.Abort(_('cannot amend recursively'))
 
         old = repo['.']
@@ -2260,7 +2270,7 @@ def debugsetparents(ui, repo, rev1, rev2=None):
 
     wlock = repo.wlock()
     try:
-        repo.dirstate.setparents(r1, r2)
+        repo.setparents(r1, r2)
     finally:
         wlock.release()
 
@@ -2663,52 +2673,56 @@ def graft(ui, repo, *revs, **opts):
     if not revs:
         return -1
 
-    for pos, ctx in enumerate(repo.set("%ld", revs)):
-        current = repo['.']
+    wlock = repo.wlock()
+    try:
+        for pos, ctx in enumerate(repo.set("%ld", revs)):
+            current = repo['.']
 
-        ui.status(_('grafting revision %s\n') % ctx.rev())
-        if opts.get('dry_run'):
-            continue
+            ui.status(_('grafting revision %s\n') % ctx.rev())
+            if opts.get('dry_run'):
+                continue
 
-        # we don't merge the first commit when continuing
-        if not cont:
-            # perform the graft merge with p1(rev) as 'ancestor'
-            try:
-                # ui.forcemerge is an internal variable, do not document
-                repo.ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
-                stats = mergemod.update(repo, ctx.node(), True, True, False,
-                                        ctx.p1().node())
-            finally:
-                ui.setconfig('ui', 'forcemerge', '')
-            # drop the second merge parent
-            repo.dirstate.setparents(current.node(), nullid)
-            repo.dirstate.write()
-            # fix up dirstate for copies and renames
-            cmdutil.duplicatecopies(repo, ctx.rev(), ctx.p1().rev())
-            # report any conflicts
-            if stats and stats[3] > 0:
-                # write out state for --continue
-                nodelines = [repo[rev].hex() + "\n" for rev in revs[pos:]]
-                repo.opener.write('graftstate', ''.join(nodelines))
-                raise util.Abort(
-                    _("unresolved conflicts, can't continue"),
-                    hint=_('use hg resolve and hg graft --continue'))
-        else:
-            cont = False
+            # we don't merge the first commit when continuing
+            if not cont:
+                # perform the graft merge with p1(rev) as 'ancestor'
+                try:
+                    # ui.forcemerge is an internal variable, do not document
+                    repo.ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
+                    stats = mergemod.update(repo, ctx.node(), True, True, False,
+                                            ctx.p1().node())
+                finally:
+                    ui.setconfig('ui', 'forcemerge', '')
+                # drop the second merge parent
+                repo.setparents(current.node(), nullid)
+                repo.dirstate.write()
+                # fix up dirstate for copies and renames
+                cmdutil.duplicatecopies(repo, ctx.rev(), ctx.p1().rev())
+                # report any conflicts
+                if stats and stats[3] > 0:
+                    # write out state for --continue
+                    nodelines = [repo[rev].hex() + "\n" for rev in revs[pos:]]
+                    repo.opener.write('graftstate', ''.join(nodelines))
+                    raise util.Abort(
+                        _("unresolved conflicts, can't continue"),
+                        hint=_('use hg resolve and hg graft --continue'))
+            else:
+                cont = False
 
-        # commit
-        source = ctx.extra().get('source')
-        if not source:
-            source = ctx.hex()
-        extra = {'source': source}
-        user = ctx.user()
-        if opts.get('user'):
-            user = opts['user']
-        date = ctx.date()
-        if opts.get('date'):
-            date = opts['date']
-        repo.commit(text=ctx.description(), user=user,
-                    date=date, extra=extra, editor=editor)
+            # commit
+            source = ctx.extra().get('source')
+            if not source:
+                source = ctx.hex()
+            extra = {'source': source}
+            user = ctx.user()
+            if opts.get('user'):
+                user = opts['user']
+            date = ctx.date()
+            if opts.get('date'):
+                date = opts['date']
+            repo.commit(text=ctx.description(), user=user,
+                        date=date, extra=extra, editor=editor)
+    finally:
+        wlock.release()
 
     # remove state when we complete successfully
     if not opts.get('dry_run') and os.path.exists(repo.join('graftstate')):
@@ -3621,7 +3635,7 @@ def import_(ui, repo, patch1=None, *patches, **opts):
                 if p1 != parents[0]:
                     hg.clean(repo, p1.node())
                 if p2 != parents[1]:
-                    repo.dirstate.setparents(p1.node(), p2.node())
+                    repo.setparents(p1.node(), p2.node())
 
                 if opts.get('exact') or opts.get('import_branch'):
                     repo.dirstate.setbranch(branch or 'default')
@@ -5646,11 +5660,10 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
         rev = cmdutil.finddate(ui, repo, date)
 
     if check:
-        # we could use dirty() but we can ignore merge and branch trivia
         c = repo[None]
-        if c.modified() or c.added() or c.removed():
+        if c.dirty(merge=False, branch=False):
             raise util.Abort(_("uncommitted local changes"))
-        if not rev:
+        if rev is None:
             rev = repo[repo[None].branch()].rev()
         mergemod._checkunknown(repo, repo[None], repo[rev])
 

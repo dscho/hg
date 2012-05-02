@@ -277,7 +277,7 @@ def rebase(ui, repo, **opts):
                                           editor=editor)
                 else:
                     # Skip commit if we are collapsing
-                    repo.dirstate.setparents(repo[p1].node())
+                    repo.setparents(repo[p1].node())
                     newrev = None
                 # Update the state
                 if newrev is not None:
@@ -361,7 +361,7 @@ def checkexternal(repo, state, targetancestors):
 def concludenode(repo, rev, p1, p2, commitmsg=None, editor=None, extrafn=None):
     'Commit the changes and store useful information in extra'
     try:
-        repo.dirstate.setparents(repo[p1].node(), repo[p2].node())
+        repo.setparents(repo[p1].node(), repo[p2].node())
         ctx = repo[rev]
         if commitmsg is None:
             commitmsg = ctx.description()
@@ -446,6 +446,7 @@ def updatemq(repo, state, skipped, **opts):
     mqrebase = {}
     mq = repo.mq
     original_series = mq.fullseries[:]
+    skippedpatches = set()
 
     for p in mq.applied:
         rev = repo[p.node].rev()
@@ -453,6 +454,9 @@ def updatemq(repo, state, skipped, **opts):
             repo.ui.debug('revision %d is an mq patch (%s), finalize it.\n' %
                                         (rev, p.name))
             mqrebase[rev] = (p.name, isagitpatch(repo, p.name))
+        else:
+            # Applied but not rebased, not sure this should happen
+            skippedpatches.add(p.name)
 
     if mqrebase:
         mq.finish(repo, mqrebase.keys())
@@ -464,14 +468,17 @@ def updatemq(repo, state, skipped, **opts):
                 repo.ui.debug('import mq patch %d (%s)\n' % (state[rev], name))
                 mq.qimport(repo, (), patchname=name, git=isgit,
                                 rev=[str(state[rev])])
+            else:
+                # Rebased and skipped
+                skippedpatches.add(mqrebase[rev][0])
 
-        # restore missing guards
-        for s in original_series:
-            pname = mq.guard_re.split(s, 1)[0]
-            if pname in mq.fullseries:
-                repo.ui.debug('restoring guard for patch %s' % (pname))
-                mq.fullseries[mq.fullseries.index(pname)] = s
-                mq.series_dirty = True
+        # Patches were either applied and rebased and imported in
+        # order, applied and removed or unapplied. Discard the removed
+        # ones while preserving the original series order and guards.
+        newseries = [s for s in original_series
+                     if mq.guard_re.split(s, 1)[0] not in skippedpatches]
+        mq.fullseries[:] = newseries
+        mq.seriesdirty = True
         mq.savedirty()
 
 def updatebookmarks(repo, nstate, originalbookmarks, **opts):

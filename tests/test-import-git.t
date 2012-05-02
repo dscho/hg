@@ -362,6 +362,77 @@ Move text file and patch as binary
   A binary2
     text2
   R text2
+
+Invalid base85 content
+
+  $ hg rollback
+  repository tip rolled back to revision 15 (undo import)
+  working directory now based on revision 15
+  $ hg revert -aq
+  $ hg import -d "1000000 0" -m invalid-binary - <<"EOF"
+  > diff --git a/text2 b/binary2
+  > rename from text2
+  > rename to binary2
+  > index 78981922613b2afb6025042ff6bd878ac1994e85..10efcb362e9f3b3420fcfbfc0e37f3dc16e29757
+  > GIT binary patch
+  > literal 5
+  > Mc$`b*O.$Pw00T?_*Z=?k
+  > 
+  > EOF
+  applying patch from stdin
+  abort: could not decode "binary2" binary patch: bad base85 character at position 6
+  [255]
+
+  $ hg revert -aq
+  $ hg import -d "1000000 0" -m rename-as-binary - <<"EOF"
+  > diff --git a/text2 b/binary2
+  > rename from text2
+  > rename to binary2
+  > index 78981922613b2afb6025042ff6bd878ac1994e85..10efcb362e9f3b3420fcfbfc0e37f3dc16e29757
+  > GIT binary patch
+  > literal 6
+  > Mc$`b*O5$Pw00T?_*Z=?k
+  > 
+  > EOF
+  applying patch from stdin
+  abort: "binary2" length is 5 bytes, should be 6
+  [255]
+
+  $ hg revert -aq
+  $ hg import -d "1000000 0" -m rename-as-binary - <<"EOF"
+  > diff --git a/text2 b/binary2
+  > rename from text2
+  > rename to binary2
+  > index 78981922613b2afb6025042ff6bd878ac1994e85..10efcb362e9f3b3420fcfbfc0e37f3dc16e29757
+  > GIT binary patch
+  > Mc$`b*O5$Pw00T?_*Z=?k
+  > 
+  > EOF
+  applying patch from stdin
+  abort: could not extract "binary2" binary data
+  [255]
+
+Simulate a copy/paste turning LF into CRLF (issue2870)
+
+  $ hg revert -aq
+  $ cat > binary.diff <<"EOF"
+  > diff --git a/text2 b/binary2
+  > rename from text2
+  > rename to binary2
+  > index 78981922613b2afb6025042ff6bd878ac1994e85..10efcb362e9f3b3420fcfbfc0e37f3dc16e29757
+  > GIT binary patch
+  > literal 5
+  > Mc$`b*O5$Pw00T?_*Z=?k
+  > 
+  > EOF
+  >>> fp = file('binary.diff', 'rb')
+  >>> data = fp.read()
+  >>> fp.close()
+  >>> file('binary.diff', 'wb').write(data.replace('\n', '\r\n'))
+  $ rm binary2
+  $ hg import --no-commit binary.diff
+  applying binary.diff
+
   $ cd ..
 
 Consecutive import with renames (issue2459)
@@ -482,5 +553,29 @@ Copy and changes with existing destination
   $ hg st
   ? b.rej
   ? linkb.rej
+
+Test corner case involving copies and multiple hunks (issue3384)
+
+  $ hg revert -qa
+  $ hg import --no-commit - <<EOF
+  > diff --git a/a b/c
+  > copy from a
+  > copy to c
+  > --- a/a
+  > +++ b/c
+  > @@ -1,1 +1,2 @@
+  >  a
+  > +a
+  > @@ -2,1 +2,2 @@
+  >  a
+  > +a
+  > diff --git a/a b/a
+  > --- a/a
+  > +++ b/a
+  > @@ -1,1 +1,2 @@
+  >  a
+  > +b
+  > EOF
+  applying patch from stdin
 
   $ cd ..

@@ -20,6 +20,9 @@ from mercurial import bundlerepo, hg, merge, match
 from mercurial import patch, revlog, scmutil, util, error, cmdutil
 from mercurial import revset, templatekw
 
+class TransplantError(error.Abort):
+    pass
+
 cmdtable = {}
 command = cmdutil.command(cmdtable)
 
@@ -171,11 +174,17 @@ class transplanter(object):
                 del revmap[rev]
                 if patchfile or domerge:
                     try:
-                        n = self.applyone(repo, node,
-                                          source.changelog.read(node),
-                                          patchfile, merge=domerge,
-                                          log=opts.get('log'),
-                                          filter=opts.get('filter'))
+                        try:
+                            n = self.applyone(repo, node,
+                                              source.changelog.read(node),
+                                              patchfile, merge=domerge,
+                                              log=opts.get('log'),
+                                              filter=opts.get('filter'))
+                        except TransplantError:
+                            # Do not rollback, it is up to the user to
+                            # fix the merge or cancel everything
+                            tr.close()
+                            raise
                         if n and domerge:
                             self.ui.status(_('%s merged at %s\n') % (revstr,
                                       short(n)))
@@ -259,13 +268,13 @@ class transplanter(object):
                 p2 = node
                 self.log(user, date, message, p1, p2, merge=merge)
                 self.ui.write(str(inst) + '\n')
-                raise util.Abort(_('fix up the merge and run '
-                                   'hg transplant --continue'))
+                raise TransplantError(_('fix up the merge and run '
+                                        'hg transplant --continue'))
         else:
             files = None
         if merge:
             p1, p2 = repo.dirstate.parents()
-            repo.dirstate.setparents(p1, node)
+            repo.setparents(p1, node)
             m = match.always(repo.root, '')
         else:
             m = match.exact(repo.root, '', files)
@@ -331,7 +340,7 @@ class transplanter(object):
                     _('working dir not at transplant parent %s') %
                                  revlog.hex(parent))
             if merge:
-                repo.dirstate.setparents(p1, parents[1])
+                repo.setparents(p1, parents[1])
             n = repo.commit(message, user, date, extra=extra,
                             editor=self.editor)
             if not n:

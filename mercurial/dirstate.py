@@ -237,14 +237,36 @@ class dirstate(object):
         return encoding.tolocal(self._branch)
 
     def setparents(self, p1, p2=nullid):
+        """Set dirstate parents to p1 and p2.
+
+        When moving from two parents to one, 'm' merged entries a
+        adjusted to normal and previous copy records discarded and
+        returned by the call.
+
+        See localrepo.setparents()
+        """
         self._dirty = self._dirtypl = True
+        oldp2 = self._pl[1]
         self._pl = p1, p2
+        copies = {}
+        if oldp2 != nullid and p2 == nullid:
+            # Discard 'm' markers when moving away from a merge state
+            for f, s in self._map.iteritems():
+                if s[0] == 'm':
+                    if f in self._copymap:
+                        copies[f] = self._copymap[f]
+                    self.normallookup(f)
+        return copies
 
     def setbranch(self, branch):
         if branch in ['tip', '.', 'null']:
             raise util.Abort(_('the name \'%s\' is reserved') % branch)
         self._branch = encoding.fromlocal(branch)
-        self._opener.write("branch", self._branch + '\n')
+        f = self._opener('branch', 'w', atomictemp=True)
+        try:
+            f.write(self._branch + '\n')
+        finally:
+            f.close()
 
     def _read(self):
         self._map = {}
@@ -382,6 +404,8 @@ class dirstate(object):
 
     def merge(self, f):
         '''Mark a file merged.'''
+        if self._pl[1] == nullid:
+            return self.normallookup(f)
         self._dirty = True
         s = os.lstat(self._join(f))
         self._addpath(f)
@@ -396,32 +420,48 @@ class dirstate(object):
             self._droppath(f)
             del self._map[f]
 
-    def _normalize(self, path, isknown):
+    def _normalize(self, path, isknown, ignoremissing=False, exists=None):
         normed = util.normcase(path)
         folded = self._foldmap.get(normed, None)
         if folded is None:
-            if isknown or not os.path.lexists(os.path.join(self._root, path)):
+            if isknown:
                 folded = path
             else:
-                # recursively normalize leading directory components
-                # against dirstate
-                if '/' in normed:
-                    d, f = normed.rsplit('/', 1)
-                    d = self._normalize(d, isknown)
-                    r = self._root + "/" + d
-                    folded = d + "/" + util.fspath(f, r)
+                if exists is None:
+                    exists = os.path.lexists(os.path.join(self._root, path))
+                if not exists:
+                    # Maybe a path component exists
+                    if not ignoremissing and '/' in path:
+                        d, f = path.rsplit('/', 1)
+                        d = self._normalize(d, isknown, ignoremissing, None)
+                        folded = d + "/" + f
+                    else:
+                        # No path components, preserve original case
+                        folded = path
                 else:
-                    folded = util.fspath(normed, self._root)
-                self._foldmap[normed] = folded
+                    # recursively normalize leading directory components
+                    # against dirstate
+                    if '/' in normed:
+                        d, f = normed.rsplit('/', 1)
+                        d = self._normalize(d, isknown, ignoremissing, True)
+                        r = self._root + "/" + d
+                        folded = d + "/" + util.fspath(f, r)
+                    else:
+                        folded = util.fspath(normed, self._root)
+                    self._foldmap[normed] = folded
 
         return folded
 
-    def normalize(self, path, isknown=False):
+    def normalize(self, path, isknown=False, ignoremissing=False):
         '''
         normalize the case of a pathname when on a casefolding filesystem
 
         isknown specifies whether the filename came from walking the
-        disk, to avoid extra filesystem access
+        disk, to avoid extra filesystem access.
+
+        If ignoremissing is True, missing path are returned
+        unchanged. Otherwise, we try harder to normalize possibly
+        existing path components.
 
         The normalized case is determined based on the following precedence:
 
@@ -431,7 +471,7 @@ class dirstate(object):
         '''
 
         if self._checkcase:
-            return self._normalize(path, isknown)
+            return self._normalize(path, isknown, ignoremissing)
         return path
 
     def clear(self):
@@ -563,7 +603,7 @@ class dirstate(object):
             normalize = self._normalize
             skipstep3 = False
         else:
-            normalize = lambda x, y: x
+            normalize = lambda x, y, z: x
 
         files = sorted(match.files())
         subrepos.sort()
@@ -584,7 +624,7 @@ class dirstate(object):
 
         # step 1: find all explicit files
         for ff in files:
-            nf = normalize(normpath(ff), False)
+            nf = normalize(normpath(ff), False, True)
             if nf in results:
                 continue
 
@@ -634,7 +674,7 @@ class dirstate(object):
                     continue
                 raise
             for f, kind, st in entries:
-                nf = normalize(nd and (nd + "/" + f) or f, True)
+                nf = normalize(nd and (nd + "/" + f) or f, True, True)
                 if nf not in results:
                     if kind == dirkind:
                         if not ignore(nf):

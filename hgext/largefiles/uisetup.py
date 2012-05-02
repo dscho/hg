@@ -12,6 +12,7 @@ from mercurial import archival, cmdutil, commands, extensions, filemerge, hg, \
     httprepo, localrepo, merge, sshrepo, sshserver, wireproto
 from mercurial.i18n import _
 from mercurial.hgweb import hgweb_mod, protocol, webcommands
+from mercurial.subrepo import hgsubrepo
 
 import overrides
 import proto
@@ -35,8 +36,13 @@ def uisetup(ui):
                                    overrides.overrideremove)
     entry = extensions.wrapcommand(commands.table, 'forget',
                                    overrides.overrideforget)
+
+    # Subrepos call status function
     entry = extensions.wrapcommand(commands.table, 'status',
                                    overrides.overridestatus)
+    entry = extensions.wrapfunction(hgsubrepo, 'status',
+                                    overrides.overridestatusfn)
+
     entry = extensions.wrapcommand(commands.table, 'log',
                                    overrides.overridelog)
     entry = extensions.wrapcommand(commands.table, 'rollback',
@@ -74,6 +80,10 @@ def uisetup(ui):
                                     overrides.overridefilemerge)
     entry = extensions.wrapfunction(cmdutil, 'copy',
                                     overrides.overridecopy)
+
+    # Summary calls dirty on the subrepos
+    entry = extensions.wrapfunction(hgsubrepo, 'dirty',
+                                    overrides.overridedirty)
 
     # Backout calls revert so we need to override both the command and the
     # function

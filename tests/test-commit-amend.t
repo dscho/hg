@@ -1,3 +1,5 @@
+  $ "$TESTDIR/hghave" execbit || exit 80
+
   $ hg init
 
 Setup:
@@ -273,7 +275,7 @@ Follow copies/renames:
   $ hg mv c d
   $ hg ci --amend -m 'b -> d'
   saved backup bundle to $TESTTMP/.hg/strip-backup/9c207120aa98-amend-backup.hg
-  $ hg st --rev .^ --copies d
+  $ hg st --rev '.^' --copies d
   A d
     b
   $ hg cp d e
@@ -281,9 +283,33 @@ Follow copies/renames:
   $ hg cp e f
   $ hg ci --amend -m 'f = d'
   saved backup bundle to $TESTTMP/.hg/strip-backup/fda2b3b27b22-amend-backup.hg
-  $ hg st --rev .^ --copies f
+  $ hg st --rev '.^' --copies f
   A f
     d
+
+  $ mv f f.orig
+  $ hg rm -A f
+  $ hg ci -m removef
+  $ hg cp a f
+  $ mv f.orig f
+  $ hg ci --amend -m replacef
+  saved backup bundle to $TESTTMP/.hg/strip-backup/20a7413547f9-amend-backup.hg
+  $ hg st --change . --copies
+  $ hg log -r . --template "{file_copies}\n"
+  
+
+Move added file (issue3410):
+
+  $ echo g >> g
+  $ hg ci -Am g
+  adding g
+  $ hg mv g h
+  $ hg ci --amend
+  saved backup bundle to $TESTTMP/.hg/strip-backup/5daa77a5d616-amend-backup.hg
+  $ hg st --change . --copies h
+  A h
+  $ hg log -r . --template "{file_copies}\n"
+  
 
 Can't rollback an amend:
 

@@ -291,7 +291,8 @@ def bisect(repo, subset, x):
     - ``ignored``            : csets ignored due to DAG topology
     """
     status = getstring(x, _("bisect requires a string")).lower()
-    return [r for r in subset if r in hbisect.get(repo, status)]
+    state = set(hbisect.get(repo, status))
+    return [r for r in subset if r in state]
 
 # Backward-compatibility
 # - no help entry so that we do not advertise it any more
@@ -340,23 +341,26 @@ def branch(repo, subset, x):
 def checkstatus(repo, subset, pat, field):
     m = None
     s = []
-    fast = not matchmod.patkind(pat)
+    hasset = matchmod.patkind(pat) == 'set'
+    fname = None
     for r in subset:
         c = repo[r]
-        if fast:
-            if pat not in c.files():
+        if not m or hasset:
+            m = matchmod.match(repo.root, repo.getcwd(), [pat], ctx=c)
+            if not m.anypats() and len(m.files()) == 1:
+                fname = m.files()[0]
+        if fname is not None:
+            if fname not in c.files():
                 continue
         else:
-            if not m or matchmod.patkind(pat) == 'set':
-                m = matchmod.match(repo.root, repo.getcwd(), [pat], ctx=c)
             for f in c.files():
                 if m(f):
                     break
             else:
                 continue
         files = repo.status(c.p1().node(), c.node())[field]
-        if fast:
-            if pat in files:
+        if fname is not None:
+            if fname in files:
                 s.append(r)
         else:
             for f in files:
@@ -910,19 +914,23 @@ def matching(repo, subset, x):
     """``matching(revision [, field])``
     Changesets in which a given set of fields match the set of fields in the
     selected revision or set.
+
     To match more than one field pass the list of fields to match separated
-    by spaces (e.g. 'author description').
-    Valid fields are most regular revision fields and some special fields:
-    * regular fields:
-      - description, author, branch, date, files, phase, parents,
-      substate, user.
-      Note that author and user are synonyms.
-    * special fields: summary, metadata.
-      - summary: matches the first line of the description.
-      - metatadata: It is equivalent to matching 'description user date'
-        (i.e. it matches the main metadata fields).
-    metadata is the default field which is used when no fields are specified.
-    You can match more than one field at a time.
+    by spaces (e.g. ``author description``).
+
+    Valid fields are most regular revision fields and some special fields.
+
+    Regular revision fields are ``description``, ``author``, ``branch``,
+    ``date``, ``files``, ``phase``, ``parents``, ``substate`` and ``user``.
+    Note that ``author`` and ``user`` are synonyms.
+
+    Special fields are ``summary`` and ``metadata``:
+    ``summary`` matches the first line of the description.
+    ``metatadata`` is equivalent to matching ``description user date``
+    (i.e. it matches the main metadata fields).
+
+    ``metadata`` is the default field which is used when no fields are
+    specified. You can match more than one field at a time.
     """
     l = getargs(x, 1, 2, _("matching takes 1 or 2 arguments"))
 

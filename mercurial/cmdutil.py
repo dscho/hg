@@ -268,6 +268,11 @@ def copy(ui, repo, pats, opts, rename=False):
     # otarget: ossep
     def copyfile(abssrc, relsrc, otarget, exact):
         abstarget = scmutil.canonpath(repo.root, cwd, otarget)
+        if '/' in abstarget:
+            # We cannot normalize abstarget itself, this would prevent
+            # case only renames, like a => A.
+            abspath, absname = abstarget.rsplit('/', 1)
+            abstarget = repo.dirstate.normalize(abspath) + '/' + absname
         reltarget = repo.pathto(abstarget, cwd)
         target = repo.wjoin(abstarget)
         src = repo.wjoin(abssrc)
@@ -1291,9 +1296,6 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
 
     wlock = repo.wlock()
     try:
-        # Fix up dirstate for copies and renames
-        duplicatecopies(repo, None, base.node())
-
         # First, do a regular commit to record all changes in the working
         # directory (if there are any)
         node = commit(ui, repo, commitfunc, pats, opts)
@@ -1321,6 +1323,8 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
             date = ctx.date()
             message = ctx.description()
             extra = ctx.extra()
+            # Recompute copies (avoid recording a -> b -> a)
+            copied = copies.pathcopies(base, ctx)
 
             # Prune files which were reverted by the updates: if old introduced
             # file X and our intermediate commit, node, renamed that file, then
@@ -1334,8 +1338,7 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
                     if f in base.manifest():
                         b = base.filectx(f)
                         return (a.data() == b.data()
-                                and a.flags() == b.flags()
-                                and a.renamed() == b.renamed())
+                                and a.flags() == b.flags())
                     else:
                         return False
                 else:
@@ -1344,7 +1347,13 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
 
             def filectxfn(repo, ctx_, path):
                 try:
-                    return ctx.filectx(path)
+                    fctx = ctx[path]
+                    flags = fctx.flags()
+                    mctx = context.memfilectx(fctx.path(), fctx.data(),
+                                              islink='l' in flags,
+                                              isexec='x' in flags,
+                                              copied=copied.get(path))
+                    return mctx
                 except KeyError:
                     raise IOError()
         else:
@@ -1379,7 +1388,7 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
         newid = repo.commitctx(new)
         if newid != old.node():
             # Reroute the working copy parent to the new changeset
-            repo.dirstate.setparents(newid, nullid)
+            repo.setparents(newid, nullid)
 
             # Move bookmarks from old parent to amend commit
             bms = repo.nodebookmarks(old.node())

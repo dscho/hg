@@ -120,6 +120,15 @@ change file in svn and hg, commit
    source   file://*/svn-repo/src (glob)
    revision 2
 
+missing svn file, commit should fail
+
+  $ rm s/alpha
+  $ hg commit --subrepos -m 'abort on missing file'
+  committing subrepository s
+  abort: cannot commit missing svn entries
+  [255]
+  $ svn revert s/alpha > /dev/null
+
 add an unrelated revision in svn and update the subrepo to without
 bringing any changes.
 
@@ -272,13 +281,13 @@ Check hg update --clean
   Checked out revision 3.
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd t/s
-  $ svn status
+  $ svn status | sort
+  
   ? *    a (glob)
-  X *    externals (glob)
   ? *    f1 (glob)
   ? *    f2 (glob)
-  
   Performing status on external item at 'externals'* (glob)
+  X *    externals (glob)
 
 Sticky subrepositories, no changes
   $ cd $TESTTMP/sub/t
@@ -548,3 +557,49 @@ Test archive
   archiving (s): 2/2 files (100.00%)
   archiving (recreated): 0/1 files (0.00%)
   archiving (recreated): 1/1 files (100.00%)
+
+Test forgetting files, not implemented in svn subrepo, used to
+traceback
+
+  $ hg forget 'notafile*'
+  notafile*: No such file or directory
+  [1]
+
+Test a subrepo referencing a just moved svn path. Last commit rev will
+be different from the revision, and the path will be different as
+well.
+
+  $ cd $WCROOT
+  $ svn up > /dev/null
+  $ mkdir trunk/subdir branches
+  $ echo a > trunk/subdir/a
+  $ svn add trunk/subdir branches
+  A         trunk/subdir
+  A         trunk/subdir/a
+  A         branches
+  $ svn ci -m addsubdir
+  Adding         branches
+  Adding         trunk/subdir
+  Adding         trunk/subdir/a
+  Transmitting file data .
+  Committed revision 14.
+  $ svn cp -m branchtrunk $SVNREPO/trunk $SVNREPO/branches/somebranch
+  
+  Committed revision 15.
+  $ cd ..
+
+  $ hg init repo2
+  $ cd repo2
+  $ svn co $SVNREPO/branches/somebranch/subdir
+  A    subdir/a
+  Checked out revision 15.
+  $ echo "subdir = [svn] $SVNREPO/branches/somebranch/subdir" > .hgsub
+  $ hg add .hgsub
+  $ hg ci -m addsub
+  $ hg up null
+  0 files updated, 0 files merged, 2 files removed, 0 files unresolved
+  $ hg up
+  A    *subdir/a (glob)
+  Checked out revision 15.
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ cd ..

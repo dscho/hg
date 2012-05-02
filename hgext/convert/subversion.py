@@ -2,16 +2,13 @@
 #
 # Copyright(C) 2007 Daniel Holth et al
 
-import os
-import re
-import sys
+import os, re, sys, tempfile, urllib, urllib2, xml.dom.minidom
 import cPickle as pickle
-import tempfile
-import urllib
-import urllib2
 
 from mercurial import strutil, scmutil, util, encoding
 from mercurial.i18n import _
+
+propertycache = util.propertycache
 
 # Subversion stuff. Works best with very recent Python SVN bindings
 # e.g. SVN 1.5 or backports. Thanks to the bzr folks for enhancing
@@ -555,18 +552,47 @@ class svn_source(converter_source):
     def revnum(self, rev):
         return int(rev.split('@')[-1])
 
-    def latest(self, path, stop=0):
-        """Find the latest revid affecting path, up to stop. It may return
-        a revision in a different module, since a branch may be moved without
-        a change being reported. Return None if computed module does not
-        belong to rootmodule subtree.
+    def latest(self, path, stop=None):
+        """Find the latest revid affecting path, up to stop revision
+        number. If stop is None, default to repository latest
+        revision. It may return a revision in a different module,
+        since a branch may be moved without a change being
+        reported. Return None if computed module does not belong to
+        rootmodule subtree.
         """
+        def findchanges(path, start, stop=None):
+            stream = self._getlog([path], start, stop or 1)
+            try:
+                for entry in stream:
+                    paths, revnum, author, date, message = entry
+                    if stop is None and paths:
+                        # We do not know the latest changed revision,
+                        # keep the first one with changed paths.
+                        break
+                    if revnum <= stop:
+                        break
+
+                    for p in paths:
+                        if (not path.startswith(p) or
+                            not paths[p].copyfrom_path):
+                            continue
+                        newpath = paths[p].copyfrom_path + path[len(p):]
+                        self.ui.debug("branch renamed from %s to %s at %d\n" %
+                                      (path, newpath, revnum))
+                        path = newpath
+                        break
+                if not paths:
+                    revnum = None
+                return revnum, path
+            finally:
+                stream.close()
+
         if not path.startswith(self.rootmodule):
             # Requests on foreign branches may be forbidden at server level
             self.ui.debug('ignoring foreign branch %r\n' % path)
             return None
 
-        if not stop:
+        if stop is None:
             stop = svn.ra.get_latest_revnum(self.ra)
         try:
             prevmodule = self.reparent('')
@@ -581,28 +607,24 @@ class svn_source(converter_source):
         # stat() gives us the previous revision on this line of
         # development, but it might be in *another module*. Fetch the
         # log and detect renames down to the latest revision.
-        stream = self._getlog([path], stop, dirent.created_rev)
-        try:
-            for entry in stream:
-                paths, revnum, author, date, message = entry
-                if revnum <= dirent.created_rev:
-                    break
+        revnum, realpath = findchanges(path, stop, dirent.created_rev)
+        if revnum is None:
+            # Tools like svnsync can create empty revision, when
+            # synchronizing only a subtree for instance. These empty
+            # revisions created_rev still have their original values
+            # despite all changes having disappeared and can be
+            # returned by ra.stat(), at least when stating the root
+            # module. In that case, do not trust created_rev and scan
+            # the whole history.
+            revnum, realpath = findchanges(path, stop)
+            if revnum is None:
+                self.ui.debug('ignoring empty branch %r\n' % realpath)
+                return None
 
-                for p in paths:
-                    if not path.startswith(p) or not paths[p].copyfrom_path:
-                        continue
-                    newpath = paths[p].copyfrom_path + path[len(p):]
-                    self.ui.debug("branch renamed from %s to %s at %d\n" %
-                                  (path, newpath, revnum))
-                    path = newpath
-                    break
-        finally:
-            stream.close()
-
-        if not path.startswith(self.rootmodule):
-            self.ui.debug('ignoring foreign branch %r\n' % path)
+        if not realpath.startswith(self.rootmodule):
+            self.ui.debug('ignoring foreign branch %r\n' % realpath)
             return None
-        return self.revid(dirent.created_rev, path)
+        return self.revid(revnum, realpath)
 
     def reparent(self, module):
         """Reparent the svn transport and return the previous parent."""
@@ -783,7 +805,7 @@ class svn_source(converter_source):
                 branch = None
 
             cset = commit(author=author,
-                          date=util.datestr(date),
+                          date=util.datestr(date, '%Y-%m-%d %H:%M:%S %1%2'),
                           desc=log,
                           parents=parents,
                           branch=branch,
@@ -1032,6 +1054,29 @@ class svn_sink(converter_sink, commandline):
     def wjoin(self, *names):
         return os.path.join(self.wc, *names)
 
+    @propertycache
+    def manifest(self):
+        # As of svn 1.7, the "add" command fails when receiving
+        # already tracked entries, so we have to track and filter them
+        # ourselves.
+        m = set()
+        output = self.run0('ls', recursive=True, xml=True)
+        doc = xml.dom.minidom.parseString(output)
+        for e in doc.getElementsByTagName('entry'):
+            for n in e.childNodes:
+                if n.nodeType != n.ELEMENT_NODE or n.tagName != 'name':
+                    continue
+                name = ''.join(c.data for c in n.childNodes
+                               if c.nodeType == c.TEXT_NODE)
+                # Entries are compared with names coming from
+                # mercurial, so bytes with undefined encoding. Our
+                # best bet is to assume they are in local
+                # encoding. They will be passed to command line calls
+                # later anyway, so they better be.
+                m.add(encoding.tolocal(name.encode('utf-8')))
+                break
+        return m
+
     def putfile(self, filename, flags, data):
         if 'l' in flags:
             self.wopener.symlink(data, filename)
@@ -1074,6 +1119,7 @@ class svn_sink(converter_sink, commandline):
         try:
             self.run0('copy', source, dest)
         finally:
+            self.manifest.add(dest)
             if exists:
                 try:
                     os.unlink(wdest)
@@ -1092,13 +1138,16 @@ class svn_sink(converter_sink, commandline):
 
     def add_dirs(self, files):
         add_dirs = [d for d in sorted(self.dirs_of(files))
-                    if not os.path.exists(self.wjoin(d, '.svn', 'entries'))]
+                    if d not in self.manifest]
         if add_dirs:
+            self.manifest.update(add_dirs)
             self.xargs(add_dirs, 'add', non_recursive=True, quiet=True)
         return add_dirs
 
     def add_files(self, files):
+        files = [f for f in files if f not in self.manifest]
         if files:
+            self.manifest.update(files)
             self.xargs(files, 'add', quiet=True)
         return files
 
@@ -1108,6 +1157,7 @@ class svn_sink(converter_sink, commandline):
             wd = self.wjoin(d)
             if os.listdir(wd) == '.svn':
                 self.run0('delete', d)
+                self.manifest.remove(d)
                 deleted.append(d)
         return deleted
 
@@ -1145,6 +1195,8 @@ class svn_sink(converter_sink, commandline):
             self.copies = []
         if self.delete:
             self.xargs(self.delete, 'delete')
+            for f in self.delete:
+                self.manifest.remove(f)
             self.delete = []
         entries.update(self.add_files(files.difference(entries)))
         entries.update(self.tidy_dirs(entries))

@@ -230,7 +230,7 @@ def extract(ui, fileobj):
                         elif line.startswith("# Node ID "):
                             nodeid = line[10:]
                         elif line.startswith("# Parent "):
-                            parents.append(line[10:])
+                            parents.append(line[9:].lstrip())
                         elif not line.startswith("# "):
                             hgpatchheader = False
                     elif line == '---' and gitsendmail:
@@ -289,6 +289,19 @@ class patchmeta(object):
         other.op = self.op
         other.binary = self.binary
         return other
+
+    def _ispatchinga(self, afile):
+        if afile == '/dev/null':
+            return self.op == 'ADD'
+        return afile == 'a/' + (self.oldpath or self.path)
+
+    def _ispatchingb(self, bfile):
+        if bfile == '/dev/null':
+            return self.op == 'DELETE'
+        return bfile == 'b/' + self.path
+
+    def ispatching(self, afile, bfile):
+        return self._ispatchinga(afile) and self._ispatchingb(bfile)
 
     def __repr__(self):
         return "<patchmeta %s %r>" % (self.op, self.path)
@@ -1009,9 +1022,10 @@ class hunk(object):
 
 class binhunk(object):
     'A binary patch file. Only understands literals so far.'
-    def __init__(self, lr):
+    def __init__(self, lr, fname):
         self.text = None
         self.hunk = ['GIT binary patch\n']
+        self._fname = fname
         self._read(lr)
 
     def complete(self):
@@ -1021,30 +1035,36 @@ class binhunk(object):
         return [self.text]
 
     def _read(self, lr):
-        line = lr.readline()
-        self.hunk.append(line)
+        def getline(lr, hunk):
+            l = lr.readline()
+            hunk.append(l)
+            return l.rstrip('\r\n')
+
+        line = getline(lr, self.hunk)
         while line and not line.startswith('literal '):
-            line = lr.readline()
-            self.hunk.append(line)
+            line = getline(lr, self.hunk)
         if not line:
-            raise PatchError(_('could not extract binary patch'))
+            raise PatchError(_('could not extract "%s" binary data')
+                             % self._fname)
         size = int(line[8:].rstrip())
         dec = []
-        line = lr.readline()
-        self.hunk.append(line)
+        line = getline(lr, self.hunk)
         while len(line) > 1:
             l = line[0]
             if l <= 'Z' and l >= 'A':
                 l = ord(l) - ord('A') + 1
             else:
                 l = ord(l) - ord('a') + 27
-            dec.append(base85.b85decode(line[1:-1])[:l])
-            line = lr.readline()
-            self.hunk.append(line)
+            try:
+                dec.append(base85.b85decode(line[1:])[:l])
+            except ValueError, e:
+                raise PatchError(_('could not decode "%s" binary patch: %s')
+                                 % (self._fname, str(e)))
+            line = getline(lr, self.hunk)
         text = zlib.decompress(''.join(dec))
         if len(text) != size:
-            raise PatchError(_('binary patch is %d bytes, not %d') %
-                             len(text), size)
+            raise PatchError(_('"%s" length is %d bytes, should be %d')
+                             % (self._fname, len(text), size))
         self.text = text
 
 def parsefilename(str):
@@ -1180,10 +1200,10 @@ def iterhunks(fp):
             or x.startswith('GIT binary patch')):
             gp = None
             if (gitpatches and
-                (gitpatches[-1][0] == afile or gitpatches[-1][1] == bfile)):
-                gp = gitpatches.pop()[2]
+                gitpatches[-1].ispatching(afile, bfile)):
+                gp = gitpatches.pop()
             if x.startswith('GIT binary patch'):
-                h = binhunk(lr)
+                h = binhunk(lr, gp.path)
             else:
                 if context is None and x.startswith('***************'):
                     context = True
@@ -1194,25 +1214,24 @@ def iterhunks(fp):
                 yield 'file', (afile, bfile, h, gp and gp.copy() or None)
             yield 'hunk', h
         elif x.startswith('diff --git'):
-            m = gitre.match(x)
+            m = gitre.match(x.rstrip(' \r\n'))
             if not m:
                 continue
-            if not gitpatches:
+            if gitpatches is None:
                 # scan whole input for git metadata
-                gitpatches = [('a/' + gp.path, 'b/' + gp.path, gp) for gp
-                              in scangitpatch(lr, x)]
-                yield 'git', [g[2].copy() for g in gitpatches
-                              if g[2].op in ('COPY', 'RENAME')]
+                gitpatches = scangitpatch(lr, x)
+                yield 'git', [g.copy() for g in gitpatches
+                              if g.op in ('COPY', 'RENAME')]
                 gitpatches.reverse()
             afile = 'a/' + m.group(1)
             bfile = 'b/' + m.group(2)
-            while afile != gitpatches[-1][0] and bfile != gitpatches[-1][1]:
-                gp = gitpatches.pop()[2]
+            while gitpatches and not gitpatches[-1].ispatching(afile, bfile):
+                gp = gitpatches.pop()
                 yield 'file', ('a/' + gp.path, 'b/' + gp.path, None, gp.copy())
-            gp = gitpatches[-1][2]
-            # copy/rename + modify should modify target, not source
-            if gp.op in ('COPY', 'DELETE', 'RENAME', 'ADD') or gp.mode:
-                afile = bfile
+            if not gitpatches:
+                raise PatchError(_('failed to synchronize metadata for "%s"')
+                                 % afile[2:])
+            gp = gitpatches[-1]
             newfile = True
         elif x.startswith('---'):
             # check for a unified diff
@@ -1247,7 +1266,7 @@ def iterhunks(fp):
             hunknum = 0
 
     while gitpatches:
-        gp = gitpatches.pop()[2]
+        gp = gitpatches.pop()
         yield 'file', ('a/' + gp.path, 'b/' + gp.path, None, gp.copy())
 
 def applydiff(ui, fp, backend, store, strip=1, eolmode='strict'):

@@ -380,9 +380,7 @@ Ensure --continue restores a correct state (issue3046) and phase:
   $ hg rebase -c
   saved backup bundle to $TESTTMP/a7/.hg/strip-backup/6215fafa5447-backup.hg (glob)
   $ hg  log -G --template "{rev}:{phase} '{desc}' {branches}\n"
-  @  8:secret 'H2'
-  |
-  o  7:draft 'H'
+  @  7:draft 'H'
   |
   | o  6:draft 'G'
   |/|
@@ -398,4 +396,3 @@ Ensure --continue restores a correct state (issue3046) and phase:
   |/
   o  0:draft 'A'
   
-

@@ -117,9 +117,7 @@ already has one local mq patch
   saved backup bundle to $TESTTMP/b/.hg/strip-backup/*-backup.hg (glob)
 
   $ hg tglog
-  @  9: 'r5' tags: 5.diff qtip tip
-  |
-  o  8: 'r4' tags: 4.diff
+  @  8: 'r5' tags: 5.diff qtip tip
   |
   o  7: 'r2' tags: 2.diff qbase
   |

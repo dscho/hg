@@ -815,7 +815,7 @@ Test that renaming a largefile results in correct output for status
 
 Test --normal flag
 
-  $ dd if=/dev/urandom bs=2k count=11k > new-largefile 2> /dev/null
+  $ dd if=/dev/zero bs=2k count=11k > new-largefile 2> /dev/null
   $ hg add --normal --large new-largefile
   abort: --normal cannot be used with --large
   [255]
@@ -881,7 +881,7 @@ used all HGPORTs, kill all daemons
   $ "$TESTDIR/killdaemons.py"
 
 vanilla clients locked out from largefiles ssh repos
-  $ hg --config extensions.largefiles=! clone -e 'python "$TESTDIR/dummyssh"' ssh://user@dummy/r4 r5
+  $ hg --config extensions.largefiles=! clone -e "python \"$TESTDIR/dummyssh\"" ssh://user@dummy/r4 r5
   abort: remote error:
   
   This repository uses the largefiles extension.
@@ -945,7 +945,7 @@ We have to simulate that here by setting $HOME and removing write permissions
   $ cd alice
   $ hg init pubrepo
   $ cd pubrepo
-  $ dd if=/dev/urandom bs=1k count=11k > a-large-file 2> /dev/null
+  $ dd if=/dev/zero bs=1k count=11k > a-large-file 2> /dev/null
   $ hg add --large a-large-file
   $ hg commit -m "Add a large file"
   Invoking status precommit hook
@@ -1050,5 +1050,50 @@ verify that largefiles doesn't break filesets
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     add files
   
-
+verify that large files in subrepos handled properly
+  $ hg init subrepo
+  $ echo "subrepo = subrepo" > .hgsub
+  $ hg add .hgsub
+  $ hg ci -m "add subrepo"
+  Invoking status precommit hook
+  A .hgsub
+  ? .hgsubstate
+  $ echo "rev 1" > subrepo/large.txt
+  $ hg -R subrepo add --large subrepo/large.txt
+  $ hg sum
+  parent: 1:8ee150ea2e9c tip
+   add subrepo
+  branch: default
+  commit: 1 subrepos
+  update: (current)
+  $ hg st
+  $ hg st -S
+  A subrepo/large.txt
+  $ hg ci -S -m "commit top repo"
+  committing subrepository subrepo
+  Invoking status precommit hook
+  A large.txt
+  Invoking status precommit hook
+  M .hgsubstate
+# No differences
+  $ hg st -S
+  $ hg sum
+  parent: 2:ce4cd0c527a6 tip
+   commit top repo
+  branch: default
+  commit: (clean)
+  update: (current)
+  $ echo "rev 2" > subrepo/large.txt
+  $ hg st -S
+  M subrepo/large.txt
+  $ hg sum
+  parent: 2:ce4cd0c527a6 tip
+   commit top repo
+  branch: default
+  commit: 1 subrepos
+  update: (current)
+  $ hg ci -m "this commit should fail without -S"
+  abort: uncommitted changes in subrepo subrepo
+  (use --subrepos for recursive commit)
+  [255]
   $ cd ..
