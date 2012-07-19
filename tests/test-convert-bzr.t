@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" symlink execbit || exit 80
-
   $ . "$TESTDIR/bzr-definitions"
 
 create and rename on the same file in the same step
@@ -157,6 +155,8 @@ merge
   
   $ cd ..
 
+#if symlink execbit
+
 symlinks and executable files
 
   $ mkdir test-symlinks
@@ -199,14 +199,17 @@ symlinks and executable files
   755 * newprog
   644   program
   644 @ syma
-  $ cd source-hg
 
 test the symlinks can be recreated
 
+  $ cd source-hg
   $ hg up
   5 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg cat syma; echo
   a
+  $ cd ../..
+
+#endif
 
 Multiple branches
 
@@ -222,6 +225,7 @@ Multiple branches
   $ bzr switch -b branch
   Tree is up to date at revision 1.
   Switched to branch: *repo/branch/ (glob)
+  $ sleep 1
   $ echo b > b
   $ bzr add -q b
   $ bzr ci -qm addb
@@ -230,6 +234,7 @@ Multiple branches
   $ bzr switch --force ../repo/trunk
   Updated to revision 1.
   Switched to branch: */repo/trunk/ (glob)
+  $ sleep 1
   $ echo a >> a
   $ bzr ci -qm changea
   $ cd ..

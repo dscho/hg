@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" symlink || exit 80
-
 commit date test
 
   $ hg init test
@@ -75,10 +73,14 @@ commit added file that has been deleted
   $ hg commit -m commit-14 does-not-exist
   abort: does-not-exist: * (glob)
   [255]
+
+#if symlink
   $ ln -s foo baz
   $ hg commit -m commit-15 baz
   abort: baz: file not tracked!
   [255]
+#endif
+
   $ touch quux
   $ hg commit -m commit-16 quux
   abort: quux: file not tracked!
@@ -280,3 +282,26 @@ test commit message content
   HG: removed removed
   abort: empty commit message
   [255]
+  $ cd ..
+
+
+commit copy
+
+  $ hg init dir2
+  $ cd dir2
+  $ echo bleh > bar
+  $ hg add bar
+  $ hg ci -m 'add bar'
+
+  $ hg cp bar foo
+  $ echo >> bar
+  $ hg ci -m 'cp bar foo; change bar'
+
+  $ hg debugrename foo
+  foo renamed from bar:26d3ca0dfd18e44d796b564e38dd173c9668d3a9
+  $ hg debugindex bar
+     rev    offset  length  ..... linkrev nodeid       p1           p2 (re)
+       0         0       6  .....       0 26d3ca0dfd18 000000000000 000000000000 (re)
+       1         6       7  .....       1 d267bddd54f7 26d3ca0dfd18 000000000000 (re)
+
+  $ cd ..

@@ -17,7 +17,7 @@ Test the GPG extension
   $ hg sigs
 
   $ hg sign 0
-  Signing 0:e63c23eaa88a
+  signing 0:e63c23eaa88a
 
   $ hg sigs
   hgtest                             0:e63c23eaa88ae77967edcf4ea194d31167c478b0
@@ -30,3 +30,5 @@ verify that this test has not modified the trustdb.gpg file back in
 the main hg working dir
   $ "$TESTDIR/md5sum.py" "$TESTDIR/gpg/trustdb.gpg"
   f6b9c78c65fa9536e7512bb2ceb338ae  */gpg/trustdb.gpg (glob)
+
+  $ cd ..

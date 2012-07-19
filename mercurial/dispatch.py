@@ -12,7 +12,8 @@ import cmdutil, encoding
 import ui as uimod
 
 class request(object):
-    def __init__(self, args, ui=None, repo=None, fin=None, fout=None, ferr=None):
+    def __init__(self, args, ui=None, repo=None, fin=None, fout=None,
+                 ferr=None):
         self.args = args
         self.ui = ui
         self.repo = repo
@@ -87,7 +88,7 @@ def _runcatch(req):
                 return _dispatch(req)
             finally:
                 ui.flush()
-        except:
+        except: # re-raises
             # enter the debugger when we hit an exception
             if '--debugger' in req.args:
                 traceback.print_exc()
@@ -203,18 +204,58 @@ def _runcatch(req):
         return inst.code
     except socket.error, inst:
         ui.warn(_("abort: %s\n") % inst.args[-1])
-    except:
-        ui.warn(_("** unknown exception encountered,"
-                  " please report by visiting\n"))
-        ui.warn(_("**  http://mercurial.selenic.com/wiki/BugTracker\n"))
-        ui.warn(_("** Python %s\n") % sys.version.replace('\n', ''))
-        ui.warn(_("** Mercurial Distributed SCM (version %s)\n")
-               % util.version())
-        ui.warn(_("** Extensions loaded: %s\n")
-               % ", ".join([x[0] for x in extensions.extensions()]))
+    except: # re-raises
+        myver = util.version()
+        # For compatibility checking, we discard the portion of the hg
+        # version after the + on the assumption that if a "normal
+        # user" is running a build with a + in it the packager
+        # probably built from fairly close to a tag and anyone with a
+        # 'make local' copy of hg (where the version number can be out
+        # of date) will be clueful enough to notice the implausible
+        # version number and try updating.
+        compare = myver.split('+')[0]
+        ct = tuplever(compare)
+        worst = None, ct, ''
+        for name, mod in extensions.extensions():
+            testedwith = getattr(mod, 'testedwith', 'unknown')
+            report = getattr(mod, 'buglink', _('the extension author.'))
+            if testedwith == 'unknown':
+                # We found an untested extension. It's likely the culprit.
+                worst = name, testedwith, report
+                break
+            if compare not in testedwith.split() and testedwith != 'internal':
+                tested = [tuplever(v) for v in testedwith.split()]
+                nearest = max([t for t in tested if t < ct])
+                if nearest < worst[1]:
+                    worst = name, nearest, report
+        if worst[0] is not None:
+            name, testedwith, report = worst
+            if not isinstance(testedwith, str):
+                testedwith = '.'.join([str(c) for c in testedwith])
+            warning = (_('** Unknown exception encountered with '
+                         'possibly-broken third-party extension %s\n'
+                         '** which supports versions %s of Mercurial.\n'
+                         '** Please disable %s and try your action again.\n'
+                         '** If that fixes the bug please report it to %s\n')
+                       % (name, testedwith, name, report))
+        else:
+            warning = (_("** unknown exception encountered, "
+                         "please report by visiting\n") +
+                       _("** http://mercurial.selenic.com/wiki/BugTracker\n"))
+        warning += ((_("** Python %s\n") % sys.version.replace('\n', '')) +
+                    (_("** Mercurial Distributed SCM (version %s)\n") % myver) +
+                    (_("** Extensions loaded: %s\n") %
+                     ", ".join([x[0] for x in extensions.extensions()])))
+        ui.warn(warning)
         raise
 
     return -1
+
+def tuplever(v):
+    try:
+        return tuple([int(i) for i in v.split('.')])
+    except ValueError:
+        return tuple()
 
 def aliasargs(fn, givenargs):
     args = getattr(fn, 'args', [])
@@ -532,7 +573,8 @@ def _checkshellalias(lui, ui, args):
 
     if cmd and util.safehasattr(fn, 'shell'):
         d = lambda: fn(ui, *args[1:])
-        return lambda: runcommand(lui, None, cmd, args[:1], ui, options, d, [], {})
+        return lambda: runcommand(lui, None, cmd, args[:1], ui, options, d,
+                                  [], {})
 
     restorecommands()
 
@@ -612,7 +654,7 @@ def _dispatch(req):
         s = get_times()
         def print_time():
             t = get_times()
-            ui.warn(_("Time: real %.3f secs (user %.3f+%.3f sys %.3f+%.3f)\n") %
+            ui.warn(_("time: real %.3f secs (user %.3f+%.3f sys %.3f+%.3f)\n") %
                 (t[4]-s[4], t[0]-s[0], t[2]-s[2], t[1]-s[1], t[3]-s[3]))
         atexit.register(print_time)
 
@@ -680,7 +722,8 @@ def _dispatch(req):
                             return _dispatch(req)
                     if not path:
                         raise error.RepoError(_("no repository found in '%s'"
-                                                " (.hg not found)") % os.getcwd())
+                                                " (.hg not found)")
+                                              % os.getcwd())
                     raise
         if repo:
             ui = repo.ui
@@ -703,7 +746,7 @@ def lsprofile(ui, func, fp):
     field = ui.config('profiling', 'sort', default='inlinetime')
     climit = ui.configint('profiling', 'nested', default=5)
 
-    if not format in ['text', 'kcachegrind']:
+    if format not in ['text', 'kcachegrind']:
         ui.warn(_("unrecognized profiling format '%s'"
                     " - Ignored\n") % format)
         format = 'text'

@@ -53,7 +53,7 @@
   [255]
   $ rm .hg/hgrc
   $ hg commit -m commit-1 2>&1
-  No username found, using '[^']*' instead (re)
+  no username found, using '[^']*' instead (re)
 
   $ echo space > asdf
   $ hg commit -u ' ' -m commit-1
@@ -61,3 +61,5 @@
   rollback completed
   abort: empty username!
   [255]
+
+  $ cd ..

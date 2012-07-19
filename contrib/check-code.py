@@ -45,12 +45,10 @@ testpats = [
   [
     (r'pushd|popd', "don't use 'pushd' or 'popd', use 'cd'"),
     (r'\W\$?\(\([^\)\n]*\)\)', "don't use (()) or $(()), use 'expr'"),
-    (r'^function', "don't use 'function', use old style"),
     (r'grep.*-q', "don't use 'grep -q', redirect to /dev/null"),
     (r'sed.*-i', "don't use 'sed -i', use a temporary file"),
-    (r'echo.*\\n', "don't use 'echo \\n', use printf"),
+    (r'\becho\b.*\\n', "don't use 'echo \\n', use printf"),
     (r'echo -n', "don't use 'echo -n', use printf"),
-    (r'^diff.*-\w*N', "don't use 'diff -N'"),
     (r'(^| )wc[^|]*$\n(?!.*\(re\))', "filter wc output"),
     (r'head -c', "don't use 'head -c', use 'dd'"),
     (r'sha1sum', "don't use sha1sum, use $TESTDIR/md5sum.py"),
@@ -62,10 +60,8 @@ testpats = [
     (r'(^|\|\s*)grep (-\w\s+)*[^|]*[(|]\w',
      "use egrep for extended grep syntax"),
     (r'/bin/', "don't use explicit paths for tools"),
-    (r'\$PWD', "don't use $PWD, use `pwd`"),
     (r'[^\n]\Z', "no trailing newline"),
     (r'export.*=', "don't export and assign at once"),
-    (r'^([^"\'\n]|("[^"\n]*")|(\'[^\'\n]*\'))*\^', "^ must be quoted"),
     (r'^source\b', "don't use 'source', use '.'"),
     (r'touch -d', "don't use 'touch -d', use 'touch -t' instead"),
     (r'ls +[^|\n-]+ +-', "options to 'ls' must come before filenames"),
@@ -79,7 +75,12 @@ testpats = [
     (r'^( *)\t', "don't use tabs to indent"),
   ],
   # warnings
-  []
+  [
+    (r'^function', "don't use 'function', use old style"),
+    (r'^diff.*-\w*N', "don't use 'diff -N'"),
+    (r'\$PWD', "don't use $PWD, use `pwd`"),
+    (r'^([^"\'\n]|("[^"\n]*")|(\'[^\'\n]*\'))*\^', "^ must be quoted"),
+  ]
 ]
 
 testfilters = [
@@ -91,13 +92,16 @@ uprefix = r"^  \$ "
 utestpats = [
   [
     (r'^(\S|  $ ).*(\S[ \t]+|^[ \t]+)\n', "trailing whitespace on non-output"),
-    (uprefix + r'.*\|\s*sed', "use regex test output patterns instead of sed"),
+    (uprefix + r'.*\|\s*sed[^|>\n]*\n',
+     "use regex test output patterns instead of sed"),
     (uprefix + r'(true|exit 0)', "explicit zero exit unnecessary"),
     (uprefix + r'.*(?<!\[)\$\?', "explicit exit code checks unnecessary"),
     (uprefix + r'.*\|\| echo.*(fail|error)',
      "explicit exit code checks unnecessary"),
     (uprefix + r'set -e', "don't use set -e"),
     (uprefix + r'\s', "don't indent commands, use > for continued lines"),
+    (r'^  saved backup bundle to \$TESTTMP.*\.hg$',
+     "use (glob) to match Windows paths too"),
   ],
   # warnings
   []
@@ -106,9 +110,9 @@ utestpats = [
 for i in [0, 1]:
     for p, m in testpats[i]:
         if p.startswith(r'^'):
-            p = r"^  \$ (%s)" % p[1:]
+            p = r"^  [$>] (%s)" % p[1:]
         else:
-            p = r"^  \$ .*(%s)" % p
+            p = r"^  [$>] .*(%s)" % p
         utestpats[i].append((p, m))
 
 utestfilters = [
@@ -133,11 +137,12 @@ pypats = [
     (r'^\s+\w+=\w+[^,)\n]$', "missing whitespace in assignment"),
     (r'(\s+)try:\n((?:\n|\1\s.*\n)+?)\1except.*?:\n'
      r'((?:\n|\1\s.*\n)+?)\1finally:', 'no try/except/finally in Py2.4'),
-    (r'.{85}', "line too long"),
+    (r'.{81}', "line too long"),
     (r' x+[xo][\'"]\n\s+[\'"]x', 'string join across lines with no space'),
     (r'[^\n]\Z', "no trailing newline"),
     (r'(\S[ \t]+|^[ \t]+)\n', "trailing whitespace"),
-#    (r'^\s+[^_ \n][^_. \n]+_[^_\n]+\s*=', "don't use underbars in identifiers"),
+#    (r'^\s+[^_ \n][^_. \n]+_[^_\n]+\s*=',
+#     "don't use underbars in identifiers"),
     (r'^\s+(self\.)?[A-za-z][a-z0-9]+[A-Z]\w* = ',
      "don't use camelcase in identifiers"),
     (r'^\s*(if|while|def|class|except|try)\s[^[\n]*:\s*[^\\n]#\s]+',
@@ -167,13 +172,13 @@ pypats = [
      "gratuitous whitespace after Python keyword"),
     (r'([\(\[][ \t]\S)|(\S[ \t][\)\]])', "gratuitous whitespace in () or []"),
 #    (r'\s\s=', "gratuitous whitespace before ="),
-    (r'[^>< ](\+=|-=|!=|<>|<=|>=|<<=|>>=)\S',
+    (r'[^>< ](\+=|-=|!=|<>|<=|>=|<<=|>>=|%=)\S',
      "missing whitespace around operator"),
-    (r'[^>< ](\+=|-=|!=|<>|<=|>=|<<=|>>=)\s',
+    (r'[^>< ](\+=|-=|!=|<>|<=|>=|<<=|>>=|%=)\s',
      "missing whitespace around operator"),
-    (r'\s(\+=|-=|!=|<>|<=|>=|<<=|>>=)\S',
+    (r'\s(\+=|-=|!=|<>|<=|>=|<<=|>>=|%=)\S',
      "missing whitespace around operator"),
-    (r'[^^+=*/!<>&| -](\s=|=\s)[^= ]',
+    (r'[^^+=*/!<>&| %-](\s=|=\s)[^= ]',
      "wrong whitespace around ="),
     (r'raise Exception', "don't raise generic exceptions"),
     (r' is\s+(not\s+)?["\'0-9-]', "object comparison with literal"),
@@ -199,11 +204,11 @@ pypats = [
      "always assign an opened file to a variable, and close it afterwards"),
     (r'(?i)descendent', "the proper spelling is descendAnt"),
     (r'\.debug\(\_', "don't mark debug messages for translation"),
+    (r'\.strip\(\)\.split\(\)', "no need to strip before splitting"),
+    (r'^\s*except\s*:', "warning: naked except clause", r'#.*re-raises'),
   ],
   # warnings
   [
-    (r'.{81}', "warning: line over 80 characters"),
-    (r'^\s*except:$', "warning: naked except clause"),
     (r'ui\.(status|progress|write|note|warn)\([\'\"]x',
      "warning: unwrapped ui message"),
   ]
@@ -222,7 +227,7 @@ cpats = [
     (r'^  ', "don't use spaces to indent"),
     (r'\S\t', "don't use tabs except for indent"),
     (r'(\S[ \t]+|^[ \t]+)\n', "trailing whitespace"),
-    (r'.{85}', "line too long"),
+    (r'.{81}', "line too long"),
     (r'(while|if|do|for)\(', "use space after while/if/do/for"),
     (r'return\(', "return is not a function"),
     (r' ;', "no space before ;"),
@@ -352,7 +357,13 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
 
         prelines = None
         errors = []
-        for p, msg in pats:
+        for pat in pats:
+            if len(pat) == 3:
+                p, msg, ignore = pat
+            else:
+                p, msg = pat
+                ignore = None
+
             # fix-up regexes for multiline searches
             po = p
             # \s doesn't match \n
@@ -382,6 +393,8 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
                     if debug:
                         print "Skipping %s for %s:%s (check-code -ignore)" % (
                             name, f, n)
+                    continue
+                elif ignore and re.search(ignore, l, re.MULTILINE):
                     continue
                 bd = ""
                 if blame:

@@ -14,11 +14,15 @@ skip if we can't import elementtree
   >     exit 80
   > fi
 
+#if no-outer-repo
+
 try converting darcs1 repository
 
   $ hg clone -q "$TESTDIR/bundles/darcs1.hg" darcs
   $ hg convert -s darcs darcs/darcs1 2>&1 | grep darcs-1.0
   darcs-1.0 repository format is unsupported, please upgrade
+
+#endif
 
 initialize darcs repo
 
@@ -32,7 +36,7 @@ initialize darcs repo
 
 branch and update
 
-  $ darcs get darcs-repo darcs-clone >/dev/null
+  $ darcs get -q darcs-repo darcs-clone >/dev/null
   $ cd darcs-clone
   $ echo c >> a
   $ echo c > c
@@ -48,11 +52,10 @@ update source
   $ darcs record -a -l -m p1.2
   Finished recording patch 'p1.2'
 
-  $ darcs pull -a --no-set-default ../darcs-clone
-  Backing up ./a(-darcs-backup0)
+  $ darcs pull -q -a --no-set-default ../darcs-clone
+  Backing up ./a(*) (glob)
   We have conflicts in the following files:
   ./a
-  Finished pulling and applying.
   $ sleep 1
   $ echo e > a
   $ echo f > f

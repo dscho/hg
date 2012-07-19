@@ -241,6 +241,11 @@
   default                        0:19709c5a4e75 (inactive)
   $ hg branches -a
   a branch name much longer than the default justification used by branches 7:10ff5895aa57
+  $ hg branches -q
+  a branch name much longer than the default justification used by branches
+  c
+  a
+  default
   $ hg heads b
   no open branch heads found on branches b
   [1]
@@ -403,3 +408,5 @@ custom closed branch color:
   \x1b[0;34mc\x1b[0m \x1b[0;36m                            14:f894c25619d3\x1b[0m (closed) (esc)
   \x1b[0;35ma\x1b[0m \x1b[0;36m                             5:d8cbc61dbaa6\x1b[0m (inactive) (esc)
   \x1b[0;35mdefault\x1b[0m \x1b[0;36m                       0:19709c5a4e75\x1b[0m (inactive) (esc)
+
+  $ cd ..

@@ -245,7 +245,7 @@ def extract(ui, fileobj):
                         tmpfp.write('\n')
             elif not diffs_seen and message and content_type == 'text/plain':
                 message += '\n' + payload
-    except:
+    except: # re-raises
         tmpfp.close()
         os.unlink(tmpname)
         raise
@@ -534,7 +534,7 @@ class filestore(object):
         if fname in self.data:
             return self.data[fname]
         if not self.opener or fname not in self.files:
-            raise IOError()
+            raise IOError
         fn, mode, copied = self.files[fname]
         return self.opener.read(fn), mode, copied
 
@@ -560,7 +560,7 @@ class repobackend(abstractbackend):
         try:
             fctx = self.ctx[fname]
         except error.LookupError:
-            raise IOError()
+            raise IOError
         flags = fctx.flags()
         return fctx.data(), ('l' in flags, 'x' in flags)
 
@@ -858,7 +858,8 @@ class hunk(object):
             self.lenb = int(self.lenb)
         self.starta = int(self.starta)
         self.startb = int(self.startb)
-        diffhelpers.addlines(lr, self.hunk, self.lena, self.lenb, self.a, self.b)
+        diffhelpers.addlines(lr, self.hunk, self.lena, self.lenb, self.a,
+                             self.b)
         # if we hit eof before finishing out the hunk, the last line will
         # be zero length.  Lets try to fix it up.
         while len(self.hunk[-1]) == 0:
@@ -1040,12 +1041,13 @@ class binhunk(object):
             hunk.append(l)
             return l.rstrip('\r\n')
 
-        line = getline(lr, self.hunk)
-        while line and not line.startswith('literal '):
+        while True:
             line = getline(lr, self.hunk)
-        if not line:
-            raise PatchError(_('could not extract "%s" binary data')
-                             % self._fname)
+            if not line:
+                raise PatchError(_('could not extract "%s" binary data')
+                                 % self._fname)
+            if line.startswith('literal '):
+                break
         size = int(line[8:].rstrip())
         dec = []
         line = getline(lr, self.hunk)
@@ -1595,12 +1597,12 @@ def diff(repo, node1=None, node2=None, match=None, changes=None, opts=None,
 
     def lrugetfilectx():
         cache = {}
-        order = []
+        order = util.deque()
         def getfilectx(f, ctx):
             fctx = ctx.filectx(f, filelog=cache.get(f))
             if f not in cache:
                 if len(cache) > 20:
-                    del cache[order.pop(0)]
+                    del cache[order.popleft()]
                 cache[f] = fctx.filelog()
             else:
                 order.remove(f)
@@ -1628,13 +1630,14 @@ def diff(repo, node1=None, node2=None, match=None, changes=None, opts=None,
     if opts.git or opts.upgrade:
         copy = copies.pathcopies(ctx1, ctx2)
 
-    difffn = lambda opts, losedata: trydiff(repo, revs, ctx1, ctx2,
-                 modified, added, removed, copy, getfilectx, opts, losedata, prefix)
+    difffn = (lambda opts, losedata:
+                  trydiff(repo, revs, ctx1, ctx2, modified, added, removed,
+                          copy, getfilectx, opts, losedata, prefix))
     if opts.upgrade and not opts.git:
         try:
             def losedata(fn):
                 if not losedatafn or not losedatafn(fn=fn):
-                    raise GitDiffRequired()
+                    raise GitDiffRequired
             # Buffer the whole output until we are sure it can be generated
             return list(difffn(opts.copy(git=False), losedata))
         except GitDiffRequired:
@@ -1665,7 +1668,7 @@ def difflabel(func, *args, **kw):
                 if line.startswith('@'):
                     head = False
             else:
-                if line and not line[0] in ' +-@\\':
+                if line and line[0] not in ' +-@\\':
                     head = True
             stripline = line
             if not head and line and line[0] in '+-':
@@ -1870,7 +1873,8 @@ def diffstat(lines, width=80, git=False):
                        countwidth, count, pluses, minuses))
 
     if stats:
-        output.append(_(' %d files changed, %d insertions(+), %d deletions(-)\n')
+        output.append(_(' %d files changed, %d insertions(+), '
+                        '%d deletions(-)\n')
                       % (len(stats), totaladds, totalremoves))
 
     return ''.join(output)

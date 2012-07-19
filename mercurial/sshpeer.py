@@ -1,4 +1,4 @@
-# sshrepo.py - ssh repository proxy class for mercurial
+# sshpeer.py - ssh repository proxy class for mercurial
 #
 # Copyright 2005, 2006 Matt Mackall <mpm@selenic.com>
 #
@@ -25,10 +25,11 @@ def _serverquote(s):
         return s
     return "'%s'" % s.replace("'", "'\\''")
 
-class sshrepository(wireproto.wirerepository):
+class sshpeer(wireproto.wirepeer):
     def __init__(self, ui, path, create=False):
         self._url = path
         self.ui = ui
+        self.pipeo = self.pipei = self.pipee = None
 
         u = util.url(path, parsequery=False, parsefragment=False)
         if u.scheme != 'ssh' or not u.host or u.path is None:
@@ -86,13 +87,17 @@ class sshrepository(wireproto.wirerepository):
             lines.append(l)
             max_noise -= 1
         else:
-            self._abort(error.RepoError(_("no suitable response from remote hg")))
+            self._abort(error.RepoError(_('no suitable response from '
+                                          'remote hg')))
 
-        self.capabilities = set()
+        self._caps = set()
         for l in reversed(lines):
             if l.startswith("capabilities:"):
-                self.capabilities.update(l[:-1].split(":")[1].split())
+                self._caps.update(l[:-1].split(":")[1].split())
                 break
+
+    def _capabilities(self):
+        return self._caps
 
     def readerr(self):
         while True:
@@ -110,15 +115,17 @@ class sshrepository(wireproto.wirerepository):
         raise exception
 
     def cleanup(self):
+        if self.pipeo is None:
+            return
+        self.pipeo.close()
+        self.pipei.close()
         try:
-            self.pipeo.close()
-            self.pipei.close()
             # read the error descriptor until EOF
             for l in self.pipee:
                 self.ui.status(_("remote: "), l)
-            self.pipee.close()
-        except:
+        except (IOError, ValueError):
             pass
+        self.pipee.close()
 
     __del__ = cleanup
 
@@ -229,4 +236,4 @@ class sshrepository(wireproto.wirerepository):
         except ValueError:
             self._abort(error.ResponseError(_("unexpected response:"), r))
 
-instance = sshrepository
+instance = sshpeer

@@ -5,12 +5,14 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-'''pull, update and merge in one command'''
+'''pull, update and merge in one command (DEPRECATED)'''
 
 from mercurial.i18n import _
 from mercurial.node import nullid, short
 from mercurial import commands, cmdutil, hg, util, error
 from mercurial.lock import release
+
+testedwith = 'internal'
 
 def fetch(ui, repo, source='default', **opts):
     '''pull changes from a remote repository, merge new changes if needed.
@@ -38,7 +40,10 @@ def fetch(ui, repo, source='default', **opts):
 
     parent, p2 = repo.dirstate.parents()
     branch = repo.dirstate.branch()
-    branchnode = repo.branchtags().get(branch)
+    try:
+        branchnode = repo.branchtip(branch)
+    except error.RepoLookupError:
+        branchnode = None
     if parent != branchnode:
         raise util.Abort(_('working dir not at branch tip '
                            '(use "hg update" to check out branch tip)'))
@@ -70,7 +75,7 @@ def fetch(ui, repo, source='default', **opts):
             try:
                 revs = [other.lookup(rev) for rev in opts['rev']]
             except error.CapabilityError:
-                err = _("Other repository doesn't support revision lookup, "
+                err = _("other repository doesn't support revision lookup, "
                         "so a rev cannot be specified.")
                 raise util.Abort(err)
 

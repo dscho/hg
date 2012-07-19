@@ -42,7 +42,12 @@ def loadpath(path, module_name):
         fd, fpath, desc = imp.find_module(f, [d])
         return imp.load_module(module_name, fd, fpath, desc)
     else:
-        return imp.load_source(module_name, path)
+        try:
+            return imp.load_source(module_name, path)
+        except IOError, exc:
+            if not exc.filename:
+                exc.filename = path # python does not fill this
+            raise
 
 def load(ui, name, path):
     # unused ui argument kept for backwards compatibility
@@ -274,7 +279,7 @@ def disabled():
 
     paths = _disabledpaths()
     if not paths:
-        return None
+        return {}
 
     exts = {}
     for name, path in paths.iteritems():
@@ -301,7 +306,7 @@ def disabledext(name):
 
 def disabledcmd(ui, cmd, strict=False):
     '''import disabled extensions until cmd is found.
-    returns (cmdname, extname, doc)'''
+    returns (cmdname, extname, module)'''
 
     paths = _disabledpaths(strip_init=True)
     if not paths:
@@ -329,18 +334,19 @@ def disabledcmd(ui, cmd, strict=False):
             cmd = aliases[0]
         return (cmd, name, mod)
 
+    ext = None
     # first, search for an extension with the same name as the command
     path = paths.pop(cmd, None)
     if path:
         ext = findcmd(cmd, cmd, path)
-        if ext:
-            return ext
-
-    # otherwise, interrogate each extension until there's a match
-    for name, path in paths.iteritems():
-        ext = findcmd(cmd, name, path)
-        if ext:
-            return ext
+    if not ext:
+        # otherwise, interrogate each extension until there's a match
+        for name, path in paths.iteritems():
+            ext = findcmd(cmd, name, path)
+            if ext:
+                break
+    if ext and 'DEPRECATED' not in ext.__doc__:
+        return ext
 
     raise error.UnknownCommand(cmd)
 

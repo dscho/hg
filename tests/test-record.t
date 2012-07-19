@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" execbit || exit 80
-
 Set up a repo
 
   $ echo "[ui]" >> $HGRCPATH
@@ -772,6 +770,8 @@ f
   +a
   
 
+#if execbit
+
 Preserve chmod +x
 
   $ chmod +x f1
@@ -885,7 +885,119 @@ Preserve chmod -x
   +c
   
 
+#else
+
+Slightly bogus tests to get almost same repo structure as when x bit is used
+- but with different hashes.
+
+Mock "Preserve chmod +x"
+
+  $ echo a >> f1
+  $ hg record -d '20 0' -mz <<EOF
+  > y
+  > y
+  > y
+  > EOF
+  diff --git a/subdir/f1 b/subdir/f1
+  1 hunks, 1 lines changed
+  examine changes to 'subdir/f1'? [Ynesfdaq?] 
+  @@ -1,2 +1,3 @@
+   a
+   a
+  +a
+  record this change to 'subdir/f1'? [Ynesfdaq?] 
+
+  $ hg tip --config diff.git=True -p
+  changeset:   22:0d463bd428f5
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:20 1970 +0000
+  summary:     z
+  
+  diff --git a/subdir/f1 b/subdir/f1
+  --- a/subdir/f1
+  +++ b/subdir/f1
+  @@ -1,2 +1,3 @@
+   a
+   a
+  +a
+  
+
+Mock "Preserve execute permission on original"
+
+  $ echo b >> f1
+  $ hg record -d '21 0' -maa <<EOF
+  > y
+  > y
+  > y
+  > EOF
+  diff --git a/subdir/f1 b/subdir/f1
+  1 hunks, 1 lines changed
+  examine changes to 'subdir/f1'? [Ynesfdaq?] 
+  @@ -1,3 +1,4 @@
+   a
+   a
+   a
+  +b
+  record this change to 'subdir/f1'? [Ynesfdaq?] 
+
+  $ hg tip --config diff.git=True -p
+  changeset:   23:0eab41a3e524
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:21 1970 +0000
+  summary:     aa
+  
+  diff --git a/subdir/f1 b/subdir/f1
+  --- a/subdir/f1
+  +++ b/subdir/f1
+  @@ -1,3 +1,4 @@
+   a
+   a
+   a
+  +b
+  
+
+Mock "Preserve chmod -x"
+
+  $ chmod -x f1
+  $ echo c >> f1
+  $ hg record -d '22 0' -mab <<EOF
+  > y
+  > y
+  > y
+  > EOF
+  diff --git a/subdir/f1 b/subdir/f1
+  1 hunks, 1 lines changed
+  examine changes to 'subdir/f1'? [Ynesfdaq?] 
+  @@ -2,3 +2,4 @@
+   a
+   a
+   b
+  +c
+  record this change to 'subdir/f1'? [Ynesfdaq?] 
+
+  $ hg tip --config diff.git=True -p
+  changeset:   24:f4f718f27b7c
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:22 1970 +0000
+  summary:     ab
+  
+  diff --git a/subdir/f1 b/subdir/f1
+  --- a/subdir/f1
+  +++ b/subdir/f1
+  @@ -2,3 +2,4 @@
+   a
+   a
+   b
+  +c
+  
+
+#endif
+
   $ cd ..
+
 
 Abort early when a merge is in progress
 
@@ -917,12 +1029,10 @@ Abort early when a merge is in progress
 
 Editing patch
 
-  $ cat > editor << '__EOF__'
-  > #!/bin/sh
+  $ cat > editor.sh << '__EOF__'
   > sed -e 7d -e '5s/^-/ /' "$1" > tmp
   > mv tmp "$1"
   > __EOF__
-  $ chmod +x editor
   $ cat > editedfile << '__EOF__'
   > This is the first line
   > This is the second line
@@ -935,7 +1045,7 @@ Editing patch
   > This change will be committed
   > This is the third line
   > __EOF__
-  $ HGEDITOR="'`pwd`'"/editor hg record -d '23 0' -medit-patch-2 <<EOF
+  $ HGEDITOR="\"sh\" \"`pwd`/editor.sh\"" hg record -d '23 0' -medit-patch-2 <<EOF
   > y
   > e
   > EOF
@@ -980,13 +1090,11 @@ Removing changes from patch
   $ sed -e '3s/third/second/' -e '2s/will/will not/' -e 1d editedfile > tmp
   $ mv tmp editedfile
   $ echo "This line has been added" >> editedfile
-  $ cat > editor << '__EOF__'
-  > #!/bin/sh
+  $ cat > editor.sh << '__EOF__'
   > sed -e 's/^[-+]/ /' "$1" > tmp
   > mv tmp "$1"
   > __EOF__
-  $ chmod +x editor
-  $ HGEDITOR="'`pwd`'"/editor hg record <<EOF
+  $ HGEDITOR="\"sh\" \"`pwd`/editor.sh\"" hg record <<EOF
   > y
   > e
   > EOF
@@ -1017,13 +1125,11 @@ Invalid patch
   $ sed -e '3s/third/second/' -e '2s/will/will not/' -e 1d editedfile > tmp
   $ mv tmp editedfile
   $ echo "This line has been added" >> editedfile
-  $ cat > editor << '__EOF__'
-  > #!/bin/sh
+  $ cat > editor.sh << '__EOF__'
   > sed s/This/That/ "$1" > tmp
   > mv tmp "$1"
   > __EOF__
-  $ chmod +x editor
-  $ HGEDITOR="'`pwd`'"/editor hg record <<EOF
+  $ HGEDITOR="\"sh\" \"`pwd`/editor.sh\"" hg record <<EOF
   > y
   > e
   > EOF
@@ -1096,13 +1202,13 @@ Ignore win32text deprecation warning for now:
   record this change to 'subdir/f1'? [Ynesfdaq?] 
 
   $ hg tip -p
-  changeset:   28:287ad1f41a72
+  changeset:   28:* (glob)
   tag:         tip
   user:        test
   date:        Thu Jan 01 00:00:24 1970 +0000
   summary:     w1
   
-  diff -r 65ce23a81197 -r 287ad1f41a72 subdir/f1
+  diff -r ???????????? -r ???????????? subdir/f1 (glob)
   --- a/subdir/f1	Thu Jan 01 00:00:23 1970 +0000
   +++ b/subdir/f1	Thu Jan 01 00:00:24 1970 +0000
   @@ -3,3 +3,4 @@
@@ -1111,3 +1217,5 @@ Ignore win32text deprecation warning for now:
    c
   +d
   
+
+  $ cd ..

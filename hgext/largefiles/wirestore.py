@@ -14,7 +14,7 @@ class wirestore(remotestore.remotestore):
         if not cap:
             raise lfutil.storeprotonotcapable([])
         storetypes = cap.split(',')
-        if not 'serve' in storetypes:
+        if 'serve' not in storetypes:
             raise lfutil.storeprotonotcapable(storetypes)
         self.remote = remote
         super(wirestore, self).__init__(ui, repo, remote.url())
@@ -25,5 +25,13 @@ class wirestore(remotestore.remotestore):
     def _get(self, hash):
         return self.remote.getlfile(hash)
 
-    def _stat(self, hash):
-        return self.remote.statlfile(hash)
+    def _stat(self, hashes):
+        batch = self.remote.batch()
+        futures = {}
+        for hash in hashes:
+            futures[hash] = batch.statlfile(hash)
+        batch.submit()
+        retval = {}
+        for hash in hashes:
+            retval[hash] = not futures[hash].value
+        return retval

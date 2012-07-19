@@ -336,7 +336,8 @@ def createlog(ui, directory=None, root="", rlog=True, cache=None):
                 else:
                     myrev = '.'.join(myrev[:-2] + ['0', myrev[-2]])
                     branches = [b for b in branchmap if branchmap[b] == myrev]
-                    assert len(branches) == 1, 'unknown branch: %s' % e.mergepoint
+                    assert len(branches) == 1, ('unknown branch: %s'
+                                                % e.mergepoint)
                     e.mergepoint = branches[0]
             else:
                 e.mergepoint = None
@@ -705,11 +706,11 @@ def createchangeset(ui, log, fuzz=60, mergefrom=None, mergeto=None):
         if mergeto:
             m = mergeto.search(c.comment)
             if m:
-                try:
+                if m.groups():
                     m = m.group(1)
                     if m == 'HEAD':
                         m = None
-                except:
+                else:
                     m = None   # if no group found then merge to HEAD
                 if m in branches and c.branch != m:
                     # insert empty changeset for merge

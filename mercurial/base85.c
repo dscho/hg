@@ -9,6 +9,7 @@
  Largely based on git's implementation
 */
 
+#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
 #include "util.h"
@@ -33,7 +34,7 @@ b85encode(PyObject *self, PyObject *args)
 	const unsigned char *text;
 	PyObject *out;
 	char *dst;
-	int len, olen, i;
+	Py_ssize_t len, olen, i;
 	unsigned int acc, val, ch;
 	int pad = 0;
 
@@ -81,7 +82,8 @@ b85decode(PyObject *self, PyObject *args)
 	PyObject *out;
 	const char *text;
 	char *dst;
-	int len, i, j, olen, c, cap;
+	Py_ssize_t len, i, j, olen, cap;
+	int c;
 	unsigned int acc;
 
 	if (!PyArg_ParseTuple(args, "s#", &text, &len))
@@ -109,7 +111,8 @@ b85decode(PyObject *self, PyObject *args)
 			if (c < 0)
 				return PyErr_Format(
 					PyExc_ValueError,
-					"bad base85 character at position %d", i);
+					"bad base85 character at position %d",
+					(int)i);
 			acc = acc * 85 + c;
 		}
 		if (i++ < len)
@@ -118,13 +121,15 @@ b85decode(PyObject *self, PyObject *args)
 			if (c < 0)
 				return PyErr_Format(
 					PyExc_ValueError,
-					"bad base85 character at position %d", i);
+					"bad base85 character at position %d",
+					(int)i);
 			/* overflow detection: 0xffffffff == "|NsC0",
 			 * "|NsC" == 0x03030303 */
 			if (acc > 0x03030303 || (acc *= 85) > 0xffffffff - c)
 				return PyErr_Format(
 					PyExc_ValueError,
-					"bad base85 sequence at position %d", i);
+					"bad base85 sequence at position %d",
+					(int)i);
 			acc += c;
 		}
 

@@ -8,7 +8,7 @@
 import errno, os, re, xml.dom.minidom, shutil, posixpath
 import stat, subprocess, tarfile
 from i18n import _
-import config, scmutil, util, node, error, cmdutil, bookmarks
+import config, scmutil, util, node, error, cmdutil, bookmarks, match as matchmod
 hg = None
 propertycache = util.propertycache
 
@@ -200,7 +200,8 @@ def _updateprompt(ui, sub, dirty, local, remote):
                  'use (l)ocal source (%s) or (r)emote source (%s)?\n')
                % (subrelpath(sub), local, remote))
     else:
-        msg = (_(' subrepository sources for %s differ (in checked out version)\n'
+        msg = (_(' subrepository sources for %s differ (in checked out '
+                 'version)\n'
                  'use (l)ocal source (%s) or (r)emote source (%s)?\n')
                % (subrelpath(sub), local, remote))
     return ui.promptchoice(msg, (_('&Local'), _('&Remote')), 0)
@@ -267,7 +268,7 @@ def subrepo(ctx, path):
     hg = h
 
     scmutil.pathauditor(ctx._repo.root)(path)
-    state = ctx.substate.get(path, nullstate)
+    state = ctx.substate[path]
     if state[2] not in types:
         raise util.Abort(_('unknown subrepo type %s') % state[2])
     return types[state[2]](ctx, path, state[:2])
@@ -350,8 +351,11 @@ class abstractsubrepo(object):
         """return file flags"""
         return ''
 
-    def archive(self, ui, archiver, prefix):
-        files = self.files()
+    def archive(self, ui, archiver, prefix, match=None):
+        if match is not None:
+            files = [f for f in self.files() if match(f)]
+        else:
+            files = self.files()
         total = len(files)
         relpath = subrelpath(self)
         ui.progress(_('archiving (%s)') % relpath, 0,
@@ -444,15 +448,16 @@ class hgsubrepo(abstractsubrepo):
             self._repo.ui.warn(_('warning: error "%s" in subrepository "%s"\n')
                                % (inst, subrelpath(self)))
 
-    def archive(self, ui, archiver, prefix):
+    def archive(self, ui, archiver, prefix, match=None):
         self._get(self._state + ('hg',))
-        abstractsubrepo.archive(self, ui, archiver, prefix)
+        abstractsubrepo.archive(self, ui, archiver, prefix, match)
 
         rev = self._state[1]
         ctx = self._repo[rev]
         for subpath in ctx.substate:
             s = subrepo(ctx, subpath)
-            s.archive(ui, archiver, os.path.join(prefix, self._path))
+            submatch = matchmod.narrowmatcher(subpath, match)
+            s.archive(ui, archiver, os.path.join(prefix, self._path), submatch)
 
     def dirty(self, ignoreupdate=False):
         r = self._state[1]
@@ -498,8 +503,10 @@ class hgsubrepo(abstractsubrepo):
                                      % (subrelpath(self), srcurl))
                 parentrepo = self._repo._subparent
                 shutil.rmtree(self._repo.path)
-                other, self._repo = hg.clone(self._repo._subparent.ui, {}, other,
-                                         self._repo.root, update=False)
+                other, cloned = hg.clone(self._repo._subparent.ui, {},
+                                         other, self._repo.root,
+                                         update=False)
+                self._repo = cloned.local()
                 self._initrepo(parentrepo, source, create=True)
             else:
                 self._repo.ui.status(_('pulling subrepo %s from %s\n')
@@ -1203,7 +1210,7 @@ class gitsubrepo(abstractsubrepo):
             else:
                 os.remove(path)
 
-    def archive(self, ui, archiver, prefix):
+    def archive(self, ui, archiver, prefix, match=None):
         source, revision = self._state
         if not revision:
             return
@@ -1218,6 +1225,8 @@ class gitsubrepo(abstractsubrepo):
         ui.progress(_('archiving (%s)') % relpath, 0, unit=_('files'))
         for i, info in enumerate(tar):
             if info.isdir():
+                continue
+            if match and not match(info.name):
                 continue
             if info.issym():
                 data = info.linkname

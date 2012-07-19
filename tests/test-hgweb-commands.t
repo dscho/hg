@@ -37,7 +37,7 @@ Set up the repo
 
 Logs and changes
 
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/log/?style=atom'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'log/?style=atom'
   200 Script output follows
   
   <?xml version="1.0" encoding="ascii"?>
@@ -115,7 +115,7 @@ Logs and changes
    </entry>
   
   </feed>
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/log/1/?style=atom'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'log/1/?style=atom'
   200 Script output follows
   
   <?xml version="1.0" encoding="ascii"?>
@@ -193,7 +193,7 @@ Logs and changes
    </entry>
   
   </feed>
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/log/1/foo/?style=atom'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'log/1/foo/?style=atom'
   200 Script output follows
   
   <?xml version="1.0" encoding="ascii"?>
@@ -221,7 +221,7 @@ Logs and changes
    </entry>
   
   </feed>
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/shortlog/'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'shortlog/'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -326,7 +326,7 @@ Logs and changes
   </body>
   </html>
   
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/rev/0/'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'rev/0/'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -453,7 +453,7 @@ Logs and changes
   </body>
   </html>
   
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/rev/1/?style=raw'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'rev/1/?style=raw'
   200 Script output follows
   
   
@@ -470,7 +470,7 @@ Logs and changes
   @@ -0,0 +1,1 @@
   +2ef0ac749a14e4f57a5a822464a0902c6f7f448f 1.0
   
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/log?rev=base'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'log?rev=base'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -548,11 +548,11 @@ Logs and changes
 
 File-related
 
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/file/1/foo/?style=raw'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'file/1/foo/?style=raw'
   200 Script output follows
   
   foo
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/annotate/1/foo/?style=raw'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'annotate/1/foo/?style=raw'
   200 Script output follows
   
   
@@ -561,7 +561,7 @@ File-related
   
   
   
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/file/1/?style=raw'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'file/1/?style=raw'
   200 Script output follows
   
   
@@ -570,7 +570,7 @@ File-related
   -rw-r--r-- 4 foo
   
   
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/file/1/foo'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'file/1/foo'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -605,6 +605,7 @@ File-related
   <li class="active">file</li>
   <li><a href="/file/tip/foo">latest</a></li>
   <li><a href="/diff/a4f92ed23982/foo">diff</a></li>
+  <li><a href="/comparison/a4f92ed23982/foo">comparison</a></li>
   <li><a href="/annotate/a4f92ed23982/foo">annotate</a></li>
   <li><a href="/log/a4f92ed23982/foo">file log</a></li>
   <li><a href="/raw-file/a4f92ed23982/foo">raw</a></li>
@@ -663,7 +664,7 @@ File-related
   </body>
   </html>
   
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/filediff/0/foo/?style=raw'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'filediff/0/foo/?style=raw'
   200 Script output follows
   
   
@@ -677,7 +678,7 @@ File-related
   
   
 
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/filediff/1/foo/?style=raw'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'filediff/1/foo/?style=raw'
   200 Script output follows
   
   
@@ -688,23 +689,23 @@ File-related
 
 Overviews
 
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/raw-tags'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'raw-tags'
   200 Script output follows
   
   tip	ba87b23d29ca67a305625d81a20ac279c1e3f444
   1.0	2ef0ac749a14e4f57a5a822464a0902c6f7f448f
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/raw-branches'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'raw-branches'
   200 Script output follows
   
   unstable	ba87b23d29ca67a305625d81a20ac279c1e3f444	open
   stable	1d22e65f027e5a0609357e7d8e7508cd2ba5d2fe	inactive
   default	a4f92ed23982be056b9852de5dfe873eaac7f0de	inactive
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/raw-bookmarks'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'raw-bookmarks'
   200 Script output follows
   
   anotherthing	2ef0ac749a14e4f57a5a822464a0902c6f7f448f
   something	ba87b23d29ca67a305625d81a20ac279c1e3f444
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/summary/?style=gitweb'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'summary/?style=gitweb'
   200 Script output follows
   
   <?xml version="1.0" encoding="ascii"?>
@@ -906,7 +907,7 @@ Overviews
   </body>
   </html>
   
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/graph/?style=gitweb'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'graph/?style=gitweb'
   200 Script output follows
   
   <?xml version="1.0" encoding="ascii"?>
@@ -1047,6 +1048,55 @@ Overviews
   </body>
   </html>
   
+raw graph
+
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'graph/?style=raw'
+  200 Script output follows
+  
+  
+  # HG graph
+  # Node ID ba87b23d29ca67a305625d81a20ac279c1e3f444
+  # Rows shown 4
+  
+  changeset:   ba87b23d29ca
+  user:        test
+  date:        1970-01-01
+  summary:     branch
+  branch:      unstable
+  tag:         tip
+  bookmark:    something
+  
+  node:        (0, 0) (color 1)
+  edge:        (0, 0) -> (0, 1) (color 1)
+  
+  changeset:   1d22e65f027e
+  user:        test
+  date:        1970-01-01
+  summary:     branch
+  branch:      stable
+  
+  node:        (0, 1) (color 1)
+  edge:        (0, 1) -> (0, 2) (color 1)
+  
+  changeset:   a4f92ed23982
+  user:        test
+  date:        1970-01-01
+  summary:     Added tag 1.0 for changeset 2ef0ac749a14
+  branch:      default
+  
+  node:        (0, 2) (color 1)
+  edge:        (0, 2) -> (0, 3) (color 1)
+  
+  changeset:   2ef0ac749a14
+  user:        test
+  date:        1970-01-01
+  summary:     base
+  tag:         1.0
+  bookmark:    anotherthing
+  
+  node:        (0, 3) (color 1)
+  
+  
 
 capabilities
 
@@ -1098,7 +1148,7 @@ failing unbundle, requires POST request
 
 Static files
 
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/static/style.css'
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'static/style.css'
   200 Script output follows
   
   a { text-decoration:none; }
@@ -1221,7 +1271,7 @@ commit message with Japanese Kanji 'Noh', which ends with '\x5c'
 
 Graph json escape of multibyte character
 
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT '/graph/' \
+  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'graph/' \
   >     | grep '^var data ='
   var data = [["548001d11f45", [0, 1], [[0, 0, 1, -1, ""]], "\u80fd", "test", "1970-01-01", ["unstable", true], ["tip"], ["something"]], ["ba87b23d29ca", [0, 1], [[0, 0, 1, 3, "FF0000"]], "branch", "test", "1970-01-01", ["unstable", false], [], []], ["1d22e65f027e", [0, 1], [[0, 0, 1, 3, ""]], "branch", "test", "1970-01-01", ["stable", true], [], []], ["a4f92ed23982", [0, 1], [[0, 0, 1, 3, ""]], "Added tag 1.0 for changeset 2ef0ac749a14", "test", "1970-01-01", ["default", true], [], []], ["2ef0ac749a14", [0, 1], [], "base", "test", "1970-01-01", ["default", false], ["1.0"], ["anotherthing"]]];
 
@@ -1237,3 +1287,5 @@ heads
 ERRORS ENCOUNTERED
 
   $ cat errors.log
+
+  $ cd ..

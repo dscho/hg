@@ -46,6 +46,8 @@ from mercurial.node import short
 from mercurial import util
 import re
 
+testedwith = 'internal'
+
 # regexp for single LF without CR preceding.
 re_single_lf = re.compile('(^|[^\r])\n', re.MULTILINE)
 
@@ -128,7 +130,7 @@ def forbidnewline(ui, repo, hooktype, node, newline, **kwargs):
             data = c[f].data()
             if not util.binary(data) and newline in data:
                 if not halt:
-                    ui.warn(_('Attempt to commit or push text file(s) '
+                    ui.warn(_('attempt to commit or push text file(s) '
                               'using %s line endings\n') %
                               newlinestr[newline])
                 ui.warn(_('in %s: %s\n') % (short(c.node()), f))

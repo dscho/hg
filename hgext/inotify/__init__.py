@@ -15,6 +15,8 @@ from mercurial import util
 import server
 from client import client, QueryFailed
 
+testedwith = 'internal'
+
 def serve(ui, repo, **opts):
     '''start an inotify server for this repository'''
     server.start(ui, repo.dirstate, repo.root, opts)
@@ -46,7 +48,8 @@ def reposetup(ui, repo):
             files = match.files()
             if '.' in files:
                 files = []
-            if self._inotifyon and not ignored and not subrepos and not self._dirty:
+            if (self._inotifyon and not ignored and not subrepos and
+                not self._dirty):
                 cli = client(ui, repo)
                 try:
                     result = cli.statusquery(files, match, False,

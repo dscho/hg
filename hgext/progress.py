@@ -38,14 +38,14 @@ characters.
 import sys
 import time
 
-from mercurial import util
 from mercurial.i18n import _
+testedwith = 'internal'
 
 def spacejoin(*args):
     return ' '.join(s for s in args if s)
 
 def shouldprint(ui):
-    return util.isatty(sys.stderr) or ui.configbool('progress', 'assume-tty')
+    return ui._isatty(sys.stderr) or ui.configbool('progress', 'assume-tty')
 
 def fmtremaining(seconds):
     if seconds < 60:
@@ -237,7 +237,7 @@ class progbar(object):
             # truncate the list of topics assuming all topics within
             # this one are also closed
             if topic in self.topics:
-              self.topics = self.topics[:self.topics.index(topic)]
+                self.topics = self.topics[:self.topics.index(topic)]
         else:
             if topic not in self.topics:
                 self.starttimes[topic] = now

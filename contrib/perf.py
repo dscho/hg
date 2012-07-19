@@ -33,20 +33,34 @@ def perfwalk(ui, repo, *pats):
     try:
         m = scmutil.match(repo[None], pats, {})
         timer(lambda: len(list(repo.dirstate.walk(m, [], True, False))))
-    except:
+    except Exception:
         try:
             m = scmutil.match(repo[None], pats, {})
             timer(lambda: len([b for a, b, c in repo.dirstate.statwalk([], m)]))
-        except:
+        except Exception:
             timer(lambda: len(list(cmdutil.walk(repo, pats, {}))))
 
 def perfstatus(ui, repo, *pats):
     #m = match.always(repo.root, repo.getcwd())
-    #timer(lambda: sum(map(len, repo.dirstate.status(m, [], False, False, False))))
+    #timer(lambda: sum(map(len, repo.dirstate.status(m, [], False, False,
+    #                                                False))))
     timer(lambda: sum(map(len, repo.status())))
 
+def clearcaches(cl):
+    # behave somewhat consistently across internal API changes
+    if util.safehasattr(cl, 'clearcaches'):
+        cl.clearcaches()
+    elif util.safehasattr(cl, '_nodecache'):
+        from mercurial.node import nullid, nullrev
+        cl._nodecache = {nullid: nullrev}
+        cl._nodepos = None
+
 def perfheads(ui, repo):
-    timer(lambda: len(repo.changelog.headrevs()))
+    cl = repo.changelog
+    def d():
+        len(cl.headrevs())
+        clearcaches(cl)
+    timer(d)
 
 def perftags(ui, repo):
     import mercurial.changelog, mercurial.manifest
@@ -56,6 +70,13 @@ def perftags(ui, repo):
         repo._tags = None
         return len(repo.tags())
     timer(t)
+
+def perfancestors(ui, repo):
+    heads = repo.changelog.headrevs()
+    def d():
+        for a in repo.changelog.ancestors(heads):
+            pass
+    timer(d)
 
 def perfdirstate(ui, repo):
     "a" in repo.dirstate
@@ -69,6 +90,14 @@ def perfdirstatedirs(ui, repo):
     def d():
         "a" in repo.dirstate._dirs
         del repo.dirstate._dirs
+    timer(d)
+
+def perfdirstatewrite(ui, repo):
+    ds = repo.dirstate
+    "a" in ds
+    def d():
+        ds._dirty = True
+        ds.write()
     timer(d)
 
 def perfmanifest(ui, repo):
@@ -111,6 +140,10 @@ def perfparents(ui, repo):
 def perflookup(ui, repo, rev):
     timer(lambda: len(repo.lookup(rev)))
 
+def perfrevrange(ui, repo, *specs):
+    revrange = scmutil.revrange
+    timer(lambda: len(revrange(repo, specs)))
+
 def perfnodelookup(ui, repo, rev):
     import mercurial.revlog
     mercurial.revlog._prereadsize = 2**24 # disable lazy parser in old hg
@@ -125,20 +158,9 @@ def perfnodelookup(ui, repo, rev):
     mercurial.revlog._prereadsize = 2**24 # disable lazy parser in old hg
     n = repo[rev].node()
     cl = mercurial.revlog.revlog(repo.sopener, "00changelog.i")
-    # behave somewhat consistently across internal API changes
-    if util.safehasattr(cl, 'clearcaches'):
-        clearcaches = cl.clearcaches
-    elif util.safehasattr(cl, '_nodecache'):
-        from mercurial.node import nullid, nullrev
-        def clearcaches():
-            cl._nodecache = {nullid: nullrev}
-            cl._nodepos = None
-    else:
-        def clearcaches():
-            pass
     def d():
         cl.rev(n)
-        clearcaches()
+        clearcaches(cl)
     timer(d)
 
 def perflog(ui, repo, **opts):
@@ -155,7 +177,7 @@ def perftemplating(ui, repo):
     ui.popbuffer()
 
 def perfcca(ui, repo):
-    timer(lambda: scmutil.casecollisionauditor(ui, False, repo[None]))
+    timer(lambda: scmutil.casecollisionauditor(ui, False, repo.dirstate))
 
 def perffncacheload(ui, repo):
     from mercurial import scmutil, store
@@ -205,6 +227,7 @@ cmdtable = {
     'perffncacheload': (perffncacheload, []),
     'perffncachewrite': (perffncachewrite, []),
     'perflookup': (perflookup, []),
+    'perfrevrange': (perfrevrange, []),
     'perfnodelookup': (perfnodelookup, []),
     'perfparents': (perfparents, []),
     'perfstartup': (perfstartup, []),
@@ -215,8 +238,10 @@ cmdtable = {
     'perfindex': (perfindex, []),
     'perfheads': (perfheads, []),
     'perftags': (perftags, []),
+    'perfancestors': (perfancestors, []),
     'perfdirstate': (perfdirstate, []),
     'perfdirstatedirs': (perfdirstate, []),
+    'perfdirstatewrite': (perfdirstatewrite, []),
     'perflog': (perflog,
                 [('', 'rename', False, 'ask log to follow renames')]),
     'perftemplating': (perftemplating, []),

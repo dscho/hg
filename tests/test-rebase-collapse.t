@@ -2,6 +2,7 @@
   > [extensions]
   > graphlog=
   > rebase=
+  > mq=
   > 
   > [phases]
   > publish=False
@@ -230,7 +231,7 @@ Rebase and collapse - more than one external (fail):
 
 Rebase and collapse - E onto H:
 
-  $ hg rebase -s 4 --collapse
+  $ hg rebase -s 4 --collapse # root (4) is not a merge
   saved backup bundle to $TESTTMP/b1/.hg/strip-backup/*-backup.hg (glob)
 
   $ hg tglog
@@ -250,7 +251,6 @@ Rebase and collapse - E onto H:
   
   $ hg manifest
   A
-  B
   C
   D
   E
@@ -258,6 +258,44 @@ Rebase and collapse - E onto H:
   H
 
   $ cd ..
+
+
+
+
+Test that branchheads cache is updated correctly when doing a strip in which
+the parent of the ancestor node to be stripped does not become a head and
+also, the parent of a node that is a child of the node stripped becomes a head
+(node 3).
+
+  $ hg clone -q -u . b b2
+  $ cd b2
+
+  $ hg heads --template="{rev}:{node} {branch}\n"
+  7:c65502d4178782309ce0574c5ae6ee9485a9bafa default
+  6:c772a8b2dc17629cec88a19d09c926c4814b12c7 default
+
+  $ cat $TESTTMP/b2/.hg/cache/branchheads
+  c65502d4178782309ce0574c5ae6ee9485a9bafa 7
+  c772a8b2dc17629cec88a19d09c926c4814b12c7 default
+  c65502d4178782309ce0574c5ae6ee9485a9bafa default
+
+  $ hg strip 4
+  saved backup bundle to $TESTTMP/b2/.hg/strip-backup/8a5212ebc852-backup.hg (glob)
+
+  $ cat $TESTTMP/b2/.hg/cache/branchheads
+  c65502d4178782309ce0574c5ae6ee9485a9bafa 4
+  2870ad076e541e714f3c2bc32826b5c6a6e5b040 default
+  c65502d4178782309ce0574c5ae6ee9485a9bafa default
+
+  $ hg heads --template="{rev}:{node} {branch}\n"
+  4:c65502d4178782309ce0574c5ae6ee9485a9bafa default
+  3:2870ad076e541e714f3c2bc32826b5c6a6e5b040 default
+
+  $ cd ..
+
+
+
+
 
 
 Create repo c:
@@ -340,7 +378,7 @@ Rebase and collapse - E onto I:
   $ hg clone -q -u . c c1
   $ cd c1
 
-  $ hg rebase -s 4 --collapse
+  $ hg rebase -s 4 --collapse # root (4) is not a merge
   merging E
   saved backup bundle to $TESTTMP/c1/.hg/strip-backup/*-backup.hg (glob)
 
@@ -362,7 +400,6 @@ Rebase and collapse - E onto I:
   
   $ hg manifest
   A
-  B
   C
   D
   E
@@ -589,4 +626,97 @@ Rebase, collapse and copies
   b
   $ hg log -r . --template "{file_copies}\n"
   d (a)g (b)
+
+Test collapsing a middle revision in-place
+
+  $ hg tglog
+  @  2: 'Collapsed revision
+  |  * move1
+  |  * move2'
+  o  1: 'change'
+  |
+  o  0: 'add'
+  
+  $ hg rebase --collapse -r 1 -d 0
+  abort: can't remove original changesets with unrebased descendants
+  (use --keep to keep original changesets)
+  [255]
+
+Test collapsing in place
+
+  $ hg rebase --collapse -b . -d 0
+  saved backup bundle to $TESTTMP/copies/.hg/strip-backup/*-backup.hg (glob)
+  $ hg st --change . --copies
+  M a
+  M c
+  A d
+    a
+  A g
+    b
+  R b
+  $ cat a
+  a
+  a
+  $ cat c
+  c
+  c
+  $ cat d
+  a
+  a
+  $ cat g
+  b
+  b
   $ cd ..
+
+
+Test stripping a revision with another child
+
+  $ hg init f
+  $ cd f
+
+  $ echo A > A
+  $ hg ci -Am A
+  adding A
+  $ echo B > B
+  $ hg ci -Am B
+  adding B
+
+  $ hg up -q 0
+
+  $ echo C > C
+  $ hg ci -Am C
+  adding C
+  created new head
+
+  $ hg tglog
+  @  2: 'C'
+  |
+  | o  1: 'B'
+  |/
+  o  0: 'A'
+  
+
+
+  $ hg heads --template="{rev}:{node} {branch}: {desc}\n"
+  2:c5cefa58fd557f84b72b87f970135984337acbc5 default: C
+  1:27547f69f25460a52fff66ad004e58da7ad3fb56 default: B
+
+  $ hg strip 2
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  saved backup bundle to $TESTTMP/f/.hg/strip-backup/*-backup.hg (glob)
+
+  $ hg tglog
+  o  1: 'B'
+  |
+  @  0: 'A'
+  
+
+
+  $ hg heads --template="{rev}:{node} {branch}: {desc}\n"
+  1:27547f69f25460a52fff66ad004e58da7ad3fb56 default: B
+
+  $ cd ..
+
+
+
+

@@ -353,3 +353,162 @@ correctly handle subrepos with patch queues
   $ echo sub = sub >> .hgsub
   $ hg add .hgsub
   $ hg qnew 0.diff
+
+  $ cd ..
+
+check whether MQ operations can import updated .hgsubstate correctly
+both into 'revision' and 'patch file under .hg/patches':
+
+  $ hg init importing-hgsubstate
+  $ cd importing-hgsubstate
+
+  $ echo a > a
+  $ hg commit -u test -d '0 0' -Am '#0 in parent'
+  adding a
+  $ hg init sub
+  $ echo sa > sub/sa
+  $ hg -R sub commit -u test -d '0 0' -Am '#0 in sub'
+  adding sa
+  $ echo 'sub = sub' > .hgsub
+  $ touch .hgsubstate
+  $ hg add .hgsub .hgsubstate
+
+  $ hg qnew -u test -d '0 0' import-at-qnew
+  $ hg -R sub parents --template '{node} sub\n'
+  b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
+  $ cat .hgsubstate
+  b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
+  $ hg diff -c tip
+  diff -r f499373e340c -r b20ffac88564 .hgsub
+  --- /dev/null
+  +++ b/.hgsub
+  @@ -0,0 +1,1 @@
+  +sub = sub
+  diff -r f499373e340c -r b20ffac88564 .hgsubstate
+  --- /dev/null
+  +++ b/.hgsubstate
+  @@ -0,0 +1,1 @@
+  +b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
+  $ cat .hg/patches/import-at-qnew
+  # HG changeset patch
+  # Parent f499373e340cdca5d01dee904aeb42dd2a325e71
+  # User test
+  # Date 0 0
+  
+  diff -r f499373e340c -r b20ffac88564 .hgsub
+  --- /dev/null
+  +++ b/.hgsub
+  @@ -0,0 +1,1 @@
+  +sub = sub
+  diff -r f499373e340c -r b20ffac88564 .hgsubstate
+  --- /dev/null
+  +++ b/.hgsubstate
+  @@ -0,0 +1,1 @@
+  +b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
+  $ hg qpop
+  popping import-at-qnew
+  patch queue now empty
+  $ hg qpush
+  applying import-at-qnew
+  now at: import-at-qnew
+
+  $ hg qnew import-at-qrefresh
+  $ echo sb > sub/sb
+  $ hg -R sub commit -u test -d '0 0' -Am '#1 in sub'
+  adding sb
+  $ hg qrefresh -u test -d '0 0'
+  $ hg -R sub parents --template '{node} sub\n'
+  88ac1bef5ed43b689d1d200b59886b675dec474b sub
+  $ cat .hgsubstate
+  88ac1bef5ed43b689d1d200b59886b675dec474b sub
+  $ hg diff -c tip
+  diff -r 44f846335325 -r b3e8c5fa3aaa .hgsubstate
+  --- a/.hgsubstate
+  +++ b/.hgsubstate
+  @@ -1,1 +1,1 @@
+  -b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
+  +88ac1bef5ed43b689d1d200b59886b675dec474b sub
+  $ cat .hg/patches/import-at-qrefresh
+  # HG changeset patch
+  # Date 0 0
+  # User test
+  # Parent 44f846335325209be6be35dc2c9a4be107278c09
+  
+  diff -r 44f846335325 .hgsubstate
+  --- a/.hgsubstate
+  +++ b/.hgsubstate
+  @@ -1,1 +1,1 @@
+  -b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
+  +88ac1bef5ed43b689d1d200b59886b675dec474b sub
+
+  $ hg qrefresh -u test -d '0 0'
+  $ cat .hgsubstate
+  88ac1bef5ed43b689d1d200b59886b675dec474b sub
+  $ hg diff -c tip
+  diff -r 44f846335325 -r b3e8c5fa3aaa .hgsubstate
+  --- a/.hgsubstate
+  +++ b/.hgsubstate
+  @@ -1,1 +1,1 @@
+  -b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
+  +88ac1bef5ed43b689d1d200b59886b675dec474b sub
+  $ cat .hg/patches/import-at-qrefresh
+  # HG changeset patch
+  # Date 0 0
+  # User test
+  # Parent 44f846335325209be6be35dc2c9a4be107278c09
+  
+  diff -r 44f846335325 .hgsubstate
+  --- a/.hgsubstate
+  +++ b/.hgsubstate
+  @@ -1,1 +1,1 @@
+  -b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
+  +88ac1bef5ed43b689d1d200b59886b675dec474b sub
+
+  $ hg update -C tip
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg qpop -a
+  popping import-at-qrefresh
+  popping import-at-qnew
+  patch queue now empty
+
+  $ hg -R sub update -C 0
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo 'sub = sub' > .hgsub
+  $ hg commit -Am '#1 in parent'
+  adding .hgsub
+  $ hg -R sub update -C 1
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg commit -Am '#2 in parent (but be rollbacked soon)'
+  $ hg rollback
+  repository tip rolled back to revision 1 (undo commit)
+  working directory now based on revision 1
+  $ hg status
+  M .hgsubstate
+  $ hg qnew -u test -d '0 0' checkstate-at-qnew
+  $ hg -R sub parents --template '{node} sub\n'
+  88ac1bef5ed43b689d1d200b59886b675dec474b sub
+  $ cat .hgsubstate
+  88ac1bef5ed43b689d1d200b59886b675dec474b sub
+  $ hg diff -c tip
+  diff -r 4d91eb2fa1d1 -r 1259c112d884 .hgsubstate
+  --- a/.hgsubstate
+  +++ b/.hgsubstate
+  @@ -1,1 +1,1 @@
+  -b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
+  +88ac1bef5ed43b689d1d200b59886b675dec474b sub
+  $ cat .hg/patches/checkstate-at-qnew
+  # HG changeset patch
+  # Parent 4d91eb2fa1d1b22ec513347b9cd06f6b49d470fa
+  # User test
+  # Date 0 0
+  
+  diff -r 4d91eb2fa1d1 -r 1259c112d884 .hgsubstate
+  --- a/.hgsubstate
+  +++ b/.hgsubstate
+  @@ -1,1 +1,1 @@
+  -b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
+  +88ac1bef5ed43b689d1d200b59886b675dec474b sub
+
+  $ cd ..
+
+  $ cd ..

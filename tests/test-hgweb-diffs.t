@@ -1,4 +1,4 @@
-  $ "$TESTDIR/hghave" serve execbit || exit 80
+  $ "$TESTDIR/hghave" serve || exit 80
 
 setting up repo
 
@@ -12,9 +12,22 @@ setting up repo
 
 change permissions for git diffs
 
-  $ chmod +x a
-  $ hg rm b
-  $ hg ci -Amb
+  $ hg import -q --bypass - <<EOF
+  > # HG changeset patch
+  > # User test
+  > # Date 0 0
+  > b
+  > 
+  > diff --git a/a b/a
+  > old mode 100644
+  > new mode 100755
+  > diff --git a/b b/b
+  > deleted file mode 100644
+  > --- a/b
+  > +++ /dev/null
+  > @@ -1,1 +0,0 @@
+  > -b
+  > EOF
 
 set up hgweb
 
@@ -23,7 +36,7 @@ set up hgweb
 
 revision
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT '/rev/0'
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'rev/0'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -153,7 +166,7 @@ revision
 
 raw revision
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT '/raw-rev/0'
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'raw-rev/0'
   200 Script output follows
   
   
@@ -178,7 +191,7 @@ raw revision
 
 diff removed file
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT '/diff/tip/b'
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'diff/tip/b'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -214,6 +227,7 @@ diff removed file
   <li><a href="/file/559edbd9ed20/b">file</a></li>
   <li><a href="/file/tip/b">latest</a></li>
   <li class="active">diff</li>
+  <li><a href="/comparison/559edbd9ed20/b">comparison</a></li>
   <li><a href="/annotate/559edbd9ed20/b">annotate</a></li>
   <li><a href="/log/559edbd9ed20/b">file log</a></li>
   <li><a href="/raw-file/559edbd9ed20/b">raw</a></li>
@@ -283,7 +297,7 @@ set up hgweb with git diffs
 
 revision
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT '/rev/0'
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'rev/0'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -415,7 +429,7 @@ revision
 
 revision
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT '/raw-rev/0'
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'raw-rev/0'
   200 Script output follows
   
   
@@ -442,7 +456,7 @@ revision
 
 diff removed file
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT '/diff/tip/a'
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'diff/tip/a'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -478,6 +492,7 @@ diff removed file
   <li><a href="/file/559edbd9ed20/a">file</a></li>
   <li><a href="/file/tip/a">latest</a></li>
   <li class="active">diff</li>
+  <li><a href="/comparison/559edbd9ed20/a">comparison</a></li>
   <li><a href="/annotate/559edbd9ed20/a">annotate</a></li>
   <li><a href="/log/559edbd9ed20/a">file log</a></li>
   <li><a href="/raw-file/559edbd9ed20/a">raw</a></li>
@@ -536,6 +551,378 @@ diff removed file
   </body>
   </html>
   
+
+comparison new file
+
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'comparison/0/a'
+  200 Script output follows
+  
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en-US">
+  <head>
+  <link rel="icon" href="/static/hgicon.png" type="image/png" />
+  <meta name="robots" content="index, nofollow" />
+  <link rel="stylesheet" href="/static/style-paper.css" type="text/css" />
+  <script type="text/javascript" src="/static/mercurial.js"></script>
+  
+  <title>test: a comparison</title>
+  </head>
+  <body>
+  
+  <div class="container">
+  <div class="menu">
+  <div class="logo">
+  <a href="http://mercurial.selenic.com/">
+  <img src="/static/hglogo.png" alt="mercurial" /></a>
+  </div>
+  <ul>
+  <li><a href="/shortlog/0cd96de13884">log</a></li>
+  <li><a href="/graph/0cd96de13884">graph</a></li>
+  <li><a href="/tags">tags</a></li>
+  <li><a href="/bookmarks">bookmarks</a></li>
+  <li><a href="/branches">branches</a></li>
+  </ul>
+  <ul>
+  <li><a href="/rev/0cd96de13884">changeset</a></li>
+  <li><a href="/file/0cd96de13884">browse</a></li>
+  </ul>
+  <ul>
+  <li><a href="/file/0cd96de13884/a">file</a></li>
+  <li><a href="/file/tip/a">latest</a></li>
+  <li><a href="/diff/0cd96de13884/a">diff</a></li>
+  <li class="active">comparison</li>
+  <li><a href="/annotate/0cd96de13884/a">annotate</a></li>
+  <li><a href="/log/0cd96de13884/a">file log</a></li>
+  <li><a href="/raw-file/0cd96de13884/a">raw</a></li>
+  </ul>
+  <ul>
+  <li><a href="/help">help</a></li>
+  </ul>
+  </div>
+  
+  <div class="main">
+  <h2><a href="/">test</a></h2>
+  <h3>comparison a @ 0:0cd96de13884</h3>
+  
+  <form class="search" action="/log">
+  <p></p>
+  <p><input name="rev" id="search1" type="text" size="30" /></p>
+  <div id="hint">find changesets by author, revision,
+  files, or words in the commit message</div>
+  </form>
+  
+  <div class="description">a</div>
+  
+  <table id="changesetEntry">
+  <tr>
+   <th>author</th>
+   <td>&#116;&#101;&#115;&#116;</td>
+  </tr>
+  <tr>
+   <th>date</th>
+   <td class="date age">Thu, 01 Jan 1970 00:00:00 +0000</td>
+  </tr>
+  <tr>
+   <th>parents</th>
+   <td></td>
+  </tr>
+  <tr>
+   <th>children</th>
+   <td><a href="/file/559edbd9ed20/a">559edbd9ed20</a> </td>
+  </tr>
+  
+  </table>
+  
+  <div class="overflow">
+  <div class="sourcefirst">   comparison</div>
+  <div class="legend">
+    <span class="legendinfo equal">equal</span>
+    <span class="legendinfo delete">deleted</span>
+    <span class="legendinfo insert">inserted</span>
+    <span class="legendinfo replace">replaced</span>
+  </div>
+  
+  
+  <table class="bigtable">
+  <thead class="header">
+  <tr>
+  <th>-1:000000000000</th>
+  <th>0:b789fdd96dc2</th>
+  </tr>
+  </thead>
+  
+  <tbody class="block">
+  
+  <tr>
+  <td class="source insert"><a href="#r1" id="r1">      </a> </td>
+  <td class="source insert"><a href="#r1" id="r1">     1</a> a</td>
+  </tr>
+  </tbody>
+  </table>
+  
+  </div>
+  </div>
+  </div>
+  
+  <script type="text/javascript">process_dates()</script>
+  
+  
+  </body>
+  </html>
+  
+
+comparison existing file
+
+  $ hg up
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo a >> a
+  $ hg ci -mc
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'comparison/tip/a'
+  200 Script output follows
+  
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en-US">
+  <head>
+  <link rel="icon" href="/static/hgicon.png" type="image/png" />
+  <meta name="robots" content="index, nofollow" />
+  <link rel="stylesheet" href="/static/style-paper.css" type="text/css" />
+  <script type="text/javascript" src="/static/mercurial.js"></script>
+  
+  <title>test: a comparison</title>
+  </head>
+  <body>
+  
+  <div class="container">
+  <div class="menu">
+  <div class="logo">
+  <a href="http://mercurial.selenic.com/">
+  <img src="/static/hglogo.png" alt="mercurial" /></a>
+  </div>
+  <ul>
+  <li><a href="/shortlog/d73db4d812ff">log</a></li>
+  <li><a href="/graph/d73db4d812ff">graph</a></li>
+  <li><a href="/tags">tags</a></li>
+  <li><a href="/bookmarks">bookmarks</a></li>
+  <li><a href="/branches">branches</a></li>
+  </ul>
+  <ul>
+  <li><a href="/rev/d73db4d812ff">changeset</a></li>
+  <li><a href="/file/d73db4d812ff">browse</a></li>
+  </ul>
+  <ul>
+  <li><a href="/file/d73db4d812ff/a">file</a></li>
+  <li><a href="/file/tip/a">latest</a></li>
+  <li><a href="/diff/d73db4d812ff/a">diff</a></li>
+  <li class="active">comparison</li>
+  <li><a href="/annotate/d73db4d812ff/a">annotate</a></li>
+  <li><a href="/log/d73db4d812ff/a">file log</a></li>
+  <li><a href="/raw-file/d73db4d812ff/a">raw</a></li>
+  </ul>
+  <ul>
+  <li><a href="/help">help</a></li>
+  </ul>
+  </div>
+  
+  <div class="main">
+  <h2><a href="/">test</a></h2>
+  <h3>comparison a @ 2:d73db4d812ff</h3>
+  
+  <form class="search" action="/log">
+  <p></p>
+  <p><input name="rev" id="search1" type="text" size="30" /></p>
+  <div id="hint">find changesets by author, revision,
+  files, or words in the commit message</div>
+  </form>
+  
+  <div class="description">c</div>
+  
+  <table id="changesetEntry">
+  <tr>
+   <th>author</th>
+   <td>&#116;&#101;&#115;&#116;</td>
+  </tr>
+  <tr>
+   <th>date</th>
+   <td class="date age">Thu, 01 Jan 1970 00:00:00 +0000</td>
+  </tr>
+  <tr>
+   <th>parents</th>
+   <td><a href="/file/559edbd9ed20/a">559edbd9ed20</a> </td>
+  </tr>
+  <tr>
+   <th>children</th>
+   <td></td>
+  </tr>
+  
+  </table>
+  
+  <div class="overflow">
+  <div class="sourcefirst">   comparison</div>
+  <div class="legend">
+    <span class="legendinfo equal">equal</span>
+    <span class="legendinfo delete">deleted</span>
+    <span class="legendinfo insert">inserted</span>
+    <span class="legendinfo replace">replaced</span>
+  </div>
+  
+  
+  <table class="bigtable">
+  <thead class="header">
+  <tr>
+  <th>0:b789fdd96dc2</th>
+  <th>1:a80d06849b33</th>
+  </tr>
+  </thead>
+  
+  <tbody class="block">
+  
+  <tr>
+  <td class="source equal"><a href="#l1r1" id="l1r1">     1</a> a</td>
+  <td class="source equal"><a href="#l1r1" id="l1r1">     1</a> a</td>
+  </tr>
+  <tr>
+  <td class="source insert"><a href="#r2" id="r2">      </a> </td>
+  <td class="source insert"><a href="#r2" id="r2">     2</a> a</td>
+  </tr>
+  </tbody>
+  </table>
+  
+  </div>
+  </div>
+  </div>
+  
+  <script type="text/javascript">process_dates()</script>
+  
+  
+  </body>
+  </html>
+  
+
+comparison removed file
+
+  $ hg rm a
+  $ hg ci -md
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'comparison/tip/a'
+  200 Script output follows
+  
+  <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en-US">
+  <head>
+  <link rel="icon" href="/static/hgicon.png" type="image/png" />
+  <meta name="robots" content="index, nofollow" />
+  <link rel="stylesheet" href="/static/style-paper.css" type="text/css" />
+  <script type="text/javascript" src="/static/mercurial.js"></script>
+  
+  <title>test: a comparison</title>
+  </head>
+  <body>
+  
+  <div class="container">
+  <div class="menu">
+  <div class="logo">
+  <a href="http://mercurial.selenic.com/">
+  <img src="/static/hglogo.png" alt="mercurial" /></a>
+  </div>
+  <ul>
+  <li><a href="/shortlog/20e80271eb7a">log</a></li>
+  <li><a href="/graph/20e80271eb7a">graph</a></li>
+  <li><a href="/tags">tags</a></li>
+  <li><a href="/bookmarks">bookmarks</a></li>
+  <li><a href="/branches">branches</a></li>
+  </ul>
+  <ul>
+  <li><a href="/rev/20e80271eb7a">changeset</a></li>
+  <li><a href="/file/20e80271eb7a">browse</a></li>
+  </ul>
+  <ul>
+  <li><a href="/file/20e80271eb7a/a">file</a></li>
+  <li><a href="/file/tip/a">latest</a></li>
+  <li><a href="/diff/20e80271eb7a/a">diff</a></li>
+  <li class="active">comparison</li>
+  <li><a href="/annotate/20e80271eb7a/a">annotate</a></li>
+  <li><a href="/log/20e80271eb7a/a">file log</a></li>
+  <li><a href="/raw-file/20e80271eb7a/a">raw</a></li>
+  </ul>
+  <ul>
+  <li><a href="/help">help</a></li>
+  </ul>
+  </div>
+  
+  <div class="main">
+  <h2><a href="/">test</a></h2>
+  <h3>comparison a @ 3:20e80271eb7a</h3>
+  
+  <form class="search" action="/log">
+  <p></p>
+  <p><input name="rev" id="search1" type="text" size="30" /></p>
+  <div id="hint">find changesets by author, revision,
+  files, or words in the commit message</div>
+  </form>
+  
+  <div class="description">d</div>
+  
+  <table id="changesetEntry">
+  <tr>
+   <th>author</th>
+   <td>&#116;&#101;&#115;&#116;</td>
+  </tr>
+  <tr>
+   <th>date</th>
+   <td class="date age">Thu, 01 Jan 1970 00:00:00 +0000</td>
+  </tr>
+  <tr>
+   <th>parents</th>
+   <td><a href="/file/d73db4d812ff/a">d73db4d812ff</a> </td>
+  </tr>
+  <tr>
+   <th>children</th>
+   <td></td>
+  </tr>
+  
+  </table>
+  
+  <div class="overflow">
+  <div class="sourcefirst">   comparison</div>
+  <div class="legend">
+    <span class="legendinfo equal">equal</span>
+    <span class="legendinfo delete">deleted</span>
+    <span class="legendinfo insert">inserted</span>
+    <span class="legendinfo replace">replaced</span>
+  </div>
+  
+  
+  <table class="bigtable">
+  <thead class="header">
+  <tr>
+  <th>1:a80d06849b33</th>
+  <th>-1:000000000000</th>
+  </tr>
+  </thead>
+  
+  <tbody class="block">
+  
+  <tr>
+  <td class="source delete"><a href="#l1" id="l1">     1</a> a</td>
+  <td class="source delete"><a href="#l1" id="l1">      </a> </td>
+  </tr>
+  <tr>
+  <td class="source delete"><a href="#l2" id="l2">     2</a> a</td>
+  <td class="source delete"><a href="#l2" id="l2">      </a> </td>
+  </tr>
+  </tbody>
+  </table>
+  
+  </div>
+  </div>
+  </div>
+  
+  <script type="text/javascript">process_dates()</script>
+  
+  
+  </body>
+  </html>
+  
+
   $ cd ..
 
 test import rev as raw-rev
@@ -548,7 +935,7 @@ test import rev as raw-rev
   updating to branch default
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd test1
-  $ hg import -q --exact http://localhost:$HGPORT/rev/1
+  $ hg import -q --bypass --exact http://localhost:$HGPORT/rev/1
 
 raw revision with diff block numbers
 
@@ -572,7 +959,7 @@ raw revision with diff block numbers
   > EOF
   $ hg serve -n test -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log
   $ cat hg.pid >> $DAEMON_PIDS
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT '/raw-rev/0'
+  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'raw-rev/0'
   200 Script output follows
   
   Block: 1
@@ -598,3 +985,5 @@ raw revision with diff block numbers
 errors
 
   $ cat ../test/errors.log
+
+  $ cd ..

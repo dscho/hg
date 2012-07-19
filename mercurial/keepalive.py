@@ -136,7 +136,7 @@ class ConnectionManager(object):
     def add(self, host, connection, ready):
         self._lock.acquire()
         try:
-            if not host in self._hostmap:
+            if host not in self._hostmap:
                 self._hostmap[host] = []
             self._hostmap[host].append(connection)
             self._connmap[connection] = host
@@ -290,7 +290,7 @@ class KeepAliveHandler(object):
             # worked.  We'll check the version below, too.
         except (socket.error, httplib.HTTPException):
             r = None
-        except:
+        except: # re-raises
             # adding this block just in case we've missed
             # something we will still raise the exception, but
             # lets try and close the connection and remove it
@@ -534,7 +534,7 @@ def safesend(self, str):
         if self.auto_open:
             self.connect()
         else:
-            raise httplib.NotConnected()
+            raise httplib.NotConnected
 
     # send the data to the server. if we get a broken pipe, then close
     # the socket. we want to reconnect when somebody tries to send again.
@@ -758,7 +758,7 @@ if __name__ == '__main__':
     try:
         N = int(sys.argv[1])
         url = sys.argv[2]
-    except:
+    except (IndexError, ValueError):
         print "%s <integer> <url>" % sys.argv[0]
     else:
         test(url, N)

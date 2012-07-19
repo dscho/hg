@@ -3,7 +3,7 @@
 # put something like this in the repo .hg/hgrc:
 #
 #     [hooks]
-#     changegroup = python "$TESTDIR"/printenv.py <hookname> [exit] [output]
+#     changegroup = python "$TESTDIR/printenv.py" <hookname> [exit] [output]
 #
 #   - <hookname> is a mandatory argument (e.g. "changegroup")
 #   - [exit] is the exit code of the hook (default: 0)
@@ -32,13 +32,17 @@ if len(sys.argv) > 2:
 
 # variables with empty values may not exist on all platforms, filter
 # them now for portability sake.
-env = [k for k, v in os.environ.iteritems()
+env = [(k, v) for k, v in os.environ.iteritems()
        if k.startswith("HG_") and v]
 env.sort()
 
 out.write("%s hook: " % name)
-for v in env:
-    out.write("%s=%s " % (v, os.environ[v]))
+if os.name == 'nt':
+    filter = lambda x: x.replace('\\', '/')
+else:
+    filter = lambda x: x
+vars = ["%s=%s" % (k, filter(v)) for k, v in env]
+out.write(" ".join(vars))
 out.write("\n")
 out.close()
 

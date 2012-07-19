@@ -1,5 +1,9 @@
 
   $ "$TESTDIR/hghave" git || exit 80
+  $ echo "[core]" >> $HOME/.gitconfig
+  $ echo "autocrlf = false" >> $HOME/.gitconfig
+  $ echo "[core]" >> $HOME/.gitconfig
+  $ echo "autocrlf = false" >> $HOME/.gitconfig
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "convert=" >> $HGRCPATH
   $ echo 'hgext.graphlog =' >> $HGRCPATH
@@ -281,9 +285,12 @@ damage git repository and convert again
 
   $ cat > damage.py <<EOF
   > import os
+  > import stat
   > for root, dirs, files in os.walk('git-repo4/.git/objects'):
   >     if files:
   >         path = os.path.join(root, files[0])
+  >         if os.name == 'nt':
+  >             os.chmod(path, stat.S_IWUSR)
   >         os.remove(path)
   >         break
   > EOF

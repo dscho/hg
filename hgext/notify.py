@@ -132,6 +132,8 @@ from mercurial.i18n import _
 from mercurial import patch, cmdutil, templater, util, mail
 import email.Parser, email.Errors, fnmatch, socket, time
 
+testedwith = 'internal'
+
 # template for single changeset can include email headers.
 single_template = '''
 Subject: changeset in {webroot}: {desc|firstline|strip}
@@ -357,8 +359,8 @@ def hook(ui, repo, hooktype, node=None, source=None, **kwargs):
                     author = repo[rev].user()
             else:
                 data += ui.popbuffer()
-                ui.note(_('notify: suppressing notification for merge %d:%s\n') %
-                        (rev, repo[rev].hex()[:12]))
+                ui.note(_('notify: suppressing notification for merge %d:%s\n')
+                        % (rev, repo[rev].hex()[:12]))
                 ui.pushbuffer()
         if count:
             n.diff(ctx, repo['tip'])

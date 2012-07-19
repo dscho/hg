@@ -23,24 +23,25 @@ else:
 try:
     import hashlib
     sha = hashlib.sha1()
-except:
+except ImportError:
     try:
         import sha
-    except:
+    except ImportError:
         raise SystemExit(
             "Couldn't import standard hashlib (incomplete Python install).")
 
 try:
     import zlib
-except:
+except ImportError:
     raise SystemExit(
         "Couldn't import standard zlib (incomplete Python install).")
 
 # The base IronPython distribution (as of 2.7.1) doesn't support bz2
 isironpython = False
 try:
-    isironpython = platform.python_implementation().lower().find("ironpython") != -1
-except:
+    isironpython = (platform.python_implementation()
+                    .lower().find("ironpython") != -1)
+except AttributeError:
     pass
 
 if isironpython:
@@ -48,7 +49,7 @@ if isironpython:
 else:
     try:
         import bz2
-    except:
+    except ImportError:
         raise SystemExit(
             "Couldn't import standard bz2 (incomplete Python install).")
 
@@ -64,6 +65,7 @@ from distutils.command.build_py import build_py
 from distutils.command.install_scripts import install_scripts
 from distutils.spawn import spawn, find_executable
 from distutils.ccompiler import new_compiler
+from distutils import cygwinccompiler
 from distutils.errors import CCompilerError, DistutilsExecError
 from distutils.sysconfig import get_python_inc
 from distutils.version import StrictVersion
@@ -107,7 +109,7 @@ def hasfunction(cc, funcname):
             os.dup2(devnull.fileno(), sys.stderr.fileno())
             objects = cc.compile([fname], output_dir=tmpdir)
             cc.link_executable(objects, os.path.join(tmpdir, "a.out"))
-        except:
+        except Exception:
             return False
         return True
     finally:
@@ -211,10 +213,12 @@ class hgbuild(build):
     # Insert hgbuildmo first so that files in mercurial/locale/ are found
     # when build_py is run next.
     sub_commands = [('build_mo', None),
-    # We also need build_ext before build_py. Otherwise, when 2to3 is called (in
-    # build_py), it will not find osutil & friends, thinking that those modules are
-    # global and, consequently, making a mess, now that all module imports are
-    # global.
+
+    # We also need build_ext before build_py. Otherwise, when 2to3 is
+    # called (in build_py), it will not find osutil & friends,
+    # thinking that those modules are global and, consequently, making
+    # a mess, now that all module imports are global.
+
                     ('build_ext', build.has_ext_modules),
                    ] + build.sub_commands
 
@@ -292,7 +296,8 @@ class hgbuildpy(build_py):
             self.distribution.ext_modules = []
         else:
             if not os.path.exists(os.path.join(get_python_inc(), 'Python.h')):
-                raise SystemExit("Python headers are required to build Mercurial")
+                raise SystemExit('Python headers are required to build '
+                                 'Mercurial')
 
     def find_modules(self):
         modules = build_py.find_modules(self)
@@ -330,6 +335,19 @@ class buildhgextindex(Command):
         f.write('docs = ')
         f.write(out)
         f.close()
+
+class buildhgexe(build_ext):
+    description = 'compile hg.exe from mercurial/exewrapper.c'
+
+    def build_extensions(self):
+        if os.name != 'nt':
+            return
+        objects = self.compiler.compile(['mercurial/exewrapper.c'],
+                                         output_dir=self.build_temp)
+        dir = os.path.dirname(self.get_ext_fullpath('dummy'))
+        target = os.path.join(dir, 'hg')
+        self.compiler.link_executable(objects, target,
+                                      output_dir=self.build_temp)
 
 class hginstallscripts(install_scripts):
     '''
@@ -382,10 +400,11 @@ cmdclass = {'build': hgbuild,
             'build_ext': hgbuildext,
             'build_py': hgbuildpy,
             'build_hgextindex': buildhgextindex,
-            'install_scripts': hginstallscripts}
+            'install_scripts': hginstallscripts,
+            'build_hgexe': buildhgexe,
+            }
 
-packages = ['mercurial', 'mercurial.hgweb',
-            'mercurial.httpclient', 'mercurial.httpclient.tests',
+packages = ['mercurial', 'mercurial.hgweb', 'mercurial.httpclient',
             'hgext', 'hgext.convert', 'hgext.highlight', 'hgext.zeroconf',
             'hgext.largefiles']
 
@@ -410,6 +429,20 @@ if sys.platform == 'win32' and sys.version_info < (2, 5, 0, 'final'):
 else:
     extmodules.append(Extension('mercurial.osutil', ['mercurial/osutil.c'],
                                 extra_link_args=osutil_ldflags))
+
+# the -mno-cygwin option has been deprecated for years
+Mingw32CCompiler = cygwinccompiler.Mingw32CCompiler
+
+class HackedMingw32CCompiler(cygwinccompiler.Mingw32CCompiler):
+    def __init__(self, *args, **kwargs):
+        Mingw32CCompiler.__init__(self, *args, **kwargs)
+        for i in 'compiler compiler_so linker_exe linker_so'.split():
+            try:
+                getattr(self, i).remove('-mno-cygwin')
+            except ValueError:
+                pass
+
+cygwinccompiler.Mingw32CCompiler = HackedMingw32CCompiler
 
 if sys.platform.startswith('linux') and os.uname()[2] > '2.6':
     # The inotify extension is only usable with Linux 2.6 kernels.

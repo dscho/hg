@@ -83,6 +83,74 @@ test tranplanted keyword
   1 
   0 
 
+test destination() revset predicate with a transplant of a transplant; new
+clone so subsequent rollback isn't affected
+  $ hg clone -q . ../destination
+  $ cd ../destination
+  $ hg up -Cq 0
+  $ hg branch -q b4
+  $ hg ci -qm "b4"
+  $ hg transplant 7
+  applying ffd6818a3975
+  ffd6818a3975 transplanted to 502236fa76bb
+
+
+  $ hg log -r 'destination()'
+  changeset:   5:e234d668f844
+  parent:      1:d11e3596cc1a
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     b1
+  
+  changeset:   6:539f377d78df
+  user:        test
+  date:        Thu Jan 01 00:00:01 1970 +0000
+  summary:     b2
+  
+  changeset:   7:ffd6818a3975
+  user:        test
+  date:        Thu Jan 01 00:00:02 1970 +0000
+  summary:     b3
+  
+  changeset:   9:502236fa76bb
+  branch:      b4
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:02 1970 +0000
+  summary:     b3
+  
+  $ hg log -r 'destination(a53251cdf717)'
+  changeset:   7:ffd6818a3975
+  user:        test
+  date:        Thu Jan 01 00:00:02 1970 +0000
+  summary:     b3
+  
+  changeset:   9:502236fa76bb
+  branch:      b4
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:02 1970 +0000
+  summary:     b3
+  
+
+test subset parameter in reverse order
+  $ hg log -r 'reverse(all()) and destination(a53251cdf717)'
+  changeset:   9:502236fa76bb
+  branch:      b4
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:02 1970 +0000
+  summary:     b3
+  
+  changeset:   7:ffd6818a3975
+  user:        test
+  date:        Thu Jan 01 00:00:02 1970 +0000
+  summary:     b3
+  
+
+back to the original dir
+  $ cd ../rebase
+
 rollback the transplant
   $ hg rollback
   repository tip rolled back to revision 4 (undo transplant)
@@ -120,7 +188,25 @@ rebase b onto r1, skipping b2
   1  r2
   0  r1
 
+test same-parent transplant with --log
 
+  $ hg clone -r 1 ../t ../sameparent
+  adding changesets
+  adding manifests
+  adding file changes
+  added 2 changesets with 2 changes to 2 files
+  updating to branch default
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ cd ../sameparent
+  $ hg transplant --log -s ../prune 5
+  searching for changes
+  applying e234d668f844
+  e234d668f844 transplanted to e07aea8ecf9c
+  $ hg log --template '{rev} {parents} {desc}\n'
+  2  b1
+  (transplanted from e234d668f844e1b1a765f01db83a32c0c7bfa170)
+  1  r2
+  0  r1
 remote transplant
 
   $ hg clone -r 1 ../t ../remote
@@ -338,6 +424,8 @@ test transplant into empty repository
   $ cd ..
 
 
+#if unix-permissions system-sh
+
 test filter
 
   $ hg init filter
@@ -423,6 +511,10 @@ test transplant with filter handles invalid changelog
   filtering * (glob)
   abort: filter corrupted changeset (no user or date)
   [255]
+  $ cd ..
+
+#endif
+
 
 test with a win32ext like setup (differing EOLs)
 
@@ -481,6 +573,7 @@ test transplant with merge changeset is skipped
   $ hg init merge1b
   $ cd merge1b
   $ hg transplant -s ../merge1a tip
+  $ cd ..
 
 test transplant with merge changeset accepts --parent
 
@@ -509,3 +602,4 @@ test transplant with merge changeset accepts --parent
   $ hg transplant -s ../merge2a --parent 0 tip
   applying be9f9b39483f
   be9f9b39483f transplanted to 9959e51f94d1
+  $ cd ..

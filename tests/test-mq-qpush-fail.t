@@ -202,6 +202,42 @@ test qpop --force --no-backup
   $ test -f a.orig && echo 'error: backup with --no-backup'
   [1]
 
+test qpop --keep-changes
+
+  $ hg qpush
+  applying p1
+  now at: p1
+  $ hg qpop --keep-changes --force
+  abort: cannot use both --force and --keep-changes
+  [255]
+  $ echo a >> a
+  $ hg qpop --keep-changes
+  abort: local changes found, refresh first
+  [255]
+  $ hg revert -qa a
+  $ rm a
+  $ hg qpop --keep-changes
+  abort: local changes found, refresh first
+  [255]
+  $ hg rm -A a
+  $ hg qpop --keep-changes
+  abort: local changes found, refresh first
+  [255]
+  $ hg revert -qa a
+  $ echo b > b
+  $ hg add b
+  $ hg qpop --keep-changes
+  abort: local changes found, refresh first
+  [255]
+  $ hg forget b
+  $ echo d > d
+  $ hg add d
+  $ hg qpop --keep-changes
+  popping p1
+  patch queue now empty
+  $ hg forget d
+  $ rm d
+
 test qpush --force and backup files
 
   $ echo a >> a
@@ -281,3 +317,110 @@ test qgoto --force --no-backup
   now at: p2
   $ test -f a.orig && echo 'error: backup with --no-backup'
   [1]
+
+test qpush --keep-changes
+
+  $ hg qpush --keep-changes --force
+  abort: cannot use both --force and --keep-changes
+  [255]
+  $ hg qpush --keep-changes --exact
+  abort: cannot use --exact and --keep-changes together
+  [255]
+  $ echo b >> b
+  $ hg qpush --keep-changes
+  applying p3
+  errors during apply, please fix and refresh p2
+  [2]
+  $ rm b
+  $ hg qpush --keep-changes
+  applying p3
+  errors during apply, please fix and refresh p2
+  [2]
+  $ hg rm -A b
+  $ hg qpush --keep-changes
+  applying p3
+  errors during apply, please fix and refresh p2
+  [2]
+  $ hg revert -aq b
+  $ echo d > d
+  $ hg add d
+  $ hg qpush --keep-changes
+  applying p3
+  errors during apply, please fix and refresh p2
+  [2]
+  $ hg forget d
+  $ rm d
+  $ hg qpop
+  popping p2
+  patch queue now empty
+  $ echo b >> b
+  $ hg qpush -a --keep-changes
+  applying p2
+  applying p3
+  errors during apply, please fix and refresh p2
+  [2]
+  $ hg qtop
+  p2
+  $ hg parents --template "{rev} {desc}\n"
+  2 imported patch p2
+  $ hg st b
+  M b
+  $ cat b
+  b
+  b
+
+test qgoto --keep-changes
+
+  $ hg revert -aq b
+  $ rm e
+  $ hg qgoto --keep-changes --force p3
+  abort: cannot use both --force and --keep-changes
+  [255]
+  $ echo a >> a
+  $ hg qgoto --keep-changes p3
+  applying p3
+  now at: p3
+  $ hg st a
+  M a
+  $ hg qgoto --keep-changes p2
+  popping p3
+  now at: p2
+  $ hg st a
+  M a
+
+test mq.keepchanges setting
+
+  $ hg --config mq.keepchanges=1 qpush
+  applying p3
+  now at: p3
+  $ hg st a
+  M a
+  $ hg --config mq.keepchanges=1 qpop
+  popping p3
+  now at: p2
+  $ hg st a
+  M a
+  $ hg --config mq.keepchanges=1 qgoto p3
+  applying p3
+  now at: p3
+  $ hg st a
+  M a
+  $ echo b >> b
+  $ hg --config mq.keepchanges=1 qpop --force
+  popping p3
+  now at: p2
+  $ hg st b
+  $ hg --config mq.keepchanges=1 qpush --exact
+  abort: local changes found, refresh first
+  [255]
+  $ hg revert -qa a
+  $ hg qpop
+  popping p2
+  patch queue now empty
+  $ echo a >> a
+  $ hg --config mq.keepchanges=1 qpush --force
+  applying p2
+  now at: p2
+  $ hg st a
+
+  $ cd ..

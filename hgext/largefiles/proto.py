@@ -6,7 +6,8 @@
 import os
 import urllib2
 
-from mercurial import error, httprepo, util, wireproto
+from mercurial import error, httppeer, util, wireproto
+from mercurial.wireproto import batchable, future
 from mercurial.i18n import _
 
 import lfutil
@@ -81,7 +82,7 @@ def wirereposetup(ui, repo):
             # unfortunately, httprepository._callpush tries to convert its
             # input file-like into a bundle before sending it, so we can't use
             # it ...
-            if issubclass(self.__class__, httprepo.httprepository):
+            if issubclass(self.__class__, httppeer.httppeer):
                 res = None
                 try:
                     res = self._call('putlfile', data=fd, sha=sha,
@@ -119,15 +120,19 @@ def wirereposetup(ui, repo):
                                                 length))
             return (length, stream)
 
+        @batchable
         def statlfile(self, sha):
+            f = future()
+            result = {'sha': sha}
+            yield result, f
             try:
-                return int(self._call("statlfile", sha=sha))
+                yield int(f.value)
             except (ValueError, urllib2.HTTPError):
                 # If the server returns anything but an integer followed by a
                 # newline, newline, it's not speaking our language; if we get
                 # an HTTP error, we can't be sure the largefile is present;
                 # either way, consider it missing.
-                return 2
+                yield 2
 
     repo.__class__ = lfileswirerepository
 

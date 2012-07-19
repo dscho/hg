@@ -6,7 +6,8 @@ Create configuration
 help record (no record)
 
   $ hg help record
-  record extension - commands to interactively select changes for commit/qrefresh
+  record extension - commands to interactively select changes for
+  commit/qrefresh
   
   use "hg help extensions" for information on enabling extensions
 
@@ -397,3 +398,5 @@ After qrecord b.patch 'tip'
 After qrecord b.patch 'diff'
 
   $ hg diff --nodates
+
+  $ cd ..

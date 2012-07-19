@@ -7,7 +7,7 @@
 
 from node import nullid, nullrev, hex, bin
 from i18n import _
-import scmutil, util, filemerge, copies, subrepo
+import error, scmutil, util, filemerge, copies, subrepo
 import errno, os, shutil
 
 class mergestate(object):
@@ -198,9 +198,11 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
     elif pa == p2: # backwards
         pa = p1.p1()
     elif pa and repo.ui.configbool("merge", "followcopies", True):
-        copy, diverge = copies.mergecopies(repo, p1, p2, pa)
+        copy, diverge, renamedelete = copies.mergecopies(repo, p1, p2, pa)
         for of, fl in diverge.iteritems():
             act("divergent renames", "dr", of, fl)
+        for of, fl in renamedelete.iteritems():
+            act("rename and delete", "rd", of, fl)
 
     repo.ui.note(_("resolving manifests\n"))
     repo.ui.debug(" overwrite: %s, partial: %s\n"
@@ -363,7 +365,8 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
             removed += 1
         elif m == "m": # merge
             if f == '.hgsubstate': # subrepo states need updating
-                subrepo.submerge(repo, wctx, mctx, wctx.ancestor(mctx), overwrite)
+                subrepo.submerge(repo, wctx, mctx, wctx.ancestor(mctx),
+                                 overwrite)
                 continue
             f2, fd, flags, move = a[2:]
             repo.wopener.audit(fd)
@@ -406,6 +409,12 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
             fl = a[2]
             repo.ui.warn(_("note: possible conflict - %s was renamed "
                            "multiple times to:\n") % f)
+            for nf in fl:
+                repo.ui.warn(" %s\n" % nf)
+        elif m == "rd": # rename and delete
+            fl = a[2]
+            repo.ui.warn(_("note: possible conflict - %s was deleted "
+                           "and renamed to:\n") % f)
             for nf in fl:
                 repo.ui.warn(" %s\n" % nf)
         elif m == "e": # exec
@@ -479,7 +488,8 @@ def recordupdates(repo, action, branchmerge):
                 if f:
                     repo.dirstate.drop(f)
 
-def update(repo, node, branchmerge, force, partial, ancestor=None):
+def update(repo, node, branchmerge, force, partial, ancestor=None,
+           mergeancestor=False):
     """
     Perform a merge between the working directory and the given node
 
@@ -487,6 +497,10 @@ def update(repo, node, branchmerge, force, partial, ancestor=None):
     branchmerge = whether to merge between branches
     force = whether to force branch merging or file overwriting
     partial = a function to filter file lists (dirstate not updated)
+    mergeancestor = if false, merging with an ancestor (fast-forward)
+      is only allowed between different named branches. This flag
+      is used by rebase extension as a temporary fix and should be
+      avoided in general.
 
     The table below shows all the behaviors of the update command
     given the -c and -C or no options, whether the working directory
@@ -523,8 +537,8 @@ def update(repo, node, branchmerge, force, partial, ancestor=None):
         if node is None:
             # tip of current branch
             try:
-                node = repo.branchtags()[wc.branch()]
-            except KeyError:
+                node = repo.branchtip(wc.branch())
+            except error.RepoLookupError:
                 if wc.branch() == "default": # no default branch!
                     node = repo.lookup("tip") # update to tip
                 else:
@@ -547,7 +561,7 @@ def update(repo, node, branchmerge, force, partial, ancestor=None):
                 raise util.Abort(_("merging with a working directory ancestor"
                                    " has no effect"))
             elif pa == p1:
-                if p1.branch() == p2.branch():
+                if not mergeancestor and p1.branch() == p2.branch():
                     raise util.Abort(_("nothing to merge"),
                                      hint=_("use 'hg update' "
                                             "or check 'hg heads'"))

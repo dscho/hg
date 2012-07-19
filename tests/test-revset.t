@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" no-msys || exit 80 # MSYS will translate /a/b/c/ as if it was a real file path
-
   $ HGENCODING=utf-8
   $ export HGENCODING
 
@@ -32,6 +30,16 @@
   (branches are permanent and global, did you want a bookmark?)
   $ hg ci -Aqm2 -u Bob
 
+  $ hg log -r "extra('branch', 'a-b-c-')" --template '{rev}\n'
+  2
+  $ hg log -r "extra('branch')" --template '{rev}\n'
+  0
+  1
+  2
+  $ hg log -r "extra('branch', 're:a')" --template '{rev} {branch}\n'
+  0 a
+  2 a-b-c-
+
   $ hg co 1
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg branch +a+b+c+
@@ -49,8 +57,8 @@
 
   $ hg co 3
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  $ hg branch /a/b/c/
-  marked working directory as branch /a/b/c/
+  $ hg branch !a/b/c/
+  marked working directory as branch !a/b/c/
   (branches are permanent and global, did you want a bookmark?)
   $ hg ci -Aqm"5 bug"
 
@@ -223,9 +231,30 @@ quoting needed
   5
   $ log 'author(bob)'
   2
+  $ log 'author("re:bob|test")'
+  0
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
   $ log 'branch(é)'
   8
   9
+  $ log 'branch(a)'
+  0
+  $ hg log -r 'branch("re:a")' --template '{rev} {branch}\n'
+  0 a
+  2 a-b-c-
+  3 +a+b+c+
+  4 -a-b-c-
+  5 !a/b/c/
+  6 _a_b_c_
+  7 .a.b.c.
   $ log 'children(ancestor(4,5))'
   2
   3
@@ -343,6 +372,17 @@ quoting needed
   4
   3
   2
+  $ log 'reverse(all())'
+  9
+  8
+  7
+  6
+  5
+  4
+  3
+  2
+  1
+  0
   $ log 'rev(5)'
   5
   $ log 'sort(limit(reverse(all()), 3))'
@@ -362,6 +402,22 @@ quoting needed
   6
   $ log 'tag(tip)'
   9
+
+we can use patterns when searching for tags
+
+  $ log 'tag("1..*")'
+  abort: tag '1..*' does not exist
+  [255]
+  $ log 'tag("re:1..*")'
+  6
+  $ log 'tag("re:[0-9].[0-9]")'
+  6
+  $ log 'tag("literal:1.0")'
+  6
+  $ log 'tag("re:0..*")'
+  abort: no tags exist that match '0..*'
+  [255]
+
   $ log 'tag(unknown)'
   abort: tag 'unknown' does not exist
   [255]

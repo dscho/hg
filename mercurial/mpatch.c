@@ -20,6 +20,7 @@
  of the GNU General Public License, incorporated herein by reference.
 */
 
+#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,7 +39,7 @@ struct flist {
 	struct frag *base, *head, *tail;
 };
 
-static struct flist *lalloc(int size)
+static struct flist *lalloc(Py_ssize_t size)
 {
 	struct flist *a = NULL;
 
@@ -68,7 +69,7 @@ static void lfree(struct flist *a)
 	}
 }
 
-static int lsize(struct flist *a)
+static Py_ssize_t lsize(struct flist *a)
 {
 	return a->tail - a->head;
 }
@@ -197,7 +198,7 @@ static struct flist *combine(struct flist *a, struct flist *b)
 }
 
 /* decode a binary patch into a hunk list */
-static struct flist *decode(const char *bin, int len)
+static struct flist *decode(const char *bin, Py_ssize_t len)
 {
 	struct flist *l;
 	struct frag *lt;
@@ -236,9 +237,9 @@ static struct flist *decode(const char *bin, int len)
 }
 
 /* calculate the size of resultant text */
-static int calcsize(int len, struct flist *l)
+static Py_ssize_t calcsize(Py_ssize_t len, struct flist *l)
 {
-	int outlen = 0, last = 0;
+	Py_ssize_t outlen = 0, last = 0;
 	struct frag *f = l->head;
 
 	while (f != l->tail) {
@@ -258,7 +259,7 @@ static int calcsize(int len, struct flist *l)
 	return outlen;
 }
 
-static int apply(char *buf, const char *orig, int len, struct flist *l)
+static int apply(char *buf, const char *orig, Py_ssize_t len, struct flist *l)
 {
 	struct frag *f = l->head;
 	int last = 0;
@@ -283,10 +284,9 @@ static int apply(char *buf, const char *orig, int len, struct flist *l)
 }
 
 /* recursively generate a patch of all bins between start and end */
-static struct flist *fold(PyObject *bins, int start, int end)
+static struct flist *fold(PyObject *bins, Py_ssize_t start, Py_ssize_t end)
 {
-	int len;
-	Py_ssize_t blen;
+	Py_ssize_t len, blen;
 	const char *buffer;
 
 	if (start + 1 == end) {
@@ -312,8 +312,7 @@ patches(PyObject *self, PyObject *args)
 	struct flist *patch;
 	const char *in;
 	char *out;
-	int len, outlen;
-	Py_ssize_t inlen;
+	Py_ssize_t len, outlen, inlen;
 
 	if (!PyArg_ParseTuple(args, "OO:mpatch", &text, &bins))
 		return NULL;
@@ -357,7 +356,7 @@ static PyObject *
 patchedsize(PyObject *self, PyObject *args)
 {
 	long orig, start, end, len, outlen = 0, last = 0;
-	int patchlen;
+	Py_ssize_t patchlen;
 	char *bin, *binend, *data;
 
 	if (!PyArg_ParseTuple(args, "ls#", &orig, &bin, &patchlen))

@@ -158,12 +158,12 @@ Rebase with base == '.' => same as no arguments (from 3 onto 8):
   $ cd ..
 
 
-Rebase with dest == `hg branch` => same as no arguments (from 3 onto 8):
+Rebase with dest == branch(.) => same as no arguments (from 3 onto 8):
 
   $ hg clone -q -u 3 a a3
   $ cd a3
 
-  $ hg rebase --dest `hg branch`
+  $ hg rebase --dest 'branch(.)'
   saved backup bundle to $TESTTMP/a3/.hg/strip-backup/*-backup.hg (glob)
 
   $ hg tglog
@@ -199,19 +199,19 @@ Specify only source (from 2 onto 8):
   $ hg tglog
   @  8: 'D'
   |
-  o    7: 'C'
-  |\
-  | o  6: 'I'
+  o  7: 'C'
+  |
+  o  6: 'I'
+  |
+  o  5: 'H'
+  |
+  | o  4: 'G'
+  |/|
+  o |  3: 'F'
   | |
-  | o  5: 'H'
-  | |
-  | | o  4: 'G'
-  | |/|
-  | o |  3: 'F'
-  | | |
-  | | o  2: 'E'
-  | |/
-  o |  1: 'B'
+  | o  2: 'E'
+  |/
+  | o  1: 'B'
   |/
   o  0: 'A'
   
@@ -283,7 +283,7 @@ Specify source and dest (from 2 onto 7):
   $ hg clone -q -u . a a7
   $ cd a7
 
-  $ hg rebase --detach --source 2 --dest 7
+  $ hg rebase --source 2 --dest 7
   saved backup bundle to $TESTTMP/a7/.hg/strip-backup/*-backup.hg (glob)
 
   $ hg tglog
@@ -349,19 +349,19 @@ Specify only revs (from 2 onto 8)
   $ hg tglog
   @  8: 'D'
   |
-  o    7: 'C'
-  |\
-  | o  6: 'I'
+  o  7: 'C'
+  |
+  o  6: 'I'
+  |
+  o  5: 'H'
+  |
+  | o  4: 'G'
+  |/|
+  o |  3: 'F'
   | |
-  | o  5: 'H'
-  | |
-  | | o  4: 'G'
-  | |/|
-  | o |  3: 'F'
-  | | |
-  | | o  2: 'E'
-  | |/
-  o |  1: 'B'
+  | o  2: 'E'
+  |/
+  | o  1: 'B'
   |/
   o  0: 'A'
   
@@ -427,3 +427,4 @@ Test --tool parameter:
   tool option will be ignored
   saved backup bundle to $TESTTMP/b3/.hg/strip-backup/*-backup.hg (glob)
 
+  $ cd ..

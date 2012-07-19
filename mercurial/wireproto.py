@@ -9,8 +9,8 @@ import urllib, tempfile, os, sys
 from i18n import _
 from node import bin, hex
 import changegroup as changegroupmod
-import repo, error, encoding, util, store
-import phases
+import peer, error, encoding, util, store
+import discovery, phases
 
 # abstract batching support
 
@@ -24,9 +24,9 @@ class future(object):
 class batcher(object):
     '''base class for batches of commands submittable in a single request
 
-    All methods invoked on instances of this class are simply queued and return a
-    a future for the result. Once you call submit(), all the queued calls are
-    performed and the results set in their respective futures.
+    All methods invoked on instances of this class are simply queued and
+    return a a future for the result. Once you call submit(), all the queued
+    calls are performed and the results set in their respective futures.
     '''
     def __init__(self):
         self.calls = []
@@ -51,7 +51,8 @@ class localbatch(batcher):
 class remotebatch(batcher):
     '''batches the queued calls; uses as few roundtrips as possible'''
     def __init__(self, remote):
-        '''remote must support _submitbatch(encbatch) and _submitone(op, encargs)'''
+        '''remote must support _submitbatch(encbatch) and
+        _submitone(op, encargs)'''
         batcher.__init__(self)
         self.remote = remote
     def submit(self):
@@ -97,14 +98,14 @@ def batchable(f):
         encresref = future()
         # Return encoded arguments and future:
         yield encargs, encresref
-        # Assuming the future to be filled with the result from the batched request
-        # now. Decode it:
+        # Assuming the future to be filled with the result from the batched
+        # request now. Decode it:
         yield decode(encresref.value)
 
-    The decorator returns a function which wraps this coroutine as a plain method,
-    but adds the original method as an attribute called "batchable", which is
-    used by remotebatch to split the call into separate encoding and decoding
-    phases.
+    The decorator returns a function which wraps this coroutine as a plain
+    method, but adds the original method as an attribute called "batchable",
+    which is used by remotebatch to split the call into separate encoding and
+    decoding phases.
     '''
     def plain(*args, **opts):
         batchable = f(*args, **opts)
@@ -148,7 +149,7 @@ def unescapearg(escaped):
 def todict(**args):
     return args
 
-class wirerepository(repo.repository):
+class wirepeer(peer.peerrepository):
 
     def batch(self):
         return remotebatch(self)
@@ -396,7 +397,7 @@ def between(repo, proto, pairs):
     return "".join(r)
 
 def branchmap(repo, proto):
-    branchmap = phases.visiblebranchmap(repo)
+    branchmap = discovery.visiblebranchmap(repo)
     heads = []
     for branch, nodes in branchmap.iteritems():
         branchname = urllib.quote(encoding.fromlocal(branch))
@@ -452,7 +453,7 @@ def getbundle(repo, proto, others):
     return streamres(proto.groupchunks(cg))
 
 def heads(repo, proto):
-    h = phases.visibleheads(repo)
+    h = discovery.visibleheads(repo)
     return encodelist(h) + "\n"
 
 def hello(repo, proto):
@@ -555,7 +556,7 @@ def unbundle(repo, proto, heads):
     their_heads = decodelist(heads)
 
     def check_heads():
-        heads = phases.visibleheads(repo)
+        heads = discovery.visibleheads(repo)
         heads_hash = util.sha1(''.join(sorted(heads))).digest()
         return (their_heads == ['force'] or their_heads == heads or
                 their_heads == ['hashed', heads_hash])

@@ -5,46 +5,46 @@ Short help:
   
   basic commands:
   
-   add         add the specified files on the next commit
-   annotate    show changeset information by line for each file
-   clone       make a copy of an existing repository
-   commit      commit the specified files or all outstanding changes
-   diff        diff repository (or selected files)
-   export      dump the header and diffs for one or more changesets
-   forget      forget the specified files on the next commit
-   init        create a new repository in the given directory
-   log         show revision history of entire repository or files
-   merge       merge working directory with another revision
-   phase       set or show the current phase name
-   pull        pull changes from the specified source
-   push        push changes to the specified destination
-   remove      remove the specified files on the next commit
-   serve       start stand-alone webserver
-   status      show changed files in the working directory
-   summary     summarize working directory state
-   update      update working directory (or switch revisions)
+   add           add the specified files on the next commit
+   annotate      show changeset information by line for each file
+   clone         make a copy of an existing repository
+   commit        commit the specified files or all outstanding changes
+   diff          diff repository (or selected files)
+   export        dump the header and diffs for one or more changesets
+   forget        forget the specified files on the next commit
+   init          create a new repository in the given directory
+   log           show revision history of entire repository or files
+   merge         merge working directory with another revision
+   phase         set or show the current phase name
+   pull          pull changes from the specified source
+   push          push changes to the specified destination
+   remove        remove the specified files on the next commit
+   serve         start stand-alone webserver
+   status        show changed files in the working directory
+   summary       summarize working directory state
+   update        update working directory (or switch revisions)
   
   use "hg help" for the full list of commands or "hg -v" for details
 
   $ hg -q
-   add         add the specified files on the next commit
-   annotate    show changeset information by line for each file
-   clone       make a copy of an existing repository
-   commit      commit the specified files or all outstanding changes
-   diff        diff repository (or selected files)
-   export      dump the header and diffs for one or more changesets
-   forget      forget the specified files on the next commit
-   init        create a new repository in the given directory
-   log         show revision history of entire repository or files
-   merge       merge working directory with another revision
-   phase       set or show the current phase name
-   pull        pull changes from the specified source
-   push        push changes to the specified destination
-   remove      remove the specified files on the next commit
-   serve       start stand-alone webserver
-   status      show changed files in the working directory
-   summary     summarize working directory state
-   update      update working directory (or switch revisions)
+   add           add the specified files on the next commit
+   annotate      show changeset information by line for each file
+   clone         make a copy of an existing repository
+   commit        commit the specified files or all outstanding changes
+   diff          diff repository (or selected files)
+   export        dump the header and diffs for one or more changesets
+   forget        forget the specified files on the next commit
+   init          create a new repository in the given directory
+   log           show revision history of entire repository or files
+   merge         merge working directory with another revision
+   phase         set or show the current phase name
+   pull          pull changes from the specified source
+   push          push changes to the specified destination
+   remove        remove the specified files on the next commit
+   serve         start stand-alone webserver
+   status        show changed files in the working directory
+   summary       summarize working directory state
+   update        update working directory (or switch revisions)
 
   $ hg help
   Mercurial Distributed SCM
@@ -211,42 +211,26 @@ Test short command list with verbose option
   
   basic commands:
   
-   add:
-        add the specified files on the next commit
-   annotate, blame:
-        show changeset information by line for each file
-   clone:
-        make a copy of an existing repository
-   commit, ci:
-        commit the specified files or all outstanding changes
-   diff:
-        diff repository (or selected files)
-   export:
-        dump the header and diffs for one or more changesets
-   forget:
-        forget the specified files on the next commit
-   init:
-        create a new repository in the given directory
-   log, history:
-        show revision history of entire repository or files
-   merge:
-        merge working directory with another revision
-   phase:
-        set or show the current phase name
-   pull:
-        pull changes from the specified source
-   push:
-        push changes to the specified destination
-   remove, rm:
-        remove the specified files on the next commit
-   serve:
-        start stand-alone webserver
-   status, st:
-        show changed files in the working directory
-   summary, sum:
-        summarize working directory state
-   update, up, checkout, co:
-        update working directory (or switch revisions)
+   add           add the specified files on the next commit
+   annotate, blame
+                 show changeset information by line for each file
+   clone         make a copy of an existing repository
+   commit, ci    commit the specified files or all outstanding changes
+   diff          diff repository (or selected files)
+   export        dump the header and diffs for one or more changesets
+   forget        forget the specified files on the next commit
+   init          create a new repository in the given directory
+   log, history  show revision history of entire repository or files
+   merge         merge working directory with another revision
+   phase         set or show the current phase name
+   pull          pull changes from the specified source
+   push          push changes to the specified destination
+   remove, rm    remove the specified files on the next commit
+   serve         start stand-alone webserver
+   status, st    show changed files in the working directory
+   summary, sum  summarize working directory state
+   update, up, checkout, co
+                 update working directory (or switch revisions)
   
   global options:
   
@@ -389,8 +373,8 @@ Test ambiguous command help
   $ hg help ad
   list of commands:
   
-   add          add the specified files on the next commit
-   addremove    add all new files, delete all missing files
+   add           add the specified files on the next commit
+   addremove     add all new files, delete all missing files
   
   use "hg -v help ad" to show builtin aliases and global options
 
@@ -539,24 +523,24 @@ Test command without options
   
   basic commands:
   
-   add         add the specified files on the next commit
-   annotate    show changeset information by line for each file
-   clone       make a copy of an existing repository
-   commit      commit the specified files or all outstanding changes
-   diff        diff repository (or selected files)
-   export      dump the header and diffs for one or more changesets
-   forget      forget the specified files on the next commit
-   init        create a new repository in the given directory
-   log         show revision history of entire repository or files
-   merge       merge working directory with another revision
-   phase       set or show the current phase name
-   pull        pull changes from the specified source
-   push        push changes to the specified destination
-   remove      remove the specified files on the next commit
-   serve       start stand-alone webserver
-   status      show changed files in the working directory
-   summary     summarize working directory state
-   update      update working directory (or switch revisions)
+   add           add the specified files on the next commit
+   annotate      show changeset information by line for each file
+   clone         make a copy of an existing repository
+   commit        commit the specified files or all outstanding changes
+   diff          diff repository (or selected files)
+   export        dump the header and diffs for one or more changesets
+   forget        forget the specified files on the next commit
+   init          create a new repository in the given directory
+   log           show revision history of entire repository or files
+   merge         merge working directory with another revision
+   phase         set or show the current phase name
+   pull          pull changes from the specified source
+   push          push changes to the specified destination
+   remove        remove the specified files on the next commit
+   serve         start stand-alone webserver
+   status        show changed files in the working directory
+   summary       summarize working directory state
+   update        update working directory (or switch revisions)
   
   use "hg help" for the full list of commands or "hg -v" for details
   [255]
@@ -567,24 +551,24 @@ Test command without options
   
   basic commands:
   
-   add         add the specified files on the next commit
-   annotate    show changeset information by line for each file
-   clone       make a copy of an existing repository
-   commit      commit the specified files or all outstanding changes
-   diff        diff repository (or selected files)
-   export      dump the header and diffs for one or more changesets
-   forget      forget the specified files on the next commit
-   init        create a new repository in the given directory
-   log         show revision history of entire repository or files
-   merge       merge working directory with another revision
-   phase       set or show the current phase name
-   pull        pull changes from the specified source
-   push        push changes to the specified destination
-   remove      remove the specified files on the next commit
-   serve       start stand-alone webserver
-   status      show changed files in the working directory
-   summary     summarize working directory state
-   update      update working directory (or switch revisions)
+   add           add the specified files on the next commit
+   annotate      show changeset information by line for each file
+   clone         make a copy of an existing repository
+   commit        commit the specified files or all outstanding changes
+   diff          diff repository (or selected files)
+   export        dump the header and diffs for one or more changesets
+   forget        forget the specified files on the next commit
+   init          create a new repository in the given directory
+   log           show revision history of entire repository or files
+   merge         merge working directory with another revision
+   phase         set or show the current phase name
+   pull          pull changes from the specified source
+   push          push changes to the specified destination
+   remove        remove the specified files on the next commit
+   serve         start stand-alone webserver
+   status        show changed files in the working directory
+   summary       summarize working directory state
+   update        update working directory (or switch revisions)
   
   use "hg help" for the full list of commands or "hg -v" for details
   [255]
@@ -613,6 +597,15 @@ Test command with no help text
   (no help text available)
   
   use "hg -v help nohelp" to show more info
+
+  $ hg help -k nohelp
+  Commands:
+  
+   nohelp hg nohelp
+  
+  Extension Commands:
+  
+   nohelp (no help text available)
 
 Test that default list of commands omits extension commands
 
@@ -711,7 +704,7 @@ Test list of commands with command with no help text
   
   list of commands:
   
-   nohelp    (no help text available)
+   nohelp        (no help text available)
   
   use "hg -v help helpext" to show builtin aliases and global options
 
@@ -733,13 +726,13 @@ Test a help topic
       short-form identifier is only valid if it is the prefix of exactly one
       full-length identifier.
   
-      Any other string is treated as a tag or branch name. A tag name is a
-      symbolic name associated with a revision identifier. A branch name denotes
-      the tipmost revision of that branch. Tag and branch names must not contain
-      the ":" character.
+      Any other string is treated as a bookmark, tag, or branch name. A bookmark
+      is a movable pointer to a revision. A tag is a permanent name associated
+      with a revision. A branch name denotes the tipmost revision of that
+      branch. Bookmark, tag, and branch names must not contain the ":"
+      character.
   
-      The reserved name "tip" is a special tag that always identifies the most
-      recent revision.
+      The reserved name "tip" always identifies the most recent revision.
   
       The reserved name "null" indicates the null revision. This is the revision
       of an empty repository, and the parent of revision 0.
@@ -782,3 +775,30 @@ Test help hooks
   $ hg help revsets | grep helphook
       helphook1
       helphook2
+
+Test keyword search help
+
+  $ hg help -k clone
+  Topics:
+  
+   config     Configuration Files
+   extensions Using Additional Features
+   glossary   Glossary
+   phases     Working with Phases
+   subrepo    Subrepositories
+   urls       URL Paths
+  
+  Commands:
+  
+   clone  make a copy of an existing repository
+   paths  show aliases for remote repositories
+   update update working directory (or switch revisions)
+  
+  Extensions:
+  
+   relink recreates hardlinks between repository clones
+  
+  Extension Commands:
+  
+   qclone clone main and patch repository at same time
+

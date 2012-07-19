@@ -169,6 +169,8 @@ def removelargefiles(ui, repo, *pats, **opts):
         # function handle this.
         if not getattr(repo, "_isaddremove", False):
             lfutil.reporemove(repo, remove, unlink=True)
+        else:
+            lfutil.reporemove(repo, remove, unlink=False)
     finally:
         wlock.release()
 
@@ -651,6 +653,7 @@ def hgmerge(orig, repo, node, force=None, remind=True):
 # take some extra care so that the largefiles are correctly updated in the
 # working copy
 def overridepull(orig, ui, repo, source=None, **opts):
+    revsprepull = len(repo)
     if opts.get('rebase', False):
         repo._isrebasing = True
         try:
@@ -660,7 +663,6 @@ def overridepull(orig, ui, repo, source=None, **opts):
                           'the update flag\n')
             del opts['rebase']
             cmdutil.bailifchanged(repo)
-            revsprepull = len(repo)
             origpostincoming = commands.postincoming
             def _dummy(*args, **kwargs):
                 pass
@@ -695,7 +697,34 @@ def overridepull(orig, ui, repo, source=None, **opts):
             (cached, missing) = lfcommands.cachelfiles(ui, repo, head)
             numcached += len(cached)
         ui.status(_("%d largefiles cached\n") % numcached)
+    if opts.get('all_largefiles'):
+        revspostpull = len(repo)
+        revs = []
+        for rev in xrange(revsprepull + 1, revspostpull):
+            revs.append(repo[rev].rev())
+        lfcommands.downloadlfiles(ui, repo, revs)
     return result
+
+def overrideclone(orig, ui, source, dest=None, **opts):
+    if dest is None:
+        dest = hg.defaultdest(source)
+    if opts.get('all_largefiles') and not hg.islocal(dest):
+            raise util.Abort(_(
+            '--all-largefiles is incompatible with non-local destination %s' %
+            dest))
+    result = hg.clone(ui, opts, source, dest,
+                      pull=opts.get('pull'),
+                      stream=opts.get('uncompressed'),
+                      rev=opts.get('rev'),
+                      update=True, # required for successful walkchangerevs
+                      branch=opts.get('branch'))
+    if result is None:
+        return True
+    if opts.get('all_largefiles'):
+        sourcerepo, destrepo = result
+        success, missing = lfcommands.downloadlfiles(ui, destrepo.local(), None)
+        return missing != 0
+    return result is None
 
 def overriderebase(orig, ui, repo, **opts):
     repo._isrebasing = True
@@ -778,9 +807,55 @@ def overridearchive(orig, repo, dest, node, kind, decode=True, matchfn=None,
     if subrepos:
         for subpath in ctx.substate:
             sub = ctx.sub(subpath)
-            sub.archive(repo.ui, archiver, prefix)
+            submatch = match_.narrowmatcher(subpath, matchfn)
+            sub.archive(repo.ui, archiver, prefix, submatch)
 
     archiver.done()
+
+def hgsubrepoarchive(orig, repo, ui, archiver, prefix, match=None):
+    rev = repo._state[1]
+    ctx = repo._repo[rev]
+
+    lfcommands.cachelfiles(ui, repo._repo, ctx.node())
+
+    def write(name, mode, islink, getdata):
+        # At this point, the standin has been replaced with the largefile name,
+        # so the normal matcher works here without the lfutil variants.
+        if match and not match(f):
+            return
+        data = getdata()
+
+        archiver.addfile(prefix + repo._path + '/' + name, mode, islink, data)
+
+    for f in ctx:
+        ff = ctx.flags(f)
+        getdata = ctx[f].data
+        if lfutil.isstandin(f):
+            path = lfutil.findfile(repo._repo, getdata().strip())
+            if path is None:
+                raise util.Abort(
+                    _('largefile %s not found in repo store or system cache')
+                    % lfutil.splitstandin(f))
+            f = lfutil.splitstandin(f)
+
+            def getdatafn():
+                fd = None
+                try:
+                    fd = open(os.path.join(prefix, path), 'rb')
+                    return fd.read()
+                finally:
+                    if fd:
+                        fd.close()
+
+            getdata = getdatafn
+
+        write(f, 'x' in ff and 0755 or 0644, 'l' in ff, getdata)
+
+    for subpath in ctx.substate:
+        sub = ctx.sub(subpath)
+        submatch = match_.narrowmatcher(subpath, match)
+        sub.archive(ui, archiver, os.path.join(prefix, repo._path) + '/',
+                    submatch)
 
 # If a largefile is modified, the change is not reflected in its
 # standin until a commit. cmdutil.bailifchanged() raises an exception

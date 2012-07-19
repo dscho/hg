@@ -56,11 +56,11 @@ def findcommonincoming(repo, remote, heads=None, force=False):
     # a 'branch' here is a linear segment of history, with four parts:
     # head, root, first parent, second parent
     # (a branch always has two parents (or none) by definition)
-    unknown = remote.branches(unknown)
+    unknown = util.deque(remote.branches(unknown))
     while unknown:
         r = []
         while unknown:
-            n = unknown.pop(0)
+            n = unknown.popleft()
             if n[0] in seen:
                 continue
 

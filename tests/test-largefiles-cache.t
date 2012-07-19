@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" unix-permissions || exit 80
-
 Create user cache directory
 
   $ USERCACHE=`pwd`/cache; export USERCACHE
@@ -49,7 +47,7 @@ but there is no cache file for it.  So, hg must treat it as
   $ hg update
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   getting changed largefiles
-  large: Can't get file locally
+  large: can't get file locally
   (no default or default-push path set in hgrc)
   0 largefiles updated, 0 removed
   $ hg status
@@ -67,15 +65,17 @@ Update working directory to tip, again.
   $ hg update
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   getting changed largefiles
-  large: Can't get file locally
+  large: can't get file locally
   (no default or default-push path set in hgrc)
   0 largefiles updated, 0 removed
   $ hg status
   ! large
+  $ cd ..
+
+#if unix-permissions
 
 Portable way to print file permissions:
 
-  $ cd ..
   $ cat > ls-l.py <<EOF
   > #!/usr/bin/env python
   > import sys, os
@@ -119,3 +119,7 @@ Test permission of files created by push:
 
   $ ../ls-l.py ../src/.hg/largefiles/b734e14a0971e370408ab9bce8d56d8485e368a9
   640
+
+  $ cd ..
+
+#endif

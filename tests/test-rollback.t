@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" serve || exit 80
-
 setup repo
   $ hg init t
   $ cd t
@@ -110,12 +108,10 @@ rollback by pretxncommit saves commit message (issue 1635)
 
 same thing, but run $EDITOR
 
-  $ cat > editor << '__EOF__'
-  > #!/bin/sh
+  $ cat > editor.sh << '__EOF__'
   > echo "another precious commit message" > "$1"
   > __EOF__
-  $ chmod +x editor
-  $ HGEDITOR="'`pwd`'"/editor hg --config hooks.pretxncommit=false commit 2>&1
+  $ HGEDITOR="\"sh\" \"`pwd`/editor.sh\"" hg --config hooks.pretxncommit=false commit 2>&1
   transaction abort!
   rollback completed
   note: commit message saved in .hg/last-message.txt
@@ -126,6 +122,7 @@ same thing, but run $EDITOR
 
 test rollback on served repository
 
+#if serve
   $ hg commit -m "precious commit message"
   $ hg serve -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log
   $ cat hg.pid >> $DAEMON_PIDS
@@ -150,6 +147,7 @@ presents the correct tip changeset:
   working directory now based on revision 0
   $ hg id default
   791dd2169706
+#endif
 
 update to older changeset and then refuse rollback, because
 that would lose data (issue2998)
@@ -185,3 +183,5 @@ same again, but emulate an old client that doesn't write undo.desc
   rolling back unknown transaction
   $ cat a
   a
+
+  $ cd ..

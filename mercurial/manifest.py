@@ -19,6 +19,8 @@ class manifestdict(dict):
         self._flags = flags
     def flags(self, f):
         return self._flags.get(f, "")
+    def withflags(self):
+        return set(self._flags.keys())
     def set(self, f, flags):
         self._flags[f] = flags
     def copy(self):
@@ -124,8 +126,8 @@ class manifest(revlog.revlog):
                     addlist[start:end] = array.array('c', content)
                 else:
                     del addlist[start:end]
-            return "".join(struct.pack(">lll", start, end, len(content)) + content
-                           for start, end, content in x)
+            return "".join(struct.pack(">lll", start, end, len(content))
+                           + content for start, end, content in x)
 
         def checkforbidden(l):
             for f in l:

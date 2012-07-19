@@ -22,7 +22,7 @@ from mercurial.i18n import _
 __all__ = [
    'log', 'rawfile', 'file', 'changelog', 'shortlog', 'changeset', 'rev',
    'manifest', 'tags', 'bookmarks', 'branches', 'summary', 'filediff', 'diff',
-   'annotate', 'filelog', 'archive', 'static', 'graph', 'help',
+   'comparison', 'annotate', 'filelog', 'archive', 'static', 'graph', 'help',
 ]
 
 def log(web, req, tmpl):
@@ -441,7 +441,7 @@ def branches(web, req, tmpl):
     tips = (web.repo[n] for t, n in web.repo.branchtags().iteritems())
     heads = web.repo.heads()
     parity = paritygen(web.stripecount)
-    sortkey = lambda ctx: ('close' not in ctx.extra(), ctx.rev())
+    sortkey = lambda ctx: (not ctx.closesbranch(), ctx.rev())
 
     def entries(limit, **map):
         count = 0
@@ -585,6 +585,31 @@ def filediff(web, req, tmpl):
                 diff=diffs)
 
 diff = filediff
+
+def comparison(web, req, tmpl):
+    ctx = webutil.changectx(web.repo, req)
+    path = webutil.cleanpath(web.repo, req.form['file'][0])
+    rename = path in ctx and webutil.renamelink(ctx[path]) or []
+
+    parsecontext = lambda v: v == 'full' and -1 or int(v)
+    if 'context' in req.form:
+        context = parsecontext(req.form['context'][0])
+    else:
+        context = parsecontext(web.config('web', 'comparisoncontext', '5'))
+
+    comparison = webutil.compare(tmpl, ctx, path, context)
+    return tmpl('filecomparison',
+                file=path,
+                node=hex(ctx.node()),
+                rev=ctx.rev(),
+                date=ctx.date(),
+                desc=ctx.description(),
+                author=ctx.user(),
+                rename=rename,
+                branch=webutil.nodebranchnodefault(ctx),
+                parent=webutil.parents(ctx),
+                child=webutil.children(ctx),
+                comparison=comparison)
 
 def annotate(web, req, tmpl):
     fctx = webutil.filectx(web.repo, req)
@@ -784,24 +809,76 @@ def graph(web, req, tmpl):
 
     dag = graphmod.dagwalker(web.repo, range(startrev, downrev - 1, -1))
     tree = list(graphmod.colored(dag, web.repo))
-    canvasheight = (len(tree) + 1) * bg_height - 27
-    data = []
-    for (id, type, ctx, vtx, edges) in tree:
-        if type != graphmod.CHANGESET:
-            continue
-        node = str(ctx)
-        age = templatefilters.age(ctx.date())
-        desc = templatefilters.firstline(ctx.description())
-        desc = cgi.escape(templatefilters.nonempty(desc))
-        user = cgi.escape(templatefilters.person(ctx.user()))
-        branch = ctx.branch()
-        branch = branch, web.repo.branchtags().get(branch) == ctx.node()
-        data.append((node, vtx, edges, desc, user, age, branch, ctx.tags(),
-                     ctx.bookmarks()))
+
+    def getcolumns(tree):
+        cols = 0
+        for (id, type, ctx, vtx, edges) in tree:
+            if type != graphmod.CHANGESET:
+                continue
+            cols = max(cols, max([edge[0] for edge in edges] or [0]),
+                             max([edge[1] for edge in edges] or [0]))
+        return cols
+
+    def graphdata(usetuples, **map):
+        data = []
+
+        row = 0
+        for (id, type, ctx, vtx, edges) in tree:
+            if type != graphmod.CHANGESET:
+                continue
+            node = str(ctx)
+            age = templatefilters.age(ctx.date())
+            desc = templatefilters.firstline(ctx.description())
+            desc = cgi.escape(templatefilters.nonempty(desc))
+            user = cgi.escape(templatefilters.person(ctx.user()))
+            branch = ctx.branch()
+            try:
+                branchnode = web.repo.branchtip(branch)
+            except error.RepoLookupError:
+                branchnode = None
+            branch = branch, branchnode == ctx.node()
+
+            if usetuples:
+                data.append((node, vtx, edges, desc, user, age, branch,
+                             ctx.tags(), ctx.bookmarks()))
+            else:
+                edgedata = [dict(col=edge[0], nextcol=edge[1],
+                                 color=(edge[2] - 1) % 6 + 1,
+                                 width=edge[3], bcolor=edge[4])
+                            for edge in edges]
+
+                data.append(
+                    dict(node=node,
+                         col=vtx[0],
+                         color=(vtx[1] - 1) % 6 + 1,
+                         edges=edgedata,
+                         row=row,
+                         nextrow=row + 1,
+                         desc=desc,
+                         user=user,
+                         age=age,
+                         bookmarks=webutil.nodebookmarksdict(
+                            web.repo, ctx.node()),
+                         branches=webutil.nodebranchdict(web.repo, ctx),
+                         inbranch=webutil.nodeinbranch(web.repo, ctx),
+                         tags=webutil.nodetagsdict(web.repo, ctx.node())))
+
+            row += 1
+
+        return data
+
+    cols = getcolumns(tree)
+    rows = len(tree)
+    canvasheight = (rows + 1) * bg_height - 27
 
     return tmpl('graph', rev=rev, revcount=revcount, uprev=uprev,
                 lessvars=lessvars, morevars=morevars, downrev=downrev,
-                canvasheight=canvasheight, jsdata=data, bg_height=bg_height,
+                cols=cols, rows=rows,
+                canvaswidth=(cols + 1) * bg_height,
+                truecanvasheight=rows * bg_height,
+                canvasheight=canvasheight, bg_height=bg_height,
+                jsdata=lambda **x: graphdata(True, **x),
+                nodes=lambda **x: graphdata(False, **x),
                 node=revnode_hex, changenav=changenav)
 
 def _getdoc(e):
@@ -850,6 +927,7 @@ def help(web, req, tmpl):
 
     u = webutil.wsgiui()
     u.pushbuffer()
+    u.verbose = True
     try:
         commands.help_(u, topicname)
     except error.UnknownCommand:

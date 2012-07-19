@@ -14,7 +14,7 @@ hide platform-specific details from the core.
 """
 
 from i18n import _
-import error, osutil, encoding
+import error, osutil, encoding, collections
 import errno, re, shutil, sys, tempfile, traceback
 import os, time, datetime, calendar, textwrap, signal
 import imp, socket, urllib
@@ -23,9 +23,6 @@ if os.name == 'nt':
     import windows as platform
 else:
     import posix as platform
-
-platform.encodinglower = encoding.lower
-platform.encodingupper = encoding.upper
 
 cachestat = platform.cachestat
 checkexec = platform.checkexec
@@ -202,15 +199,27 @@ def cachefunc(func):
 
     return f
 
+try:
+    collections.deque.remove
+    deque = collections.deque
+except AttributeError:
+    # python 2.4 lacks deque.remove
+    class deque(collections.deque):
+        def remove(self, val):
+            for i, v in enumerate(self):
+                if v == val:
+                    del self[i]
+                    break
+
 def lrucachefunc(func):
     '''cache most recent results of function calls'''
     cache = {}
-    order = []
+    order = deque()
     if func.func_code.co_argcount == 1:
         def f(arg):
             if arg not in cache:
                 if len(cache) > 20:
-                    del cache[order.pop(0)]
+                    del cache[order.popleft()]
                 cache[arg] = func(arg)
             else:
                 order.remove(arg)
@@ -220,7 +229,7 @@ def lrucachefunc(func):
         def f(*args):
             if args not in cache:
                 if len(cache) > 20:
-                    del cache[order.pop(0)]
+                    del cache[order.popleft()]
                 cache[args] = func(*args)
             else:
                 order.remove(args)
@@ -617,6 +626,30 @@ def checkcase(path):
     except OSError:
         return True
 
+try:
+    import re2
+    _re2 = None
+except ImportError:
+    _re2 = False
+
+def compilere(pat):
+    '''Compile a regular expression, using re2 if possible
+
+    For best performance, use only re2-compatible regexp features.'''
+    global _re2
+    if _re2 is None:
+        try:
+            re2.compile
+            _re2 = True
+        except ImportError:
+            _re2 = False
+    if _re2:
+        try:
+            return re2.compile(pat)
+        except re2.error:
+            pass
+    return re.compile(pat)
+
 _fspathcache = {}
 def fspath(name, root):
     '''Get name in the case stored in the filesystem
@@ -760,9 +793,9 @@ def mktempcopy(name, emptyok=False, createmode=None):
             ofp.write(chunk)
         ifp.close()
         ofp.close()
-    except:
+    except: # re-raises
         try: os.unlink(temp)
-        except: pass
+        except OSError: pass
         raise
     return temp
 
@@ -858,7 +891,7 @@ class chunkbuffer(object):
                 else:
                     yield chunk
         self.iter = splitbig(in_iter)
-        self._queue = []
+        self._queue = deque()
 
     def read(self, l):
         """Read L bytes of data from the iterator of chunks of data.
@@ -878,10 +911,10 @@ class chunkbuffer(object):
                 if not queue:
                     break
 
-            chunk = queue.pop(0)
+            chunk = queue.popleft()
             left -= len(chunk)
             if left < 0:
-                queue.insert(0, chunk[left:])
+                queue.appendleft(chunk[left:])
                 buf += chunk[:left]
             else:
                 buf += chunk
@@ -1079,7 +1112,7 @@ def matchdate(date):
             try:
                 d["d"] = days
                 return parsedate(date, extendeddateformats, d)[0]
-            except:
+            except Abort:
                 pass
         d["d"] = "28"
         return parsedate(date, extendeddateformats, d)[0]

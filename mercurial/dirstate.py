@@ -312,9 +312,9 @@ class dirstate(object):
         if self[f] not in "?r" and "_dirs" in self.__dict__:
             _decdirs(self._dirs, f)
 
-    def _addpath(self, f, check=False):
+    def _addpath(self, f, state, mode, size, mtime):
         oldstate = self[f]
-        if check or oldstate == "r":
+        if state == 'a' or oldstate == 'r':
             scmutil.checkfilename(f)
             if f in self._dirs:
                 raise util.Abort(_('directory %r already in dirstate') % f)
@@ -327,14 +327,14 @@ class dirstate(object):
                         _('file %r in dirstate clashes with %r') % (d, f))
         if oldstate in "?r" and "_dirs" in self.__dict__:
             _incdirs(self._dirs, f)
+        self._dirty = True
+        self._map[f] = (state, mode, size, mtime)
 
     def normal(self, f):
         '''Mark a file normal and clean.'''
-        self._dirty = True
-        self._addpath(f)
         s = os.lstat(self._join(f))
         mtime = int(s.st_mtime)
-        self._map[f] = ('n', s.st_mode, s.st_size, mtime)
+        self._addpath(f, 'n', s.st_mode, s.st_size, mtime)
         if f in self._copymap:
             del self._copymap[f]
         if mtime > self._lastnormaltime:
@@ -361,9 +361,7 @@ class dirstate(object):
                 return
             if entry[0] == 'm' or entry[0] == 'n' and entry[2] == -2:
                 return
-        self._dirty = True
-        self._addpath(f)
-        self._map[f] = ('n', 0, -1, -1)
+        self._addpath(f, 'n', 0, -1, -1)
         if f in self._copymap:
             del self._copymap[f]
 
@@ -372,17 +370,13 @@ class dirstate(object):
         if self._pl[1] == nullid:
             raise util.Abort(_("setting %r to other parent "
                                "only allowed in merges") % f)
-        self._dirty = True
-        self._addpath(f)
-        self._map[f] = ('n', 0, -2, -1)
+        self._addpath(f, 'n', 0, -2, -1)
         if f in self._copymap:
             del self._copymap[f]
 
     def add(self, f):
         '''Mark a file added.'''
-        self._dirty = True
-        self._addpath(f, True)
-        self._map[f] = ('a', 0, -1, -1)
+        self._addpath(f, 'a', 0, -1, -1)
         if f in self._copymap:
             del self._copymap[f]
 
@@ -406,10 +400,8 @@ class dirstate(object):
         '''Mark a file merged.'''
         if self._pl[1] == nullid:
             return self.normallookup(f)
-        self._dirty = True
         s = os.lstat(self._join(f))
-        self._addpath(f)
-        self._map[f] = ('m', s.st_mode, s.st_size, int(s.st_mtime))
+        self._addpath(f, 'm', s.st_mode, s.st_size, int(s.st_mtime))
         if f in self._copymap:
             del self._copymap[f]
 
@@ -498,12 +490,24 @@ class dirstate(object):
             return
         st = self._opener("dirstate", "w", atomictemp=True)
 
+        def finish(s):
+            st.write(s)
+            st.close()
+            self._lastnormaltime = 0
+            self._dirty = self._dirtypl = False
+
         # use the modification time of the newly created temporary file as the
         # filesystem's notion of 'now'
-        now = int(util.fstat(st).st_mtime)
-
-        cs = cStringIO.StringIO()
+        now = util.fstat(st).st_mtime
         copymap = self._copymap
+        try:
+            finish(parsers.pack_dirstate(self._map, copymap, self._pl, now))
+            return
+        except AttributeError:
+            pass
+
+        now = int(now)
+        cs = cStringIO.StringIO()
         pack = struct.pack
         write = cs.write
         write("".join(self._pl))
@@ -526,10 +530,7 @@ class dirstate(object):
             e = pack(_format, e[0], e[1], e[2], e[3], len(f))
             write(e)
             write(f)
-        st.write(cs.getvalue())
-        st.close()
-        self._lastnormaltime = 0
-        self._dirty = self._dirtypl = False
+        finish(cs.getvalue())
 
     def _dirignore(self, f):
         if f == '.':
@@ -695,7 +696,8 @@ class dirstate(object):
         if not skipstep3 and not exact:
             visit = sorted([f for f in dmap if f not in results and matchfn(f)])
             for nf, st in zip(visit, util.statfiles([join(i) for i in visit])):
-                if not st is None and not getkind(st.st_mode) in (regkind, lnkkind):
+                if (not st is None and
+                    getkind(st.st_mode) not in (regkind, lnkkind)):
                     st = None
                 results[nf] = st
         for s in subrepos:

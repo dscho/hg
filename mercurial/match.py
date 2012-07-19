@@ -9,6 +9,14 @@ import re
 import scmutil, util, fileset
 from i18n import _
 
+def _rematcher(pat):
+    m = util.compilere(pat)
+    try:
+        # slightly faster, provided by facebook's re2 bindings
+        return m.test_match
+    except AttributeError:
+        return m.match
+
 def _expandsets(pats, ctx):
     '''convert set: patterns into a list of files in the given context'''
     fset = set()
@@ -121,6 +129,8 @@ class match(object):
         return self._files
     def anypats(self):
         return self._anypats
+    def always(self):
+        return False
 
 class exact(match):
     def __init__(self, root, cwd, files):
@@ -129,6 +139,8 @@ class exact(match):
 class always(match):
     def __init__(self, root, cwd):
         match.__init__(self, root, cwd, [])
+    def always(self):
+        return True
 
 class narrowmatcher(match):
     """Adapt a matcher to work on a subdirectory only.
@@ -275,8 +287,8 @@ def _buildregexmatch(pats, tail):
     try:
         pat = '(?:%s)' % '|'.join([_regex(k, p, tail) for (k, p) in pats])
         if len(pat) > 20000:
-            raise OverflowError()
-        return pat, re.compile(pat).match
+            raise OverflowError
+        return pat, _rematcher(pat)
     except OverflowError:
         # We're using a Python with a tiny regex engine and we
         # made it explode, so we'll divide the pattern list in two
@@ -290,7 +302,7 @@ def _buildregexmatch(pats, tail):
     except re.error:
         for k, p in pats:
             try:
-                re.compile('(?:%s)' % _regex(k, p, tail))
+                _rematcher('(?:%s)' % _regex(k, p, tail))
             except re.error:
                 raise util.Abort(_("invalid pattern (%s): %s") % (k, p))
         raise util.Abort(_("invalid pattern"))

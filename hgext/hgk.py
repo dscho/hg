@@ -39,6 +39,8 @@ from mercurial import commands, util, patch, revlog, scmutil
 from mercurial.node import nullid, nullrev, short
 from mercurial.i18n import _
 
+testedwith = 'internal'
+
 def difftree(ui, repo, node1=None, node2=None, *files, **opts):
     """diff trees from two commits"""
     def __difftree(repo, node1, node2, files=[]):
@@ -95,7 +97,8 @@ def catcommit(ui, repo, n, prefix, ctx=None):
     nlprefix = '\n' + prefix
     if ctx is None:
         ctx = repo[n]
-    ui.write("tree %s\n" % short(ctx.changeset()[0])) # use ctx.node() instead ??
+    # use ctx.node() instead ??
+    ui.write("tree %s\n" % short(ctx.changeset()[0]))
     for p in ctx.parents():
         ui.write("parent %s\n" % p)
 
@@ -113,7 +116,8 @@ def catcommit(ui, repo, n, prefix, ctx=None):
     ui.write("branch %s\n\n" % ctx.branch())
 
     if prefix != "":
-        ui.write("%s%s\n" % (prefix, description.replace('\n', nlprefix).strip()))
+        ui.write("%s%s\n" % (prefix,
+                             description.replace('\n', nlprefix).strip()))
     else:
         ui.write(description + "\n")
     if prefix:

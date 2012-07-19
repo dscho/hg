@@ -95,7 +95,7 @@ class mercurial_sink(converter_sink):
             self.after()
             try:
                 self.repo = hg.repository(self.ui, branchpath)
-            except:
+            except Exception:
                 self.repo = hg.repository(self.ui, branchpath, create=True)
             self.before()
 
@@ -105,7 +105,7 @@ class mercurial_sink(converter_sink):
         for b in pbranches:
             try:
                 self.repo.lookup(b[0])
-            except:
+            except Exception:
                 missings.setdefault(b[1], []).append(b[0])
 
         if missings:
@@ -192,7 +192,7 @@ class mercurial_sink(converter_sink):
 
         try:
             oldlines = sorted(parentctx['.hgtags'].data().splitlines(True))
-        except:
+        except Exception:
             oldlines = []
 
         newlines = sorted([("%s %s\n" % (tags[tag], tag)) for tag in tags])
@@ -224,7 +224,7 @@ class mercurial_sink(converter_sink):
             bookmarks.write(self.repo)
 
     def hascommit(self, rev):
-        if not rev in self.repo and self.clonebranches:
+        if rev not in self.repo and self.clonebranches:
             raise util.Abort(_('revision %s not found in destination '
                                'repository (lookups with clonebranches=true '
                                'are not implemented)') % rev)
@@ -241,7 +241,7 @@ class mercurial_source(converter_source):
             # try to provoke an exception if this isn't really a hg
             # repo, but some other bogus compatible-looking url
             if not self.repo.local():
-                raise error.RepoError()
+                raise error.RepoError
         except error.RepoError:
             ui.traceback()
             raise NoRepo(_("%s is not a local Mercurial repository") % path)
@@ -259,7 +259,7 @@ class mercurial_source(converter_source):
                                  % startnode)
             startrev = self.repo.changelog.rev(startnode)
             children = {startnode: 1}
-            for rev in self.repo.changelog.descendants(startrev):
+            for rev in self.repo.changelog.descendants([startrev]):
                 children[self.repo.changelog.node(rev)] = 1
             self.keep = children.__contains__
         else:
@@ -294,7 +294,8 @@ class mercurial_source(converter_source):
         if not parents:
             files = sorted(ctx.manifest())
             # getcopies() is not needed for roots, but it is a simple way to
-            # detect missing revlogs and abort on errors or populate self.ignored
+            # detect missing revlogs and abort on errors or populate
+            # self.ignored
             self.getcopies(ctx, parents, files)
             return [(f, rev) for f in files if f not in self.ignored], {}
         if self._changescache and self._changescache[0] == rev:

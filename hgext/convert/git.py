@@ -69,7 +69,7 @@ class convert_git(converter_source):
 
     def catfile(self, rev, type):
         if rev == hex(nullid):
-            raise IOError()
+            raise IOError
         data, ret = self.gitread("git cat-file %s %s" % (type, rev))
         if ret:
             raise util.Abort(_('cannot read %r object at %s') % (type, rev))
@@ -181,8 +181,8 @@ class convert_git(converter_source):
                 m, f = l[:-1].split("\t")
                 changes.append(f)
         else:
-            fh = self.gitopen('git diff-tree --name-only --root -r %s "%s^%s" --'
-                             % (version, version, i + 1))
+            fh = self.gitopen('git diff-tree --name-only --root -r %s '
+                              '"%s^%s" --' % (version, version, i + 1))
             changes = [f.rstrip('\n') for f in fh]
         if fh.close():
             raise util.Abort(_('cannot read changes in %s') % version)
@@ -211,7 +211,7 @@ class convert_git(converter_source):
                         continue
                     name = '%s%s' % (reftype, name[prefixlen:])
                     bookmarks[name] = rev
-            except:
+            except Exception:
                 pass
 
         return bookmarks

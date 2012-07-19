@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" execbit || exit 80
-
 The g is crafted to have 2 filelog topological heads in a linear
 changeset graph
 
@@ -275,10 +273,12 @@ log copies, non-linear manifest
 
 log copies, execute bit set
 
+#if execbit
   $ chmod +x e
   $ hg ci -me3 -d '7 0'
   $ hg log -v --template '{rev} {file_copies}\n' -r 6
   6 
+#endif
 
 
 log -p d
@@ -331,12 +331,12 @@ log --removed revrange file
   a
   
   
-
+  $ cd ..
 
 log --follow tests
 
-  $ hg init ../follow
-  $ cd ../follow
+  $ hg init follow
+  $ cd follow
 
   $ echo base > base
   $ hg ci -Ambase -d '1 0'
@@ -539,34 +539,6 @@ log -k r1
   date:        Thu Jan 01 00:00:01 1970 +0000
   summary:     r1
   
-log -d " " (whitespaces only)
-
-  $ hg log -d " "
-  abort: dates cannot consist entirely of whitespace
-  [255]
-
-log -d -1
-
-  $ hg log -d -1
-
-log -d ">"
-
-  $ hg log -d ">"
-  abort: invalid day spec, use '>DATE'
-  [255]
-
-log -d "<"
-
-  $ hg log -d "<"
-  abort: invalid day spec, use '<DATE'
-  [255]
-
-Negative ranges
-  $ hg log -d "--2"
-  abort: -2 must be nonnegative (see 'hg help dates')
-  [255]
-
-
 log -p -l2 --color=always
 
   $ hg --config extensions.color= --config color.mode=ansi \
@@ -613,6 +585,9 @@ log -r tip --stat
   
 
   $ cd ..
+
+
+User
 
   $ hg init usertest
   $ cd usertest
@@ -898,11 +873,10 @@ log -p -R repo
   +a
   
 
+  $ cd ../..
 
-  $ cd ..
   $ hg init follow2
   $ cd follow2
-
 
 # Build the following history:
 # tip - o - x - o - x - x
@@ -967,7 +941,7 @@ log -p -R repo
   $ hg resolve -m foo
   $ hg ci -m "Last merge, related"
 
-  $ hg --config "extensions.graphlog=" glog
+  $ hg log --graph
   @    changeset:   10:4dae8563d2c5
   |\   tag:         tip
   | |  parent:      9:7b35701b003e
@@ -1077,6 +1051,7 @@ Also check when maxrev < lastrevfilelog
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     add foo, related
   
+  $ cd ..
 
 Issue2383: hg log showing _less_ differences than hg diff
 
@@ -1153,7 +1128,8 @@ Diff here should be the same:
 
 'hg log -r rev fn' when last(filelog(fn)) != rev
 
-  $ hg init simplelog; cd simplelog
+  $ hg init simplelog
+  $ cd simplelog
   $ echo f > a
   $ hg ci -Am'a' -d '0 0'
   adding a
@@ -1170,7 +1146,7 @@ Diff here should be the same:
   > def reposetup(ui, repo):
   >     for line in repo.opener('hidden'):
   >         ctx = repo[line.strip()]
-  >         repo.changelog.hiddenrevs.add(ctx.rev())
+  >         repo.hiddenrevs.add(ctx.rev())
   > EOF
   $ echo '[extensions]' >> $HGRCPATH
   $ echo "hidden=$HGTMP/testhidden.py" >> $HGRCPATH

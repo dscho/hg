@@ -49,22 +49,27 @@ def checkportabilityalert(ui):
     return abort, warn
 
 class casecollisionauditor(object):
-    def __init__(self, ui, abort, existingiter):
+    def __init__(self, ui, abort, dirstate):
         self._ui = ui
         self._abort = abort
-        self._map = {}
-        for f in existingiter:
-            self._map[encoding.lower(f)] = f
+        allfiles = '\0'.join(dirstate._map)
+        self._loweredfiles = set(encoding.lower(allfiles).split('\0'))
+        self._dirstate = dirstate
+        # The purpose of _newfiles is so that we don't complain about
+        # case collisions if someone were to call this object with the
+        # same filename twice.
+        self._newfiles = set()
 
     def __call__(self, f):
         fl = encoding.lower(f)
-        map = self._map
-        if fl in map and map[fl] != f:
+        if (fl in self._loweredfiles and f not in self._dirstate and
+            f not in self._newfiles):
             msg = _('possible case-folding collision for %s') % f
             if self._abort:
                 raise util.Abort(msg)
             self._ui.warn(_("warning: %s\n") % msg)
-        map[fl] = f
+        self._loweredfiles.add(fl)
+        self._newfiles.add(f)
 
 class pathauditor(object):
     '''ensure that a filesystem path contains no banned components.
@@ -141,8 +146,9 @@ class pathauditor(object):
                 elif (stat.S_ISDIR(st.st_mode) and
                       os.path.isdir(os.path.join(curpath, '.hg'))):
                     if not self.callback or not self.callback(curpath):
-                        raise util.Abort(_("path '%s' is inside nested repo %r") %
-                                         (path, prefix))
+                        raise util.Abort(_("path '%s' is inside nested "
+                                           "repo %r")
+                                         % (path, prefix))
             prefixes.append(normprefix)
             parts.pop()
             normparts.pop()
@@ -189,13 +195,30 @@ class abstractopener(object):
         finally:
             fp.close()
 
+    def mkdir(self, path=None):
+        return os.mkdir(self.join(path))
+
+    def exists(self, path=None):
+        return os.path.exists(self.join(path))
+
+    def isdir(self, path=None):
+        return os.path.isdir(self.join(path))
+
+    def makedir(self, path=None, notindexed=True):
+        return util.makedir(self.join(path), notindexed)
+
+    def makedirs(self, path=None, mode=None):
+        return util.makedirs(self.join(path), mode)
+
 class opener(abstractopener):
     '''Open files relative to a base directory
 
     This class is used to hide the details of COW semantics and
     remote file access from higher level code.
     '''
-    def __init__(self, base, audit=True):
+    def __init__(self, base, audit=True, expand=False):
+        if expand:
+            base = os.path.realpath(util.expandpath(base))
         self.base = base
         self._audit = audit
         if audit:
@@ -290,7 +313,10 @@ class opener(abstractopener):
         self.auditor(path)
 
     def join(self, path):
-        return os.path.join(self.base, path)
+        if path:
+            return os.path.join(self.base, path)
+        else:
+            return self.base
 
 class filteropener(abstractopener):
     '''Wrapper opener for filtering filenames with a function.'''
@@ -323,18 +349,16 @@ def canonpath(root, cwd, myname, auditor=None):
     else:
         # Determine whether `name' is in the hierarchy at or beneath `root',
         # by iterating name=dirname(name) until that causes no change (can't
-        # check name == '/', because that doesn't work on windows).  For each
-        # `name', compare dev/inode numbers.  If they match, the list `rel'
-        # holds the reversed list of components making up the relative file
-        # name we want.
-        root_st = os.stat(root)
+        # check name == '/', because that doesn't work on windows). The list
+        # `rel' holds the reversed list of components making up the relative
+        # file name we want.
         rel = []
         while True:
             try:
-                name_st = os.stat(name)
+                s = util.samefile(name, root)
             except OSError:
-                name_st = None
-            if name_st and util.samestat(name_st, root_st):
+                s = False
+            if s:
                 if not rel:
                     # name was actually the same as root (maybe a symlink)
                     return ''
@@ -351,7 +375,8 @@ def canonpath(root, cwd, myname, auditor=None):
         raise util.Abort('%s not under root' % myname)
 
 def walkrepos(path, followsym=False, seen_dirs=None, recurse=False):
-    '''yield every hg repository under path, recursively.'''
+    '''yield every hg repository under path, always recursively.
+    The recurse flag will only control recursion into repo working dirs'''
     def errhandler(err):
         if err.filename == path:
             raise err
@@ -464,7 +489,7 @@ if os.name != 'nt':
 
 else:
 
-    _HKEY_LOCAL_MACHINE = 0x80000002L
+    import _winreg
 
     def systemrcpath():
         '''return default os-specific hgrc search path'''
@@ -484,7 +509,7 @@ else:
             return rcpath
         # else look for a system rcpath in the registry
         value = util.lookupreg('SOFTWARE\\Mercurial', None,
-                               _HKEY_LOCAL_MACHINE)
+                               _winreg.HKEY_LOCAL_MACHINE)
         if not isinstance(value, str) or not value:
             return rcpath
         value = util.localpath(value)
@@ -585,10 +610,9 @@ def revrange(repo, revs):
 
         # fall through to new-style queries if old-style fails
         m = revset.match(repo.ui, spec)
-        for r in m(repo, range(len(repo))):
-            if r not in seen:
-                l.append(r)
-        seen.update(l)
+        dl = [r for r in m(repo, xrange(len(repo))) if r not in seen]
+        l.extend(dl)
+        seen.update(dl)
 
     return l
 
@@ -656,8 +680,9 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
             unknown.append(abs)
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('adding %s\n') % ((pats and rel) or abs))
-        elif repo.dirstate[abs] != 'r' and (not good or not os.path.lexists(target)
-            or (os.path.isdir(target) and not os.path.islink(target))):
+        elif (repo.dirstate[abs] != 'r' and
+              (not good or not os.path.lexists(target) or
+               (os.path.isdir(target) and not os.path.islink(target)))):
             deleted.append(abs)
             if repo.ui.verbose or not exact:
                 repo.ui.status(_('removing %s\n') % ((pats and rel) or abs))
@@ -766,8 +791,9 @@ def readrequires(opener, supported):
             missings.append(r)
     missings.sort()
     if missings:
-        raise error.RequirementError(_("unknown repository format: "
-            "requires features '%s' (upgrade Mercurial)") % "', '".join(missings))
+        raise error.RequirementError(
+            _("unknown repository format: requires features '%s' (upgrade "
+              "Mercurial)") % "', '".join(missings))
     return requirements
 
 class filecacheentry(object):

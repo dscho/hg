@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" system-sh || exit 80
-
 Setting up test
 
   $ hg init test
@@ -207,8 +205,8 @@ Make sure bundlerepo doesn't leak tempfiles (issue2491)
 
 Pull ../full.hg into empty (with hook)
 
-  $ echo '[hooks]' >> .hg/hgrc
-  $ echo 'changegroup = python "$TESTDIR"/printenv.py changegroup' >> .hg/hgrc
+  $ echo "[hooks]" >> .hg/hgrc
+  $ echo "changegroup = python \"$TESTDIR/printenv.py\" changegroup" >> .hg/hgrc
 
 doesn't work (yet ?)
 
@@ -221,7 +219,7 @@ hg -R bundle://../full.hg verify
   adding manifests
   adding file changes
   added 9 changesets with 7 changes to 4 files (+1 heads)
-  changegroup hook: HG_NODE=f9ee2f85a263049e9ae6d37a0e67e96194ffb735 HG_SOURCE=pull HG_URL=bundle:../full.hg 
+  changegroup hook: HG_NODE=f9ee2f85a263049e9ae6d37a0e67e96194ffb735 HG_SOURCE=pull HG_URL=bundle:../full.hg
   (run 'hg heads' to see heads, 'hg merge' to merge)
 
 Rollback empty
@@ -244,7 +242,7 @@ Pull full.hg into empty again (using -R; with hook)
   adding manifests
   adding file changes
   added 9 changesets with 7 changes to 4 files (+1 heads)
-  changegroup hook: HG_NODE=f9ee2f85a263049e9ae6d37a0e67e96194ffb735 HG_SOURCE=pull HG_URL=bundle:empty+full.hg 
+  changegroup hook: HG_NODE=f9ee2f85a263049e9ae6d37a0e67e96194ffb735 HG_SOURCE=pull HG_URL=bundle:empty+full.hg
   (run 'hg heads' to see heads, 'hg merge' to merge)
 
 Create partial clones
@@ -386,9 +384,12 @@ Outgoing -R full.hg vs partial2 in partial
 Outgoing -R does-not-exist.hg vs partial2 in partial
 
   $ hg -R bundle://../does-not-exist.hg outgoing ../partial2
-  abort: *: ../does-not-exist.hg (glob)
+  abort: *../does-not-exist.hg* (glob)
   [255]
   $ cd ..
+
+hide outer repo
+  $ hg init
 
 Direct clone from bundle (all-history)
 
@@ -419,7 +420,7 @@ When cloning from a non-copiable repository into '', do not
 recurse infinitely (issue 2528)
 
   $ hg clone full.hg ''
-  abort: * (glob)
+  abort: empty destination path is not valid
   [255]
 
 test for http://mercurial.selenic.com/bts/issue216
@@ -598,3 +599,5 @@ bundle single branch
   crosschecking files in changesets and manifests
   checking files
   4 files, 3 changesets, 5 total revisions
+
+  $ cd ..

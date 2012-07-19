@@ -6,26 +6,113 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import gettext, _
-import sys, os
+import itertools, sys, os
 import extensions, revset, fileset, templatekw, templatefilters, filemerge
-import util
+import encoding, util, minirst
 
 def listexts(header, exts, indent=1):
     '''return a text listing of the given extensions'''
-    if not exts:
-        return ''
-    maxlength = max(len(e) for e in exts)
-    result = '\n%s\n\n' % header
-    for name, desc in sorted(exts.iteritems()):
-        result += '%s%-*s %s\n' % (' ' * indent, maxlength + 2,
-                                   ':%s:' % name, desc)
-    return result
+    rst = []
+    if exts:
+        rst.append('\n%s\n\n' % header)
+        for name, desc in sorted(exts.iteritems()):
+            rst.append('%s:%s: %s\n' % (' ' * indent, name, desc))
+    return rst
 
 def extshelp():
-    doc = loaddoc('extensions')()
-    doc += listexts(_('enabled extensions:'), extensions.enabled())
-    doc += listexts(_('disabled extensions:'), extensions.disabled())
+    rst = loaddoc('extensions')().splitlines(True)
+    rst.extend(listexts(_('enabled extensions:'), extensions.enabled()))
+    rst.extend(listexts(_('disabled extensions:'), extensions.disabled()))
+    doc = ''.join(rst)
     return doc
+
+def optrst(options, verbose):
+    data = []
+    multioccur = False
+    for option in options:
+        if len(option) == 5:
+            shortopt, longopt, default, desc, optlabel = option
+        else:
+            shortopt, longopt, default, desc = option
+            optlabel = _("VALUE") # default label
+
+        if _("DEPRECATED") in desc and not verbose:
+            continue
+
+        so = ''
+        if shortopt:
+            so = '-' + shortopt
+        lo = '--' + longopt
+        if default:
+            desc += _(" (default: %s)") % default
+
+        if isinstance(default, list):
+            lo += " %s [+]" % optlabel
+            multioccur = True
+        elif (default is not None) and not isinstance(default, bool):
+            lo += " %s" % optlabel
+
+        data.append((so, lo, desc))
+
+    rst = minirst.maketable(data, 1)
+
+    if multioccur:
+        rst.append(_("\n[+] marked option can be specified multiple times\n"))
+
+    return ''.join(rst)
+
+def topicmatch(kw):
+    """Return help topics matching kw.
+
+    Returns {'section': [(name, summary), ...], ...} where section is
+    one of topics, commands, extensions, or extensioncommands.
+    """
+    kw = encoding.lower(kw)
+    def lowercontains(container):
+        return kw in encoding.lower(container)  # translated in helptable
+    results = {'topics': [],
+               'commands': [],
+               'extensions': [],
+               'extensioncommands': [],
+               }
+    for names, header, doc in helptable:
+        if (sum(map(lowercontains, names))
+            or lowercontains(header)
+            or lowercontains(doc())):
+            results['topics'].append((names[0], header))
+    import commands # avoid cycle
+    for cmd, entry in commands.table.iteritems():
+        if cmd.startswith('debug'):
+            continue
+        if len(entry) == 3:
+            summary = entry[2]
+        else:
+            summary = ''
+        # translate docs *before* searching there
+        docs = _(getattr(entry[0], '__doc__', None)) or ''
+        if kw in cmd or lowercontains(summary) or lowercontains(docs):
+            doclines = docs.splitlines()
+            if doclines:
+                summary = doclines[0]
+            cmdname = cmd.split('|')[0].lstrip('^')
+            results['commands'].append((cmdname, summary))
+    for name, docs in itertools.chain(
+        extensions.enabled().iteritems(),
+        extensions.disabled().iteritems()):
+        # extensions.load ignores the UI argument
+        mod = extensions.load(None, name, '')
+        if lowercontains(name) or lowercontains(docs):
+            # extension docs are already translated
+            results['extensions'].append((name, docs.splitlines()[0]))
+        for cmd, entry in getattr(mod, 'cmdtable', {}).iteritems():
+            if kw in cmd or (len(entry) > 2 and lowercontains(entry[2])):
+                cmdname = cmd.split('|')[0].lstrip('^')
+                if entry[0].__doc__:
+                    cmddoc = gettext(entry[0].__doc__).splitlines()[0]
+                else:
+                    cmddoc = _('(no help text available)')
+                results['extensioncommands'].append((cmdname, cmddoc))
+    return results
 
 def loaddoc(topic):
     """Return a delayed loader for help/topic.txt."""
@@ -112,5 +199,5 @@ def addtopicsymbols(topic, marker, symbols):
 addtopicsymbols('filesets', '.. predicatesmarker', fileset.symbols)
 addtopicsymbols('merge-tools', '.. internaltoolsmarker', filemerge.internals)
 addtopicsymbols('revsets', '.. predicatesmarker', revset.symbols)
-addtopicsymbols('templates', '.. keywordsmarker', templatekw.keywords)
+addtopicsymbols('templates', '.. keywordsmarker', templatekw.dockeywords)
 addtopicsymbols('templates', '.. filtersmarker', templatefilters.filters)

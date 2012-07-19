@@ -66,6 +66,8 @@ from mercurial.node import short, nullid
 from mercurial import scmutil, scmutil, util, commands, encoding
 import os, shlex, shutil, tempfile, re
 
+testedwith = 'internal'
+
 def snapshot(ui, repo, files, node, tmproot):
     '''snapshot files as of some revision
     if not using snapshot, -I/-X does not work and recursive diff
@@ -88,7 +90,7 @@ def snapshot(ui, repo, files, node, tmproot):
     ctx = repo[node]
     for fn in files:
         wfn = util.pconvert(fn)
-        if not wfn in ctx:
+        if wfn not in ctx:
             # File doesn't exist; could be a bogus modify
             continue
         ui.note('  %s\n' % wfn)

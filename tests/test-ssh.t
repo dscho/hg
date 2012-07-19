@@ -14,21 +14,21 @@ creating 'remote' repo
   > uncompressed = True
   > 
   > [hooks]
-  > changegroup = python "$TESTDIR"/printenv.py changegroup-in-remote 0 ../dummylog
+  > changegroup = python "$TESTDIR/printenv.py" changegroup-in-remote 0 ../dummylog
   > EOF
   $ cd ..
 
 repo not found error
 
   $ hg clone -e "python \"$TESTDIR/dummyssh\"" ssh://user@dummy/nonexistent local
-  remote: abort: There is no Mercurial repository here (.hg not found)!
+  remote: abort: there is no Mercurial repository here (.hg not found)!
   abort: no suitable response from remote hg!
   [255]
 
 non-existent absolute path
 
   $ hg clone -e "python \"$TESTDIR/dummyssh\"" ssh://user@dummy//`pwd`/nonexistent local
-  remote: abort: There is no Mercurial repository here (.hg not found)!
+  remote: abort: there is no Mercurial repository here (.hg not found)!
   abort: no suitable response from remote hg!
   [255]
 
@@ -70,7 +70,7 @@ verify
   checking files
   2 files, 1 changesets, 2 total revisions
   $ echo '[hooks]' >> .hg/hgrc
-  $ echo 'changegroup = python "$TESTDIR"/printenv.py changegroup-in-local 0 ../dummylog' >> .hg/hgrc
+  $ echo "changegroup = python \"$TESTDIR/printenv.py\" changegroup-in-local 0 ../dummylog" >> .hg/hgrc
 
 empty default pull
 
@@ -167,6 +167,7 @@ test pushkeys and bookmarks
   bookmarks	
   phases	
   namespaces	
+  obsolete	
   $ hg book foo -r 0
   $ hg out -B
   comparing with ssh://user@dummy/remote
@@ -271,6 +272,9 @@ results here)
 
   $ cd ..
 
+hide outer repo
+  $ hg init
+
 Test remote paths with spaces (issue2983):
 
   $ hg init --ssh "python \"$TESTDIR/dummyssh\"" "ssh://user@dummy/a repo"
@@ -308,6 +312,41 @@ parameters:
   Illegal command "'hg' -R 'a'repo' serve --stdio": No closing quotation
   [255]
 
+Test hg-ssh in read-only mode:
+
+  $ cat > ssh.sh << EOF
+  > userhost="\$1"
+  > SSH_ORIGINAL_COMMAND="\$2"
+  > export SSH_ORIGINAL_COMMAND
+  > PYTHONPATH="$PYTHONPATH"
+  > export PYTHONPATH
+  > python "$TESTDIR/../contrib/hg-ssh" --read-only "$TESTTMP/remote"
+  > EOF
+
+  $ hg clone --ssh "sh ssh.sh" "ssh://user@dummy/$TESTTMP/remote" read-only-local
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 4 changesets with 5 changes to 4 files (+1 heads)
+  updating to branch default
+  3 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
+  $ cd read-only-local
+  $ echo "baz" > bar
+  $ hg ci -A -m "unpushable commit" bar
+  $ hg push --ssh "sh ../ssh.sh"
+  pushing to ssh://user@dummy/*/remote (glob)
+  searching for changes
+  remote: Permission denied
+  remote: abort: prechangegroup.hg-ssh hook failed
+  remote: Permission denied
+  remote: abort: prepushkey.hg-ssh hook failed
+  abort: unexpected response: empty string
+  [255]
+
+  $ cd ..
+
   $ cat dummylog
   Got arguments 1:user@dummy 2:hg -R nonexistent serve --stdio
   Got arguments 1:user@dummy 2:hg -R /$TESTTMP/nonexistent serve --stdio
@@ -318,7 +357,7 @@ parameters:
   Got arguments 1:user@dummy 2:hg -R local serve --stdio
   Got arguments 1:user@dummy 2:hg -R $TESTTMP/local serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
-  changegroup-in-remote hook: HG_NODE=a28a9d1a809cab7d4e2fde4bee738a9ede948b60 HG_SOURCE=serve HG_URL=remote:ssh:127.0.0.1 
+  changegroup-in-remote hook: HG_NODE=a28a9d1a809cab7d4e2fde4bee738a9ede948b60 HG_SOURCE=serve HG_URL=remote:ssh:127.0.0.1
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
@@ -328,7 +367,7 @@ parameters:
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
-  changegroup-in-remote hook: HG_NODE=1383141674ec756a6056f6a9097618482fe0f4a6 HG_SOURCE=serve HG_URL=remote:ssh:127.0.0.1 
+  changegroup-in-remote hook: HG_NODE=1383141674ec756a6056f6a9097618482fe0f4a6 HG_SOURCE=serve HG_URL=remote:ssh:127.0.0.1
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg init 'a repo'
   Got arguments 1:user@dummy 2:hg -R 'a repo' serve --stdio

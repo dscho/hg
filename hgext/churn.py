@@ -13,6 +13,8 @@ from mercurial import patch, cmdutil, scmutil, util, templater, commands
 import os
 import time, datetime
 
+testedwith = 'internal'
+
 def maketemplater(ui, repo, tmpl):
     tmpl = templater.parsestring(tmpl, quoted=False)
     try:
@@ -67,7 +69,7 @@ def countrate(ui, repo, amap, *pats, **opts):
         else:
             parents = ctx.parents()
             if len(parents) > 1:
-                ui.note(_('Revision %d is a merge, ignoring...\n') % (rev,))
+                ui.note(_('revision %d is a merge, ignoring...\n') % (rev,))
                 return
 
             ctx1 = parents[0]

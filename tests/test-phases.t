@@ -9,6 +9,15 @@
 
   $ hg init initialrepo
   $ cd initialrepo
+
+Cannot change null revision phase
+
+  $ hg phase --force --secret null
+  abort: cannot change null revision phase
+  [255]
+  $ hg phase null
+  -1: public
+
   $ mkcommit A
 
 New commit are draft by default
@@ -103,7 +112,7 @@ Test secret changeset are not pushed
   2 draft C
   3 draft D
   6 draft B'
-  $ hg outgoing -r default ../push-dest --template='{rev} {phase} {desc|firstline}\n'
+  $ hg outgoing -r 'branch(default)' ../push-dest --template='{rev} {phase} {desc|firstline}\n'
   comparing with ../push-dest
   searching for changes
   0 public A
@@ -466,3 +475,5 @@ test complete failure
   cannot move 1 changesets to a more permissive phase, use --force
   no phases changed
   [1]
+
+  $ cd ..

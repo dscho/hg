@@ -7,7 +7,7 @@
 
 from mercurial.i18n import _
 from mercurial.node import hex
-from mercurial import encoding, util
+from mercurial import encoding, error, util
 import errno, os
 
 def valid(mark):
@@ -140,8 +140,8 @@ def unsetcurrent(repo):
 
 def updatecurrentbookmark(repo, oldnode, curbranch):
     try:
-        return update(repo, oldnode, repo.branchtags()[curbranch])
-    except KeyError:
+        return update(repo, oldnode, repo.branchtip(curbranch))
+    except error.RepoLookupError:
         if curbranch == "default": # no default branch!
             return update(repo, oldnode, repo.lookup("tip"))
         else:
@@ -150,13 +150,20 @@ def updatecurrentbookmark(repo, oldnode, curbranch):
 def update(repo, parents, node):
     marks = repo._bookmarks
     update = False
-    mark = repo._bookmarkcurrent
-    if mark and marks[mark] in parents:
-        old = repo[marks[mark]]
-        new = repo[node]
-        if new in old.descendants():
-            marks[mark] = new.node()
-            update = True
+    cur = repo._bookmarkcurrent
+    if not cur:
+        return False
+
+    toupdate = [b for b in marks if b.split('@', 1)[0] == cur.split('@', 1)[0]]
+    for mark in toupdate:
+        if mark and marks[mark] in parents:
+            old = repo[marks[mark]]
+            new = repo[node]
+            if new in old.descendants() and mark == cur:
+                marks[cur] = new.node()
+                update = True
+            if mark != cur:
+                del marks[mark]
     if update:
         repo._writebookmarks(marks)
     return update
@@ -221,6 +228,11 @@ def updatefromremote(ui, repo, remote, path):
                     repo._bookmarks[n] = cr.node()
                     changed = True
                     ui.warn(_("divergent bookmark %s stored as %s\n") % (k, n))
+        elif rb[k] in repo:
+            # add remote bookmarks for changes we already have
+            repo._bookmarks[k] = repo[rb[k]].node()
+            changed = True
+            ui.status(_("adding remote bookmark %s\n") % k)
 
     if changed:
         write(repo)

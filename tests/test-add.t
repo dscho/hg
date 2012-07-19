@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" no-windows || exit 80
-
   $ hg init a
   $ cd a
   $ echo a > a
@@ -35,6 +33,7 @@ should fail
   A a
   A b
 
+#if no-windows
   $ echo foo > con.xml
   $ hg --config ui.portablefilenames=jump add con.xml
   abort: ui.portablefilenames value is invalid ('jump')
@@ -52,6 +51,11 @@ should fail
   A a
   A b
   A con.xml
+  $ hg forget con.xml
+  $ rm con.xml
+#endif
+
+#if eol-in-paths
   $ echo bla > 'hello:world'
   $ hg --config ui.portablefilenames=abort add
   adding hello:world
@@ -60,15 +64,14 @@ should fail
   $ hg st
   A a
   A b
-  A con.xml
   ? hello:world
   $ hg --config ui.portablefilenames=ignore add
   adding hello:world
   $ hg st
   A a
   A b
-  A con.xml
   A hello:world
+#endif
 
   $ hg ci -m 0 --traceback
 
@@ -134,3 +137,4 @@ Issue683: peculiarity with hg revert of an removed then added file
   A c
   ? a.orig
 
+  $ cd ..

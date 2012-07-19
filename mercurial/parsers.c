@@ -13,8 +13,10 @@
 
 #include "util.h"
 
-static int hexdigit(char c)
+static inline int hexdigit(const char *p, Py_ssize_t off)
 {
+	char c = p[off];
+
 	if (c >= '0' && c <= '9')
 		return c - '0';
 	if (c >= 'a' && c <= 'f')
@@ -32,8 +34,8 @@ static int hexdigit(char c)
 static PyObject *unhexlify(const char *str, int len)
 {
 	PyObject *ret;
-	const char *c;
 	char *d;
+	int i;
 
 	ret = PyBytes_FromStringAndSize(NULL, len / 2);
 
@@ -42,9 +44,9 @@ static PyObject *unhexlify(const char *str, int len)
 
 	d = PyBytes_AsString(ret);
 
-	for (c = str; c < str + len;) {
-		int hi = hexdigit(*c++);
-		int lo = hexdigit(*c++);
+	for (i = 0; i < len;) {
+		int hi = hexdigit(str, i++);
+		int lo = hexdigit(str, i++);
 		*d++ = (hi << 4) | lo;
 	}
 
@@ -212,6 +214,154 @@ quit:
 	return ret;
 }
 
+static inline int getintat(PyObject *tuple, int off, uint32_t *v)
+{
+	PyObject *o = PyTuple_GET_ITEM(tuple, off);
+	long val;
+
+	if (PyInt_Check(o))
+		val = PyInt_AS_LONG(o);
+	else if (PyLong_Check(o)) {
+		val = PyLong_AsLong(o);
+		if (val == -1 && PyErr_Occurred())
+			return -1;
+	} else {
+		PyErr_SetString(PyExc_TypeError, "expected an int or long");
+		return -1;
+	}
+	if (LONG_MAX > INT_MAX && (val > INT_MAX || val < INT_MIN)) {
+		PyErr_SetString(PyExc_OverflowError,
+				"Python value to large to convert to uint32_t");
+		return -1;
+	}
+	*v = (uint32_t)val;
+	return 0;
+}
+
+static PyObject *dirstate_unset;
+
+/*
+ * Efficiently pack a dirstate object into its on-disk format.
+ */
+static PyObject *pack_dirstate(PyObject *self, PyObject *args)
+{
+	PyObject *packobj = NULL;
+	PyObject *map, *copymap, *pl;
+	Py_ssize_t nbytes, pos, l;
+	PyObject *k, *v, *pn;
+	char *p, *s;
+	double now;
+
+	if (!PyArg_ParseTuple(args, "O!O!Od:pack_dirstate",
+			      &PyDict_Type, &map, &PyDict_Type, &copymap,
+			      &pl, &now))
+		return NULL;
+
+	if (!PySequence_Check(pl) || PySequence_Size(pl) != 2) {
+		PyErr_SetString(PyExc_TypeError, "expected 2-element sequence");
+		return NULL;
+	}
+
+	/* Figure out how much we need to allocate. */
+	for (nbytes = 40, pos = 0; PyDict_Next(map, &pos, &k, &v);) {
+		PyObject *c;
+		if (!PyString_Check(k)) {
+			PyErr_SetString(PyExc_TypeError, "expected string key");
+			goto bail;
+		}
+		nbytes += PyString_GET_SIZE(k) + 17;
+		c = PyDict_GetItem(copymap, k);
+		if (c) {
+			if (!PyString_Check(c)) {
+				PyErr_SetString(PyExc_TypeError,
+						"expected string key");
+				goto bail;
+			}
+			nbytes += PyString_GET_SIZE(c) + 1;
+		}
+	}
+
+	packobj = PyString_FromStringAndSize(NULL, nbytes);
+	if (packobj == NULL)
+		goto bail;
+
+	p = PyString_AS_STRING(packobj);
+
+	pn = PySequence_ITEM(pl, 0);
+	if (PyString_AsStringAndSize(pn, &s, &l) == -1 || l != 20) {
+		PyErr_SetString(PyExc_TypeError, "expected a 20-byte hash");
+		goto bail;
+	}
+	memcpy(p, s, l);
+	p += 20;
+	pn = PySequence_ITEM(pl, 1);
+	if (PyString_AsStringAndSize(pn, &s, &l) == -1 || l != 20) {
+		PyErr_SetString(PyExc_TypeError, "expected a 20-byte hash");
+		goto bail;
+	}
+	memcpy(p, s, l);
+	p += 20;
+
+	for (pos = 0; PyDict_Next(map, &pos, &k, &v); ) {
+		uint32_t mode, size, mtime;
+		Py_ssize_t len, l;
+		PyObject *o;
+		char *s, *t;
+
+		if (!PyTuple_Check(v) || PyTuple_GET_SIZE(v) != 4) {
+			PyErr_SetString(PyExc_TypeError, "expected a 4-tuple");
+			goto bail;
+		}
+		o = PyTuple_GET_ITEM(v, 0);
+		if (PyString_AsStringAndSize(o, &s, &l) == -1 || l != 1) {
+			PyErr_SetString(PyExc_TypeError, "expected one byte");
+			goto bail;
+		}
+		*p++ = *s;
+		if (getintat(v, 1, &mode) == -1)
+			goto bail;
+		if (getintat(v, 2, &size) == -1)
+			goto bail;
+		if (getintat(v, 3, &mtime) == -1)
+			goto bail;
+		if (*s == 'n' && mtime == (uint32_t)now) {
+			/* See dirstate.py:write for why we do this. */
+			if (PyDict_SetItem(map, k, dirstate_unset) == -1)
+				goto bail;
+			mode = 0, size = -1, mtime = -1;
+		}
+		putbe32(mode, p);
+		putbe32(size, p + 4);
+		putbe32(mtime, p + 8);
+		t = p + 12;
+		p += 16;
+		len = PyString_GET_SIZE(k);
+		memcpy(p, PyString_AS_STRING(k), len);
+		p += len;
+		o = PyDict_GetItem(copymap, k);
+		if (o) {
+			*p++ = '\0';
+			l = PyString_GET_SIZE(o);
+			memcpy(p, PyString_AS_STRING(o), l);
+			p += l;
+			len += l + 1;
+		}
+		putbe32((uint32_t)len, t);
+	}
+
+	pos = p - PyString_AS_STRING(packobj);
+	if (pos != nbytes) {
+		PyErr_Format(PyExc_SystemError, "bad dirstate size: %ld != %ld",
+                             (long)pos, (long)nbytes);
+		goto bail;
+	}
+
+	return packobj;
+bail:
+	Py_XDECREF(packobj);
+	return NULL;
+}
+
 /*
  * A base-16 trie for fast node->rev mapping.
  *
@@ -244,6 +394,7 @@ typedef struct {
 	Py_ssize_t raw_length; /* original number of elements */
 	Py_ssize_t length;     /* current number of elements */
 	PyObject *added;       /* populated on demand */
+	PyObject *headrevs;    /* cache, invalidated on changes */
 	nodetree *nt;          /* base-16 trie */
 	int ntlength;          /* # nodes in use */
 	int ntcapacity;        /* # nodes allocated */
@@ -273,6 +424,9 @@ static char *tuple_format = "Kiiiiiis#";
 static char *tuple_format = "kiiiiiis#";
 #endif
 
+/* A RevlogNG v1 index entry is 64 bytes long. */
+static const long v1_hdrsize = 64;
+
 /*
  * Return a pointer to the beginning of a RevlogNG record.
  */
@@ -289,7 +443,7 @@ static const char *index_deref(indexObject *self, Py_ssize_t pos)
 		return self->offsets[pos];
 	}
 
-	return PyString_AS_STRING(self->data) + pos * 64;
+	return PyString_AS_STRING(self->data) + pos * v1_hdrsize;
 }
 
 /*
@@ -385,7 +539,7 @@ static const char *index_node(indexObject *self, Py_ssize_t pos)
 	Py_ssize_t length = index_length(self);
 	const char *data;
 
-	if (pos == length - 1)
+	if (pos == length - 1 || pos == INT_MAX)
 		return nullid;
 
 	if (pos >= length)
@@ -461,6 +615,7 @@ static PyObject *index_insert(indexObject *self, PyObject *args)
 	if (self->nt)
 		nt_insert(self, node, (int)offset);
 
+	Py_CLEAR(self->headrevs);
 	Py_RETURN_NONE;
 }
 
@@ -469,12 +624,8 @@ static void _index_clearcaches(indexObject *self)
 	if (self->cache) {
 		Py_ssize_t i;
 
-		for (i = 0; i < self->raw_length; i++) {
-			if (self->cache[i]) {
-				Py_DECREF(self->cache[i]);
-				self->cache[i] = NULL;
-			}
-		}
+		for (i = 0; i < self->raw_length; i++)
+			Py_CLEAR(self->cache[i]);
 		free(self->cache);
 		self->cache = NULL;
 	}
@@ -486,6 +637,7 @@ static void _index_clearcaches(indexObject *self)
 		free(self->nt);
 		self->nt = NULL;
 	}
+	Py_CLEAR(self->headrevs);
 }
 
 static PyObject *index_clearcaches(indexObject *self)
@@ -506,13 +658,13 @@ static PyObject *index_stats(indexObject *self)
 		return NULL;
 
 #define istat(__n, __d) \
-	if (PyDict_SetItemString(obj, __d, PyInt_FromLong(self->__n)) == -1) \
+	if (PyDict_SetItemString(obj, __d, PyInt_FromSsize_t(self->__n)) == -1) \
 		goto bail;
 
 	if (self->added) {
 		Py_ssize_t len = PyList_GET_SIZE(self->added);
 		if (PyDict_SetItemString(obj, "index entries added",
-					 PyInt_FromLong(len)) == -1)
+					 PyInt_FromSsize_t(len)) == -1)
 			goto bail;
 	}
 
@@ -536,7 +688,108 @@ bail:
 	return NULL;
 }
 
-static inline int nt_level(const char *node, int level)
+/*
+ * When we cache a list, we want to be sure the caller can't mutate
+ * the cached copy.
+ */
+static PyObject *list_copy(PyObject *list)
+{
+	Py_ssize_t len = PyList_GET_SIZE(list);
+	PyObject *newlist = PyList_New(len);
+	Py_ssize_t i;
+
+	if (newlist == NULL)
+		return NULL;
+
+	for (i = 0; i < len; i++) {
+		PyObject *obj = PyList_GET_ITEM(list, i);
+		Py_INCREF(obj);
+		PyList_SET_ITEM(newlist, i, obj);
+	}
+
+	return newlist;
+}
+
+static PyObject *index_headrevs(indexObject *self)
+{
+	Py_ssize_t i, len, addlen;
+	char *nothead = NULL;
+	PyObject *heads;
+
+	if (self->headrevs)
+		return list_copy(self->headrevs);
+
+	len = index_length(self) - 1;
+	heads = PyList_New(0);
+	if (heads == NULL)
+		goto bail;
+	if (len == 0) {
+		PyObject *nullid = PyInt_FromLong(-1);
+		if (nullid == NULL || PyList_Append(heads, nullid) == -1) {
+			Py_XDECREF(nullid);
+			goto bail;
+		}
+		goto done;
+	}
+
+	nothead = calloc(len, 1);
+	if (nothead == NULL)
+		goto bail;
+
+	for (i = 0; i < self->raw_length; i++) {
+		const char *data = index_deref(self, i);
+		int parent_1 = getbe32(data + 24);
+		int parent_2 = getbe32(data + 28);
+		if (parent_1 >= 0)
+			nothead[parent_1] = 1;
+		if (parent_2 >= 0)
+			nothead[parent_2] = 1;
+	}
+
+	addlen = self->added ? PyList_GET_SIZE(self->added) : 0;
+
+	for (i = 0; i < addlen; i++) {
+		PyObject *rev = PyList_GET_ITEM(self->added, i);
+		PyObject *p1 = PyTuple_GET_ITEM(rev, 5);
+		PyObject *p2 = PyTuple_GET_ITEM(rev, 6);
+		long parent_1, parent_2;
+
+		if (!PyInt_Check(p1) || !PyInt_Check(p2)) {
+			PyErr_SetString(PyExc_TypeError,
+					"revlog parents are invalid");
+			goto bail;
+		}
+		parent_1 = PyInt_AS_LONG(p1);
+		parent_2 = PyInt_AS_LONG(p2);
+		if (parent_1 >= 0)
+			nothead[parent_1] = 1;
+		if (parent_2 >= 0)
+			nothead[parent_2] = 1;
+	}
+
+	for (i = 0; i < len; i++) {
+		PyObject *head;
+
+		if (nothead[i])
+			continue;
+		head = PyInt_FromLong(i);
+		if (head == NULL || PyList_Append(heads, head) == -1) {
+			Py_XDECREF(head);
+			goto bail;
+		}
+	}
+
+done:
+	self->headrevs = heads;
+	free(nothead);
+	return list_copy(self->headrevs);
+bail:
+	Py_XDECREF(heads);
+	free(nothead);
+	return NULL;
+}
+
+static inline int nt_level(const char *node, Py_ssize_t level)
 {
 	int v = node[level>>1];
 	if (!(level & 1))
@@ -544,8 +797,17 @@ static inline int nt_level(const char *node, int level)
 	return v & 0xf;
 }
 
-static int nt_find(indexObject *self, const char *node, Py_ssize_t nodelen)
+/*
+ * Return values:
+ *
+ *   -4: match is ambiguous (multiple candidates)
+ *   -2: not found
+ * rest: valid rev
+ */
+static int nt_find(indexObject *self, const char *node, Py_ssize_t nodelen,
+		   int hex)
 {
+	int (*getnybble)(const char *, Py_ssize_t) = hex ? hexdigit : nt_level;
 	int level, maxlevel, off;
 
 	if (nodelen == 20 && node[0] == '\0' && memcmp(node, nullid, 20) == 0)
@@ -554,27 +816,35 @@ static int nt_find(indexObject *self, const char *node, Py_ssize_t nodelen)
 	if (self->nt == NULL)
 		return -2;
 
-	maxlevel = nodelen > 20 ? 40 : ((int)nodelen * 2);
+	if (hex)
+		maxlevel = nodelen > 40 ? 40 : (int)nodelen;
+	else
+		maxlevel = nodelen > 20 ? 40 : ((int)nodelen * 2);
 
 	for (level = off = 0; level < maxlevel; level++) {
-		int k = nt_level(node, level);
+		int k = getnybble(node, level);
 		nodetree *n = &self->nt[off];
 		int v = n->children[k];
 
 		if (v < 0) {
 			const char *n;
+			Py_ssize_t i;
+
 			v = -v - 1;
 			n = index_node(self, v);
 			if (n == NULL)
 				return -2;
-			return memcmp(node, n, nodelen > 20 ? 20 : nodelen)
-				? -2 : v;
+			for (i = level; i < maxlevel; i++)
+				if (getnybble(node, i) != nt_level(n, i))
+					return -2;
+			return v;
 		}
 		if (v == 0)
 			return -2;
 		off = v;
 	}
-	return -2;
+	/* multiple matches against an ambiguous prefix */
+	return -4;
 }
 
 static int nt_new(indexObject *self)
@@ -638,6 +908,26 @@ static int nt_insert(indexObject *self, const char *node, int rev)
 	return -1;
 }
 
+static int nt_init(indexObject *self)
+{
+	if (self->nt == NULL) {
+		self->ntcapacity = self->raw_length < 4
+			? 4 : self->raw_length / 2;
+		self->nt = calloc(self->ntcapacity, sizeof(nodetree));
+		if (self->nt == NULL) {
+			PyErr_NoMemory();
+			return -1;
+		}
+		self->ntlength = 1;
+		self->ntrev = (int)index_length(self) - 1;
+		self->ntlookups = 1;
+		self->ntmisses = 0;
+		if (nt_insert(self, nullid, INT_MAX) == -1)
+			return -1;
+	}
+	return 0;
+}
+
 /*
  * Return values:
  *
@@ -651,23 +941,12 @@ static int index_find_node(indexObject *self,
 	int rev;
 
 	self->ntlookups++;
-	rev = nt_find(self, node, nodelen);
+	rev = nt_find(self, node, nodelen, 0);
 	if (rev >= -1)
 		return rev;
 
-	if (self->nt == NULL) {
-		self->ntcapacity = self->raw_length < 4
-			? 4 : self->raw_length / 2;
-		self->nt = calloc(self->ntcapacity, sizeof(nodetree));
-		if (self->nt == NULL) {
-			PyErr_SetString(PyExc_MemoryError, "out of memory");
-			return -3;
-		}
-		self->ntlength = 1;
-		self->ntrev = (int)index_length(self) - 1;
-		self->ntlookups = 1;
-		self->ntmisses = 0;
-	}
+	if (nt_init(self) == -1)
+		return -3;
 
 	/*
 	 * For the first handful of lookups, we scan the entire index,
@@ -692,10 +971,14 @@ static int index_find_node(indexObject *self,
 	} else {
 		for (rev = self->ntrev - 1; rev >= 0; rev--) {
 			const char *n = index_node(self, rev);
-			if (n == NULL)
+			if (n == NULL) {
+				self->ntrev = rev + 1;
 				return -2;
-			if (nt_insert(self, n, rev) == -1)
+			}
+			if (nt_insert(self, n, rev) == -1) {
+				self->ntrev = rev + 1;
 				return -3;
+			}
 			if (memcmp(node, n, nodelen > 20 ? 20 : nodelen) == 0) {
 				break;
 			}
@@ -763,6 +1046,77 @@ static PyObject *index_getitem(indexObject *self, PyObject *value)
 	return NULL;
 }
 
+static int nt_partialmatch(indexObject *self, const char *node,
+			   Py_ssize_t nodelen)
+{
+	int rev;
+
+	if (nt_init(self) == -1)
+		return -3;
+
+	if (self->ntrev > 0) {
+		/* ensure that the radix tree is fully populated */
+		for (rev = self->ntrev - 1; rev >= 0; rev--) {
+			const char *n = index_node(self, rev);
+			if (n == NULL)
+				return -2;
+			if (nt_insert(self, n, rev) == -1)
+				return -3;
+		}
+		self->ntrev = rev;
+	}
+
+	return nt_find(self, node, nodelen, 1);
+}
+
+static PyObject *index_partialmatch(indexObject *self, PyObject *args)
+{
+	const char *fullnode;
+	int nodelen;
+	char *node;
+	int rev, i;
+
+	if (!PyArg_ParseTuple(args, "s#", &node, &nodelen))
+		return NULL;
+
+	if (nodelen < 4) {
+		PyErr_SetString(PyExc_ValueError, "key too short");
+		return NULL;
+	}
+
+	if (nodelen > 40)
+		nodelen = 40;
+
+	for (i = 0; i < nodelen; i++)
+		hexdigit(node, i);
+	if (PyErr_Occurred()) {
+		/* input contains non-hex characters */
+		PyErr_Clear();
+		Py_RETURN_NONE;
+	}
+
+	rev = nt_partialmatch(self, node, nodelen);
+
+	switch (rev) {
+	case -4:
+		raise_revlog_error();
+	case -3:
+		return NULL;
+	case -2:
+		Py_RETURN_NONE;
+	case -1:
+		return PyString_FromStringAndSize(nullid, 20);
+	}
+
+	fullnode = index_node(self, rev);
+	if (fullnode == NULL) {
+		PyErr_Format(PyExc_IndexError,
+			     "could not access rev %d", rev);
+		return NULL;
+	}
+	return PyString_FromStringAndSize(fullnode, 20);
+}
+
 static PyObject *index_m_get(indexObject *self, PyObject *args)
 {
 	Py_ssize_t nodelen;
@@ -819,10 +1173,8 @@ static void nt_invalidate_added(indexObject *self, Py_ssize_t start)
 		nt_insert(self, PyString_AS_STRING(node), -1);
 	}
 
-	if (start == 0) {
-		Py_DECREF(self->added);
-		self->added = NULL;
-	}
+	if (start == 0)
+		Py_CLEAR(self->added);
 }
 
 /*
@@ -833,6 +1185,7 @@ static int index_slice_del(indexObject *self, PyObject *item)
 {
 	Py_ssize_t start, stop, step, slicelength;
 	Py_ssize_t length = index_length(self);
+	int ret = 0;
 
 	if (PySlice_GetIndicesEx((PySliceObject*)item, length,
 				 &start, &stop, &step, &slicelength) < 0)
@@ -878,7 +1231,9 @@ static int index_slice_del(indexObject *self, PyObject *item)
 				self->ntrev = (int)start;
 		}
 		self->length = start + 1;
-		return 0;
+		if (start < self->raw_length)
+			self->raw_length = start;
+		goto done;
 	}
 
 	if (self->nt) {
@@ -886,10 +1241,12 @@ static int index_slice_del(indexObject *self, PyObject *item)
 		if (self->ntrev > start)
 			self->ntrev = (int)start;
 	}
-	return self->added
-		? PyList_SetSlice(self->added, start - self->length + 1,
-				  PyList_GET_SIZE(self->added), NULL)
-		: 0;
+	if (self->added)
+		ret = PyList_SetSlice(self->added, start - self->length + 1,
+				      PyList_GET_SIZE(self->added), NULL);
+done:
+	Py_CLEAR(self->headrevs);
+	return ret;
 }
 
 /*
@@ -931,17 +1288,16 @@ static long inline_scan(indexObject *self, const char **offsets)
 {
 	const char *data = PyString_AS_STRING(self->data);
 	const char *end = data + PyString_GET_SIZE(self->data);
-	const long hdrsize = 64;
-	long incr = hdrsize;
+	long incr = v1_hdrsize;
 	Py_ssize_t len = 0;
 
-	while (data + hdrsize <= end) {
+	while (data + v1_hdrsize <= end) {
 		uint32_t comp_len;
 		const char *old_data;
 		/* 3rd element of header is length of compressed inline data */
 		comp_len = getbe32(data + 8);
-		incr = hdrsize + comp_len;
-		if (incr < hdrsize)
+		incr = v1_hdrsize + comp_len;
+		if (incr < v1_hdrsize)
 			break;
 		if (offsets)
 			offsets[len] = data;
@@ -952,7 +1308,7 @@ static long inline_scan(indexObject *self, const char **offsets)
 			break;
 	}
 
-	if (data != end && data + hdrsize != end) {
+	if (data != end && data + v1_hdrsize != end) {
 		if (!PyErr_Occurred())
 			PyErr_SetString(PyExc_ValueError, "corrupt index file");
 		return -1;
@@ -979,6 +1335,7 @@ static int index_init(indexObject *self, PyObject *args)
 	self->cache = NULL;
 
 	self->added = NULL;
+	self->headrevs = NULL;
 	self->offsets = NULL;
 	self->nt = NULL;
 	self->ntlength = self->ntcapacity = 0;
@@ -994,11 +1351,11 @@ static int index_init(indexObject *self, PyObject *args)
 		self->raw_length = len;
 		self->length = len + 1;
 	} else {
-		if (size % 64) {
+		if (size % v1_hdrsize) {
 			PyErr_SetString(PyExc_ValueError, "corrupt index file");
 			goto bail;
 		}
-		self->raw_length = size / 64;
+		self->raw_length = size / v1_hdrsize;
 		self->length = self->raw_length + 1;
 	}
 
@@ -1043,8 +1400,12 @@ static PyMethodDef index_methods[] = {
 	 "clear the index caches"},
 	{"get", (PyCFunction)index_m_get, METH_VARARGS,
 	 "get an index entry"},
+	{"headrevs", (PyCFunction)index_headrevs, METH_NOARGS,
+	 "get head revisions"},
 	{"insert", (PyCFunction)index_insert, METH_VARARGS,
 	 "insert an index entry"},
+	{"partialmatch", (PyCFunction)index_partialmatch, METH_VARARGS,
+	 "match a potentially ambiguous node ID"},
 	{"stats", (PyCFunction)index_stats, METH_NOARGS,
 	 "stats for the index"},
 	{NULL} /* Sentinel */
@@ -1143,6 +1504,7 @@ bail:
 static char parsers_doc[] = "Efficient content parsing.";
 
 static PyMethodDef methods[] = {
+	{"pack_dirstate", pack_dirstate, METH_VARARGS, "pack a dirstate\n"},
 	{"parse_manifest", parse_manifest, METH_VARARGS, "parse a manifest\n"},
 	{"parse_dirstate", parse_dirstate, METH_VARARGS, "parse a dirstate\n"},
 	{"parse_index2", parse_index2, METH_VARARGS, "parse a revlog index\n"},
@@ -1162,6 +1524,8 @@ static void module_init(PyObject *mod)
 				  -1, -1, -1, -1, nullid, 20);
 	if (nullentry)
 		PyObject_GC_UnTrack(nullentry);
+
+	dirstate_unset = Py_BuildValue("ciii", 'n', 0, -1, -1);
 }
 
 #ifdef IS_PY3K

@@ -85,8 +85,8 @@ class changedpath(object):
         self.copyfrom_rev = p.copyfrom_rev
         self.action = p.action
 
-def get_log_child(fp, url, paths, start, end, limit=0, discover_changed_paths=True,
-                    strict_node_history=False):
+def get_log_child(fp, url, paths, start, end, limit=0,
+                  discover_changed_paths=True, strict_node_history=False):
     protocol = -1
     def receiver(orig_paths, revnum, author, date, message, pool):
         if orig_paths is not None:
@@ -120,6 +120,10 @@ def debugsvnlog(ui, **opts):
     """Fetch SVN log in a subprocess and channel them back to parent to
     avoid memory collection issues.
     """
+    if svn is None:
+        raise util.Abort(_('debugsvnlog could not load Subversion python '
+                           'bindings'))
+
     util.setbinary(sys.stdin)
     util.setbinary(sys.stdout)
     args = decodeargs(sys.stdin.read())
@@ -139,7 +143,7 @@ class logstream(object):
                                    ' hg executable is in PATH'))
             try:
                 orig_paths, revnum, author, date, message = entry
-            except:
+            except (TypeError, ValueError):
                 if entry is None:
                     break
                 raise util.Abort(_("log stream exception '%s'") % entry)
@@ -176,7 +180,7 @@ def httpcheck(ui, path, proto):
                       'know better.\n'))
             return True
         data = inst.fp.read()
-    except:
+    except Exception:
         # Could be urllib2.URLError if the URL is invalid or anything else.
         return False
     return '<m:human-readable errcode="160013">' in data
@@ -189,6 +193,9 @@ def issvnurl(ui, url):
     try:
         proto, path = url.split('://', 1)
         if proto == 'file':
+            if (os.name == 'nt' and path[:1] == '/' and path[1:2].isalpha()
+                and path[2:6].lower() == '%3a/'):
+                path = path[:2] + ':/' + path[6:]
             path = urllib.url2pathname(path)
     except ValueError:
         proto = 'file'
@@ -227,7 +234,7 @@ class svn_source(converter_source):
             raise NoRepo(_("%s does not look like a Subversion repository")
                          % url)
         if svn is None:
-            raise MissingTool(_('Could not load Subversion python bindings'))
+            raise MissingTool(_('could not load Subversion python bindings'))
 
         try:
             version = svn.core.SVN_VER_MAJOR, svn.core.SVN_VER_MINOR
@@ -276,7 +283,8 @@ class svn_source(converter_source):
             except ValueError:
                 raise util.Abort(_('svn: revision %s is not an integer') % rev)
 
-        self.trunkname = self.ui.config('convert', 'svn.trunk', 'trunk').strip('/')
+        self.trunkname = self.ui.config('convert', 'svn.trunk',
+                                        'trunk').strip('/')
         self.startrev = self.ui.config('convert', 'svn.startrev', default=0)
         try:
             self.startrev = int(self.startrev)
@@ -862,13 +870,14 @@ class svn_source(converter_source):
                     pass
         except SubversionException, (inst, num):
             if num == svn.core.SVN_ERR_FS_NO_SUCH_REVISION:
-                raise util.Abort(_('svn: branch has no revision %s') % to_revnum)
+                raise util.Abort(_('svn: branch has no revision %s')
+                                 % to_revnum)
             raise
 
     def getfile(self, file, rev):
         # TODO: ra.get_file transmits the whole file instead of diffs.
         if file in self.removed:
-            raise IOError()
+            raise IOError
         mode = ''
         try:
             new_module, revnum = revsplit(rev)[1:]
@@ -889,7 +898,7 @@ class svn_source(converter_source):
             notfound = (svn.core.SVN_ERR_FS_NOT_FOUND,
                 svn.core.SVN_ERR_RA_DAV_PATH_NOT_FOUND)
             if e.apr_err in notfound: # File not found
-                raise IOError()
+                raise IOError
             raise
         if mode == 'l':
             link_prefix = "link "
@@ -949,8 +958,8 @@ class svn_source(converter_source):
             if not p.startswith('/'):
                 p = self.module + '/' + p
             relpaths.append(p.strip('/'))
-        args = [self.baseurl, relpaths, start, end, limit, discover_changed_paths,
-                strict_node_history]
+        args = [self.baseurl, relpaths, start, end, limit,
+                discover_changed_paths, strict_node_history]
         arg = encodeargs(args)
         hgexe = util.hgexecutable()
         cmd = '%s debugsvnlog' % util.shellquote(hgexe)
@@ -1089,20 +1098,13 @@ class svn_sink(converter_sink, commandline):
             self.wopener.write(filename, data)
 
             if self.is_exec:
-                was_exec = self.is_exec(self.wjoin(filename))
-            else:
-                # On filesystems not supporting execute-bit, there is no way
-                # to know if it is set but asking subversion. Setting it
-                # systematically is just as expensive and much simpler.
-                was_exec = 'x' not in flags
-
-            util.setflags(self.wjoin(filename), False, 'x' in flags)
-            if was_exec:
-                if 'x' not in flags:
-                    self.delexec.append(filename)
-            else:
-                if 'x' in flags:
-                    self.setexec.append(filename)
+                if self.is_exec(self.wjoin(filename)):
+                    if 'x' not in flags:
+                        self.delexec.append(filename)
+                else:
+                    if 'x' in flags:
+                        self.setexec.append(filename)
+                util.setflags(self.wjoin(filename), False, 'x' in flags)
 
     def _copyfile(self, source, dest):
         # SVN's copy command pukes if the destination file exists, but

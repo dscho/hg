@@ -282,6 +282,8 @@ from mercurial.node import short
 from mercurial import cmdutil, mail, templater, util
 import re, time, urlparse, xmlrpclib
 
+testedwith = 'internal'
+
 class bzaccess(object):
     '''Base class for access to Bugzilla.'''
 
@@ -416,7 +418,8 @@ class bzmysql(bzaccess):
         for id in bugs.keys():
             self.ui.status(_('  bug %s\n') % id)
             cmdfmt = self.ui.config('bugzilla', 'notify', self.default_notify)
-            bzdir = self.ui.config('bugzilla', 'bzdir', '/var/www/html/bugzilla')
+            bzdir = self.ui.config('bugzilla', 'bzdir',
+                                   '/var/www/html/bugzilla')
             try:
                 # Backwards-compatible with old notify string, which
                 # took one string. This will throw with a new format
@@ -468,8 +471,8 @@ class bzmysql(bzaccess):
                 userid = self.get_user_id(defaultuser)
                 user = defaultuser
             except KeyError:
-                raise util.Abort(_('cannot find bugzilla user id for %s or %s') %
-                                 (user, defaultuser))
+                raise util.Abort(_('cannot find bugzilla user id for %s or %s')
+                                 % (user, defaultuser))
         return (user, userid)
 
     def updatebug(self, bugid, newstate, text, committer):
@@ -910,4 +913,3 @@ def hook(ui, repo, hooktype, node=None, **kwargs):
             bz.notify(bugs, util.email(ctx.user()))
     except Exception, e:
         raise util.Abort(_('Bugzilla error: %s') % e)
-

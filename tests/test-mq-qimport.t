@@ -22,6 +22,12 @@
   $ hg init repo
   $ cd repo
 
+qimport without file or revision
+
+  $ hg qimport
+  abort: no files or revisions specified
+  [255]
+
 qimport non-existing-file
 
   $ hg qimport non-existing-file
@@ -270,3 +276,5 @@ check qimport phase:
   $ hg qimport -r qparent
   $ hg phase qbase
   1: secret
+
+  $ cd ..

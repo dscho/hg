@@ -264,7 +264,8 @@ class basicstore(object):
                         l.append((decodedir(n), n, st.st_size))
                     elif kind == stat.S_IFDIR and recurse:
                         visit.append(fp)
-        return sorted(l)
+        l.sort()
+        return l
 
     def datafiles(self):
         return self._walk('data', True)
@@ -390,15 +391,16 @@ class fncachestore(basicstore):
     def join(self, f):
         return self.path + '/' + self.encode(f)
 
+    def getsize(self, path):
+        return os.stat(self.path + '/' + path).st_size
+
     def datafiles(self):
         rewrite = False
         existing = []
-        spath = self.path
         for f in self.fncache:
             ef = self.encode(f)
             try:
-                st = os.stat(spath + '/' + ef)
-                yield f, ef, st.st_size
+                yield f, ef, self.getsize(ef)
                 existing.append(f)
             except OSError:
                 # nonexistent entry

@@ -4,12 +4,11 @@
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
-
 from node import bin, hex, nullid, nullrev, short
 from i18n import _
-import repo, changegroup, subrepo, discovery, pushkey
+import peer, changegroup, subrepo, discovery, pushkey, obsolete
 import changelog, dirstate, filelog, manifest, context, bookmarks, phases
-import lock, transaction, store, encoding
+import lock, transaction, store, encoding, base85
 import scmutil, util, extensions, hook, error, revset
 import match as matchmod
 import merge as mergemod
@@ -24,50 +23,135 @@ class storecache(filecache):
     def join(self, obj, fname):
         return obj.sjoin(fname)
 
-class localrepository(repo.repository):
-    capabilities = set(('lookup', 'changegroupsubset', 'branchmap', 'pushkey',
-                        'known', 'getbundle'))
+MODERNCAPS = set(('lookup', 'branchmap', 'pushkey', 'known', 'getbundle'))
+LEGACYCAPS = MODERNCAPS.union(set(['changegroupsubset']))
+
+class localpeer(peer.peerrepository):
+    '''peer for a local repo; reflects only the most recent API'''
+
+    def __init__(self, repo, caps=MODERNCAPS):
+        peer.peerrepository.__init__(self)
+        self._repo = repo
+        self.ui = repo.ui
+        self._caps = repo._restrictcapabilities(caps)
+        self.requirements = repo.requirements
+        self.supportedformats = repo.supportedformats
+
+    def close(self):
+        self._repo.close()
+
+    def _capabilities(self):
+        return self._caps
+
+    def local(self):
+        return self._repo
+
+    def canpush(self):
+        return True
+
+    def url(self):
+        return self._repo.url()
+
+    def lookup(self, key):
+        return self._repo.lookup(key)
+
+    def branchmap(self):
+        return discovery.visiblebranchmap(self._repo)
+
+    def heads(self):
+        return discovery.visibleheads(self._repo)
+
+    def known(self, nodes):
+        return self._repo.known(nodes)
+
+    def getbundle(self, source, heads=None, common=None):
+        return self._repo.getbundle(source, heads=heads, common=common)
+
+    # TODO We might want to move the next two calls into legacypeer and add
+    # unbundle instead.
+
+    def lock(self):
+        return self._repo.lock()
+
+    def addchangegroup(self, cg, source, url):
+        return self._repo.addchangegroup(cg, source, url)
+
+    def pushkey(self, namespace, key, old, new):
+        return self._repo.pushkey(namespace, key, old, new)
+
+    def listkeys(self, namespace):
+        return self._repo.listkeys(namespace)
+
+    def debugwireargs(self, one, two, three=None, four=None, five=None):
+        '''used to test argument passing over the wire'''
+        return "%s %s %s %s %s" % (one, two, three, four, five)
+
+class locallegacypeer(localpeer):
+    '''peer extension which implements legacy methods too; used for tests with
+    restricted capabilities'''
+
+    def __init__(self, repo):
+        localpeer.__init__(self, repo, caps=LEGACYCAPS)
+
+    def branches(self, nodes):
+        return self._repo.branches(nodes)
+
+    def between(self, pairs):
+        return self._repo.between(pairs)
+
+    def changegroup(self, basenodes, source):
+        return self._repo.changegroup(basenodes, source)
+
+    def changegroupsubset(self, bases, heads, source):
+        return self._repo.changegroupsubset(bases, heads, source)
+
+class localrepository(object):
+
     supportedformats = set(('revlogv1', 'generaldelta'))
     supported = supportedformats | set(('store', 'fncache', 'shared',
                                         'dotencode'))
+    openerreqs = set(('revlogv1', 'generaldelta'))
+    requirements = ['revlogv1']
+
+    def _baserequirements(self, create):
+        return self.requirements[:]
 
     def __init__(self, baseui, path=None, create=False):
-        repo.repository.__init__(self)
-        self.root = os.path.realpath(util.expandpath(path))
-        self.path = os.path.join(self.root, ".hg")
+        self.wopener = scmutil.opener(path, expand=True)
+        self.wvfs = self.wopener
+        self.root = self.wvfs.base
+        self.path = self.wvfs.join(".hg")
         self.origroot = path
         self.auditor = scmutil.pathauditor(self.root, self._checknested)
         self.opener = scmutil.opener(self.path)
-        self.wopener = scmutil.opener(self.root)
+        self.vfs = self.opener
         self.baseui = baseui
         self.ui = baseui.copy()
-        self._dirtyphases = False
         # A list of callback to shape the phase if no data were found.
         # Callback are in the form: func(repo, roots) --> processed root.
         # This list it to be filled by extension during repo setup
         self._phasedefaults = []
-
         try:
             self.ui.readconfig(self.join("hgrc"), self.root)
             extensions.loadall(self.ui)
         except IOError:
             pass
 
-        if not os.path.isdir(self.path):
+        if not self.vfs.isdir():
             if create:
-                if not os.path.exists(path):
-                    util.makedirs(path)
-                util.makedir(self.path, notindexed=True)
-                requirements = ["revlogv1"]
+                if not self.wvfs.exists():
+                    self.wvfs.makedirs()
+                self.vfs.makedir(notindexed=True)
+                requirements = self._baserequirements(create)
                 if self.ui.configbool('format', 'usestore', True):
-                    os.mkdir(os.path.join(self.path, "store"))
+                    self.vfs.mkdir("store")
                     requirements.append("store")
                     if self.ui.configbool('format', 'usefncache', True):
                         requirements.append("fncache")
                         if self.ui.configbool('format', 'dotencode', True):
                             requirements.append('dotencode')
                     # create an invalid changelog
-                    self.opener.append(
+                    self.vfs.append(
                         "00changelog.i",
                         '\0\0\0\2' # represents revlogv2
                         ' dummy changelog to prevent using the old repo layout'
@@ -81,7 +165,7 @@ class localrepository(repo.repository):
             raise error.RepoError(_("repository %s already exists") % path)
         else:
             try:
-                requirements = scmutil.readrequires(self.opener, self.supported)
+                requirements = scmutil.readrequires(self.vfs, self.supported)
             except IOError, inst:
                 if inst.errno != errno.ENOENT:
                     raise
@@ -101,6 +185,7 @@ class localrepository(repo.repository):
         self.store = store.store(requirements, self.sharedpath, scmutil.opener)
         self.spath = self.store.path
         self.sopener = self.store.opener
+        self.svfs = self.sopener
         self.sjoin = self.store.join
         self.opener.createmode = self.store.createmode
         self._applyrequirements(requirements)
@@ -120,11 +205,16 @@ class localrepository(repo.repository):
         # Maps a property name to its util.filecacheentry
         self._filecache = {}
 
+    def close(self):
+        pass
+
+    def _restrictcapabilities(self, caps):
+        return caps
+
     def _applyrequirements(self, requirements):
         self.requirements = requirements
-        openerreqs = set(('revlogv1', 'generaldelta'))
         self.sopener.options = dict((r, 1) for r in requirements
-                                           if r in openerreqs)
+                                           if r in self.openerreqs)
 
     def _writerequirements(self):
         reqfile = self.opener("requires", "w")
@@ -170,6 +260,9 @@ class localrepository(repo.repository):
                 parts.pop()
         return False
 
+    def peer(self):
+        return localpeer(self) # not cached to avoid reference cycle
+
     @filecache('bookmarks')
     def _bookmarks(self):
         return bookmarks.read(self)
@@ -181,24 +274,41 @@ class localrepository(repo.repository):
     def _writebookmarks(self, marks):
       bookmarks.write(self)
 
+    def bookmarkheads(self, bookmark):
+        name = bookmark.split('@', 1)[0]
+        heads = []
+        for mark, n in self._bookmarks.iteritems():
+            if mark.split('@', 1)[0] == name:
+                heads.append(n)
+        return heads
+
     @storecache('phaseroots')
-    def _phaseroots(self):
-        self._dirtyphases = False
-        phaseroots = phases.readroots(self)
-        phases.filterunknown(self, phaseroots)
-        return phaseroots
+    def _phasecache(self):
+        return phases.phasecache(self, self._phasedefaults)
+
+    @storecache('obsstore')
+    def obsstore(self):
+        store = obsolete.obsstore(self.sopener)
+        return store
 
     @propertycache
-    def _phaserev(self):
-        cache = [phases.public] * len(self)
-        for phase in phases.trackedphases:
-            roots = map(self.changelog.rev, self._phaseroots[phase])
-            if roots:
-                for rev in roots:
-                    cache[rev] = phase
-                for rev in self.changelog.descendants(*roots):
-                    cache[rev] = phase
-        return cache
+    def hiddenrevs(self):
+        """hiddenrevs: revs that should be hidden by command and tools
+
+        This set is carried on the repo to ease initialisation and lazy
+        loading it'll probably move back to changelog for efficienty and
+        consistency reason
+
+        Note that the hiddenrevs will needs invalidations when
+        - a new changesets is added (possible unstable above extinct)
+        - a new obsolete marker is added (possible new extinct changeset)
+        """
+        hidden = set()
+        if self.obsstore:
+            ### hide extinct changeset that are not accessible by any mean
+            hiddenquery = 'extinct() - ::(. + bookmark() + tagged())'
+            hidden.update(self.revs(hiddenquery))
+        return hidden
 
     @storecache('00changelog.i')
     def changelog(self):
@@ -296,7 +406,8 @@ class localrepository(repo.repository):
                 fp.write('\n')
             for name in names:
                 m = munge and munge(name) or name
-                if self._tagscache.tagtypes and name in self._tagscache.tagtypes:
+                if (self._tagscache.tagtypes and
+                    name in self._tagscache.tagtypes):
                     old = self.tags().get(name, nullid)
                     fp.write('%s %s\n' % (hex(old), m))
                 fp.write('%s %s\n' % (hex(node), m))
@@ -376,7 +487,8 @@ class localrepository(repo.repository):
 
     @propertycache
     def _tagscache(self):
-        '''Returns a tagscache object that contains various tags related caches.'''
+        '''Returns a tagscache object that contains various tags related
+        caches.'''
 
         # This simplifies its cache management by having one decorated
         # function (this one) and the rest simply fetch things from it.
@@ -505,7 +617,7 @@ class localrepository(repo.repository):
             partial = self._branchcache
 
         self._branchtags(partial, lrev)
-        # this private cache holds all heads (not just tips)
+        # this private cache holds all heads (not just the branch tips)
         self._branchcache = partial
 
     def branchmap(self):
@@ -513,17 +625,27 @@ class localrepository(repo.repository):
         self.updatebranchcache()
         return self._branchcache
 
+    def _branchtip(self, heads):
+        '''return the tipmost branch head in heads'''
+        tip = heads[-1]
+        for h in reversed(heads):
+            if not self[h].closesbranch():
+                tip = h
+                break
+        return tip
+
+    def branchtip(self, branch):
+        '''return the tip node for a given branch'''
+        if branch not in self.branchmap():
+            raise error.RepoLookupError(_("unknown branch '%s'") % branch)
+        return self._branchtip(self.branchmap()[branch])
+
     def branchtags(self):
         '''return a dict where branch names map to the tipmost head of
         the branch, open heads come before closed'''
         bt = {}
         for bn, heads in self.branchmap().iteritems():
-            tip = heads[-1]
-            for h in reversed(heads):
-                if 'close' not in self.changelog.read(h)[5]:
-                    tip = h
-                    break
-            bt[bn] = tip
+            bt[bn] = self._branchtip(heads)
         return bt
 
     def _readbranchcache(self):
@@ -546,6 +668,9 @@ class localrepository(repo.repository):
                     continue
                 node, label = l.split(" ", 1)
                 label = encoding.tolocal(label.strip())
+                if not node in self:
+                    raise ValueError('invalidating branch cache because node '+
+                                     '%s does not exist' % node)
                 partial.setdefault(label, []).append(bin(node))
         except KeyboardInterrupt:
             raise
@@ -567,6 +692,10 @@ class localrepository(repo.repository):
             pass
 
     def _updatebranchcache(self, partial, ctxgen):
+        """Given a branchhead cache, partial, that may have extra nodes or be
+        missing heads, and a generator of nodes that are at least a superset of
+        heads missing, this function updates partial to be correct.
+        """
         # collect new branch entries
         newbranches = {}
         for c in ctxgen:
@@ -576,21 +705,51 @@ class localrepository(repo.repository):
         # 1 (branch a) -> 2 (branch b) -> 3 (branch a)
         for branch, newnodes in newbranches.iteritems():
             bheads = partial.setdefault(branch, [])
-            bheads.extend(newnodes)
-            if len(bheads) <= 1:
-                continue
-            bheads = sorted(bheads, key=lambda x: self[x].rev())
-            # starting from tip means fewer passes over reachable
-            while newnodes:
-                latest = newnodes.pop()
-                if latest not in bheads:
+            # Remove candidate heads that no longer are in the repo (e.g., as
+            # the result of a strip that just happened).  Avoid using 'node in
+            # self' here because that dives down into branchcache code somewhat
+            # recrusively.
+            bheadrevs = [self.changelog.rev(node) for node in bheads
+                         if self.changelog.hasnode(node)]
+            newheadrevs = [self.changelog.rev(node) for node in newnodes
+                           if self.changelog.hasnode(node)]
+            ctxisnew = bheadrevs and min(newheadrevs) > max(bheadrevs)
+            # Remove duplicates - nodes that are in newheadrevs and are already
+            # in bheadrevs.  This can happen if you strip a node whose parent
+            # was already a head (because they're on different branches).
+            bheadrevs = sorted(set(bheadrevs).union(newheadrevs))
+
+            # Starting from tip means fewer passes over reachable.  If we know
+            # the new candidates are not ancestors of existing heads, we don't
+            # have to examine ancestors of existing heads
+            if ctxisnew:
+                iterrevs = sorted(newheadrevs)
+            else:
+                iterrevs = list(bheadrevs)
+
+            # This loop prunes out two kinds of heads - heads that are
+            # superceded by a head in newheadrevs, and newheadrevs that are not
+            # heads because an existing head is their descendant.
+            while iterrevs:
+                latest = iterrevs.pop()
+                if latest not in bheadrevs:
                     continue
-                minbhrev = self[bheads[0]].node()
-                reachable = self.changelog.reachable(latest, minbhrev)
-                reachable.remove(latest)
-                if reachable:
-                    bheads = [b for b in bheads if b not in reachable]
-            partial[branch] = bheads
+                ancestors = set(self.changelog.ancestors([latest],
+                                                         bheadrevs[0]))
+                if ancestors:
+                    bheadrevs = [b for b in bheadrevs if b not in ancestors]
+            partial[branch] = [self.changelog.node(rev) for rev in bheadrevs]
+
+        # There may be branches that cease to exist when the last commit in the
+        # branch was stripped.  This code filters them out.  Note that the
+        # branch that ceased to exist may not be in newbranches because
+        # newbranches is the set of candidate heads, which when you strip the
+        # last commit in a branch will be the parent branch.
+        for branch in partial.keys():
+            nodes = [head for head in partial[branch]
+                     if self.changelog.hasnode(head)]
+            if not nodes:
+                del partial[branch]
 
     def lookup(self, key):
         return self[key].node()
@@ -605,15 +764,19 @@ class localrepository(repo.repository):
 
     def known(self, nodes):
         nm = self.changelog.nodemap
+        pc = self._phasecache
         result = []
         for n in nodes:
             r = nm.get(n)
-            resp = not (r is None or self._phaserev[r] >= phases.secret)
+            resp = not (r is None or pc.phase(self, r) >= phases.secret)
             result.append(resp)
         return result
 
     def local(self):
         return self
+
+    def cancopy(self):
+        return self.local() # so statichttprepo's override of local() works
 
     def join(self, f):
         return os.path.join(self.path, f)
@@ -833,9 +996,6 @@ class localrepository(repo.repository):
                         self.sjoin('phaseroots'))
         self.invalidate()
 
-        # Discard all cache entries to force reloading everything.
-        self._filecache.clear()
-
         parentgone = (parents[0] not in self.changelog.nodemap or
                       parents[1] not in self.changelog.nodemap)
         if parentgone:
@@ -856,6 +1016,9 @@ class localrepository(repo.repository):
             else:
                 ui.status(_('working directory now based on '
                             'revision %d\n') % parents)
+        # TODO: if we know which new heads may result from this rollback, pass
+        # them to destroy(), which will prevent the branchhead cache from being
+        # invalidated.
         self.destroyed()
         return 0
 
@@ -867,7 +1030,6 @@ class localrepository(repo.repository):
                 pass
 
         delcache('_tagscache')
-        delcache('_phaserev')
 
         self._branchcache = None # in UTF-8
         self._branchcachetip = None
@@ -900,6 +1062,9 @@ class localrepository(repo.repository):
             except AttributeError:
                 pass
         self.invalidatecaches()
+
+        # Discard all cache entries to force reloading everything.
+        self._filecache.clear()
 
     def _lock(self, lockname, wait, releasefn, acquirefn, desc):
         try:
@@ -937,9 +1102,8 @@ class localrepository(repo.repository):
 
         def unlock():
             self.store.write()
-            if self._dirtyphases:
-                phases.writeroots(self)
-                self._dirtyphases = False
+            if '_phasecache' in vars(self):
+                self._phasecache.write()
             for k, ce in self._filecache.items():
                 if k == 'dirstate':
                     continue
@@ -1195,16 +1359,17 @@ class localrepository(repo.repository):
             p1, p2 = self.dirstate.parents()
             hookp1, hookp2 = hex(p1), (p2 != nullid and hex(p2) or '')
             try:
-                self.hook("precommit", throw=True, parent1=hookp1, parent2=hookp2)
+                self.hook("precommit", throw=True, parent1=hookp1,
+                          parent2=hookp2)
                 ret = self.commitctx(cctx, True)
-            except:
+            except: # re-raises
                 if edited:
                     self.ui.write(
                         _('note: commit message saved in %s\n') % msgfn)
                 raise
 
             # update bookmarks, dirstate and mergestate
-            bookmarks.update(self, p1, ret)
+            bookmarks.update(self, [p1, p2], ret)
             for f in changes[0] + changes[1]:
                 self.dirstate.normal(f)
             for f in changes[2]:
@@ -1300,12 +1465,27 @@ class localrepository(repo.repository):
                 tr.release()
             lock.release()
 
-    def destroyed(self):
+    def destroyed(self, newheadnodes=None):
         '''Inform the repository that nodes have been destroyed.
         Intended for use by strip and rollback, so there's a common
-        place for anything that has to be done after destroying history.'''
-        # XXX it might be nice if we could take the list of destroyed
-        # nodes, but I don't see an easy way for rollback() to do that
+        place for anything that has to be done after destroying history.
+
+        If you know the branchheadcache was uptodate before nodes were removed
+        and you also know the set of candidate new heads that may have resulted
+        from the destruction, you can set newheadnodes.  This will enable the
+        code to update the branchheads cache, rather than having future code
+        decide it's invalid and regenrating it from scratch.
+        '''
+        # If we have info, newheadnodes, on how to update the branch cache, do
+        # it, Otherwise, since nodes were destroyed, the cache is stale and this
+        # will be caught the next time it is read.
+        if newheadnodes:
+            tiprev = len(self) - 1
+            ctxgen = (self[node] for node in newheadnodes
+                      if self.changelog.hasnode(node))
+            self._updatebranchcache(self._branchcache, ctxgen)
+            self._writebranchcache(self._branchcache, self.changelog.tip(),
+                                   tiprev)
 
         # Ensure the persistent tag cache is updated.  Doing it now
         # means that the tag cache only has to worry about destroyed
@@ -1330,7 +1510,8 @@ class localrepository(repo.repository):
     def status(self, node1='.', node2=None, match=None,
                ignored=False, clean=False, unknown=False,
                listsubrepos=False):
-        """return status of files between two nodes or node and working directory
+        """return status of files between two nodes or node and working
+        directory.
 
         If node1 is None, use the first dirstate parent instead.
         If node2 is None, compare node1 with working directory.
@@ -1338,6 +1519,8 @@ class localrepository(repo.repository):
 
         def mfmatches(ctx):
             mf = ctx.manifest().copy()
+            if match.always():
+                return mf
             for fn in mf.keys():
                 if not match(fn):
                     del mf[fn]
@@ -1423,10 +1606,11 @@ class localrepository(repo.repository):
                 mf2 = mfmatches(ctx2)
 
             modified, added, clean = [], [], []
+            withflags = mf1.withflags() | mf2.withflags()
             for fn in mf2:
                 if fn in mf1:
                     if (fn not in deleted and
-                        (mf1.flags(fn) != mf2.flags(fn) or
+                        ((fn in withflags and mf1.flags(fn) != mf2.flags(fn)) or
                          (mf1[fn] != mf2[fn] and
                           (mf2[fn] or ctx1[fn].cmp(ctx2[fn]))))):
                         modified.append(fn)
@@ -1501,8 +1685,7 @@ class localrepository(repo.repository):
             fbheads = set(self.changelog.nodesbetween([start], bheads)[2])
             bheads = [h for h in bheads if h in fbheads]
         if not closed:
-            bheads = [h for h in bheads if
-                      ('close' not in self.changelog.read(h)[5])]
+            bheads = [h for h in bheads if not self[h].closesbranch()]
         return bheads
 
     def branches(self, nodes):
@@ -1539,6 +1722,10 @@ class localrepository(repo.repository):
         return r
 
     def pull(self, remote, heads=None, force=False):
+        # don't open transaction for nothing or you break future useful
+        # rollback call
+        tr = None
+        trname = 'pull\n' + util.hidepassword(remote.url())
         lock = self.lock()
         try:
             tmp = discovery.findcommonincoming(self, remote, heads=heads,
@@ -1549,6 +1736,7 @@ class localrepository(repo.repository):
                 added = []
                 result = 0
             else:
+                tr = self.transaction(trname)
                 if heads is None and list(common) == [nullid]:
                     self.ui.status(_("requesting all changes\n"))
                 elif heads is None and remote.capable('changegroupsubset'):
@@ -1594,7 +1782,18 @@ class localrepository(repo.repository):
                 # Remote is old or publishing all common changesets
                 # should be seen as public
                 phases.advanceboundary(self, phases.public, subset)
+
+            remoteobs = remote.listkeys('obsolete')
+            if 'dump' in remoteobs:
+                if tr is None:
+                    tr = self.transaction(trname)
+                data = base85.b85decode(remoteobs['dump'])
+                self.obsstore.mergemarkers(tr, data)
+            if tr is not None:
+                tr.close()
         finally:
+            if tr is not None:
+                tr.release()
             lock.release()
 
         return result
@@ -1623,6 +1822,8 @@ class localrepository(repo.repository):
         # unbundle assumes local user cannot lock remote repo (new ssh
         # servers, http servers).
 
+        if not remote.canpush():
+            raise util.Abort(_("destination does not support push"))
         # get local lock as we might write phase data
         locallock = self.lock()
         try:
@@ -1648,6 +1849,22 @@ class localrepository(repo.repository):
                 else:
                     # something to push
                     if not force:
+                        # if self.obsstore == False --> no obsolete
+                        # then, save the iteration
+                        if self.obsstore:
+                            # this message are here for 80 char limit reason
+                            mso = _("push includes an obsolete changeset: %s!")
+                            msu = _("push includes an unstable changeset: %s!")
+                            # If we are to push if there is at least one
+                            # obsolete or unstable changeset in missing, at
+                            # least one of the missinghead will be obsolete or
+                            # unstable. So checking heads only is ok
+                            for node in outgoing.missingheads:
+                                ctx = self[node]
+                                if ctx.obsolete():
+                                    raise util.Abort(_(mso) % ctx)
+                                elif ctx.unstable():
+                                    raise util.Abort(_(msu) % ctx)
                         discovery.checkheads(self, remote, outgoing,
                                              remoteheads, newbranch,
                                              bool(inc))
@@ -1672,7 +1889,8 @@ class localrepository(repo.repository):
                         # http: return remote's addchangegroup() or 0 for error
                         ret = remote.unbundle(cg, remoteheads, 'push')
                     else:
-                        # we return an integer indicating remote head count change
+                        # we return an integer indicating remote head count
+                        # change
                         ret = remote.addchangegroup(cg, 'push', self.url())
 
                 if ret:
@@ -1698,7 +1916,7 @@ class localrepository(repo.repository):
                     # * missingheads part of comon (::commonheads)
                     common = set(outgoing.common)
                     cheads = [node for node in revs if node in common]
-                    # and 
+                    # and
                     # * commonheads parents on missing
                     revset = self.set('%ln and parents(roots(%ln))',
                                      outgoing.commonheads,
@@ -1733,6 +1951,12 @@ class localrepository(repo.repository):
                         if not r:
                             self.ui.warn(_('updating %s to public failed!\n')
                                             % newremotehead)
+                if ('obsolete' in remote.listkeys('namespaces')
+                    and self.obsstore):
+                    data = self.listkeys('obsolete')['dump']
+                    r = remote.pushkey('obsolete', 'dump', '', data)
+                    if not r:
+                        self.ui.warn(_('failed to push obsolete markers!\n'))
             finally:
                 if lock is not None:
                     lock.release()
@@ -1783,7 +2007,7 @@ class localrepository(repo.repository):
             bases = [nullid]
         csets, bases, heads = cl.nodesbetween(bases, heads)
         # We assume that all ancestors of bases are known
-        common = set(cl.ancestors(*[cl.rev(n) for n in bases]))
+        common = set(cl.ancestors([cl.rev(n) for n in bases]))
         return self._changegroupsubset(common, csets, heads, source)
 
     def getlocalbundle(self, source, outgoing):
@@ -1904,7 +2128,8 @@ class localrepository(repo.repository):
             for fname in sorted(changedfiles):
                 filerevlog = self.file(fname)
                 if not len(filerevlog):
-                    raise util.Abort(_("empty or missing revlog for %s") % fname)
+                    raise util.Abort(_("empty or missing revlog for %s")
+                                     % fname)
                 fstate[0] = fname
                 fstate[1] = fnodes.pop(fname, {})
 
@@ -2004,7 +2229,8 @@ class localrepository(repo.repository):
             for fname in sorted(changedfiles):
                 filerevlog = self.file(fname)
                 if not len(filerevlog):
-                    raise util.Abort(_("empty or missing revlog for %s") % fname)
+                    raise util.Abort(_("empty or missing revlog for %s")
+                                     % fname)
                 fstate[0] = fname
                 nodelist = gennodelst(filerevlog)
                 if nodelist:
@@ -2149,7 +2375,7 @@ class localrepository(repo.repository):
                 heads = cl.heads()
                 dh = len(heads) - len(oldheads)
                 for h in heads:
-                    if h not in oldheads and 'close' in self[h].extra():
+                    if h not in oldheads and self[h].closesbranch():
                         dh -= 1
             htext = ""
             if dh:
@@ -2220,7 +2446,7 @@ class localrepository(repo.repository):
                 resp = int(l)
             except ValueError:
                 raise error.ResponseError(
-                    _('Unexpected response from remote server:'), l)
+                    _('unexpected response from remote server:'), l)
             if resp == 1:
                 raise util.Abort(_('operation forbidden by server'))
             elif resp == 2:
@@ -2233,9 +2459,11 @@ class localrepository(repo.repository):
                 total_files, total_bytes = map(int, l.split(' ', 1))
             except (ValueError, TypeError):
                 raise error.ResponseError(
-                    _('Unexpected response from remote server:'), l)
+                    _('unexpected response from remote server:'), l)
             self.ui.status(_('%d files to transfer, %s of data\n') %
                            (total_files, util.bytecount(total_bytes)))
+            handled_bytes = 0
+            self.ui.progress(_('clone'), 0, total=total_bytes)
             start = time.time()
             for i in xrange(total_files):
                 # XXX doesn't support '\n' or '\r' in filenames
@@ -2245,23 +2473,28 @@ class localrepository(repo.repository):
                     size = int(size)
                 except (ValueError, TypeError):
                     raise error.ResponseError(
-                        _('Unexpected response from remote server:'), l)
+                        _('unexpected response from remote server:'), l)
                 if self.ui.debugflag:
                     self.ui.debug('adding %s (%s)\n' %
                                   (name, util.bytecount(size)))
                 # for backwards compat, name was partially encoded
                 ofp = self.sopener(store.decodedir(name), 'w')
                 for chunk in util.filechunkiter(fp, limit=size):
+                    handled_bytes += len(chunk)
+                    self.ui.progress(_('clone'), handled_bytes,
+                                     total=total_bytes)
                     ofp.write(chunk)
                 ofp.close()
             elapsed = time.time() - start
             if elapsed <= 0:
                 elapsed = 0.001
+            self.ui.progress(_('clone'), None)
             self.ui.status(_('transferred %s in %.1f seconds (%s/sec)\n') %
                            (util.bytecount(total_bytes), elapsed,
                             util.bytecount(total_bytes / elapsed)))
 
-            # new requirements = old non-format requirements + new format-related
+            # new requirements = old non-format requirements +
+            #                    new format-related
             # requirements from the streamed-in repository
             requirements.update(set(self.requirements) - self.supportedformats)
             self._applyrequirements(requirements)

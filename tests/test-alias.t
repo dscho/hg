@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" system-sh || exit 80
-
   $ HGFOO=BAR; export HGFOO
   $ cat >> $HGRCPATH <<EOF
   > [extensions]
@@ -26,14 +24,14 @@
   > dln = lognull --debug
   > nousage = rollback
   > put = export -r 0 -o "\$FOO/%R.diff"
-  > blank = !echo
-  > self = !echo '\$0'
-  > echo = !echo '\$@'
-  > echo1 = !echo '\$1'
-  > echo2 = !echo '\$2'
-  > echo13 = !echo '\$1' '\$3'
-  > count = !hg log -r '\$@' --template='.' | wc -c | sed -e 's/ //g'
-  > mcount = !hg log \$@ --template='.' | wc -c | sed -e 's/ //g'
+  > blank = !printf '\n'
+  > self = !printf '\$0\n'
+  > echoall = !printf '\$@\n'
+  > echo1 = !printf '\$1\n'
+  > echo2 = !printf '\$2\n'
+  > echo13 = !printf '\$1 \$3\n'
+  > count = !hg log -r "\$@" --template=. | wc -c | sed -e 's/ //g'
+  > mcount = !hg log \$@ --template=. | wc -c | sed -e 's/ //g'
   > rt = root
   > tglog = glog --template "{rev}:{node|short}: '{desc}' {branches}\n"
   > idalias = id
@@ -41,10 +39,10 @@
   > idaliasshell = !echo test
   > parentsshell1 = !echo one
   > parentsshell2 = !echo two
-  > escaped1 = !echo 'test\$\$test'
-  > escaped2 = !echo "HGFOO is \$\$HGFOO"
-  > escaped3 = !echo "\$1 is \$\$\$1"
-  > escaped4 = !echo '\$\$0' '\$\$@'
+  > escaped1 = !printf 'test\$\$test\n'
+  > escaped2 = !sh -c 'echo "HGFOO is \$\$HGFOO"'
+  > escaped3 = !sh -c 'echo "\$1 is \$\$\$1"'
+  > escaped4 = !printf '\$\$0 \$\$@\n'
   > 
   > [defaults]
   > mylog = -q
@@ -111,8 +109,10 @@ invalid options
 
 optional repository
 
+#if no-outer-repo
   $ hg optionalrepo
   init
+#endif
   $ cd alias
   $ cat > .hg/hgrc <<EOF
   > [alias]
@@ -200,11 +200,11 @@ simple shell aliases
   
   $ hg self
   self
-  $ hg echo
+  $ hg echoall
   
-  $ hg echo foo
+  $ hg echoall foo
   foo
-  $ hg echo 'test $2' foo
+  $ hg echoall 'test $2' foo
   test $2 foo
   $ hg echo1 foo bar baz
   foo
@@ -270,7 +270,7 @@ shell aliases with global options
   0
   $ hg --cwd .. count 'branch(default)'
   2
-  $ hg echo --cwd ..
+  $ hg echoall --cwd ..
   
 
 
@@ -278,11 +278,11 @@ repo specific shell aliases
 
   $ cat >> .hg/hgrc <<EOF
   > [alias]
-  > subalias = !echo sub \$@
+  > subalias = !echo sub
   > EOF
   $ cat >> ../.hg/hgrc <<EOF
   > [alias]
-  > mainalias = !echo main \$@
+  > mainalias = !echo main
   > EOF
 
 
@@ -340,24 +340,24 @@ invalid global arguments for normal commands, aliases, and shell aliases
   
   basic commands:
   
-   add         add the specified files on the next commit
-   annotate    show changeset information by line for each file
-   clone       make a copy of an existing repository
-   commit      commit the specified files or all outstanding changes
-   diff        diff repository (or selected files)
-   export      dump the header and diffs for one or more changesets
-   forget      forget the specified files on the next commit
-   init        create a new repository in the given directory
-   log         show revision history of entire repository or files
-   merge       merge working directory with another revision
-   phase       set or show the current phase name
-   pull        pull changes from the specified source
-   push        push changes to the specified destination
-   remove      remove the specified files on the next commit
-   serve       start stand-alone webserver
-   status      show changed files in the working directory
-   summary     summarize working directory state
-   update      update working directory (or switch revisions)
+   add           add the specified files on the next commit
+   annotate      show changeset information by line for each file
+   clone         make a copy of an existing repository
+   commit        commit the specified files or all outstanding changes
+   diff          diff repository (or selected files)
+   export        dump the header and diffs for one or more changesets
+   forget        forget the specified files on the next commit
+   init          create a new repository in the given directory
+   log           show revision history of entire repository or files
+   merge         merge working directory with another revision
+   phase         set or show the current phase name
+   pull          pull changes from the specified source
+   push          push changes to the specified destination
+   remove        remove the specified files on the next commit
+   serve         start stand-alone webserver
+   status        show changed files in the working directory
+   summary       summarize working directory state
+   update        update working directory (or switch revisions)
   
   use "hg help" for the full list of commands or "hg -v" for details
   [255]
@@ -367,24 +367,24 @@ invalid global arguments for normal commands, aliases, and shell aliases
   
   basic commands:
   
-   add         add the specified files on the next commit
-   annotate    show changeset information by line for each file
-   clone       make a copy of an existing repository
-   commit      commit the specified files or all outstanding changes
-   diff        diff repository (or selected files)
-   export      dump the header and diffs for one or more changesets
-   forget      forget the specified files on the next commit
-   init        create a new repository in the given directory
-   log         show revision history of entire repository or files
-   merge       merge working directory with another revision
-   phase       set or show the current phase name
-   pull        pull changes from the specified source
-   push        push changes to the specified destination
-   remove      remove the specified files on the next commit
-   serve       start stand-alone webserver
-   status      show changed files in the working directory
-   summary     summarize working directory state
-   update      update working directory (or switch revisions)
+   add           add the specified files on the next commit
+   annotate      show changeset information by line for each file
+   clone         make a copy of an existing repository
+   commit        commit the specified files or all outstanding changes
+   diff          diff repository (or selected files)
+   export        dump the header and diffs for one or more changesets
+   forget        forget the specified files on the next commit
+   init          create a new repository in the given directory
+   log           show revision history of entire repository or files
+   merge         merge working directory with another revision
+   phase         set or show the current phase name
+   pull          pull changes from the specified source
+   push          push changes to the specified destination
+   remove        remove the specified files on the next commit
+   serve         start stand-alone webserver
+   status        show changed files in the working directory
+   summary       summarize working directory state
+   update        update working directory (or switch revisions)
   
   use "hg help" for the full list of commands or "hg -v" for details
   [255]
@@ -394,24 +394,24 @@ invalid global arguments for normal commands, aliases, and shell aliases
   
   basic commands:
   
-   add         add the specified files on the next commit
-   annotate    show changeset information by line for each file
-   clone       make a copy of an existing repository
-   commit      commit the specified files or all outstanding changes
-   diff        diff repository (or selected files)
-   export      dump the header and diffs for one or more changesets
-   forget      forget the specified files on the next commit
-   init        create a new repository in the given directory
-   log         show revision history of entire repository or files
-   merge       merge working directory with another revision
-   phase       set or show the current phase name
-   pull        pull changes from the specified source
-   push        push changes to the specified destination
-   remove      remove the specified files on the next commit
-   serve       start stand-alone webserver
-   status      show changed files in the working directory
-   summary     summarize working directory state
-   update      update working directory (or switch revisions)
+   add           add the specified files on the next commit
+   annotate      show changeset information by line for each file
+   clone         make a copy of an existing repository
+   commit        commit the specified files or all outstanding changes
+   diff          diff repository (or selected files)
+   export        dump the header and diffs for one or more changesets
+   forget        forget the specified files on the next commit
+   init          create a new repository in the given directory
+   log           show revision history of entire repository or files
+   merge         merge working directory with another revision
+   phase         set or show the current phase name
+   pull          pull changes from the specified source
+   push          push changes to the specified destination
+   remove        remove the specified files on the next commit
+   serve         start stand-alone webserver
+   status        show changed files in the working directory
+   summary       summarize working directory state
+   update        update working directory (or switch revisions)
   
   use "hg help" for the full list of commands or "hg -v" for details
   [255]
@@ -424,3 +424,5 @@ This should show id:
 This shouldn't:
 
   $ hg --config alias.log='id' history
+
+  $ cd ../..

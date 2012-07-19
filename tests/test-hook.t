@@ -1,26 +1,26 @@
-  $ "$TESTDIR/hghave" system-sh || exit 80
-
 commit hooks can see env vars
 
   $ hg init a
   $ cd a
-  $ echo "[hooks]" > .hg/hgrc
-  $ echo 'commit = unset HG_LOCAL HG_TAG; python "$TESTDIR"/printenv.py commit' >> .hg/hgrc
-  $ echo 'commit.b = unset HG_LOCAL HG_TAG; python "$TESTDIR"/printenv.py commit.b' >> .hg/hgrc
-  $ echo 'precommit = unset HG_LOCAL HG_NODE HG_TAG; python "$TESTDIR"/printenv.py precommit' >> .hg/hgrc
-  $ echo 'pretxncommit = unset HG_LOCAL HG_TAG; python "$TESTDIR"/printenv.py pretxncommit' >> .hg/hgrc
-  $ echo 'pretxncommit.tip = hg -q tip' >> .hg/hgrc
-  $ echo 'pre-identify = python "$TESTDIR"/printenv.py pre-identify 1' >> .hg/hgrc
-  $ echo 'pre-cat = python "$TESTDIR"/printenv.py pre-cat' >> .hg/hgrc
-  $ echo 'post-cat = python "$TESTDIR"/printenv.py post-cat' >> .hg/hgrc
+  $ cat > .hg/hgrc <<EOF
+  > [hooks]
+  > commit = sh -c "HG_LOCAL= HG_TAG= python \"$TESTDIR/printenv.py\" commit"
+  > commit.b = sh -c "HG_LOCAL= HG_TAG= python \"$TESTDIR/printenv.py\" commit.b"
+  > precommit = sh -c  "HG_LOCAL= HG_NODE= HG_TAG= python \"$TESTDIR/printenv.py\" precommit"
+  > pretxncommit = sh -c "HG_LOCAL= HG_TAG= python \"$TESTDIR/printenv.py\" pretxncommit"
+  > pretxncommit.tip = hg -q tip
+  > pre-identify = python "$TESTDIR/printenv.py" pre-identify 1
+  > pre-cat = python "$TESTDIR/printenv.py" pre-cat
+  > post-cat = python "$TESTDIR/printenv.py" post-cat
+  > EOF
   $ echo a > a
   $ hg add a
   $ hg commit -m a
-  precommit hook: HG_PARENT1=0000000000000000000000000000000000000000 
-  pretxncommit hook: HG_NODE=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b HG_PARENT1=0000000000000000000000000000000000000000 HG_PENDING=$TESTTMP/a 
+  precommit hook: HG_PARENT1=0000000000000000000000000000000000000000
+  pretxncommit hook: HG_NODE=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b HG_PARENT1=0000000000000000000000000000000000000000 HG_PENDING=$TESTTMP/a
   0:cb9a9f314b8b
-  commit hook: HG_NODE=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b HG_PARENT1=0000000000000000000000000000000000000000 
-  commit.b hook: HG_NODE=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b HG_PARENT1=0000000000000000000000000000000000000000 
+  commit hook: HG_NODE=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b HG_PARENT1=0000000000000000000000000000000000000000
+  commit.b hook: HG_NODE=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b HG_PARENT1=0000000000000000000000000000000000000000
 
   $ hg clone . ../b
   updating to branch default
@@ -29,114 +29,118 @@ commit hooks can see env vars
 
 changegroup hooks can see env vars
 
-  $ echo '[hooks]' > .hg/hgrc
-  $ echo 'prechangegroup = python "$TESTDIR"/printenv.py prechangegroup' >> .hg/hgrc
-  $ echo 'changegroup = python "$TESTDIR"/printenv.py changegroup' >> .hg/hgrc
-  $ echo 'incoming = python "$TESTDIR"/printenv.py incoming' >> .hg/hgrc
+  $ cat > .hg/hgrc <<EOF
+  > [hooks]
+  > prechangegroup = python "$TESTDIR/printenv.py" prechangegroup
+  > changegroup = python "$TESTDIR/printenv.py" changegroup
+  > incoming = python "$TESTDIR/printenv.py" incoming
+  > EOF
 
 pretxncommit and commit hooks can see both parents of merge
 
   $ cd ../a
   $ echo b >> a
   $ hg commit -m a1 -d "1 0"
-  precommit hook: HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b 
-  pretxncommit hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b HG_PENDING=$TESTTMP/a 
+  precommit hook: HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b
+  pretxncommit hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b HG_PENDING=$TESTTMP/a
   1:ab228980c14d
-  commit hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b 
-  commit.b hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b 
+  commit hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b
+  commit.b hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b
   $ hg update -C 0
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ echo b > b
   $ hg add b
   $ hg commit -m b -d '1 0'
-  precommit hook: HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b 
-  pretxncommit hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b HG_PENDING=$TESTTMP/a 
+  precommit hook: HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b
+  pretxncommit hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b HG_PENDING=$TESTTMP/a
   2:ee9deb46ab31
-  commit hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b 
-  commit.b hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b 
+  commit hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b
+  commit.b hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b
   created new head
   $ hg merge 1
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
   $ hg commit -m merge -d '2 0'
-  precommit hook: HG_PARENT1=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT2=ab228980c14deea8b9555d91c9581127383e40fd 
-  pretxncommit hook: HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_PARENT1=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT2=ab228980c14deea8b9555d91c9581127383e40fd HG_PENDING=$TESTTMP/a 
+  precommit hook: HG_PARENT1=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT2=ab228980c14deea8b9555d91c9581127383e40fd
+  pretxncommit hook: HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_PARENT1=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT2=ab228980c14deea8b9555d91c9581127383e40fd HG_PENDING=$TESTTMP/a
   3:07f3376c1e65
-  commit hook: HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_PARENT1=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT2=ab228980c14deea8b9555d91c9581127383e40fd 
-  commit.b hook: HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_PARENT1=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT2=ab228980c14deea8b9555d91c9581127383e40fd 
+  commit hook: HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_PARENT1=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT2=ab228980c14deea8b9555d91c9581127383e40fd
+  commit.b hook: HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_PARENT1=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT2=ab228980c14deea8b9555d91c9581127383e40fd
 
 test generic hooks
 
   $ hg id
-  pre-identify hook: HG_ARGS=id HG_OPTS={'bookmarks': None, 'branch': None, 'id': None, 'insecure': None, 'num': None, 'remotecmd': '', 'rev': '', 'ssh': '', 'tags': None} HG_PATS=[] 
+  pre-identify hook: HG_ARGS=id HG_OPTS={'bookmarks': None, 'branch': None, 'id': None, 'insecure': None, 'num': None, 'remotecmd': '', 'rev': '', 'ssh': '', 'tags': None} HG_PATS=[]
   warning: pre-identify hook exited with status 1
   [1]
   $ hg cat b
-  pre-cat hook: HG_ARGS=cat b HG_OPTS={'decode': None, 'exclude': [], 'include': [], 'output': '', 'rev': ''} HG_PATS=['b'] 
+  pre-cat hook: HG_ARGS=cat b HG_OPTS={'decode': None, 'exclude': [], 'include': [], 'output': '', 'rev': ''} HG_PATS=['b']
   b
-  post-cat hook: HG_ARGS=cat b HG_OPTS={'decode': None, 'exclude': [], 'include': [], 'output': '', 'rev': ''} HG_PATS=['b'] HG_RESULT=0 
+  post-cat hook: HG_ARGS=cat b HG_OPTS={'decode': None, 'exclude': [], 'include': [], 'output': '', 'rev': ''} HG_PATS=['b'] HG_RESULT=0
 
   $ cd ../b
   $ hg pull ../a
   pulling from ../a
   searching for changes
-  prechangegroup hook: HG_SOURCE=pull HG_URL=file:$TESTTMP/a 
+  prechangegroup hook: HG_SOURCE=pull HG_URL=file:$TESTTMP/a
   adding changesets
   adding manifests
   adding file changes
   added 3 changesets with 2 changes to 2 files
-  changegroup hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_SOURCE=pull HG_URL=file:$TESTTMP/a 
-  incoming hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_SOURCE=pull HG_URL=file:$TESTTMP/a 
-  incoming hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_SOURCE=pull HG_URL=file:$TESTTMP/a 
-  incoming hook: HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_SOURCE=pull HG_URL=file:$TESTTMP/a 
+  changegroup hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_SOURCE=pull HG_URL=file:$TESTTMP/a
+  incoming hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_SOURCE=pull HG_URL=file:$TESTTMP/a
+  incoming hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_SOURCE=pull HG_URL=file:$TESTTMP/a
+  incoming hook: HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_SOURCE=pull HG_URL=file:$TESTTMP/a
   (run 'hg update' to get a working copy)
 
 tag hooks can see env vars
 
   $ cd ../a
-  $ echo 'pretag = python "$TESTDIR"/printenv.py pretag' >> .hg/hgrc
-  $ echo 'tag = unset HG_PARENT1 HG_PARENT2; python "$TESTDIR"/printenv.py tag' >> .hg/hgrc
+  $ cat >> .hg/hgrc <<EOF
+  > pretag = python "$TESTDIR/printenv.py" pretag
+  > tag = sh -c "HG_PARENT1= HG_PARENT2= python \"$TESTDIR/printenv.py\" tag"
+  > EOF
   $ hg tag -d '3 0' a
-  pretag hook: HG_LOCAL=0 HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_TAG=a 
-  precommit hook: HG_PARENT1=07f3376c1e655977439df2a814e3cc14b27abac2 
-  pretxncommit hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PARENT1=07f3376c1e655977439df2a814e3cc14b27abac2 HG_PENDING=$TESTTMP/a 
+  pretag hook: HG_LOCAL=0 HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_TAG=a
+  precommit hook: HG_PARENT1=07f3376c1e655977439df2a814e3cc14b27abac2
+  pretxncommit hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PARENT1=07f3376c1e655977439df2a814e3cc14b27abac2 HG_PENDING=$TESTTMP/a
   4:539e4b31b6dc
-  tag hook: HG_LOCAL=0 HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_TAG=a 
-  commit hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PARENT1=07f3376c1e655977439df2a814e3cc14b27abac2 
-  commit.b hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PARENT1=07f3376c1e655977439df2a814e3cc14b27abac2 
+  tag hook: HG_LOCAL=0 HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_TAG=a
+  commit hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PARENT1=07f3376c1e655977439df2a814e3cc14b27abac2
+  commit.b hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PARENT1=07f3376c1e655977439df2a814e3cc14b27abac2
   $ hg tag -l la
-  pretag hook: HG_LOCAL=1 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=la 
-  tag hook: HG_LOCAL=1 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=la 
+  pretag hook: HG_LOCAL=1 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=la
+  tag hook: HG_LOCAL=1 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=la
 
 pretag hook can forbid tagging
 
-  $ echo 'pretag.forbid = python "$TESTDIR"/printenv.py pretag.forbid 1' >> .hg/hgrc
+  $ echo "pretag.forbid = python \"$TESTDIR/printenv.py\" pretag.forbid 1" >> .hg/hgrc
   $ hg tag -d '4 0' fa
-  pretag hook: HG_LOCAL=0 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=fa 
-  pretag.forbid hook: HG_LOCAL=0 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=fa 
+  pretag hook: HG_LOCAL=0 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=fa
+  pretag.forbid hook: HG_LOCAL=0 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=fa
   abort: pretag.forbid hook exited with status 1
   [255]
   $ hg tag -l fla
-  pretag hook: HG_LOCAL=1 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=fla 
-  pretag.forbid hook: HG_LOCAL=1 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=fla 
+  pretag hook: HG_LOCAL=1 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=fla
+  pretag.forbid hook: HG_LOCAL=1 HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_TAG=fla
   abort: pretag.forbid hook exited with status 1
   [255]
 
 pretxncommit hook can see changeset, can roll back txn, changeset no
 more there after
 
-  $ echo 'pretxncommit.forbid0 = hg tip -q' >> .hg/hgrc
-  $ echo 'pretxncommit.forbid1 = python "$TESTDIR"/printenv.py pretxncommit.forbid 1' >> .hg/hgrc
+  $ echo "pretxncommit.forbid0 = hg tip -q" >> .hg/hgrc
+  $ echo "pretxncommit.forbid1 = python \"$TESTDIR/printenv.py\" pretxncommit.forbid 1" >> .hg/hgrc
   $ echo z > z
   $ hg add z
   $ hg -q tip
   4:539e4b31b6dc
   $ hg commit -m 'fail' -d '4 0'
-  precommit hook: HG_PARENT1=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 
-  pretxncommit hook: HG_NODE=6f611f8018c10e827fee6bd2bc807f937e761567 HG_PARENT1=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PENDING=$TESTTMP/a 
+  precommit hook: HG_PARENT1=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10
+  pretxncommit hook: HG_NODE=6f611f8018c10e827fee6bd2bc807f937e761567 HG_PARENT1=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PENDING=$TESTTMP/a
   5:6f611f8018c1
   5:6f611f8018c1
-  pretxncommit.forbid hook: HG_NODE=6f611f8018c10e827fee6bd2bc807f937e761567 HG_PARENT1=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PENDING=$TESTTMP/a 
+  pretxncommit.forbid hook: HG_NODE=6f611f8018c10e827fee6bd2bc807f937e761567 HG_PARENT1=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PENDING=$TESTTMP/a
   transaction abort!
   rollback completed
   abort: pretxncommit.forbid1 hook exited with status 1
@@ -146,10 +150,10 @@ more there after
 
 precommit hook can prevent commit
 
-  $ echo 'precommit.forbid = python "$TESTDIR"/printenv.py precommit.forbid 1' >> .hg/hgrc
+  $ echo "precommit.forbid = python \"$TESTDIR/printenv.py\" precommit.forbid 1" >> .hg/hgrc
   $ hg commit -m 'fail' -d '4 0'
-  precommit hook: HG_PARENT1=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 
-  precommit.forbid hook: HG_PARENT1=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 
+  precommit hook: HG_PARENT1=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10
+  precommit.forbid hook: HG_PARENT1=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10
   abort: precommit.forbid hook exited with status 1
   [255]
   $ hg -q tip
@@ -157,22 +161,22 @@ precommit hook can prevent commit
 
 preupdate hook can prevent update
 
-  $ echo 'preupdate = python "$TESTDIR"/printenv.py preupdate' >> .hg/hgrc
+  $ echo "preupdate = python \"$TESTDIR/printenv.py\" preupdate" >> .hg/hgrc
   $ hg update 1
-  preupdate hook: HG_PARENT1=ab228980c14d 
+  preupdate hook: HG_PARENT1=ab228980c14d
   0 files updated, 0 files merged, 2 files removed, 0 files unresolved
 
 update hook
 
-  $ echo 'update = python "$TESTDIR"/printenv.py update' >> .hg/hgrc
+  $ echo "update = python \"$TESTDIR/printenv.py\" update" >> .hg/hgrc
   $ hg update
-  preupdate hook: HG_PARENT1=539e4b31b6dc 
-  update hook: HG_ERROR=0 HG_PARENT1=539e4b31b6dc 
+  preupdate hook: HG_PARENT1=539e4b31b6dc
+  update hook: HG_ERROR=0 HG_PARENT1=539e4b31b6dc
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
 pushkey hook
 
-  $ echo 'pushkey = python "$TESTDIR"/printenv.py pushkey' >> .hg/hgrc
+  $ echo "pushkey = python \"$TESTDIR/printenv.py\" pushkey" >> .hg/hgrc
   $ cd ../b
   $ hg bookmark -r null foo
   $ hg push -B foo ../a
@@ -180,50 +184,53 @@ pushkey hook
   searching for changes
   no changes found
   exporting bookmark foo
-  pushkey hook: HG_KEY=foo HG_NAMESPACE=bookmarks HG_NEW=0000000000000000000000000000000000000000 HG_RET=1 
+  pushkey hook: HG_KEY=foo HG_NAMESPACE=bookmarks HG_NEW=0000000000000000000000000000000000000000 HG_RET=1
   [1]
   $ cd ../a
 
 listkeys hook
 
-  $ echo 'listkeys = python "$TESTDIR"/printenv.py listkeys' >> .hg/hgrc
+  $ echo "listkeys = python \"$TESTDIR/printenv.py\" listkeys" >> .hg/hgrc
   $ hg bookmark -r null bar
   $ cd ../b
   $ hg pull -B bar ../a
   pulling from ../a
-  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'} 
+  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'}
   no changes found
-  listkeys hook: HG_NAMESPACE=phases HG_VALUES={'cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b': '1', 'publishing': 'True'} 
-  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'} 
+  listkeys hook: HG_NAMESPACE=phases HG_VALUES={'cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b': '1', 'publishing': 'True'}
+  listkeys hook: HG_NAMESPACE=obsolete HG_VALUES={}
+  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'}
+  adding remote bookmark bar
   importing bookmark bar
   $ cd ../a
 
 test that prepushkey can prevent incoming keys
 
-  $ echo 'prepushkey = python "$TESTDIR"/printenv.py prepushkey.forbid 1' >> .hg/hgrc
+  $ echo "prepushkey = python \"$TESTDIR/printenv.py\" prepushkey.forbid 1" >> .hg/hgrc
   $ cd ../b
   $ hg bookmark -r null baz
   $ hg push -B baz ../a
   pushing to ../a
   searching for changes
   no changes found
-  listkeys hook: HG_NAMESPACE=phases HG_VALUES={'cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b': '1', 'publishing': 'True'} 
-  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'} 
-  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'} 
+  listkeys hook: HG_NAMESPACE=phases HG_VALUES={'cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b': '1', 'publishing': 'True'}
+  listkeys hook: HG_NAMESPACE=namespaces HG_VALUES={'bookmarks': '', 'namespaces': '', 'obsolete': '', 'phases': ''}
+  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'}
+  listkeys hook: HG_NAMESPACE=bookmarks HG_VALUES={'bar': '0000000000000000000000000000000000000000', 'foo': '0000000000000000000000000000000000000000'}
   exporting bookmark baz
-  prepushkey.forbid hook: HG_KEY=baz HG_NAMESPACE=bookmarks HG_NEW=0000000000000000000000000000000000000000 
+  prepushkey.forbid hook: HG_KEY=baz HG_NAMESPACE=bookmarks HG_NEW=0000000000000000000000000000000000000000
   abort: prepushkey hook exited with status 1
   [255]
   $ cd ../a
 
 test that prelistkeys can prevent listing keys
 
-  $ echo 'prelistkeys = python "$TESTDIR"/printenv.py prelistkeys.forbid 1' >> .hg/hgrc
+  $ echo "prelistkeys = python \"$TESTDIR/printenv.py\" prelistkeys.forbid 1" >> .hg/hgrc
   $ hg bookmark -r null quux
   $ cd ../b
   $ hg pull -B quux ../a
   pulling from ../a
-  prelistkeys.forbid hook: HG_NAMESPACE=bookmarks 
+  prelistkeys.forbid hook: HG_NAMESPACE=bookmarks
   abort: prelistkeys hook exited with status 1
   [255]
   $ cd ../a
@@ -233,21 +240,25 @@ prechangegroup hook can prevent incoming changes
   $ cd ../b
   $ hg -q tip
   3:07f3376c1e65
-  $ echo '[hooks]' > .hg/hgrc
-  $ echo 'prechangegroup.forbid = python "$TESTDIR"/printenv.py prechangegroup.forbid 1' >> .hg/hgrc
+  $ cat > .hg/hgrc <<EOF
+  > [hooks]
+  > prechangegroup.forbid = python "$TESTDIR/printenv.py" prechangegroup.forbid 1
+  > EOF
   $ hg pull ../a
   pulling from ../a
   searching for changes
-  prechangegroup.forbid hook: HG_SOURCE=pull HG_URL=file:$TESTTMP/a 
+  prechangegroup.forbid hook: HG_SOURCE=pull HG_URL=file:$TESTTMP/a
   abort: prechangegroup.forbid hook exited with status 1
   [255]
 
 pretxnchangegroup hook can see incoming changes, can roll back txn,
 incoming changes no longer there after
 
-  $ echo '[hooks]' > .hg/hgrc
-  $ echo 'pretxnchangegroup.forbid0 = hg tip -q' >> .hg/hgrc
-  $ echo 'pretxnchangegroup.forbid1 = python "$TESTDIR"/printenv.py pretxnchangegroup.forbid 1' >> .hg/hgrc
+  $ cat > .hg/hgrc <<EOF
+  > [hooks]
+  > pretxnchangegroup.forbid0 = hg tip -q
+  > pretxnchangegroup.forbid1 = python "$TESTDIR/printenv.py" pretxnchangegroup.forbid 1
+  > EOF
   $ hg pull ../a
   pulling from ../a
   searching for changes
@@ -256,7 +267,7 @@ incoming changes no longer there after
   adding file changes
   added 1 changesets with 1 changes to 1 files
   4:539e4b31b6dc
-  pretxnchangegroup.forbid hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PENDING=$TESTTMP/b HG_SOURCE=pull HG_URL=file:$TESTTMP/a 
+  pretxnchangegroup.forbid hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PENDING=$TESTTMP/b HG_SOURCE=pull HG_URL=file:$TESTTMP/a
   transaction abort!
   rollback completed
   abort: pretxnchangegroup.forbid1 hook exited with status 1
@@ -267,55 +278,61 @@ incoming changes no longer there after
 outgoing hooks can see env vars
 
   $ rm .hg/hgrc
-  $ echo '[hooks]' > ../a/.hg/hgrc
-  $ echo 'preoutgoing = python "$TESTDIR"/printenv.py preoutgoing' >> ../a/.hg/hgrc
-  $ echo 'outgoing = python "$TESTDIR"/printenv.py outgoing' >> ../a/.hg/hgrc
+  $ cat > ../a/.hg/hgrc <<EOF
+  > [hooks]
+  > preoutgoing = python "$TESTDIR/printenv.py" preoutgoing
+  > outgoing = python "$TESTDIR/printenv.py" outgoing
+  > EOF
   $ hg pull ../a
   pulling from ../a
   searching for changes
-  preoutgoing hook: HG_SOURCE=pull 
+  preoutgoing hook: HG_SOURCE=pull
   adding changesets
-  outgoing hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_SOURCE=pull 
+  outgoing hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_SOURCE=pull
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files
+  adding remote bookmark quux
   (run 'hg update' to get a working copy)
   $ hg rollback
   repository tip rolled back to revision 3 (undo pull)
 
 preoutgoing hook can prevent outgoing changes
 
-  $ echo 'preoutgoing.forbid = python "$TESTDIR"/printenv.py preoutgoing.forbid 1' >> ../a/.hg/hgrc
+  $ echo "preoutgoing.forbid = python \"$TESTDIR/printenv.py\" preoutgoing.forbid 1" >> ../a/.hg/hgrc
   $ hg pull ../a
   pulling from ../a
   searching for changes
-  preoutgoing hook: HG_SOURCE=pull 
-  preoutgoing.forbid hook: HG_SOURCE=pull 
+  preoutgoing hook: HG_SOURCE=pull
+  preoutgoing.forbid hook: HG_SOURCE=pull
   abort: preoutgoing.forbid hook exited with status 1
   [255]
 
 outgoing hooks work for local clones
 
   $ cd ..
-  $ echo '[hooks]' > a/.hg/hgrc
-  $ echo 'preoutgoing = python "$TESTDIR"/printenv.py preoutgoing' >> a/.hg/hgrc
-  $ echo 'outgoing = python "$TESTDIR"/printenv.py outgoing' >> a/.hg/hgrc
+  $ cat > a/.hg/hgrc <<EOF
+  > [hooks]
+  > preoutgoing = python "$TESTDIR/printenv.py" preoutgoing
+  > outgoing = python "$TESTDIR/printenv.py" outgoing
+  > EOF
   $ hg clone a c
-  preoutgoing hook: HG_SOURCE=clone 
-  outgoing hook: HG_NODE=0000000000000000000000000000000000000000 HG_SOURCE=clone 
+  preoutgoing hook: HG_SOURCE=clone
+  outgoing hook: HG_NODE=0000000000000000000000000000000000000000 HG_SOURCE=clone
   updating to branch default
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ rm -rf c
 
 preoutgoing hook can prevent outgoing changes for local clones
 
-  $ echo 'preoutgoing.forbid = python "$TESTDIR"/printenv.py preoutgoing.forbid 1' >> a/.hg/hgrc
+  $ echo "preoutgoing.forbid = python \"$TESTDIR/printenv.py\" preoutgoing.forbid 1" >> a/.hg/hgrc
   $ hg clone a zzz
-  preoutgoing hook: HG_SOURCE=clone 
-  preoutgoing.forbid hook: HG_SOURCE=clone 
+  preoutgoing hook: HG_SOURCE=clone
+  preoutgoing.forbid hook: HG_SOURCE=clone
   abort: preoutgoing.forbid hook exited with status 1
   [255]
-  $ cd b
+
+  $ cd "$TESTTMP/b"
 
   $ cat > hooktests.py <<EOF
   > from mercurial import util
@@ -362,7 +379,11 @@ preoutgoing hook can prevent outgoing changes for local clones
 
 test python hooks
 
-  $ PYTHONPATH="`pwd`:$PYTHONPATH"
+#if windows
+  $ PYTHONPATH="$TESTTMP/b;$PYTHONPATH"
+#else
+  $ PYTHONPATH="$TESTTMP/b:$PYTHONPATH"
+#endif
   $ export PYTHONPATH
 
   $ echo '[hooks]' > ../a/.hg/hgrc
@@ -447,6 +468,7 @@ test python hooks
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files
+  adding remote bookmark quux
   (run 'hg update' to get a working copy)
 
 make sure --traceback works
@@ -508,6 +530,20 @@ test python hook configured with python:[file]:[hook] syntax
   nothing changed
   [1]
 
+  $ echo '[hooks]' > .hg/hgrc
+  $ echo "update.ne = python:`pwd`/nonexisting.py:testhook" >> .hg/hgrc
+  $ echo "pre-identify.npmd = python:`pwd`/:no_python_module_dir" >> .hg/hgrc
+
+  $ hg up null
+  loading update.ne hook failed:
+  abort: No such file or directory: $TESTTMP/d/repo/nonexisting.py
+  [255]
+
+  $ hg id
+  loading pre-identify.npmd hook failed:
+  abort: No module named repo!
+  [255]
+
   $ cd ../../b
 
 make sure --traceback works on hook import failure
@@ -522,7 +558,7 @@ make sure --traceback works on hook import failure
   $ echo 'precommit.importfail = python:importfail.whatever' >> .hg/hgrc
 
   $ echo a >> a
-  $ hg --traceback commit -ma 2>&1 | egrep '^(exception|Traceback|ImportError)'
+  $ hg --traceback commit -ma 2>&1 | egrep -v '^( +File| {4}[a-zA-Z(])'
   exception from first failed import attempt:
   Traceback (most recent call last):
   ImportError: No module named somebogusmodule
@@ -530,6 +566,8 @@ make sure --traceback works on hook import failure
   Traceback (most recent call last):
   ImportError: No module named hgext_importfail
   Traceback (most recent call last):
+  Abort: precommit.importfail hook is invalid (import of "importfail" failed)
+  abort: precommit.importfail hook is invalid (import of "importfail" failed)
 
 Issue1827: Hooks Update & Commit not completely post operation
 
@@ -594,7 +632,7 @@ new commits must be visible in pretxnchangegroup (issue3428)
   $ echo aa >> from/a
   $ hg --cwd from ci -mb
   $ hg --cwd from push
-  pushing to $TESTTMP/to
+  pushing to $TESTTMP/to (glob)
   searching for changes
   adding changesets
   adding manifests

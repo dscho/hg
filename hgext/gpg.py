@@ -12,6 +12,7 @@ from mercurial.i18n import _
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+testedwith = 'internal'
 
 class gpg(object):
     def __init__(self, path, key=None):
@@ -43,7 +44,7 @@ class gpg(object):
                 try:
                     if f:
                         os.unlink(f)
-                except:
+                except OSError:
                     pass
         keys = []
         key, fingerprint = None, None
@@ -163,7 +164,7 @@ def sigs(ui, repo):
             r = "%5d:%s" % (rev, hgnode.hex(repo.changelog.node(rev)))
             ui.write("%-30s %s\n" % (keystr(ui, k), r))
 
-@command("sigcheck", [], _('hg sigcheck REVISION'))
+@command("sigcheck", [], _('hg sigcheck REV'))
 def check(ui, repo, rev):
     """verify all the signatures there may be for a particular revision"""
     mygpg = newgpg(ui)
@@ -179,7 +180,7 @@ def check(ui, repo, rev):
                 keys.extend(k)
 
     if not keys:
-        ui.write(_("No valid signature for %s\n") % hgnode.short(rev))
+        ui.write(_("no valid signature for %s\n") % hgnode.short(rev))
         return
 
     # print summary
@@ -205,7 +206,7 @@ def keystr(ui, key):
           ('m', 'message', '',
            _('commit message'), _('TEXT')),
          ] + commands.commitopts2,
-         _('hg sign [OPTION]... [REVISION]...'))
+         _('hg sign [OPTION]... [REV]...'))
 def sign(ui, repo, *revs, **opts):
     """add a signature for the current or given revision
 
@@ -236,7 +237,7 @@ def sign(ui, repo, *revs, **opts):
 
     for n in nodes:
         hexnode = hgnode.hex(n)
-        ui.write(_("Signing %d:%s\n") % (repo.changelog.rev(n),
+        ui.write(_("signing %d:%s\n") % (repo.changelog.rev(n),
                                          hgnode.short(n)))
         # build data
         data = node2txt(repo, n, sigver)
@@ -286,4 +287,3 @@ def node2txt(repo, node, ver):
         return "%s\n" % hgnode.hex(node)
     else:
         raise util.Abort(_("unknown signature version"))
-

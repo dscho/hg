@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" symlink || exit 80
-
   $ cat > echo.py <<EOF
   > #!/usr/bin/env python
   > import os, sys
@@ -61,3 +59,5 @@ merge working directory
   HG_OTHER_ISLINK 0
   HG_BASE_ISLINK 0
   0 files updated, 1 files merged, 0 files removed, 0 files unresolved
+
+  $ cd ..

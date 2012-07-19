@@ -54,6 +54,18 @@ Can't graft ancestor:
   skipping ancestor revision 2
   [255]
 
+Specify revisions with -r:
+
+  $ hg graft -r 1 -r 2
+  skipping ancestor revision 1
+  skipping ancestor revision 2
+  [255]
+
+  $ hg graft -r 1 2
+  skipping ancestor revision 2
+  skipping ancestor revision 1
+  [255]
+
 Can't graft with dirty wd:
 
   $ hg up -q 0
@@ -72,28 +84,23 @@ Graft a rename:
   # HG changeset patch
   # User foo
   # Date 0 0
-  # Node ID d2e44c99fd3f31c176ea4efb9eca9f6306c81756
+  # Node ID ef0ef43d49e79e81ddafdc7997401ba0041efc82
   # Parent  68795b066622ca79a25816a662041d8f78f3cd9e
   2
   
   diff --git a/a b/b
   rename from a
   rename to b
-  --- a/a
-  +++ b/b
-  @@ -1,1 +1,1 @@
-  -a
-  +b
 
 Look for extra:source
 
   $ hg log --debug -r tip
-  changeset:   7:d2e44c99fd3f31c176ea4efb9eca9f6306c81756
+  changeset:   7:ef0ef43d49e79e81ddafdc7997401ba0041efc82
   tag:         tip
   phase:       draft
   parent:      0:68795b066622ca79a25816a662041d8f78f3cd9e
   parent:      -1:0000000000000000000000000000000000000000
-  manifest:    7:5d59766436fd8fbcd38e7bebef0f6eaf3eebe637
+  manifest:    7:e59b6b228f9cbf9903d5e9abf996e083a1f533eb
   user:        foo
   date:        Thu Jan 01 00:00:00 1970 +0000
   files+:      b
@@ -123,20 +130,25 @@ Graft out of order, skipping a merge and a duplicate
     searching for copies back to rev 1
     unmatched files in local:
      b
-    all copies found (* = to merge, ! = divergent):
+    all copies found (* = to merge, ! = divergent, % = renamed and deleted):
      b -> a *
     checking for directory renames
   resolving manifests
    overwrite: False, partial: False
-   ancestor: 68795b066622, local: d2e44c99fd3f+, remote: 5d205f8b35b6
+   ancestor: 68795b066622, local: ef0ef43d49e7+, remote: 5d205f8b35b6
    b: local copied/moved to a -> m
   preserving b for resolve of b
   updating: b 1/1 files (100.00%)
+  picked tool 'internal:merge' for b (binary False symlink False)
+  merging b and a to b
+  my b@ef0ef43d49e7+ other a@5d205f8b35b6 ancestor a@68795b066622
+   premerge successful
+  b
   grafting revision 5
     searching for copies back to rev 1
   resolving manifests
    overwrite: False, partial: False
-   ancestor: 4c60f11aa304, local: d2e44c99fd3f+, remote: 97f8bfe72746
+   ancestor: 4c60f11aa304, local: 6b9e5368ca4e+, remote: 97f8bfe72746
    e: remote is newer -> g
   updating: e 1/1 files (100.00%)
   getting e
@@ -145,7 +157,7 @@ Graft out of order, skipping a merge and a duplicate
     searching for copies back to rev 1
   resolving manifests
    overwrite: False, partial: False
-   ancestor: 4c60f11aa304, local: 839a7e8fcf80+, remote: 9c233e8e184d
+   ancestor: 4c60f11aa304, local: 1905859650ec+, remote: 9c233e8e184d
    e: versions differ -> m
    d: remote is newer -> g
   preserving e for resolve of e
@@ -154,7 +166,7 @@ Graft out of order, skipping a merge and a duplicate
   updating: e 2/2 files (100.00%)
   picked tool 'internal:merge' for e (binary False symlink False)
   merging e
-  my e@839a7e8fcf80+ other e@9c233e8e184d ancestor e@68795b066622
+  my e@1905859650ec+ other e@9c233e8e184d ancestor e@68795b066622
   warning: conflicts during merge.
   merging e incomplete! (edit conflicts, then use 'hg resolve --mark')
   abort: unresolved conflicts, can't continue
@@ -179,6 +191,10 @@ Continue with a revision should fail:
   abort: can't specify --continue and revisions
   [255]
 
+  $ hg graft -c -r 6
+  abort: can't specify --continue and revisions
+  [255]
+
 Continue for real, clobber usernames
 
   $ hg graft -c -U
@@ -200,11 +216,13 @@ Compare with original:
 View graph:
 
   $ hg --config extensions.graphlog= log -G --template '{author}@{rev}.{phase}: {desc}\n'
-  @  test@10.draft: 3
+  @  test@11.draft: 3
   |
-  o  test@9.draft: 4
+  o  test@10.draft: 4
   |
-  o  test@8.draft: 5
+  o  test@9.draft: 5
+  |
+  o  bar@8.draft: 1
   |
   o  foo@7.draft: 2
   |
@@ -232,17 +250,17 @@ Graft again onto another branch should preserve the original source
   grafting revision 7
 
   $ hg log -r 7 --template '{rev}:{node}\n'
-  7:d2e44c99fd3f31c176ea4efb9eca9f6306c81756
+  7:ef0ef43d49e79e81ddafdc7997401ba0041efc82
   $ hg log -r 2 --template '{rev}:{node}\n'
   2:5c095ad7e90f871700f02dd1fa5012cb4498a2d4
 
   $ hg log --debug -r tip
-  changeset:   12:95adbe5de6b10f376b699ece9ed5a57cd7b4b0f6
+  changeset:   13:9db0f28fd3747e92c57d015f53b5593aeec53c2d
   tag:         tip
   phase:       draft
-  parent:      11:b592ea63bb0c19a6c5c44685ee29a2284f9f1b8f
+  parent:      12:b592ea63bb0c19a6c5c44685ee29a2284f9f1b8f
   parent:      -1:0000000000000000000000000000000000000000
-  manifest:    12:9944044f82a462bbaccc9bdf7e0ac5b811db7d1b
+  manifest:    13:dc313617b8c32457c0d589e0dbbedfe71f3cd637
   user:        foo
   date:        Thu Jan 01 00:00:00 1970 +0000
   files+:      b
@@ -260,7 +278,7 @@ Disallow grafting an already grafted cset onto its original branch
   [255]
 
 Disallow grafting already grafted csets with the same origin onto each other
-  $ hg up -q 12
+  $ hg up -q 13
   $ hg graft 2
   skipping already grafted revision 2
   [255]
@@ -273,8 +291,18 @@ Disallow grafting already grafted csets with the same origin onto each other
   skipping already grafted revision 2
   [255]
   $ hg graft tip
-  skipping already grafted revision 12 (same origin 2)
+  skipping already grafted revision 13 (same origin 2)
   [255]
+
+Graft with --log
+
+  $ hg up -Cq 1
+  $ hg graft 3 --log -u foo
+  grafting revision 3
+  warning: can't find ancestor for 'c' copied from 'b'!
+  $ hg log --template '{rev} {parents} {desc}\n' -r tip
+  14 1:5d205f8b35b6  3
+  (grafted from 4c60f11aa304a54ae1c199feb94e7fc771e51ed8)
 
 Resolve conflicted graft
   $ hg up -q 0
@@ -330,3 +358,178 @@ Resolve conflicted graft with rename
   diff --git a/a b/b
   rename from a
   rename to b
+
+Test simple origin(), with and without args
+  $ hg log -r 'origin()'
+  changeset:   1:5d205f8b35b6
+  user:        bar
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     1
+  
+  changeset:   2:5c095ad7e90f
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   3:4c60f11aa304
+  user:        baz
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     3
+  
+  changeset:   4:9c233e8e184d
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     4
+  
+  changeset:   5:97f8bfe72746
+  branch:      stable
+  parent:      3:4c60f11aa304
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     5
+  
+  $ hg log -r 'origin(7)'
+  changeset:   2:5c095ad7e90f
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+Now transplant a graft to test following through copies
+  $ hg up -q 0
+  $ hg branch -q dev
+  $ hg ci -qm "dev branch"
+  $ hg --config extensions.transplant= transplant -q 7
+  $ hg log -r 'origin(.)'
+  changeset:   2:5c095ad7e90f
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+Test simple destination
+  $ hg log -r 'destination()'
+  changeset:   7:ef0ef43d49e7
+  parent:      0:68795b066622
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   8:6b9e5368ca4e
+  user:        bar
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     1
+  
+  changeset:   9:1905859650ec
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     5
+  
+  changeset:   10:52dc0b4c6907
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     4
+  
+  changeset:   11:882b35362a6b
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     3
+  
+  changeset:   13:9db0f28fd374
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   14:f64defefacee
+  parent:      1:5d205f8b35b6
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     3
+  
+  changeset:   17:64ecd9071ce8
+  user:        bar
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     1
+  
+  changeset:   19:2e80e1351d6e
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   21:7e61b508e709
+  branch:      dev
+  tag:         tip
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  $ hg log -r 'destination(2)'
+  changeset:   7:ef0ef43d49e7
+  parent:      0:68795b066622
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   13:9db0f28fd374
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   19:2e80e1351d6e
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   21:7e61b508e709
+  branch:      dev
+  tag:         tip
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+Transplants of grafts can find a destination...
+  $ hg log -r 'destination(7)'
+  changeset:   21:7e61b508e709
+  branch:      dev
+  tag:         tip
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+... grafts of grafts unfortunately can't
+  $ hg graft -q 13
+  $ hg log -r 'destination(13)'
+All copies of a cset
+  $ hg log -r 'origin(13) or destination(origin(13))'
+  changeset:   2:5c095ad7e90f
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   7:ef0ef43d49e7
+  parent:      0:68795b066622
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   13:9db0f28fd374
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   19:2e80e1351d6e
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   21:7e61b508e709
+  branch:      dev
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+  changeset:   22:1313d0a825e2
+  branch:      dev
+  tag:         tip
+  user:        foo
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  

@@ -1,5 +1,3 @@
-  $ "$TESTDIR/hghave" system-sh || exit 80
-
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "patchbomb=" >> $HGRCPATH
 
@@ -10,10 +8,10 @@
   adding a
 
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -r tip
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] a ...
+  displaying [PATCH] a ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -43,7 +41,7 @@
   $ hg --config ui.interactive=1 email --confirm -n -f quux -t foo -c bar -r tip<<EOF
   > n
   > EOF
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
   Final summary:
@@ -63,13 +61,13 @@
   adding b
 
   $ hg email --date '1970-1-1 0:2' -n -f quux -t foo -c bar -s test -r 0:tip
-  This patch series consists of 2 patches.
+  this patch series consists of 2 patches.
   
   
   Write the introductory message for the patch series.
   
   
-  Displaying [PATCH 0 of 2] test ...
+  displaying [PATCH 0 of 2] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -82,7 +80,7 @@
   Cc: bar
   
   
-  Displaying [PATCH 1 of 2] a ...
+  displaying [PATCH 1 of 2] a ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -110,7 +108,7 @@
   @@ -0,0 +1,1 @@
   +a
   
-  Displaying [PATCH 2 of 2] b ...
+  displaying [PATCH 2 of 2] b ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -141,12 +139,10 @@
 
 .hg/last-email.txt
 
-  $ cat > editor << '__EOF__'
-  > #!/bin/sh
+  $ cat > editor.sh << '__EOF__'
   > echo "a precious introductory message" > "$1"
   > __EOF__
-  $ chmod +x editor
-  $ HGEDITOR="'`pwd`'"/editor hg email -n -t foo -s test -r 0:tip > /dev/null
+  $ HGEDITOR="\"sh\" \"`pwd`/editor.sh\"" hg email -n -t foo -s test -r 0:tip > /dev/null
   $ cat .hg/last-email.txt
   a precious introductory message
 
@@ -155,7 +151,7 @@
   > --config progress.delay=0 --config progress.refresh=0 \
   > --config progress.width=60 2>&1 | \
   > python "$TESTDIR/filtercr.py"
-  This patch series consists of 2 patches.
+  this patch series consists of 2 patches.
   
   
   Write the introductory message for the patch series.
@@ -172,9 +168,9 @@
   sending [=============================>               ] 2/3
   sending [=============================>               ] 2/3
                                                               \r (esc)
-  Sending [PATCH 0 of 2] test ...
-  Sending [PATCH 1 of 2] a ...
-  Sending [PATCH 2 of 2] b ...
+  sending [PATCH 0 of 2] test ...
+  sending [PATCH 1 of 2] a ...
+  sending [PATCH 2 of 2] b ...
   
 
   $ cd ..
@@ -198,7 +194,7 @@ test bundle and description:
   searching for changes
   1 changesets found
   
-  Displaying test ...
+  displaying test ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: test
@@ -241,10 +237,10 @@ utf-8 patch:
 
 no mime encoding for email --test:
   $ hg email --date '1970-1-1 0:4' -f quux -t foo -c bar -r tip -n
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] utf-8 content ...
+  displaying [PATCH] utf-8 content ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 8bit
@@ -280,10 +276,10 @@ no mime encoding for email --test:
 
 mime encoded mbox (base64):
   $ hg email --date '1970-1-1 0:4' -f 'Q <quux>' -t foo -c bar -r tip -m mbox
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Sending [PATCH] utf-8 content ...
+  sending [PATCH] utf-8 content ...
 
   $ cat mbox
   From quux ... ... .. ..:..:.. .... (re)
@@ -340,10 +336,10 @@ mime encoded mbox (quoted-printable):
 
 no mime encoding for email --test:
   $ hg email --date '1970-1-1 0:4' -f quux -t foo -c bar -r tip -n
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] long line ...
+  displaying [PATCH] long line ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: quoted-printable
@@ -388,10 +384,10 @@ no mime encoding for email --test:
 
 mime encoded mbox (quoted-printable):
   $ hg email --date '1970-1-1 0:4' -f quux -t foo -c bar -r tip -m mbox
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Sending [PATCH] long line ...
+  sending [PATCH] long line ...
   $ cat mbox
   From quux ... ... .. ..:..:.. .... (re)
   Content-Type: text/plain; charset="us-ascii"
@@ -446,10 +442,10 @@ iso-8859-1 patch:
 
 fake ascii mbox:
   $ hg email --date '1970-1-1 0:5' -f quux -t foo -c bar -r tip -m mbox
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Sending [PATCH] isolatin 8-bit encoding ...
+  sending [PATCH] isolatin 8-bit encoding ...
   $ cat mbox
   From quux ... ... .. ..:..:.. .... (re)
   Content-Type: text/plain; charset="us-ascii"
@@ -481,7 +477,7 @@ fake ascii mbox:
 
 test diffstat for single patch:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -d -y -r 2
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
   Final summary:
@@ -495,7 +491,7 @@ test diffstat for single patch:
   
   are you sure you want to send (yn)? y
   
-  Displaying [PATCH] test ...
+  displaying [PATCH] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -529,7 +525,7 @@ test diffstat for single patch:
 test diffstat for multiple patches:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -d -y \
   >  -r 0:1
-  This patch series consists of 2 patches.
+  this patch series consists of 2 patches.
   
   
   Write the introductory message for the patch series.
@@ -553,7 +549,7 @@ test diffstat for multiple patches:
   
   are you sure you want to send (yn)? y
   
-  Displaying [PATCH 0 of 2] test ...
+  displaying [PATCH 0 of 2] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -570,7 +566,7 @@ test diffstat for multiple patches:
    b |  1 +
    2 files changed, 2 insertions(+), 0 deletions(-)
   
-  Displaying [PATCH 1 of 2] a ...
+  displaying [PATCH 1 of 2] a ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -602,7 +598,7 @@ test diffstat for multiple patches:
   @@ -0,0 +1,1 @@
   +a
   
-  Displaying [PATCH 2 of 2] b ...
+  displaying [PATCH 2 of 2] b ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -637,10 +633,10 @@ test diffstat for multiple patches:
 
 test inline for single patch:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -i -r 2
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] test ...
+  displaying [PATCH] test ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH] test
@@ -676,10 +672,10 @@ test inline for single patch:
 
 test inline for single patch (quoted-printable):
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -i -r 4
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] test ...
+  displaying [PATCH] test ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH] test
@@ -731,13 +727,13 @@ test inline for single patch (quoted-printable):
 test inline for multiple patches:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -i \
   >  -r 0:1 -r 4
-  This patch series consists of 3 patches.
+  this patch series consists of 3 patches.
   
   
   Write the introductory message for the patch series.
   
   
-  Displaying [PATCH 0 of 3] test ...
+  displaying [PATCH 0 of 3] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -750,7 +746,7 @@ test inline for multiple patches:
   Cc: bar
   
   
-  Displaying [PATCH 1 of 3] a ...
+  displaying [PATCH 1 of 3] a ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH 1 of 3] a
@@ -784,7 +780,7 @@ test inline for multiple patches:
   +a
   
   --===*-- (glob)
-  Displaying [PATCH 2 of 3] b ...
+  displaying [PATCH 2 of 3] b ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH 2 of 3] b
@@ -818,7 +814,7 @@ test inline for multiple patches:
   +b
   
   --===*-- (glob)
-  Displaying [PATCH 3 of 3] long line ...
+  displaying [PATCH 3 of 3] long line ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH 3 of 3] long line
@@ -871,10 +867,10 @@ test inline for multiple patches:
 
 test attach for single patch:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -a -r 2
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] test ...
+  displaying [PATCH] test ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH] test
@@ -918,10 +914,10 @@ test attach for single patch:
 
 test attach for single patch (quoted-printable):
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -a -r 4
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] test ...
+  displaying [PATCH] test ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH] test
@@ -981,10 +977,10 @@ test attach for single patch (quoted-printable):
 
 test attach and body for single patch:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -a --body -r 2
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] test ...
+  displaying [PATCH] test ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH] test
@@ -1038,13 +1034,13 @@ test attach and body for single patch:
 test attach for multiple patches:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -a \
   >  -r 0:1 -r 4
-  This patch series consists of 3 patches.
+  this patch series consists of 3 patches.
   
   
   Write the introductory message for the patch series.
   
   
-  Displaying [PATCH 0 of 3] test ...
+  displaying [PATCH 0 of 3] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1057,7 +1053,7 @@ test attach for multiple patches:
   Cc: bar
   
   
-  Displaying [PATCH 1 of 3] a ...
+  displaying [PATCH 1 of 3] a ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH 1 of 3] a
@@ -1100,7 +1096,7 @@ test attach for multiple patches:
   +a
   
   --===*-- (glob)
-  Displaying [PATCH 2 of 3] b ...
+  displaying [PATCH 2 of 3] b ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH 2 of 3] b
@@ -1143,7 +1139,7 @@ test attach for multiple patches:
   +b
   
   --===*-- (glob)
-  Displaying [PATCH 3 of 3] long line ...
+  displaying [PATCH 3 of 3] long line ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH 3 of 3] long line
@@ -1206,13 +1202,13 @@ test attach for multiple patches:
 test intro for single patch:
   $ hg email --date '1970-1-1 0:1' -n --intro -f quux -t foo -c bar -s test \
   >  -r 2
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
   Write the introductory message for the patch series.
   
   
-  Displaying [PATCH 0 of 1] test ...
+  displaying [PATCH 0 of 1] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1225,7 +1221,7 @@ test intro for single patch:
   Cc: bar
   
   
-  Displaying [PATCH 1 of 1] c ...
+  displaying [PATCH 1 of 1] c ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1258,10 +1254,10 @@ test --desc without --intro for a single patch:
   $ echo foo > intro.text
   $ hg email --date '1970-1-1 0:1' -n --desc intro.text -f quux -t foo -c bar \
   >  -s test -r 2
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH 0 of 1] test ...
+  displaying [PATCH 0 of 1] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1275,7 +1271,7 @@ test --desc without --intro for a single patch:
   
   foo
   
-  Displaying [PATCH 1 of 1] c ...
+  displaying [PATCH 1 of 1] c ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1307,13 +1303,13 @@ test --desc without --intro for a single patch:
 test intro for multiple patches:
   $ hg email --date '1970-1-1 0:1' -n --intro -f quux -t foo -c bar -s test \
   >  -r 0:1
-  This patch series consists of 2 patches.
+  this patch series consists of 2 patches.
   
   
   Write the introductory message for the patch series.
   
   
-  Displaying [PATCH 0 of 2] test ...
+  displaying [PATCH 0 of 2] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1326,7 +1322,7 @@ test intro for multiple patches:
   Cc: bar
   
   
-  Displaying [PATCH 1 of 2] a ...
+  displaying [PATCH 1 of 2] a ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1354,7 +1350,7 @@ test intro for multiple patches:
   @@ -0,0 +1,1 @@
   +a
   
-  Displaying [PATCH 2 of 2] b ...
+  displaying [PATCH 2 of 2] b ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1386,10 +1382,10 @@ test intro for multiple patches:
 test reply-to via config:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -r 2 \
   >  --config patchbomb.reply-to='baz@example.com'
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] test ...
+  displaying [PATCH] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1420,10 +1416,10 @@ test reply-to via config:
 test reply-to via command line:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -r 2 \
   >  --reply-to baz --reply-to fred
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] test ...
+  displaying [PATCH] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1458,10 +1454,10 @@ tagging csets:
 
 test inline for single named patch:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -i -r 2
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] test ...
+  displaying [PATCH] test ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH] test
@@ -1496,13 +1492,13 @@ test inline for single named patch:
 
 test inline for multiple named/unnamed patches:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -s test -i -r 0:1
-  This patch series consists of 2 patches.
+  this patch series consists of 2 patches.
   
   
   Write the introductory message for the patch series.
   
   
-  Displaying [PATCH 0 of 2] test ...
+  displaying [PATCH 0 of 2] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1515,7 +1511,7 @@ test inline for multiple named/unnamed patches:
   Cc: bar
   
   
-  Displaying [PATCH 1 of 2] a ...
+  displaying [PATCH 1 of 2] a ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH 1 of 2] a
@@ -1549,7 +1545,7 @@ test inline for multiple named/unnamed patches:
   +a
   
   --===*-- (glob)
-  Displaying [PATCH 2 of 2] b ...
+  displaying [PATCH 2 of 2] b ...
   Content-Type: multipart/mixed; boundary="===*" (glob)
   MIME-Version: 1.0
   Subject: [PATCH 2 of 2] b
@@ -1588,10 +1584,10 @@ test inline for multiple named/unnamed patches:
 test inreplyto:
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar --in-reply-to baz \
   >  -r tip
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH] Added tag two, two.diff for changeset ff2c9fa2018b ...
+  displaying [PATCH] Added tag two, two.diff for changeset ff2c9fa2018b ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1626,11 +1622,11 @@ test inreplyto:
 no intro message in non-interactive mode
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar --in-reply-to baz \
   >  -r 0:1
-  This patch series consists of 2 patches.
+  this patch series consists of 2 patches.
   
   (optional) Subject: [PATCH 0 of 2] 
   
-  Displaying [PATCH 1 of 2] a ...
+  displaying [PATCH 1 of 2] a ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1658,7 +1654,7 @@ no intro message in non-interactive mode
   @@ -0,0 +1,1 @@
   +a
   
-  Displaying [PATCH 2 of 2] b ...
+  displaying [PATCH 2 of 2] b ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1691,13 +1687,13 @@ no intro message in non-interactive mode
 
   $ hg email --date '1970-1-1 0:1' -n -f quux -t foo -c bar --in-reply-to baz \
   >  -s test -r 0:1
-  This patch series consists of 2 patches.
+  this patch series consists of 2 patches.
   
   
   Write the introductory message for the patch series.
   
   
-  Displaying [PATCH 0 of 2] test ...
+  displaying [PATCH 0 of 2] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1712,7 +1708,7 @@ no intro message in non-interactive mode
   Cc: bar
   
   
-  Displaying [PATCH 1 of 2] a ...
+  displaying [PATCH 1 of 2] a ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1740,7 +1736,7 @@ no intro message in non-interactive mode
   @@ -0,0 +1,1 @@
   +a
   
-  Displaying [PATCH 2 of 2] b ...
+  displaying [PATCH 2 of 2] b ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1772,10 +1768,10 @@ no intro message in non-interactive mode
 test single flag for single patch:
   $ hg email --date '1970-1-1 0:1' -n --flag fooFlag -f quux -t foo -c bar -s test \
   >  -r 2
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH fooFlag] test ...
+  displaying [PATCH fooFlag] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1805,13 +1801,13 @@ test single flag for single patch:
 test single flag for multiple patches:
   $ hg email --date '1970-1-1 0:1' -n --flag fooFlag -f quux -t foo -c bar -s test \
   >  -r 0:1
-  This patch series consists of 2 patches.
+  this patch series consists of 2 patches.
   
   
   Write the introductory message for the patch series.
   
   
-  Displaying [PATCH 0 of 2 fooFlag] test ...
+  displaying [PATCH 0 of 2 fooFlag] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1824,7 +1820,7 @@ test single flag for multiple patches:
   Cc: bar
   
   
-  Displaying [PATCH 1 of 2 fooFlag] a ...
+  displaying [PATCH 1 of 2 fooFlag] a ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1852,7 +1848,7 @@ test single flag for multiple patches:
   @@ -0,0 +1,1 @@
   +a
   
-  Displaying [PATCH 2 of 2 fooFlag] b ...
+  displaying [PATCH 2 of 2 fooFlag] b ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1884,10 +1880,10 @@ test single flag for multiple patches:
 test mutiple flags for single patch:
   $ hg email --date '1970-1-1 0:1' -n --flag fooFlag --flag barFlag -f quux -t foo \
   >  -c bar -s test -r 2
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Displaying [PATCH fooFlag barFlag] test ...
+  displaying [PATCH fooFlag barFlag] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1917,13 +1913,13 @@ test mutiple flags for single patch:
 test multiple flags for multiple patches:
   $ hg email --date '1970-1-1 0:1' -n --flag fooFlag --flag barFlag -f quux -t foo \
   >  -c bar -s test -r 0:1
-  This patch series consists of 2 patches.
+  this patch series consists of 2 patches.
   
   
   Write the introductory message for the patch series.
   
   
-  Displaying [PATCH 0 of 2 fooFlag barFlag] test ...
+  displaying [PATCH 0 of 2 fooFlag barFlag] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1936,7 +1932,7 @@ test multiple flags for multiple patches:
   Cc: bar
   
   
-  Displaying [PATCH 1 of 2 fooFlag barFlag] a ...
+  displaying [PATCH 1 of 2 fooFlag barFlag] a ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1964,7 +1960,7 @@ test multiple flags for multiple patches:
   @@ -0,0 +1,1 @@
   +a
   
-  Displaying [PATCH 2 of 2 fooFlag barFlag] b ...
+  displaying [PATCH 2 of 2 fooFlag barFlag] b ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -1997,10 +1993,10 @@ test multi-address parsing:
   $ hg email --date '1980-1-1 0:1' -m tmp.mbox -f quux -t 'spam<spam><eggs>' \
   >  -t toast -c 'foo,bar@example.com' -c '"A, B <>" <a@example.com>' -s test -r 0 \
   >  --config email.bcc='"Quux, A." <quux>'
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   
-  Sending [PATCH] test ...
+  sending [PATCH] test ...
   $ cat < tmp.mbox
   From quux ... ... .. ..:..:.. .... (re)
   Content-Type: text/plain; charset="us-ascii"
@@ -2036,11 +2032,11 @@ test multi-byte domain parsing:
   $ HGENCODING=iso-8859-1
   $ export HGENCODING
   $ hg email --date '1980-1-1 0:1' -m tmp.mbox -f quux -t "bar@${UUML}nicode.com" -s test -r 0
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   Cc: 
   
-  Sending [PATCH] test ...
+  sending [PATCH] test ...
 
   $ cat tmp.mbox
   From quux ... ... .. ..:..:.. .... (re)
@@ -2081,22 +2077,47 @@ test outgoing:
   $ echo d > d
   $ hg add d
   $ hg ci -md -d '4 0'
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -o ../t
+  $ echo d >> d
+  $ hg ci -mdd -d '5 0'
+  $ hg --config extensions.graphlog= glog --template "{rev}:{node|short} {desc|firstline}\n"
+  @  10:3b6f1ec9dde9 dd
+  |
+  o  9:2f9fa9b998c5 d
+  |
+  | o  8:7aead2484924 Added tag two, two.diff for changeset ff2c9fa2018b
+  | |
+  | o  7:045ca29b1ea2 Added tag one, one.patch for changeset 97d72e5f12c7
+  | |
+  | o  6:5d5ef15dfe5e Added tag zero, zero.foo for changeset 8580ff50825a
+  | |
+  | o  5:240fb913fc1b isolatin 8-bit encoding
+  | |
+  | o  4:a2ea8fc83dd8 long line
+  | |
+  | o  3:909a00e13e9d utf-8 content
+  | |
+  | o  2:ff2c9fa2018b c
+  |/
+  o  1:97d72e5f12c7 b
+  |
+  o  0:8580ff50825a a
+  
+  $ hg phase --force --secret -r 10
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -o ../t -r 'rev(10) or rev(6)'
   comparing with ../t
-  searching for changes
   From [test]: test
-  This patch series consists of 8 patches.
+  this patch series consists of 6 patches.
   
   
   Write the introductory message for the patch series.
   
   Cc: 
   
-  Displaying [PATCH 0 of 8] test ...
+  displaying [PATCH 0 of 6] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
-  Subject: [PATCH 0 of 8] test
+  Subject: [PATCH 0 of 6] test
   Message-Id: <patchbomb.315532860@*> (glob)
   User-Agent: Mercurial-patchbomb/* (glob)
   Date: Tue, 01 Jan 1980 00:01:00 +0000
@@ -2104,11 +2125,11 @@ test outgoing:
   To: foo
   
   
-  Displaying [PATCH 1 of 8] c ...
+  displaying [PATCH 1 of 6] c ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
-  Subject: [PATCH 1 of 8] c
+  Subject: [PATCH 1 of 6] c
   X-Mercurial-Node: ff2c9fa2018b15fa74b33363bda9527323e2a99f
   Message-Id: <ff2c9fa2018b15fa74b3.315532861@*> (glob)
   In-Reply-To: <patchbomb.315532860@*> (glob)
@@ -2131,11 +2152,11 @@ test outgoing:
   @@ -0,0 +1,1 @@
   +c
   
-  Displaying [PATCH 2 of 8] utf-8 content ...
+  displaying [PATCH 2 of 6] utf-8 content ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 8bit
-  Subject: [PATCH 2 of 8] utf-8 content
+  Subject: [PATCH 2 of 6] utf-8 content
   X-Mercurial-Node: 909a00e13e9d78b575aeee23dddbada46d5a143f
   Message-Id: <909a00e13e9d78b575ae.315532862@*> (glob)
   In-Reply-To: <patchbomb.315532860@*> (glob)
@@ -2165,11 +2186,11 @@ test outgoing:
   @@ -0,0 +1,1 @@
   +h\xc3\xb6mma! (esc)
   
-  Displaying [PATCH 3 of 8] long line ...
+  displaying [PATCH 3 of 6] long line ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: quoted-printable
-  Subject: [PATCH 3 of 8] long line
+  Subject: [PATCH 3 of 6] long line
   X-Mercurial-Node: a2ea8fc83dd8b93cfd86ac97b28287204ab806e1
   Message-Id: <a2ea8fc83dd8b93cfd86.315532863@*> (glob)
   In-Reply-To: <patchbomb.315532860@*> (glob)
@@ -2208,11 +2229,11 @@ test outgoing:
   +
   +bar
   
-  Displaying [PATCH 4 of 8] isolatin 8-bit encoding ...
+  displaying [PATCH 4 of 6] isolatin 8-bit encoding ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 8bit
-  Subject: [PATCH 4 of 8] isolatin 8-bit encoding
+  Subject: [PATCH 4 of 6] isolatin 8-bit encoding
   X-Mercurial-Node: 240fb913fc1b7ff15ddb9f33e73d82bf5277c720
   Message-Id: <240fb913fc1b7ff15ddb.315532864@*> (glob)
   In-Reply-To: <patchbomb.315532860@*> (glob)
@@ -2235,11 +2256,11 @@ test outgoing:
   @@ -0,0 +1,1 @@
   +h\xf6mma! (esc)
   
-  Displaying [PATCH 5 of 8] Added tag zero, zero.foo for changeset 8580ff50825a ...
+  displaying [PATCH 5 of 6] Added tag zero, zero.foo for changeset 8580ff50825a ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
-  Subject: [PATCH 5 of 8] Added tag zero, zero.foo for changeset 8580ff50825a
+  Subject: [PATCH 5 of 6] Added tag zero, zero.foo for changeset 8580ff50825a
   X-Mercurial-Node: 5d5ef15dfe5e7bd3a4ee154b5fff76c7945ec433
   Message-Id: <5d5ef15dfe5e7bd3a4ee.315532865@*> (glob)
   In-Reply-To: <patchbomb.315532860@*> (glob)
@@ -2263,78 +2284,17 @@ test outgoing:
   +8580ff50825a50c8f716709acdf8de0deddcd6ab zero
   +8580ff50825a50c8f716709acdf8de0deddcd6ab zero.foo
   
-  Displaying [PATCH 6 of 8] Added tag one, one.patch for changeset 97d72e5f12c7 ...
+  displaying [PATCH 6 of 6] d ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
-  Subject: [PATCH 6 of 8] Added tag one, one.patch for changeset 97d72e5f12c7
-  X-Mercurial-Node: 045ca29b1ea20e4940411e695e20e521f2f0f98e
-  Message-Id: <045ca29b1ea20e494041.315532866@*> (glob)
+  Subject: [PATCH 6 of 6] d
+  X-Mercurial-Node: 2f9fa9b998c5fe3ac2bd9a2b14bfcbeecbc7c268
+  Message-Id: <2f9fa9b998c5fe3ac2bd.315532866@*> (glob)
   In-Reply-To: <patchbomb.315532860@*> (glob)
   References: <patchbomb.315532860@*> (glob)
   User-Agent: Mercurial-patchbomb/* (glob)
   Date: Tue, 01 Jan 1980 00:01:06 +0000
-  From: test
-  To: foo
-  
-  # HG changeset patch
-  # User test
-  # Date 0 0
-  # Node ID 045ca29b1ea20e4940411e695e20e521f2f0f98e
-  # Parent  5d5ef15dfe5e7bd3a4ee154b5fff76c7945ec433
-  Added tag one, one.patch for changeset 97d72e5f12c7
-  
-  diff -r 5d5ef15dfe5e -r 045ca29b1ea2 .hgtags
-  --- a/.hgtags	Thu Jan 01 00:00:00 1970 +0000
-  +++ b/.hgtags	Thu Jan 01 00:00:00 1970 +0000
-  @@ -1,2 +1,4 @@
-   8580ff50825a50c8f716709acdf8de0deddcd6ab zero
-   8580ff50825a50c8f716709acdf8de0deddcd6ab zero.foo
-  +97d72e5f12c7e84f85064aa72e5a297142c36ed9 one
-  +97d72e5f12c7e84f85064aa72e5a297142c36ed9 one.patch
-  
-  Displaying [PATCH 7 of 8] Added tag two, two.diff for changeset ff2c9fa2018b ...
-  Content-Type: text/plain; charset="us-ascii"
-  MIME-Version: 1.0
-  Content-Transfer-Encoding: 7bit
-  Subject: [PATCH 7 of 8] Added tag two, two.diff for changeset ff2c9fa2018b
-  X-Mercurial-Node: 7aead2484924c445ad8ce2613df91f52f9e502ed
-  Message-Id: <7aead2484924c445ad8c.315532867@*> (glob)
-  In-Reply-To: <patchbomb.315532860@*> (glob)
-  References: <patchbomb.315532860@*> (glob)
-  User-Agent: Mercurial-patchbomb/* (glob)
-  Date: Tue, 01 Jan 1980 00:01:07 +0000
-  From: test
-  To: foo
-  
-  # HG changeset patch
-  # User test
-  # Date 0 0
-  # Node ID 7aead2484924c445ad8ce2613df91f52f9e502ed
-  # Parent  045ca29b1ea20e4940411e695e20e521f2f0f98e
-  Added tag two, two.diff for changeset ff2c9fa2018b
-  
-  diff -r 045ca29b1ea2 -r 7aead2484924 .hgtags
-  --- a/.hgtags	Thu Jan 01 00:00:00 1970 +0000
-  +++ b/.hgtags	Thu Jan 01 00:00:00 1970 +0000
-  @@ -2,3 +2,5 @@
-   8580ff50825a50c8f716709acdf8de0deddcd6ab zero.foo
-   97d72e5f12c7e84f85064aa72e5a297142c36ed9 one
-   97d72e5f12c7e84f85064aa72e5a297142c36ed9 one.patch
-  +ff2c9fa2018b15fa74b33363bda9527323e2a99f two
-  +ff2c9fa2018b15fa74b33363bda9527323e2a99f two.diff
-  
-  Displaying [PATCH 8 of 8] d ...
-  Content-Type: text/plain; charset="us-ascii"
-  MIME-Version: 1.0
-  Content-Transfer-Encoding: 7bit
-  Subject: [PATCH 8 of 8] d
-  X-Mercurial-Node: 2f9fa9b998c5fe3ac2bd9a2b14bfcbeecbc7c268
-  Message-Id: <2f9fa9b998c5fe3ac2bd.315532868@*> (glob)
-  In-Reply-To: <patchbomb.315532860@*> (glob)
-  References: <patchbomb.315532860@*> (glob)
-  User-Agent: Mercurial-patchbomb/* (glob)
-  Date: Tue, 01 Jan 1980 00:01:08 +0000
   From: test
   To: foo
   
@@ -2356,13 +2316,12 @@ test outgoing:
 dest#branch URIs:
   $ hg email --date '1980-1-1 0:1' -n -t foo -s test -o ../t#test
   comparing with ../t
-  searching for changes
   From [test]: test
-  This patch series consists of 1 patches.
+  this patch series consists of 1 patches.
   
   Cc: 
   
-  Displaying [PATCH] test ...
+  displaying [PATCH] test ...
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -2388,3 +2347,5 @@ dest#branch URIs:
   @@ -0,0 +1,1 @@
   +d
   
+
+  $ cd ..

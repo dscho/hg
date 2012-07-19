@@ -75,35 +75,6 @@ def hash(text, p1, p2):
     s.update(text)
     return s.digest()
 
-def compress(text):
-    """ generate a possibly-compressed representation of text """
-    if not text:
-        return ("", text)
-    l = len(text)
-    bin = None
-    if l < 44:
-        pass
-    elif l > 1000000:
-        # zlib makes an internal copy, thus doubling memory usage for
-        # large files, so lets do this in pieces
-        z = zlib.compressobj()
-        p = []
-        pos = 0
-        while pos < l:
-            pos2 = pos + 2**20
-            p.append(z.compress(text[pos:pos2]))
-            pos = pos2
-        p.append(z.flush())
-        if sum(map(len, p)) < l:
-            bin = "".join(p)
-    else:
-        bin = _compress(text)
-    if bin is None or len(bin) > l:
-        if text[0] == '\0':
-            return ("", text)
-        return ('u', text)
-    return ("", bin)
-
 def decompress(bin):
     """ decompress the given input """
     if not bin:
@@ -112,7 +83,10 @@ def decompress(bin):
     if t == '\0':
         return bin
     if t == 'x':
-        return _decompress(bin)
+        try:
+            return _decompress(bin)
+        except zlib.error, e:
+            raise RevlogError(_("revlog decompress error: %s") % str(e))
     if t == 'u':
         return bin[1:]
     raise RevlogError(_("unknown compression type %r") % t)
@@ -358,47 +332,35 @@ class revlog(object):
         return len(t)
     size = rawsize
 
-    def reachable(self, node, stop=None):
-        """return the set of all nodes ancestral to a given node, including
-         the node itself, stopping when stop is matched"""
-        reachable = set((node,))
-        visit = [node]
-        if stop:
-            stopn = self.rev(stop)
-        else:
-            stopn = 0
-        while visit:
-            n = visit.pop(0)
-            if n == stop:
-                continue
-            if n == nullid:
-                continue
-            for p in self.parents(n):
-                if self.rev(p) < stopn:
-                    continue
-                if p not in reachable:
-                    reachable.add(p)
-                    visit.append(p)
-        return reachable
-
-    def ancestors(self, *revs):
+    def ancestors(self, revs, stoprev=0):
         """Generate the ancestors of 'revs' in reverse topological order.
+        Does not generate revs lower than stoprev.
 
         Yield a sequence of revision numbers starting with the parents
         of each revision in revs, i.e., each revision is *not* considered
         an ancestor of itself.  Results are in breadth-first order:
         parents of each rev in revs, then parents of those, etc.  Result
         does not include the null revision."""
-        visit = list(revs)
+        visit = util.deque(revs)
         seen = set([nullrev])
         while visit:
-            for parent in self.parentrevs(visit.pop(0)):
+            for parent in self.parentrevs(visit.popleft()):
+                if parent < stoprev:
+                    continue
                 if parent not in seen:
                     visit.append(parent)
                     seen.add(parent)
                     yield parent
 
-    def descendants(self, *revs):
+    def incancestors(self, revs, stoprev=0):
+        """Identical to ancestors() except it also generates the
+        revisions, 'revs'"""
+        for rev in revs:
+            yield rev
+        for rev in self.ancestors(revs, stoprev):
+            yield rev
+
+    def descendants(self, revs):
         """Generate the descendants of 'revs' in revision order.
 
         Yield a sequence of revision numbers starting with a child of
@@ -441,15 +403,15 @@ class revlog(object):
         heads = [self.rev(n) for n in heads]
 
         # we want the ancestors, but inclusive
-        has = set(self.ancestors(*common))
+        has = set(self.ancestors(common))
         has.add(nullrev)
         has.update(common)
 
         # take all ancestors from heads that aren't in has
         missing = set()
-        visit = [r for r in heads if r not in has]
+        visit = util.deque(r for r in heads if r not in has)
         while visit:
-            r = visit.pop(0)
+            r = visit.popleft()
             if r in missing:
                 continue
             else:
@@ -635,6 +597,10 @@ class revlog(object):
         return (orderedout, roots, heads)
 
     def headrevs(self):
+        try:
+            return self.index.headrevs()
+        except AttributeError:
+            pass
         count = len(self)
         if not count:
             return [nullrev]
@@ -696,7 +662,7 @@ class revlog(object):
     def descendant(self, start, end):
         if start == nullrev:
             return True
-        for i in self.descendants(start):
+        for i in self.descendants([start]):
             if i == end:
                 return True
             elif i > end:
@@ -722,7 +688,7 @@ class revlog(object):
         return self.node(c)
 
     def _match(self, id):
-        if isinstance(id, (long, int)):
+        if isinstance(id, int):
             # rev
             return self.node(id)
         if len(id) == 20:
@@ -756,6 +722,15 @@ class revlog(object):
                 pass
 
     def _partialmatch(self, id):
+        try:
+            return self.index.partialmatch(id)
+        except RevlogError:
+            # parsers.c radix tree lookup gave multiple matches
+            raise LookupError(id, self.indexfile, _("ambiguous identifier"))
+        except (AttributeError, ValueError):
+            # we are pure python, or key was too short to search radix tree
+            pass
+
         if id in self._pcache:
             return self._pcache[id]
 
@@ -1004,6 +979,35 @@ class revlog(object):
                 dfh.close()
             ifh.close()
 
+    def compress(self, text):
+        """ generate a possibly-compressed representation of text """
+        if not text:
+            return ("", text)
+        l = len(text)
+        bin = None
+        if l < 44:
+            pass
+        elif l > 1000000:
+            # zlib makes an internal copy, thus doubling memory usage for
+            # large files, so lets do this in pieces
+            z = zlib.compressobj()
+            p = []
+            pos = 0
+            while pos < l:
+                pos2 = pos + 2**20
+                p.append(z.compress(text[pos:pos2]))
+                pos = pos2
+            p.append(z.flush())
+            if sum(map(len, p)) < l:
+                bin = "".join(p)
+        else:
+            bin = _compress(text)
+        if bin is None or len(bin) > l:
+            if text[0] == '\0':
+                return ("", text)
+            return ('u', text)
+        return ("", bin)
+
     def _addrevision(self, node, text, transaction, link, p1, p2,
                      cachedelta, ifh, dfh):
         """internal function to add revisions to the log
@@ -1036,7 +1040,7 @@ class revlog(object):
                 t = buildtext()
                 ptext = self.revision(self.node(rev))
                 delta = mdiff.textdiff(ptext, t)
-            data = compress(delta)
+            data = self.compress(delta)
             l = len(data[1]) + len(data[0])
             if basecache[0] == rev:
                 chainbase = basecache[1]
@@ -1080,7 +1084,7 @@ class revlog(object):
             textlen = len(text)
         if d is None or dist > textlen * 2:
             text = buildtext()
-            data = compress(text)
+            data = self.compress(text)
             l = len(data[1]) + len(data[0])
             base = chainbase = curr
 
@@ -1199,7 +1203,7 @@ class revlog(object):
                     continue
 
                 for p in (p1, p2):
-                    if not p in self.nodemap:
+                    if p not in self.nodemap:
                         raise LookupError(p, self.indexfile,
                                           _('unknown parent'))
 

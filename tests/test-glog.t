@@ -69,8 +69,6 @@ o /  (1) collapse
 o  (0) root
 
 
-  $ "$TESTDIR/hghave" no-outer-repo || exit 80
-
   $ commit()
   > {
   >   rev=$1
@@ -84,13 +82,12 @@ o  (0) root
   > }
 
   $ cat > printrevset.py <<EOF
-  > from mercurial import extensions, revset, commands
-  > from hgext import graphlog
+  > from mercurial import extensions, revset, commands, cmdutil
   >  
   > def uisetup(ui):
   >     def printrevset(orig, ui, repo, *pats, **opts):
   >         if opts.get('print_revset'):
-  >             expr = graphlog.getlogrevs(repo, pats, opts)[1]
+  >             expr = cmdutil.getgraphlogrevs(repo, pats, opts)[1]
   >             if expr:
   >                 tree = revset.parse(expr)[0]
   >             else:
@@ -1136,8 +1133,11 @@ File glog per revset (only merges):
 Empty revision range - display nothing:
   $ hg glog -r 1..0
 
-From outer space:
   $ cd ..
+
+#if no-outer-repo
+
+From outer space:
   $ hg glog -l1 repo
   @  changeset:   34:fea3ac5810e0
   |  tag:         tip
@@ -1155,6 +1155,8 @@ From outer space:
   |  summary:     (34) head
   |
   $ hg glog -l1 repo/missing
+
+#endif
 
 File log with revs != cset revs:
   $ hg init flog
@@ -2045,7 +2047,7 @@ Test --hidden
   > def reposetup(ui, repo):
   >     for line in repo.opener('hidden'):
   >         ctx = repo[line.strip()]
-  >         repo.changelog.hiddenrevs.add(ctx.rev())
+  >         repo.hiddenrevs.add(ctx.rev())
   > EOF
   $ echo '[extensions]' >> .hg/hgrc
   $ echo "hidden=$HGTMP/testhidden.py" >> .hg/hgrc
@@ -2056,3 +2058,31 @@ Test --hidden
   $ testlog --hidden
   []
   []
+
+A template without trailing newline should do something sane
+
+  $ hg glog -r ::2 --template '{rev} {desc}'
+  o  2 mv b dir/b
+  |
+  o  1 copy a b
+  |
+
+Extra newlines must be preserved
+
+  $ hg glog -r ::2 --template '\n{rev} {desc}\n\n'
+  o
+  |  2 mv b dir/b
+  |
+  o
+  |  1 copy a b
+  |
+
+The almost-empty template should do something sane too ...
+
+  $ hg glog -r ::2 --template '\n'
+  o
+  |
+  o
+  |
+
+  $ cd ..

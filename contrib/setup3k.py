@@ -26,22 +26,22 @@ else:
 try:
     import hashlib
     sha = hashlib.sha1()
-except:
+except ImportError:
     try:
         import sha
-    except:
+    except ImportError:
         raise SystemExit(
             "Couldn't import standard hashlib (incomplete Python install).")
 
 try:
     import zlib
-except:
+except ImportError:
     raise SystemExit(
         "Couldn't import standard zlib (incomplete Python install).")
 
 try:
     import bz2
-except:
+except ImportError:
     raise SystemExit(
         "Couldn't import standard bz2 (incomplete Python install).")
 
@@ -84,7 +84,7 @@ def hasfunction(cc, funcname):
             os.dup2(devnull.fileno(), sys.stderr.fileno())
             objects = cc.compile([fname], output_dir=tmpdir)
             cc.link_executable(objects, os.path.join(tmpdir, "a.out"))
-        except:
+        except Exception:
             return False
         return True
     finally:

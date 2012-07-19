@@ -594,6 +594,20 @@ def tsttest(test, wd, options, replacements):
     # can generate the surrounding doctest magic
     inpython = False
 
+    # True or False when in a true or false conditional section
+    skipping = None
+
+    def hghave(reqs):
+        # TODO: do something smarter when all other uses of hghave is gone
+        tdir = TESTDIR.replace('\\', '/')
+        proc = Popen4('%s -c "%s/hghave %s"' %
+                      (options.shell, tdir, ' '.join(reqs)), wd, 0)
+        proc.communicate()
+        ret = proc.wait()
+        if wifexited(ret):
+            ret = os.WEXITSTATUS(ret)
+        return ret == 0
+
     f = open(test)
     t = f.readlines()
     f.close()
@@ -606,7 +620,24 @@ def tsttest(test, wd, options, replacements):
     for n, l in enumerate(t):
         if not l.endswith('\n'):
             l += '\n'
-        if l.startswith('  >>> '): # python inlines
+        if l.startswith('#if'):
+            if skipping is not None:
+                after.setdefault(pos, []).append('  !!! nested #if\n')
+            skipping = not hghave(l.split()[1:])
+            after.setdefault(pos, []).append(l)
+        elif l.startswith('#else'):
+            if skipping is None:
+                after.setdefault(pos, []).append('  !!! missing #if\n')
+            skipping = not skipping
+            after.setdefault(pos, []).append(l)
+        elif l.startswith('#endif'):
+            if skipping is None:
+                after.setdefault(pos, []).append('  !!! missing #if\n')
+            skipping = None
+            after.setdefault(pos, []).append(l)
+        elif skipping:
+            after.setdefault(pos, []).append(l)
+        elif l.startswith('  >>> '): # python inlines
             after.setdefault(pos, []).append(l)
             prepos = pos
             pos = n
@@ -617,7 +648,7 @@ def tsttest(test, wd, options, replacements):
                 script.append('%s -m heredoctest <<EOF\n' % PYTHON)
             addsalt(n, True)
             script.append(l[2:])
-        if l.startswith('  ... '): # python inlines
+        elif l.startswith('  ... '): # python inlines
             after.setdefault(prepos, []).append(l)
             script.append(l[2:])
         elif l.startswith('  $ '): # commands
@@ -628,6 +659,9 @@ def tsttest(test, wd, options, replacements):
             prepos = pos
             pos = n
             addsalt(n, False)
+            cmd = l[4:].split()
+            if len(cmd) == 2 and cmd[0] == 'cd':
+                l = '  $ cd %s || exit 1\n' % cmd[1]
             script.append(l[4:])
         elif l.startswith('  > '): # continuations
             after.setdefault(prepos, []).append(l)
@@ -644,6 +678,8 @@ def tsttest(test, wd, options, replacements):
 
     if inpython:
         script.append("EOF\n")
+    if skipping is not None:
+        after.setdefault(pos, []).append('  !!! missing #endif\n')
     addsalt(n + 1, False)
 
     # Write out the script and execute it
@@ -860,7 +896,7 @@ def runone(options, test):
         tf = open(testpath)
         firstline = tf.readline().rstrip()
         tf.close()
-    except:
+    except IOError:
         firstline = ''
     lctest = test.lower()
 
@@ -877,7 +913,7 @@ def runone(options, test):
 
     # Make a tmp subdirectory to work in
     testtmp = os.environ["TESTTMP"] = os.environ["HOME"] = \
-        os.path.join(HGTMP, os.path.basename(test)).replace('\\', '/')
+        os.path.join(HGTMP, os.path.basename(test))
 
     replacements = [
         (r':%s\b' % options.port, ':$HGPORT'),
@@ -1187,6 +1223,7 @@ def main():
     os.environ['http_proxy'] = ''
     os.environ['no_proxy'] = ''
     os.environ['NO_PROXY'] = ''
+    os.environ['TERM'] = 'xterm'
 
     # unset env related to hooks
     for k in os.environ.keys():
@@ -1213,7 +1250,12 @@ def main():
             #shutil.rmtree(tmpdir)
         os.makedirs(tmpdir)
     else:
-        tmpdir = tempfile.mkdtemp('', 'hgtests.')
+        d = None
+        if os.name == 'nt':
+            # without this, we get the default temp dir location, but
+            # in all lowercase, which causes troubles with paths (issue3490)
+            d = os.getenv('TMP')
+        tmpdir = tempfile.mkdtemp('', 'hgtests.', d)
     HGTMP = os.environ['HGTMP'] = os.path.realpath(tmpdir)
     DAEMON_PIDS = None
     HGRCPATH = None

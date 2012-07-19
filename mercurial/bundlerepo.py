@@ -54,7 +54,7 @@ class bundlerevlog(revlog.revlog):
                 continue
 
             for p in (p1, p2):
-                if not p in self.nodemap:
+                if p not in self.nodemap:
                     raise error.LookupError(p, self.indexfile,
                                             _("unknown parent"))
             # start, size, full unc. size, base (unused), link, p1, p2, node
@@ -167,6 +167,10 @@ class bundlefilelog(bundlerevlog, filelog.filelog):
     def _file(self, f):
         self._repo.file(f)
 
+class bundlepeer(localrepo.localpeer):
+    def canpush(self):
+        return False
+
 class bundlerepository(localrepo.localrepository):
     def __init__(self, ui, path, bundlename):
         self._tempparent = None
@@ -272,6 +276,9 @@ class bundlerepository(localrepo.localrepository):
     def cancopy(self):
         return False
 
+    def peer(self):
+        return bundlepeer(self)
+
     def getcwd(self):
         return os.getcwd() # always outside the repo
 
@@ -323,13 +330,16 @@ def getremotechanges(ui, repo, other, onlyheads=None, bundlename=None,
 
     Returns a tuple (local, csets, cleanupfn):
 
-    "local" is a local repo from which to obtain the actual incoming changesets; it
-      is a bundlerepo for the obtained bundle when the original "other" is remote.
+    "local" is a local repo from which to obtain the actual incoming
+      changesets; it is a bundlerepo for the obtained bundle when the
+      original "other" is remote.
     "csets" lists the incoming changeset node ids.
-    "cleanupfn" must be called without arguments when you're done processing the
-      changes; it closes both the original "other" and the one returned here.
+    "cleanupfn" must be called without arguments when you're done processing
+      the changes; it closes both the original "other" and the one returned
+      here.
     '''
-    tmp = discovery.findcommonincoming(repo, other, heads=onlyheads, force=force)
+    tmp = discovery.findcommonincoming(repo, other, heads=onlyheads,
+                                       force=force)
     common, incoming, rheads = tmp
     if not incoming:
         try:
@@ -341,8 +351,8 @@ def getremotechanges(ui, repo, other, onlyheads=None, bundlename=None,
 
     bundle = None
     bundlerepo = None
-    localrepo = other
-    if bundlename or not other.local():
+    localrepo = other.local()
+    if bundlename or not localrepo:
         # create a bundle (uncompressed if other repo is not local)
 
         if other.capable('getbundle'):
@@ -353,12 +363,12 @@ def getremotechanges(ui, repo, other, onlyheads=None, bundlename=None,
             rheads = None
         else:
             cg = other.changegroupsubset(incoming, rheads, 'incoming')
-        bundletype = other.local() and "HG10BZ" or "HG10UN"
+        bundletype = localrepo and "HG10BZ" or "HG10UN"
         fname = bundle = changegroup.writebundle(cg, bundlename, bundletype)
         # keep written bundle?
         if bundlename:
             bundle = None
-        if not other.local():
+        if not localrepo:
             # use the created uncompressed bundlerepo
             localrepo = bundlerepo = bundlerepository(ui, repo.root, fname)
             # this repo contains local and other now, so filter out local again

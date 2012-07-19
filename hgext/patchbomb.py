@@ -48,13 +48,14 @@ hgrc(5) for details.
 import os, errno, socket, tempfile, cStringIO
 import email.MIMEMultipart, email.MIMEBase
 import email.Utils, email.Encoders, email.Generator
-from mercurial import cmdutil, commands, hg, mail, patch, util, discovery
+from mercurial import cmdutil, commands, hg, mail, patch, util
 from mercurial import scmutil
 from mercurial.i18n import _
 from mercurial.node import bin
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+testedwith = 'internal'
 
 def prompt(ui, prompt, default=None, rest=':'):
     if default:
@@ -109,7 +110,8 @@ def makepatch(ui, repo, patchlines, opts, _charsets, idx, total, numbered,
         msg = email.MIMEMultipart.MIMEMultipart()
         if body:
             msg.attach(mail.mimeencode(ui, body, _charsets, opts.get('test')))
-        p = mail.mimetextpatch('\n'.join(patchlines), 'x-patch', opts.get('test'))
+        p = mail.mimetextpatch('\n'.join(patchlines), 'x-patch',
+                               opts.get('test'))
         binnode = bin(node)
         # if node is mq patch, it will have the patch file's name as a tag
         if not patchname:
@@ -119,7 +121,8 @@ def makepatch(ui, repo, patchlines, opts, _charsets, idx, total, numbered,
                 patchname = patchtags[0]
             elif total > 1:
                 patchname = cmdutil.makefilename(repo, '%b-%n.patch',
-                                                  binnode, seqno=idx, total=total)
+                                                 binnode, seqno=idx,
+                                                 total=total)
             else:
                 patchname = cmdutil.makefilename(repo, '%b.patch', binnode)
         disposition = 'inline'
@@ -270,18 +273,18 @@ def patchbomb(ui, repo, *revs, **opts):
 
     def getoutgoing(dest, revs):
         '''Return the revisions present locally but not in dest'''
-        dest = ui.expandpath(dest or 'default-push', dest or 'default')
-        dest, branches = hg.parseurl(dest)
-        revs, checkout = hg.addbranchrevs(repo, repo, branches, revs)
-        other = hg.peer(repo, opts, dest)
-        ui.status(_('comparing with %s\n') % util.hidepassword(dest))
-        common, _anyinc, _heads = discovery.findcommonincoming(repo, other)
-        nodes = revs and map(repo.lookup, revs) or revs
-        o = repo.changelog.findmissing(common, heads=nodes)
-        if not o:
+        url = ui.expandpath(dest or 'default-push', dest or 'default')
+        url = hg.parseurl(url)[0]
+        ui.status(_('comparing with %s\n') % util.hidepassword(url))
+
+        revs = [r for r in scmutil.revrange(repo, revs) if r >= 0]
+        if not revs:
+            revs = [len(repo) - 1]
+        revs = repo.revs('outgoing(%s) and ::%ld', dest or '', revs)
+        if not revs:
             ui.status(_("no changes found\n"))
             return []
-        return [str(repo.changelog.rev(r)) for r in o]
+        return [str(r) for r in revs]
 
     def getpatches(revs):
         for r in scmutil.revrange(repo, revs):
@@ -302,7 +305,7 @@ def patchbomb(ui, repo, *revs, **opts):
         finally:
             try:
                 os.unlink(tmpfn)
-            except:
+            except OSError:
                 pass
             os.rmdir(tmpdir)
 
@@ -358,7 +361,7 @@ def patchbomb(ui, repo, *revs, **opts):
     def getpatchmsgs(patches, patchnames=None):
         msgs = []
 
-        ui.write(_('This patch series consists of %d patches.\n\n')
+        ui.write(_('this patch series consists of %d patches.\n\n')
                  % len(patches))
 
         # build the intro message, or skip it if the user declines
@@ -523,7 +526,7 @@ def patchbomb(ui, repo, *revs, **opts):
         if replyto:
             m['Reply-To'] = ', '.join(replyto)
         if opts.get('test'):
-            ui.status(_('Displaying '), subj, ' ...\n')
+            ui.status(_('displaying '), subj, ' ...\n')
             ui.flush()
             if 'PAGER' in os.environ and not ui.plain():
                 fp = util.popen(os.environ['PAGER'], 'w')
@@ -541,7 +544,7 @@ def patchbomb(ui, repo, *revs, **opts):
         else:
             if not sendmail:
                 sendmail = mail.connect(ui, mbox=mbox)
-            ui.status(_('Sending '), subj, ' ...\n')
+            ui.status(_('sending '), subj, ' ...\n')
             ui.progress(_('sending'), i, item=subj, total=len(msgs))
             if not mbox:
                 # Exim does not remove the Bcc field

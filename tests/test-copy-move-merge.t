@@ -24,7 +24,7 @@
     unmatched files in other:
      b
      c
-    all copies found (* = to merge, ! = divergent):
+    all copies found (* = to merge, ! = divergent, % = renamed and deleted):
      c -> a *
      b -> a *
     checking for directory renames
@@ -60,3 +60,5 @@ file c
   0
   1
   2
+
+  $ cd ..

@@ -6,8 +6,8 @@
                    Logilab SA        <contact@logilab.fr>
                    Augie Fackler     <durin42@gmail.com>
 
-    This software may be used and distributed according to the terms of the
-    GNU General Public License version 2 or any later version.
+    This software may be used and distributed according to the terms
+    of the GNU General Public License version 2 or any later version.
 
     ---
 
@@ -17,17 +17,17 @@ This module implements most phase logic in mercurial.
 Basic Concept
 =============
 
-A 'changeset phases' is an indicator that tells us how a changeset is
-manipulated and communicated. The details of each phase is described below,
-here we describe the properties they have in common.
+A 'changeset phase' is an indicator that tells us how a changeset is
+manipulated and communicated. The details of each phase is described
+below, here we describe the properties they have in common.
 
-Like bookmarks, phases are not stored in history and thus are not permanent and
-leave no audit trail.
+Like bookmarks, phases are not stored in history and thus are not
+permanent and leave no audit trail.
 
-First, no changeset can be in two phases at once. Phases are ordered, so they
-can be considered from lowest to highest. The default, lowest phase is 'public'
-- this is the normal phase of existing changesets. A child changeset can not be
-in a lower phase than its parents.
+First, no changeset can be in two phases at once. Phases are ordered,
+so they can be considered from lowest to highest. The default, lowest
+phase is 'public' - this is the normal phase of existing changesets. A
+child changeset can not be in a lower phase than its parents.
 
 These phases share a hierarchy of traits:
 
@@ -36,25 +36,26 @@ These phases share a hierarchy of traits:
     draft:               X
     secret:
 
-local commits are draft by default
+Local commits are draft by default.
 
-Phase movement and exchange
-============================
+Phase Movement and Exchange
+===========================
 
-Phase data are exchanged by pushkey on pull and push. Some server have a
-publish option set, we call them publishing server. Pushing to such server make
-draft changeset publish.
+Phase data is exchanged by pushkey on pull and push. Some servers have
+a publish option set, we call such a server a "publishing server".
+Pushing a draft changeset to a publishing server changes the phase to
+public.
 
 A small list of fact/rules define the exchange of phase:
 
 * old client never changes server states
 * pull never changes server states
-* publish and old server csets are seen as public by client
+* publish and old server changesets are seen as public by client
+* any secret changeset seen in another repository is lowered to at
+  least draft
 
-* Any secret changeset seens in another repository is lowered to at least draft
-
-
-Here is the final table summing up the 49 possible usecase of phase exchange:
+Here is the final table summing up the 49 possible use cases of phase
+exchange:
 
                            server
                   old     publish      non-publish
@@ -81,152 +82,232 @@ Legend:
     * N = new/not present,
     * P = public,
     * D = draft,
-    * X = not tracked (ie: the old client or server has no internal way of
-          recording the phase.)
+    * X = not tracked (i.e., the old client or server has no internal
+          way of recording the phase.)
 
     passive = only pushes
 
 
     A cell here can be read like this:
 
-    "When a new client pushes a draft changeset (D) to a publishing server
-    where it's not present (N), it's marked public on both sides (P/P)."
+    "When a new client pushes a draft changeset (D) to a publishing
+    server where it's not present (N), it's marked public on both
+    sides (P/P)."
 
-Note: old client behave as publish server with Draft only content
+Note: old client behave as a publishing server with draft only content
 - other people see it as public
 - content is pushed as draft
 
 """
 
 import errno
-from node import nullid, bin, hex, short
+from node import nullid, nullrev, bin, hex, short
 from i18n import _
+import util
 
 allphases = public, draft, secret = range(3)
 trackedphases = allphases[1:]
 phasenames = ['public', 'draft', 'secret']
 
-def readroots(repo):
-    """Read phase roots from disk"""
+def _filterunknown(ui, changelog, phaseroots):
+    """remove unknown nodes from the phase boundary
+
+    Nothing is lost as unknown nodes only hold data for their descendants.
+    """
+    updated = False
+    nodemap = changelog.nodemap # to filter unknown nodes
+    for phase, nodes in enumerate(phaseroots):
+        missing = [node for node in nodes if node not in nodemap]
+        if missing:
+            for mnode in missing:
+                ui.debug(
+                    'removing unknown node %s from %i-phase boundary\n'
+                    % (short(mnode), phase))
+            nodes.symmetric_difference_update(missing)
+            updated = True
+    return updated
+
+def _readroots(repo, phasedefaults=None):
+    """Read phase roots from disk
+
+    phasedefaults is a list of fn(repo, roots) callable, which are
+    executed if the phase roots file does not exist. When phases are
+    being initialized on an existing repository, this could be used to
+    set selected changesets phase to something else than public.
+
+    Return (roots, dirty) where dirty is true if roots differ from
+    what is being stored.
+    """
+    dirty = False
     roots = [set() for i in allphases]
     try:
         f = repo.sopener('phaseroots')
         try:
             for line in f:
-                phase, nh = line.strip().split()
+                phase, nh = line.split()
                 roots[int(phase)].add(bin(nh))
         finally:
             f.close()
     except IOError, inst:
         if inst.errno != errno.ENOENT:
             raise
-        for f in repo._phasedefaults:
-            roots = f(repo, roots)
-        repo._dirtyphases = True
-    return roots
+        if phasedefaults:
+            for f in phasedefaults:
+                roots = f(repo, roots)
+        dirty = True
+    if _filterunknown(repo.ui, repo.changelog, roots):
+        dirty = True
+    return roots, dirty
 
-def writeroots(repo):
-    """Write phase roots from disk"""
-    f = repo.sopener('phaseroots', 'w', atomictemp=True)
-    try:
-        for phase, roots in enumerate(repo._phaseroots):
-            for h in roots:
-                f.write('%i %s\n' % (phase, hex(h)))
-        repo._dirtyphases = False
-    finally:
-        f.close()
+class phasecache(object):
+    def __init__(self, repo, phasedefaults, _load=True):
+        if _load:
+            # Cheap trick to allow shallow-copy without copy module
+            self.phaseroots, self.dirty = _readroots(repo, phasedefaults)
+            self.opener = repo.sopener
+            self._phaserevs = None
 
-def filterunknown(repo, phaseroots=None):
-    """remove unknown nodes from the phase boundary
+    def copy(self):
+        # Shallow copy meant to ensure isolation in
+        # advance/retractboundary(), nothing more.
+        ph = phasecache(None, None, _load=False)
+        ph.phaseroots = self.phaseroots[:]
+        ph.dirty = self.dirty
+        ph.opener = self.opener
+        ph._phaserevs = self._phaserevs
+        return ph
 
-    no data is lost as unknown node only old data for their descentants
-    """
-    if phaseroots is None:
-        phaseroots = repo._phaseroots
-    nodemap = repo.changelog.nodemap # to filter unknown nodes
-    for phase, nodes in enumerate(phaseroots):
-        missing = [node for node in nodes if node not in nodemap]
-        if missing:
-            for mnode in missing:
-                repo.ui.debug(
-                    'removing unknown node %s from %i-phase boundary\n'
-                    % (short(mnode), phase))
-            nodes.symmetric_difference_update(missing)
-            repo._dirtyphases = True
+    def replace(self, phcache):
+        for a in 'phaseroots dirty opener _phaserevs'.split():
+            setattr(self, a, getattr(phcache, a))
+
+    def getphaserevs(self, repo, rebuild=False):
+        if rebuild or self._phaserevs is None:
+            revs = [public] * len(repo.changelog)
+            for phase in trackedphases:
+                roots = map(repo.changelog.rev, self.phaseroots[phase])
+                if roots:
+                    for rev in roots:
+                        revs[rev] = phase
+                    for rev in repo.changelog.descendants(roots):
+                        revs[rev] = phase
+            self._phaserevs = revs
+        return self._phaserevs
+
+    def phase(self, repo, rev):
+        # We need a repo argument here to be able to build _phaserev
+        # if necessary. The repository instance is not stored in
+        # phasecache to avoid reference cycles. The changelog instance
+        # is not stored because it is a filecache() property and can
+        # be replaced without us being notified.
+        if rev == nullrev:
+            return public
+        if self._phaserevs is None or rev >= len(self._phaserevs):
+            self._phaserevs = self.getphaserevs(repo, rebuild=True)
+        return self._phaserevs[rev]
+
+    def write(self):
+        if not self.dirty:
+            return
+        f = self.opener('phaseroots', 'w', atomictemp=True)
+        try:
+            for phase, roots in enumerate(self.phaseroots):
+                for h in roots:
+                    f.write('%i %s\n' % (phase, hex(h)))
+        finally:
+            f.close()
+        self.dirty = False
+
+    def _updateroots(self, phase, newroots):
+        self.phaseroots[phase] = newroots
+        self._phaserevs = None
+        self.dirty = True
+
+    def advanceboundary(self, repo, targetphase, nodes):
+        # Be careful to preserve shallow-copied values: do not update
+        # phaseroots values, replace them.
+
+        delroots = [] # set of root deleted by this path
+        for phase in xrange(targetphase + 1, len(allphases)):
+            # filter nodes that are not in a compatible phase already
+            nodes = [n for n in nodes
+                     if self.phase(repo, repo[n].rev()) >= phase]
+            if not nodes:
+                break # no roots to move anymore
+            olds = self.phaseroots[phase]
+            roots = set(ctx.node() for ctx in repo.set(
+                    'roots((%ln::) - (%ln::%ln))', olds, olds, nodes))
+            if olds != roots:
+                self._updateroots(phase, roots)
+                # some roots may need to be declared for lower phases
+                delroots.extend(olds - roots)
+            # declare deleted root in the target phase
+            if targetphase != 0:
+                self.retractboundary(repo, targetphase, delroots)
+
+    def retractboundary(self, repo, targetphase, nodes):
+        # Be careful to preserve shallow-copied values: do not update
+        # phaseroots values, replace them.
+
+        currentroots = self.phaseroots[targetphase]
+        newroots = [n for n in nodes
+                    if self.phase(repo, repo[n].rev()) < targetphase]
+        if newroots:
+            if nullid in newroots:
+                raise util.Abort(_('cannot change null revision phase'))
+            currentroots = currentroots.copy()
+            currentroots.update(newroots)
+            ctxs = repo.set('roots(%ln::)', currentroots)
+            currentroots.intersection_update(ctx.node() for ctx in ctxs)
+            self._updateroots(targetphase, currentroots)
 
 def advanceboundary(repo, targetphase, nodes):
     """Add nodes to a phase changing other nodes phases if necessary.
 
-    This function move boundary *forward* this means that all nodes are set
-    in the target phase or kept in a *lower* phase.
+    This function move boundary *forward* this means that all nodes
+    are set in the target phase or kept in a *lower* phase.
 
     Simplify boundary to contains phase roots only."""
-    delroots = [] # set of root deleted by this path
-    for phase in xrange(targetphase + 1, len(allphases)):
-        # filter nodes that are not in a compatible phase already
-        # XXX rev phase cache might have been invalidated by a previous loop
-        # XXX we need to be smarter here
-        nodes = [n for n in nodes if repo[n].phase() >= phase]
-        if not nodes:
-            break # no roots to move anymore
-        roots = repo._phaseroots[phase]
-        olds = roots.copy()
-        ctxs = list(repo.set('roots((%ln::) - (%ln::%ln))', olds, olds, nodes))
-        roots.clear()
-        roots.update(ctx.node() for ctx in ctxs)
-        if olds != roots:
-            # invalidate cache (we probably could be smarter here
-            if '_phaserev' in vars(repo):
-                del repo._phaserev
-            repo._dirtyphases = True
-            # some roots may need to be declared for lower phases
-            delroots.extend(olds - roots)
-        # declare deleted root in the target phase
-        if targetphase != 0:
-            retractboundary(repo, targetphase, delroots)
-
+    phcache = repo._phasecache.copy()
+    phcache.advanceboundary(repo, targetphase, nodes)
+    repo._phasecache.replace(phcache)
 
 def retractboundary(repo, targetphase, nodes):
-    """Set nodes back to a phase changing other nodes phases if necessary.
+    """Set nodes back to a phase changing other nodes phases if
+    necessary.
 
-    This function move boundary *backward* this means that all nodes are set
-    in the target phase or kept in a *higher* phase.
+    This function move boundary *backward* this means that all nodes
+    are set in the target phase or kept in a *higher* phase.
 
     Simplify boundary to contains phase roots only."""
-    currentroots = repo._phaseroots[targetphase]
-    newroots = [n for n in nodes if repo[n].phase() < targetphase]
-    if newroots:
-        currentroots.update(newroots)
-        ctxs = repo.set('roots(%ln::)', currentroots)
-        currentroots.intersection_update(ctx.node() for ctx in ctxs)
-        if '_phaserev' in vars(repo):
-            del repo._phaserev
-        repo._dirtyphases = True
-
+    phcache = repo._phasecache.copy()
+    phcache.retractboundary(repo, targetphase, nodes)
+    repo._phasecache.replace(phcache)
 
 def listphases(repo):
-    """List phases root for serialisation over pushkey"""
+    """List phases root for serialization over pushkey"""
     keys = {}
     value = '%i' % draft
-    for root in repo._phaseroots[draft]:
+    for root in repo._phasecache.phaseroots[draft]:
         keys[hex(root)] = value
 
     if repo.ui.configbool('phases', 'publish', True):
-        # Add an extra data to let remote know we are a publishing repo.
-        # Publishing repo can't just pretend they are old repo. When pushing to
-        # a publishing repo, the client still need to push phase boundary
+        # Add an extra data to let remote know we are a publishing
+        # repo. Publishing repo can't just pretend they are old repo.
+        # When pushing to a publishing repo, the client still need to
+        # push phase boundary
         #
-        # Push do not only push changeset. It also push phase data. New
-        # phase data may apply to common changeset which won't be push (as they
-        # are common).  Here is a very simple example:
+        # Push do not only push changeset. It also push phase data.
+        # New phase data may apply to common changeset which won't be
+        # push (as they are common). Here is a very simple example:
         #
         # 1) repo A push changeset X as draft to repo B
         # 2) repo B make changeset X public
-        # 3) repo B push to repo A. X is not pushed but the data that X as now
-        #    public should
+        # 3) repo B push to repo A. X is not pushed but the data that
+        #    X as now public should
         #
-        # The server can't handle it on it's own as it has no idea of client
-        # phase data.
+        # The server can't handle it on it's own as it has no idea of
+        # client phase data.
         keys['publishing'] = 'True'
     return keys
 
@@ -247,43 +328,6 @@ def pushphase(repo, nhex, oldphasestr, newphasestr):
             return 0
     finally:
         lock.release()
-
-def visibleheads(repo):
-    """return the set of visible head of this repo"""
-    # XXX we want a cache on this
-    sroots = repo._phaseroots[secret]
-    if sroots:
-        # XXX very slow revset. storing heads or secret "boundary" would help.
-        revset = repo.set('heads(not (%ln::))', sroots)
-
-        vheads = [ctx.node() for ctx in revset]
-        if not vheads:
-            vheads.append(nullid)
-    else:
-        vheads = repo.heads()
-    return vheads
-
-def visiblebranchmap(repo):
-    """return a branchmap for the visible set"""
-    # XXX Recomputing this data on the fly is very slow.  We should build a
-    # XXX cached version while computin the standard branchmap version.
-    sroots = repo._phaseroots[secret]
-    if sroots:
-        vbranchmap = {}
-        for branch, nodes in  repo.branchmap().iteritems():
-            # search for secret heads.
-            for n in nodes:
-                if repo[n].phase() >= secret:
-                    nodes = None
-                    break
-            # if secreat heads where found we must compute them again
-            if nodes is None:
-                s = repo.set('heads(branch(%s) - secret())', branch)
-                nodes = [c.node() for c in s]
-            vbranchmap[branch] = nodes
-    else:
-        vbranchmap = repo.branchmap()
-    return vbranchmap
 
 def analyzeremotephases(repo, subset, roots):
     """Compute phases heads and root in a subset of node from root dict

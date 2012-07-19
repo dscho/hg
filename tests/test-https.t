@@ -104,9 +104,15 @@ cacert not found
 
 Test server address cannot be reused
 
+#if windows
+  $ hg serve -p $HGPORT --certificate=$PRIV 2>&1
+  abort: cannot start server at ':$HGPORT': (glob)
+  [255]
+#else
   $ hg serve -p $HGPORT --certificate=$PRIV 2>&1
   abort: cannot start server at ':$HGPORT': Address already in use
   [255]
+#endif
   $ cd ..
 
 clone via pull
@@ -118,6 +124,7 @@ clone via pull
   adding manifests
   adding file changes
   added 1 changesets with 4 changes to 4 files
+  warning: localhost certificate with fingerprint 91:4f:1a:ff:87:24:9c:09:b6:85:9b:88:b1:90:6d:30:75:64:91:ca not verified (check hostfingerprints or web.cacerts config setting)
   warning: localhost certificate with fingerprint 91:4f:1a:ff:87:24:9c:09:b6:85:9b:88:b1:90:6d:30:75:64:91:ca not verified (check hostfingerprints or web.cacerts config setting)
   updating to branch default
   4 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -137,7 +144,7 @@ pull without cacert
 
   $ cd copy-pull
   $ echo '[hooks]' >> .hg/hgrc
-  $ echo "changegroup = python '$TESTDIR'/printenv.py changegroup" >> .hg/hgrc
+  $ echo "changegroup = python \"$TESTDIR/printenv.py\" changegroup" >> .hg/hgrc
   $ hg pull
   warning: localhost certificate with fingerprint 91:4f:1a:ff:87:24:9c:09:b6:85:9b:88:b1:90:6d:30:75:64:91:ca not verified (check hostfingerprints or web.cacerts config setting)
   pulling from https://localhost:$HGPORT/
@@ -147,7 +154,8 @@ pull without cacert
   adding file changes
   added 1 changesets with 1 changes to 1 files
   warning: localhost certificate with fingerprint 91:4f:1a:ff:87:24:9c:09:b6:85:9b:88:b1:90:6d:30:75:64:91:ca not verified (check hostfingerprints or web.cacerts config setting)
-  changegroup hook: HG_NODE=5fed3813f7f5e1824344fdc9cf8f63bb662c292d HG_SOURCE=pull HG_URL=https://localhost:$HGPORT/ 
+  changegroup hook: HG_NODE=5fed3813f7f5e1824344fdc9cf8f63bb662c292d HG_SOURCE=pull HG_URL=https://localhost:$HGPORT/
+  warning: localhost certificate with fingerprint 91:4f:1a:ff:87:24:9c:09:b6:85:9b:88:b1:90:6d:30:75:64:91:ca not verified (check hostfingerprints or web.cacerts config setting)
   (run 'hg update' to get a working copy)
   $ cd ..
 
@@ -176,6 +184,7 @@ variables in the filename
   pulling from https://localhost:$HGPORT/
   searching for changes
   no changes found
+  warning: localhost certificate with fingerprint 91:4f:1a:ff:87:24:9c:09:b6:85:9b:88:b1:90:6d:30:75:64:91:ca not verified (check hostfingerprints or web.cacerts config setting)
 
 cacert mismatch
 
@@ -188,6 +197,7 @@ cacert mismatch
   pulling from https://127.0.0.1:$HGPORT/
   searching for changes
   no changes found
+  warning: 127.0.0.1 certificate with fingerprint 91:4f:1a:ff:87:24:9c:09:b6:85:9b:88:b1:90:6d:30:75:64:91:ca not verified (check hostfingerprints or web.cacerts config setting)
   $ hg -R copy-pull pull --config web.cacerts=pub-other.pem
   abort: error: *:SSL3_GET_SERVER_CERTIFICATE:certificate verify failed (glob)
   [255]
@@ -196,6 +206,7 @@ cacert mismatch
   pulling from https://localhost:$HGPORT/
   searching for changes
   no changes found
+  warning: localhost certificate with fingerprint 91:4f:1a:ff:87:24:9c:09:b6:85:9b:88:b1:90:6d:30:75:64:91:ca not verified (check hostfingerprints or web.cacerts config setting)
 
 Test server cert which isn't valid yet
 
@@ -253,6 +264,7 @@ Test unvalidated https through proxy
   pulling from https://localhost:$HGPORT/
   searching for changes
   no changes found
+  warning: localhost certificate with fingerprint 91:4f:1a:ff:87:24:9c:09:b6:85:9b:88:b1:90:6d:30:75:64:91:ca not verified (check hostfingerprints or web.cacerts config setting)
 
 Test https with cacert and fingerprint through proxy
 
