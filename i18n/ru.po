@@ -14555,7 +14555,7 @@ msgid ""
 "    Update sets the working directory's parent revision to the specified\n"
 "    changeset (see :hg:`help parents`)."
 msgstr ""
-"    Update устанавливает ревизию родителя рабочего каталога в заданный\n"
+"    Update делает заданный набор изменений родительской ревизией рабочего\n"
 "    набор изменений (см. :hg:`help parents`)."
 
 msgid ""

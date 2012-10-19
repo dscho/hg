@@ -63,7 +63,7 @@ from mercurial.i18n import _
 from mercurial.node import bin, hex, short, nullid, nullrev
 from mercurial.lock import release
 from mercurial import commands, cmdutil, hg, scmutil, util, revset
-from mercurial import repair, extensions, url, error, phases
+from mercurial import repair, extensions, url, error, phases, bookmarks
 from mercurial import patch as patchmod
 import os, re, errno, shutil
 
@@ -1522,7 +1522,7 @@ class queue(object):
             #
             # this should really read:
             #   mm, dd, aa = repo.status(top, patchparent)[:3]
-            # but we do it backwards to take advantage of manifest/chlog
+            # but we do it backwards to take advantage of manifest/changelog
             # caching against the next repo.status call
             mm, aa, dd = repo.status(patchparent, top)[:3]
             changes = repo.changelog.read(top)
@@ -1535,7 +1535,7 @@ class queue(object):
                 # if amending a patch, we start with existing
                 # files plus specified files - unfiltered
                 match = scmutil.matchfiles(repo, mm + aa + dd + matchfn.files())
-                # filter with inc/exl options
+                # filter with include/exclude options
                 matchfn = scmutil.match(repo[None], opts=opts)
             else:
                 match = scmutil.matchall(repo)
@@ -1577,6 +1577,7 @@ class queue(object):
             a = list(aa)
             c = [filter(matchfn, l) for l in (m, a, r)]
             match = scmutil.matchfiles(repo, set(c[0] + c[1] + c[2] + inclsubs))
+            bmlist = repo[top].bookmarks()
 
             try:
                 if diffopts.git or diffopts.upgrade:
@@ -1662,6 +1663,11 @@ class queue(object):
                 for chunk in chunks:
                     patchf.write(chunk)
                 patchf.close()
+
+                for bm in bmlist:
+                    repo._bookmarks[bm] = n
+                bookmarks.write(repo)
+
                 self.applied.append(statusentry(n, patchfn))
             except: # re-raises
                 ctx = repo[cparents[0]]
@@ -3185,9 +3191,9 @@ def finish(ui, repo, *revrange, **opts):
     revs = scmutil.revrange(repo, revrange)
     if repo['.'].rev() in revs and repo[None].files():
         ui.warn(_('warning: uncommitted changes in the working directory\n'))
-    # queue.finish may changes phases but leave the responsability to lock the
+    # queue.finish may changes phases but leave the responsibility to lock the
     # repo to the caller to avoid deadlock with wlock. This command code is
-    # responsability for this locking.
+    # responsibility for this locking.
     lock = repo.lock()
     try:
         q.finish(repo, revs)
@@ -3262,7 +3268,8 @@ def qqueue(ui, repo, name=None, **opts):
 
     def _setactive(name):
         if q.applied:
-            raise util.Abort(_('patches applied - cannot set new queue active'))
+            raise util.Abort(_('new queue created, but cannot make active '
+                               'as patches are applied'))
         _setactivenocheck(name)
 
     def _setactivenocheck(name):
@@ -3595,3 +3602,5 @@ colortable = {'qguard.negative': 'red',
               'qseries.guarded': 'black bold',
               'qseries.missing': 'red bold',
               'qseries.unapplied': 'black bold'}
+
+commands.inferrepo += " qnew qrefresh qdiff qcommit"

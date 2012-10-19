@@ -218,7 +218,7 @@ Test display of largefiles in hgweb
   -rw-r--r-- 9 normal4
 
 
-  $ "$TESTDIR/killdaemons.py"
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
 #endif
 
 Test archiving the various revisions.  These hit corner cases known with
@@ -1291,7 +1291,7 @@ exit code with nothing outgoing (issue3611)
   [255]
 
 used all HGPORTs, kill all daemons
-  $ "$TESTDIR/killdaemons.py"
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
 #endif
 
 vanilla clients locked out from largefiles ssh repos
@@ -1377,7 +1377,7 @@ Push a largefiles repository to a served empty repository
   $ rm -rf empty
 
 used all HGPORTs, kill all daemons
-  $ "$TESTDIR/killdaemons.py"
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
 
 #endif
 
@@ -1587,9 +1587,8 @@ cloned (see test-subrepo-recursion.t):
 
   $ hg clone -U . ../empty
   $ cd ../empty
-  $ hg archive --subrepos -r tip ../archive.tar.gz 2>&1 | "$TESTDIR/filtercr.py"
+  $ hg archive --subrepos -r tip ../archive.tar.gz
   cloning subrepo subrepo from $TESTTMP/statusmatch/subrepo
-  
   $ cd ..
 
 Test that addremove picks up largefiles prior to the initial commit (issue3541)
@@ -1626,5 +1625,89 @@ Test commit's addremove option prior to the first commit
   .hglf
   .hglf/large.dat
   .hglf/large2.dat
+
+  $ cd ..
+
+issue3651: summary/outgoing with largefiles shows "no remote repo"
+unexpectedly
+
+  $ mkdir issue3651
+  $ cd issue3651
+
+  $ hg init src
+  $ echo a > src/a
+  $ hg -R src add --large src/a
+  $ hg -R src commit -m '#0'
+  Invoking status precommit hook
+  A a
+
+check messages when no remote repository is specified:
+"no remote repo" route for "hg outgoing --large" is not tested here,
+because it can't be reproduced easily.
+
+  $ hg init clone1
+  $ hg -R clone1 -q pull src
+  $ hg -R clone1 -q update
+  $ hg -R clone1 paths | grep default
+  [1]
+
+  $ hg -R clone1 summary --large
+  parent: 0:fc0bd45326d3 tip
+   #0
+  branch: default
+  commit: (clean)
+  update: (current)
+  largefiles: No remote repo
+
+check messages when there is no files to upload:
+
+  $ hg -q clone src clone2
+  $ hg -R clone2 paths | grep default
+  default = $TESTTMP/issue3651/src
+
+  $ hg -R clone2 summary --large
+  parent: 0:fc0bd45326d3 tip
+   #0
+  branch: default
+  commit: (clean)
+  update: (current)
+  searching for changes
+  largefiles: (no files to upload)
+  $ hg -R clone2 outgoing --large
+  comparing with $TESTTMP/issue3651/src
+  searching for changes
+  no changes found
+  searching for changes
+  largefiles: no files to upload
+  [1]
+
+check messages when there are files to upload:
+
+  $ echo b > clone2/b
+  $ hg -R clone2 add --large clone2/b
+  $ hg -R clone2 commit -m '#1'
+  Invoking status precommit hook
+  A b
+  $ hg -R clone2 summary --large
+  parent: 1:1acbe71ce432 tip
+   #1
+  branch: default
+  commit: (clean)
+  update: (current)
+  searching for changes
+  largefiles: 1 to upload
+  $ hg -R clone2 outgoing --large
+  comparing with $TESTTMP/issue3651/src
+  searching for changes
+  changeset:   1:1acbe71ce432
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     #1
+  
+  searching for changes
+  largefiles to upload:
+  b
+  
 
   $ cd ..

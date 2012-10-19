@@ -149,29 +149,31 @@
   $ hg email -m test.mbox -f quux -t foo -c bar -s test 0:tip \
   > --config extensions.progress= --config progress.assume-tty=1 \
   > --config progress.delay=0 --config progress.refresh=0 \
-  > --config progress.width=60 2>&1 | \
-  > python "$TESTDIR/filtercr.py"
+  > --config progress.width=60
   this patch series consists of 2 patches.
   
   
   Write the introductory message for the patch series.
   
-  
-  sending [                                             ] 0/3
-  sending [                                             ] 0/3
-                                                              
-                                                              
-  sending [==============>                              ] 1/3
-  sending [==============>                              ] 1/3
-                                                              
-                                                              
-  sending [=============================>               ] 2/3
-  sending [=============================>               ] 2/3
+  \r (no-eol) (esc)
+  sending [                                             ] 0/3\r (no-eol) (esc)
+  sending [                                             ] 0/3\r (no-eol) (esc)
+                                                              \r (no-eol) (esc)
+  \r (no-eol) (esc)
+                                                              \r (no-eol) (esc)
+  \r (no-eol) (esc)
+  sending [==============>                              ] 1/3\r (no-eol) (esc)
+  sending [==============>                              ] 1/3\r (no-eol) (esc)
+                                                              \r (no-eol) (esc)
+  \r (no-eol) (esc)
+                                                              \r (no-eol) (esc)
+  \r (no-eol) (esc)
+  sending [=============================>               ] 2/3\r (no-eol) (esc)
+  sending [=============================>               ] 2/3\r (no-eol) (esc)
                                                               \r (esc)
   sending [PATCH 0 of 2] test ...
   sending [PATCH 1 of 2] a ...
   sending [PATCH 2 of 2] b ...
-  
 
   $ cd ..
 
@@ -1877,7 +1879,7 @@ test single flag for multiple patches:
   +b
   
 
-test mutiple flags for single patch:
+test multiple flags for single patch:
   $ hg email --date '1970-1-1 0:1' -n --flag fooFlag --flag barFlag -f quux -t foo \
   >  -c bar -s test -r 2
   this patch series consists of 1 patches.

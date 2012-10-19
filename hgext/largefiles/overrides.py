@@ -158,7 +158,7 @@ def removelargefiles(ui, repo, *pats, **opts):
             ui.status(_('removing %s\n') % m.rel(f))
 
     # Need to lock because standin files are deleted then removed from the
-    # repository and we could race inbetween.
+    # repository and we could race in-between.
     wlock = repo.wlock()
     try:
         lfdirstate = lfutil.openlfdirstate(ui, repo)
@@ -256,7 +256,7 @@ def overrideverify(orig, ui, repo, *pats, **opts):
 
 # Override needs to refresh standins so that update's normal merge
 # will go through properly. Then the other update hook (overriding repo.update)
-# will get the new files. Filemerge is also overriden so that the merge
+# will get the new files. Filemerge is also overridden so that the merge
 # will merge standins correctly.
 def overrideupdate(orig, ui, repo, *pats, **opts):
     lfdirstate = lfutil.openlfdirstate(ui, repo)
@@ -701,7 +701,7 @@ def overridepull(orig, ui, repo, source=None, **opts):
         result = orig(ui, repo, source, **opts)
         # If we do not have the new largefiles for any new heads we pulled, we
         # will run into a problem later if we try to merge or rebase with one of
-        # these heads, so cache the largefiles now direclty into the system
+        # these heads, so cache the largefiles now directly into the system
         # cache.
         ui.status(_("caching new largefiles\n"))
         numcached = 0
@@ -733,24 +733,29 @@ def overrideclone(orig, ui, source, dest=None, **opts):
 def hgclone(orig, ui, opts, *args, **kwargs):
     result = orig(ui, opts, *args, **kwargs)
 
-    if result is not None and opts.get('all_largefiles'):
+    if result is not None:
         sourcerepo, destrepo = result
         repo = destrepo.local()
 
         # The .hglf directory must exist for the standin matcher to match
         # anything (which listlfiles uses for each rev), and .hg/largefiles is
         # assumed to exist by the code that caches the downloaded file.  These
-        # directories exist if clone updated to any rev.
-        if opts.get('noupdate'):
-            util.makedirs(repo.pathto(lfutil.shortname))
-            util.makedirs(repo.join(lfutil.longname))
+        # directories exist if clone updated to any rev.  (If the repo does not
+        # have largefiles, download never gets to the point of needing
+        # .hg/largefiles, and the standin matcher won't match anything anyway.)
+        if 'largefiles' in repo.requirements:
+            if opts.get('noupdate'):
+                util.makedirs(repo.pathto(lfutil.shortname))
+                util.makedirs(repo.join(lfutil.longname))
 
         # Caching is implicitly limited to 'rev' option, since the dest repo was
-        # truncated at that point.
-        success, missing = lfcommands.downloadlfiles(ui, repo, None)
+        # truncated at that point.  The user may expect a download count with
+        # this option, so attempt whether or not this is a largefile repo.
+        if opts.get('all_largefiles'):
+            success, missing = lfcommands.downloadlfiles(ui, repo, None)
 
-        if missing != 0:
-            return None
+            if missing != 0:
+                return None
 
     return result
 
@@ -933,7 +938,7 @@ def overrideforget(orig, ui, repo, *pats, **opts):
             ui.status(_('removing %s\n') % m.rel(f))
 
     # Need to lock because standin files are deleted then removed from the
-    # repository and we could race inbetween.
+    # repository and we could race in-between.
     wlock = repo.wlock()
     try:
         lfdirstate = lfutil.openlfdirstate(ui, repo)
@@ -963,7 +968,7 @@ def getoutgoinglfiles(ui, repo, dest=None, **opts):
         return None
     o = lfutil.findoutgoing(repo, remote, False)
     if not o:
-        return None
+        return o
     o = repo.changelog.nodesbetween(o, revs)[0]
     if opts.get('newest_first'):
         o.reverse()
@@ -997,6 +1002,8 @@ def overrideoutgoing(orig, ui, repo, dest=None, **opts):
         toupload = getoutgoinglfiles(ui, repo, dest, **opts)
         if toupload is None:
             ui.status(_('largefiles: No remote repo\n'))
+        elif not toupload:
+            ui.status(_('largefiles: no files to upload\n'))
         else:
             ui.status(_('largefiles to upload:\n'))
             for file in toupload:
@@ -1016,6 +1023,8 @@ def overridesummary(orig, ui, repo, *pats, **opts):
         toupload = getoutgoinglfiles(ui, repo, None, **opts)
         if toupload is None:
             ui.status(_('largefiles: No remote repo\n'))
+        elif not toupload:
+            ui.status(_('largefiles: (no files to upload)\n'))
         else:
             ui.status(_('largefiles: %d to upload\n') % len(toupload))
 

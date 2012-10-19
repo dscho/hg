@@ -543,7 +543,7 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
           hg bisect --good
           hg bisect --bad
 
-      - mark the current revision, or a known revision, to be skipped (eg. if
+      - mark the current revision, or a known revision, to be skipped (e.g. if
         that revision is not usable because of another issue)::
 
           hg bisect --skip
@@ -789,42 +789,15 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False,
     marks = repo._bookmarks
     cur   = repo.changectx('.').node()
 
-    if delete:
-        if mark is None:
-            raise util.Abort(_("bookmark name required"))
-        if mark not in marks:
-            raise util.Abort(_("bookmark '%s' does not exist") % mark)
-        if mark == repo._bookmarkcurrent:
-            bookmarks.setcurrent(repo, None)
-        del marks[mark]
-        bookmarks.write(repo)
-        return
-
-    if rename:
-        if rename not in marks:
-            raise util.Abort(_("bookmark '%s' does not exist") % rename)
-        if mark in marks and not force:
-            raise util.Abort(_("bookmark '%s' already exists "
-                               "(use -f to force)") % mark)
-        if mark is None:
-            raise util.Abort(_("new bookmark name required"))
-        marks[mark] = marks[rename]
-        if repo._bookmarkcurrent == rename and not inactive:
-            bookmarks.setcurrent(repo, mark)
-        del marks[rename]
-        bookmarks.write(repo)
-        return
-
-    if mark is not None:
-        if "\n" in mark:
-            raise util.Abort(_("bookmark name cannot contain newlines"))
+    def checkformat(mark):
         mark = mark.strip()
         if not mark:
             raise util.Abort(_("bookmark names cannot consist entirely of "
                                "whitespace"))
-        if inactive and mark == repo._bookmarkcurrent:
-            bookmarks.setcurrent(repo, None)
-            return
+        scmutil.checknewlabel(repo, mark, 'bookmark')
+        return mark
+
+    def checkconflict(repo, mark, force=False):
         if mark in marks and not force:
             raise util.Abort(_("bookmark '%s' already exists "
                                "(use -f to force)") % mark)
@@ -832,41 +805,76 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False,
             and not force):
             raise util.Abort(
                 _("a bookmark cannot have the name of an existing branch"))
+
+    if delete and rename:
+        raise util.Abort(_("--delete and --rename are incompatible"))
+    if delete and rev:
+        raise util.Abort(_("--rev is incompatible with --delete"))
+    if rename and rev:
+        raise util.Abort(_("--rev is incompatible with --rename"))
+    if mark is None and (delete or rev):
+        raise util.Abort(_("bookmark name required"))
+
+    if delete:
+        if mark not in marks:
+            raise util.Abort(_("bookmark '%s' does not exist") % mark)
+        if mark == repo._bookmarkcurrent:
+            bookmarks.setcurrent(repo, None)
+        del marks[mark]
+        bookmarks.write(repo)
+
+    elif rename:
+        if mark is None:
+            raise util.Abort(_("new bookmark name required"))
+        mark = checkformat(mark)
+        if rename not in marks:
+            raise util.Abort(_("bookmark '%s' does not exist") % rename)
+        checkconflict(repo, mark, force)
+        marks[mark] = marks[rename]
+        if repo._bookmarkcurrent == rename and not inactive:
+            bookmarks.setcurrent(repo, mark)
+        del marks[rename]
+        bookmarks.write(repo)
+
+    elif mark is not None:
+        mark = checkformat(mark)
+        if inactive and mark == repo._bookmarkcurrent:
+            bookmarks.setcurrent(repo, None)
+            return
+        checkconflict(repo, mark, force)
         if rev:
-            marks[mark] = repo.lookup(rev)
+            marks[mark] = scmutil.revsingle(repo, rev).node()
         else:
             marks[mark] = cur
         if not inactive and cur == marks[mark]:
             bookmarks.setcurrent(repo, mark)
         bookmarks.write(repo)
-        return
 
-    if mark is None:
-        if rev:
-            raise util.Abort(_("bookmark name required"))
-        if len(marks) == 0:
-            ui.status(_("no bookmarks set\n"))
-        if inactive:
-            if not repo._bookmarkcurrent:
-                ui.status(_("no active bookmark\n"))
-            else:
-                bookmarks.setcurrent(repo, None)
-            return
+    # Same message whether trying to deactivate the current bookmark (-i
+    # with no NAME) or listing bookmarks
+    elif len(marks) == 0:
+        ui.status(_("no bookmarks set\n"))
+
+    elif inactive:
+        if not repo._bookmarkcurrent:
+            ui.status(_("no active bookmark\n"))
         else:
-            for bmark, n in sorted(marks.iteritems()):
-                current = repo._bookmarkcurrent
-                if bmark == current and n == cur:
-                    prefix, label = '*', 'bookmarks.current'
-                else:
-                    prefix, label = ' ', ''
+            bookmarks.setcurrent(repo, None)
 
-                if ui.quiet:
-                    ui.write("%s\n" % bmark, label=label)
-                else:
-                    ui.write(" %s %-25s %d:%s\n" % (
-                        prefix, bmark, repo.changelog.rev(n), hexfn(n)),
-                        label=label)
-        return
+    else: # show bookmarks
+        for bmark, n in sorted(marks.iteritems()):
+            current = repo._bookmarkcurrent
+            if bmark == current and n == cur:
+                prefix, label = '*', 'bookmarks.current'
+            else:
+                prefix, label = ' ', ''
+
+            if ui.quiet:
+                ui.write("%s\n" % bmark, label=label)
+            else:
+                ui.write(" %s %-25s %d:%s\n" % (
+                    prefix, bmark, repo.changelog.rev(n), hexfn(n)),
+                    label=label)
 
 @command('branch',
     [('f', 'force', None,
@@ -977,7 +985,7 @@ def branches(ui, repo, active=False, closed=False):
                 label = 'branches.current'
             rev = str(ctx.rev()).rjust(31 - encoding.colwidth(ctx.branch()))
             rev = ui.label('%s:%s' % (rev, hexfunc(ctx.node())),
-                           'log.changeset')
+                           'log.changeset changeset.%s' % ctx.phasestr())
             tag = ui.label(ctx.branch(), label)
             if ui.quiet:
                 ui.write("%s\n" % tag)
@@ -1258,7 +1266,7 @@ def commit(ui, repo, *pats, **opts):
     Returns 0 on success, 1 if nothing changed.
     """
     if opts.get('subrepos'):
-        # Let --subrepos on the command line overide config setting.
+        # Let --subrepos on the command line override config setting.
         ui.setconfig('ui', 'commitsubrepos', True)
 
     extra = {}
@@ -1358,20 +1366,20 @@ def commit(ui, repo, *pats, **opts):
         # printed anyway.
         #
         # Par Msg Comment
-        # NN   y  additional topo root
+        # N N  y  additional topo root
         #
-        # BN   y  additional branch root
-        # CN   y  additional topo head
-        # HN   n  usual case
+        # B N  y  additional branch root
+        # C N  y  additional topo head
+        # H N  n  usual case
         #
-        # BB   y  weird additional branch root
-        # CB   y  branch merge
-        # HB   n  merge with named branch
+        # B B  y  weird additional branch root
+        # C B  y  branch merge
+        # H B  n  merge with named branch
         #
-        # CC   y  additional head from merge
-        # CH   n  merge with a head
+        # C C  y  additional head from merge
+        # C H  n  merge with a head
         #
-        # HH   n  head merge: head count decreases
+        # H H  n  head merge: head count decreases
 
     if not opts.get('close_branch'):
         for r in parents:
@@ -1702,7 +1710,7 @@ def debugdag(ui, repo, file_=None, *revs, **opts):
     """format the changelog or an index DAG as a concise textual description
 
     If you pass a revlog index, the revlog's DAG is emitted. If you list
-    revision numbers, they get labelled in the output as rN.
+    revision numbers, they get labeled in the output as rN.
 
     Otherwise, the changelog DAG of the current repo is emitted.
     """
@@ -2076,7 +2084,9 @@ def debugknown(ui, repopath, *ids, **opts):
     flags = repo.known([bin(s) for s in ids])
     ui.write("%s\n" % ("".join([f and "1" or "0" for f in flags])))
 
-@command('debugobsolete', [] + commitopts2,
+@command('debugobsolete',
+        [('', 'flags', 0, _('markers flag')),
+        ] + commitopts2,
          _('[OBSOLETED [REPLACEMENT] [REPL... ]'))
 def debugobsolete(ui, repo, precursor=None, *successors, **opts):
     """create arbitrary obsolete marker"""
@@ -2103,8 +2113,8 @@ def debugobsolete(ui, repo, precursor=None, *successors, **opts):
         try:
             tr = repo.transaction('debugobsolete')
             try:
-                repo.obsstore.create(tr, parsenodeid(precursor), succs, 0,
-                                     metadata)
+                repo.obsstore.create(tr, parsenodeid(precursor), succs,
+                                     opts['flags'], metadata)
                 tr.close()
             finally:
                 tr.release()
@@ -2987,16 +2997,17 @@ def grep(ui, repo, pattern, *pats, **opts):
         else:
             iter = [('', l) for l in states]
         for change, l in iter:
-            cols = [fn, str(rev)]
+            cols = [(fn, 'grep.filename'), (str(rev), 'grep.rev')]
             before, match, after = None, None, None
+
             if opts.get('line_number'):
-                cols.append(str(l.linenum))
+                cols.append((str(l.linenum), 'grep.linenumber'))
             if opts.get('all'):
-                cols.append(change)
+                cols.append((change, 'grep.change'))
             if opts.get('user'):
-                cols.append(ui.shortuser(ctx.user()))
+                cols.append((ui.shortuser(ctx.user()), 'grep.user'))
             if opts.get('date'):
-                cols.append(datefunc(ctx.date()))
+                cols.append((datefunc(ctx.date()), 'grep.date'))
             if opts.get('files_with_matches'):
                 c = (fn, rev)
                 if c in filerevmatches:
@@ -3006,12 +3017,16 @@ def grep(ui, repo, pattern, *pats, **opts):
                 before = l.line[:l.colstart]
                 match = l.line[l.colstart:l.colend]
                 after = l.line[l.colend:]
-            ui.write(sep.join(cols))
+            for col, label in cols[:-1]:
+                ui.write(col, label=label)
+                ui.write(sep, label='grep.sep')
+            ui.write(cols[-1][0], label=cols[-1][1])
             if before is not None:
+                ui.write(sep, label='grep.sep')
                 if not opts.get('text') and binary():
-                    ui.write(sep + " Binary file matches")
+                    ui.write(" Binary file matches")
                 else:
-                    ui.write(sep + before)
+                    ui.write(before)
                     ui.write(match, label='grep.match')
                     ui.write(after)
             ui.write(eol)
@@ -3250,8 +3265,12 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
                 rst.append(_('\nuse "hg help %s" to show the full help text\n')
                            % name)
             elif not ui.quiet:
-                rst.append(_('\nuse "hg -v help %s" to show more info\n')
-                           % name)
+                omitted = _('use "hg -v help %s" to show more complete'
+                            ' help and the global options') % name
+                notomitted = _('use "hg -v help %s" to show'
+                               ' the global options') % name
+                help.indicateomitted(rst, omitted, notomitted)
+
         return rst
 
 
@@ -3354,6 +3373,11 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
         if util.safehasattr(doc, '__call__'):
             rst += ["    %s\n" % l for l in doc().splitlines()]
 
+        if not ui.verbose:
+            omitted = (_('use "hg help -v %s" to show more complete help') %
+                       name)
+            help.indicateomitted(rst, omitted)
+
         try:
             cmdutil.findcmd(name, table)
             rst.append(_('\nuse "hg help -c %s" to see help for '
@@ -3380,6 +3404,11 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
         if tail:
             rst.extend(tail.splitlines(True))
             rst.append('\n')
+
+        if not ui.verbose:
+            omitted = (_('use "hg help -v %s" to show more complete help') %
+                       name)
+            help.indicateomitted(rst, omitted)
 
         if mod:
             try:
@@ -3444,7 +3473,13 @@ def help_(ui, name=None, unknowncmd=False, full=True, **opts):
         rst.extend(helplist())
 
     keep = ui.verbose and ['verbose'] or []
-    formatted, pruned = minirst.format(''.join(rst), textwidth, keep=keep)
+    text = ''.join(rst)
+    formatted, pruned = minirst.format(text, textwidth, keep=keep)
+    if 'verbose' in pruned:
+        keep.append('omitted')
+    else:
+        keep.append('notomitted')
+    formatted, pruned = minirst.format(text, textwidth, keep=keep)
     ui.write(formatted)
 
 
@@ -4187,7 +4222,7 @@ def manifest(ui, repo, node=None, rev=None, **opts):
                     res.append(fn[plen:-slen])
         finally:
             lock.release()
-        for f in sorted(res):
+        for f in res:
             ui.write("%s\n" % f)
         return
 
@@ -4969,6 +5004,7 @@ def resolve(ui, repo, *pats, **opts):
                         ret = 1
                 finally:
                     ui.setconfig('ui', 'forcemerge', '')
+                    ms.commit()
 
                 # replace filemerge's .orig file with our resolve file
                 util.rename(a + ".resolve", a + ".orig")
@@ -5422,7 +5458,7 @@ def summary(ui, repo, **opts):
         # label with log.changeset (instead of log.parent) since this
         # shows a working directory parent *changeset*:
         ui.write(_('parent: %d:%s ') % (p.rev(), str(p)),
-                 label='log.changeset')
+                 label='log.changeset changeset.%s' % p.phasestr())
         ui.write(' '.join(p.tags()), label='log.tag')
         if p.bookmarks():
             marks.extend(p.bookmarks())
@@ -5630,8 +5666,7 @@ def tag(ui, repo, name1, *names, **opts):
         if len(names) != len(set(names)):
             raise util.Abort(_('tag names must be unique'))
         for n in names:
-            if n in ['tip', '.', 'null']:
-                raise util.Abort(_("the name '%s' is reserved") % n)
+            scmutil.checknewlabel(repo, n, 'tag')
             if not n:
                 raise util.Abort(_('tag names cannot consist entirely of '
                                    'whitespace'))
@@ -5709,7 +5744,7 @@ def tags(ui, repo):
 
         hn = hexfunc(n)
         r = "%5d:%s" % (repo.changelog.rev(n), hn)
-        rev = ui.label(r, 'log.changeset')
+        rev = ui.label(r, 'log.changeset changeset.%s' % repo[n].phasestr())
         spaces = " " * (30 - encoding.colwidth(t))
 
         tag = ui.label(t, 'tags.normal')
@@ -5835,7 +5870,7 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
 
     # with no argument, we also move the current bookmark, if any
     movemarkfrom = None
-    if rev is None or node == '':
+    if rev is None:
         movemarkfrom = repo['.'].node()
 
     # if we defined a bookmark, we have to remember the original bookmark name
@@ -5884,6 +5919,10 @@ def verify(ui, repo):
     the changelog, manifest, and tracked files, as well as the
     integrity of their crosslinks and indices.
 
+    Please see http://mercurial.selenic.com/wiki/RepositoryCorruption
+    for more information about recovery from corruption of the
+    repository.
+
     Returns 0 on success, 1 if errors are encountered.
     """
     return hg.verify(repo)
@@ -5906,3 +5945,5 @@ norepo = ("clone init version help debugcommands debugcomplete"
           " debugknown debuggetbundle debugbundle")
 optionalrepo = ("identify paths serve showconfig debugancestor debugdag"
                 " debugdata debugindex debugindexdot debugrevlog")
+inferrepo = ("add addremove annotate cat commit diff grep forget log parents"
+             " remove resolve status debugwalk")

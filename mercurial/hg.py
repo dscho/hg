@@ -10,7 +10,7 @@ from i18n import _
 from lock import release
 from node import hex, nullid
 import localrepo, bundlerepo, httppeer, sshpeer, statichttprepo, bookmarks
-import lock, util, extensions, error, node, scmutil
+import lock, util, extensions, error, node, scmutil, phases
 import cmdutil, discovery
 import merge as mergemod
 import verify as verifymod
@@ -303,7 +303,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
 
         copy = False
         if (srcrepo and srcrepo.cancopy() and islocal(dest)
-            and not srcrepo.revs("secret()")):
+            and not phases.hassecret(srcrepo)):
             copy = not pull and not rev
 
         if copy:
@@ -335,6 +335,16 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
                 raise
 
             destlock = copystore(ui, srcrepo, destpath)
+
+            # Recomputing branch cache might be slow on big repos,
+            # so just copy it
+            dstcachedir = os.path.join(destpath, 'cache')
+            srcbranchcache = srcrepo.sjoin('cache/branchheads')
+            dstbranchcache = os.path.join(dstcachedir, 'branchheads')
+            if os.path.exists(srcbranchcache):
+                if not os.path.exists(dstcachedir):
+                    os.mkdir(dstcachedir)
+                util.copyfile(srcbranchcache, dstbranchcache)
 
             # we need to re-init the repo after manually copying the data
             # into it
@@ -399,7 +409,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
             if update:
                 if update is not True:
                     checkout = srcpeer.lookup(update)
-                for test in (checkout, 'default', 'tip'):
+                for test in (checkout, '@', 'default', 'tip'):
                     if test is None:
                         continue
                     try:

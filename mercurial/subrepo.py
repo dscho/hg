@@ -674,8 +674,8 @@ class svnsubrepo(abstractsubrepo):
 
     @propertycache
     def _svnversion(self):
-        output, err = self._svncommand(['--version'], filename=None)
-        m = re.search(r'^svn,\s+version\s+(\d+)\.(\d+)', output)
+        output, err = self._svncommand(['--version', '--quiet'], filename=None)
+        m = re.search(r'^(\d+)\.(\d+)', output)
         if not m:
             raise util.Abort(_('cannot retrieve svn tool version'))
         return (int(m.group(1)), int(m.group(2)))
@@ -892,7 +892,7 @@ class gitsubrepo(abstractsubrepo):
     def _gitnodir(self, commands, env=None, stream=False, cwd=None):
         """Calls the git command
 
-        The methods tries to call the git command. versions previor to 1.6.0
+        The methods tries to call the git command. versions prior to 1.6.0
         are not supported and very probably fail.
         """
         self._ui.debug('%s: git %s\n' % (self._relpath, ' '.join(commands)))

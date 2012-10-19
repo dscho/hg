@@ -24,7 +24,7 @@
   >     echo % $3 and $4 disallowed should both give 403
   >     "$TESTDIR/get-with-headers.py" localhost:$HGPORT "archive/tip.$3" | head -n 1
   >     "$TESTDIR/get-with-headers.py" localhost:$HGPORT "archive/tip.$4" | head -n 1
-  >     "$TESTDIR/killdaemons.py"
+  >     "$TESTDIR/killdaemons.py" $DAEMON_PIDS
   >     cat errors.log
   >     cp .hg/hgrc-base .hg/hgrc
   > }
@@ -93,7 +93,7 @@ invalid arch type should give 404
       testing: test-archive-2c0277f05ed4/foo   OK
   No errors detected in compressed data of archive.zip.
 
-  $ "$TESTDIR/killdaemons.py"
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
 
   $ hg archive -t tar test.tar
   $ tar tf test.tar
@@ -224,19 +224,19 @@ enable progress extension:
   > width = 60
   > EOF
 
-  $ hg archive ../with-progress 2>&1 | "$TESTDIR/filtercr.py"
-  
-  archiving [                                           ] 0/4
-  archiving [                                           ] 0/4
-  archiving [=========>                                 ] 1/4
-  archiving [=========>                                 ] 1/4
-  archiving [====================>                      ] 2/4
-  archiving [====================>                      ] 2/4
-  archiving [===============================>           ] 3/4
-  archiving [===============================>           ] 3/4
-  archiving [==========================================>] 4/4
-  archiving [==========================================>] 4/4
-                                                              \r (esc)
+  $ hg archive ../with-progress
+  \r (no-eol) (esc)
+  archiving [                                           ] 0/4\r (no-eol) (esc)
+  archiving [                                           ] 0/4\r (no-eol) (esc)
+  archiving [=========>                                 ] 1/4\r (no-eol) (esc)
+  archiving [=========>                                 ] 1/4\r (no-eol) (esc)
+  archiving [====================>                      ] 2/4\r (no-eol) (esc)
+  archiving [====================>                      ] 2/4\r (no-eol) (esc)
+  archiving [===============================>           ] 3/4\r (no-eol) (esc)
+  archiving [===============================>           ] 3/4\r (no-eol) (esc)
+  archiving [==========================================>] 4/4\r (no-eol) (esc)
+  archiving [==========================================>] 4/4\r (no-eol) (esc)
+                                                              \r (no-eol) (esc)
 
 cleanup after progress extension test:
 

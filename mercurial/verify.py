@@ -96,16 +96,16 @@ def _verify(repo):
             p1, p2 = obj.parents(node)
             if p1 not in seen and p1 != nullid:
                 err(lr, _("unknown parent 1 %s of %s") %
-                    (short(p1), short(n)), f)
+                    (short(p1), short(node)), f)
             if p2 not in seen and p2 != nullid:
                 err(lr, _("unknown parent 2 %s of %s") %
-                    (short(p2), short(p1)), f)
+                    (short(p2), short(node)), f)
         except Exception, inst:
             exc(lr, _("checking parents of %s") % short(node), inst, f)
 
         if node in seen:
-            err(lr, _("duplicate revision %d (%d)") % (i, seen[n]), f)
-        seen[n] = i
+            err(lr, _("duplicate revision %d (%d)") % (i, seen[node]), f)
+        seen[node] = i
         return lr
 
     if os.path.exists(repo.sjoin("journal")):
@@ -120,7 +120,7 @@ def _verify(repo):
     havemf = len(mf) > 0
 
     ui.status(_("checking changesets\n"))
-    hasmanifest = False
+    refersmf = False
     seen = {}
     checklog(cl, "changelog", 0)
     total = len(repo)
@@ -133,17 +133,17 @@ def _verify(repo):
             changes = cl.read(n)
             if changes[0] != nullid:
                 mflinkrevs.setdefault(changes[0], []).append(i)
-                hasmanifest = True
+                refersmf = True
             for f in changes[3]:
                 filelinkrevs.setdefault(f, []).append(i)
         except Exception, inst:
-            hasmanifest = True
+            refersmf = True
             exc(i, _("unpacking changeset %s") % short(n), inst)
     ui.progress(_('checking'), None)
 
     ui.status(_("checking manifests\n"))
     seen = {}
-    if hasmanifest:
+    if refersmf:
         # Do not check manifest if there are only changelog entries with
         # null manifests.
         checklog(mf, "manifest", 0)
