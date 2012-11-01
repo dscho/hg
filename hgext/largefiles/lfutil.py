@@ -215,7 +215,7 @@ def copyfromcache(repo, hash, filename):
     return True
 
 def copytostore(repo, rev, file, uploaded=False):
-    hash = readstandin(repo, file)
+    hash = readstandin(repo, file, rev)
     if instore(repo, hash):
         return
     copytostoreabsolute(repo, repo.wjoin(file), hash)
@@ -234,7 +234,7 @@ def copytostoreabsolute(repo, file, hash):
     util.makedirs(os.path.dirname(storepath(repo, hash)))
     if inusercache(repo.ui, hash):
         link(usercachepath(repo.ui, hash), storepath(repo, hash))
-    else:
+    elif not getattr(repo, "_isconverting", False):
         dst = util.atomictempfile(storepath(repo, hash),
                                   createmode=repo.store.createmode)
         for chunk in util.filechunkiter(open(file, 'rb')):

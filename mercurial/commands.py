@@ -10,7 +10,7 @@ from lock import release
 from i18n import _, gettext
 import os, re, difflib, time, tempfile, errno
 import hg, scmutil, util, revlog, extensions, copies, error, bookmarks
-import patch, help, url, encoding, templatekw, discovery
+import patch, help, encoding, templatekw, discovery
 import archival, changegroup, cmdutil, hbisect
 import sshserver, hgweb, hgweb.server, commandserver
 import merge as mergemod
@@ -1590,7 +1590,7 @@ def debugbuilddag(ui, repo, text=None,
 @command('debugbundle', [('a', 'all', None, _('show all details'))], _('FILE'))
 def debugbundle(ui, bundlepath, all=None, **opts):
     """lists the contents of a bundle"""
-    f = url.open(ui, bundlepath)
+    f = hg.openpath(ui, bundlepath)
     try:
         gen = changegroup.readbundle(f, bundlepath)
         if all:
@@ -3538,7 +3538,7 @@ def identify(ui, repo, source=None, rev=None,
 
     if source:
         source, branches = hg.parseurl(ui.expandpath(source))
-        peer = hg.peer(ui, opts, source)
+        peer = hg.peer(repo or ui, opts, source) # only pass ui when no repo
         repo = peer.local()
         revs, checkout = hg.addbranchrevs(repo, peer, branches, None)
 
@@ -3856,7 +3856,7 @@ def import_(ui, repo, patch1=None, *patches, **opts):
                 else:
                     patchurl = os.path.join(base, patchurl)
                     ui.status(_('applying %s\n') % patchurl)
-                    patchfile = url.open(ui, patchurl)
+                    patchfile = hg.openpath(ui, patchurl)
 
                 haspatch = False
                 for hunk in patch.split(patchfile):
@@ -5464,6 +5464,7 @@ def summary(ui, repo, **opts):
     for p in parents:
         # label with log.changeset (instead of log.parent) since this
         # shows a working directory parent *changeset*:
+        # i18n: column positioning for "hg summary"
         ui.write(_('parent: %d:%s ') % (p.rev(), str(p)),
                  label='log.changeset changeset.%s' % p.phasestr())
         ui.write(' '.join(p.tags()), label='log.tag')
@@ -5481,6 +5482,7 @@ def summary(ui, repo, **opts):
 
     branch = ctx.branch()
     bheads = repo.branchheads(branch)
+    # i18n: column positioning for "hg summary"
     m = _('branch: %s\n') % branch
     if branch != 'default':
         ui.write(m, label='log.branch')
@@ -5489,6 +5491,7 @@ def summary(ui, repo, **opts):
 
     if marks:
         current = repo._bookmarkcurrent
+        # i18n: column positioning for "hg summary"
         ui.write(_('bookmarks:'), label='log.bookmark')
         if current is not None:
             try:
@@ -5554,8 +5557,10 @@ def summary(ui, repo, **opts):
         t += _(' (new branch head)')
 
     if cleanworkdir:
+        # i18n: column positioning for "hg summary"
         ui.status(_('commit: %s\n') % t.strip())
     else:
+        # i18n: column positioning for "hg summary"
         ui.write(_('commit: %s\n') % t.strip())
 
     # all ancestors of branch heads - all ancestors of parent = new csets
@@ -5573,10 +5578,13 @@ def summary(ui, repo, **opts):
     new = sum(new)
 
     if new == 0:
+        # i18n: column positioning for "hg summary"
         ui.status(_('update: (current)\n'))
     elif pnode not in bheads:
+        # i18n: column positioning for "hg summary"
         ui.write(_('update: %d new changesets (update)\n') % new)
     else:
+        # i18n: column positioning for "hg summary"
         ui.write(_('update: %d new changesets, %d branch heads (merge)\n') %
                  (new, len(bheads)))
 
@@ -5618,8 +5626,10 @@ def summary(ui, repo, **opts):
                 t.append(_('%d outgoing bookmarks') % len(diff))
 
         if t:
+            # i18n: column positioning for "hg summary"
             ui.write(_('remote: %s\n') % (', '.join(t)))
         else:
+            # i18n: column positioning for "hg summary"
             ui.status(_('remote: (synced)\n'))
 
 @command('tag',
@@ -5804,7 +5814,7 @@ def unbundle(ui, repo, fname1, *fnames, **opts):
     wc = repo['.']
     try:
         for fname in fnames:
-            f = url.open(ui, fname)
+            f = hg.openpath(ui, fname)
             gen = changegroup.readbundle(f, fname)
             modheads = repo.addchangegroup(gen, 'unbundle', 'bundle:' + fname)
     finally:

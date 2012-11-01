@@ -395,7 +395,11 @@ class hgsubrepo(abstractsubrepo):
         if not os.path.exists(os.path.join(root, '.hg')):
             create = True
             util.makedirs(root)
-        self._repo = hg.repository(r.ui, root, create=create)
+        self._repo = hg.repository(r.baseui, root, create=create)
+        for s, k in [('ui', 'commitsubrepos')]:
+            v = r.ui.config(s, k)
+            if v:
+                self._repo.ui.setconfig(s, k, v)
         self._initrepo(r, state[0], create)
 
     def _initrepo(self, parentrepo, source, create):
@@ -497,13 +501,13 @@ class hgsubrepo(abstractsubrepo):
         if revision not in self._repo:
             self._repo._subsource = source
             srcurl = _abssource(self._repo)
-            other = hg.peer(self._repo.ui, {}, srcurl)
+            other = hg.peer(self._repo, {}, srcurl)
             if len(self._repo) == 0:
                 self._repo.ui.status(_('cloning subrepo %s from %s\n')
                                      % (subrelpath(self), srcurl))
                 parentrepo = self._repo._subparent
                 shutil.rmtree(self._repo.path)
-                other, cloned = hg.clone(self._repo._subparent.ui, {},
+                other, cloned = hg.clone(self._repo._subparent.baseui, {},
                                          other, self._repo.root,
                                          update=False)
                 self._repo = cloned.local()
@@ -519,7 +523,7 @@ class hgsubrepo(abstractsubrepo):
         self._get(state)
         source, revision, kind = state
         self._repo.ui.debug("getting subrepo %s\n" % self._path)
-        hg.clean(self._repo, revision, False)
+        hg.updaterepo(self._repo, revision, overwrite)
 
     def merge(self, state):
         self._get(state)
@@ -562,7 +566,7 @@ class hgsubrepo(abstractsubrepo):
         dsturl = _abssource(self._repo, True)
         self._repo.ui.status(_('pushing subrepo %s to %s\n') %
             (subrelpath(self), dsturl))
-        other = hg.peer(self._repo.ui, {'ssh': ssh}, dsturl)
+        other = hg.peer(self._repo, {'ssh': ssh}, dsturl)
         return self._repo.push(other, force, newbranch=newbranch)
 
     def outgoing(self, ui, dest, opts):
