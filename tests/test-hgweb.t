@@ -75,7 +75,7 @@ should give a 404 - static file that does not exist
   
   <div class="main">
   
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>error</h3>
   
   <form class="search" action="/log">
@@ -165,7 +165,7 @@ should give a 404 - file does not exist
   
   <div class="main">
   
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>error</h3>
   
   <form class="search" action="/log">
@@ -243,7 +243,7 @@ try bad style
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>directory / @ 0:2ef0ac749a14 <span class="tag">tip</span> </h3>
   
   <form class="search" action="/log">
@@ -310,8 +310,10 @@ Test the access/error files are opened in append mode
 
 static file
 
-  $ "$TESTDIR/get-with-headers.py" --twice localhost:$HGPORT 'static/style-gitweb.css'
+  $ "$TESTDIR/get-with-headers.py" --twice localhost:$HGPORT 'static/style-gitweb.css' - date etag server
   200 Script output follows
+  content-length: 4619
+  content-type: text/css
   
   body { font-family: sans-serif; font-size: 12px; margin:0px; border:solid #d9d8d1; border-width:1px; margin:10px; }
   a { color:#0000cc; }

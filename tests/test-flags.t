@@ -79,8 +79,11 @@ the changelog should mention file a:
 
   $ hg -v merge
   resolving manifests
-  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
+  $ cat a
+  123
+  $ [ -x a ]
 
   $ cd ../test3
   $ echo 123 >>b
@@ -128,7 +131,7 @@ the changelog should mention file a:
 
   $ hg -v merge
   resolving manifests
-  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
 
   $ ls -l ../test[123]/a > foo

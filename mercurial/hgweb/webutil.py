@@ -24,46 +24,100 @@ def up(p):
         return "/"
     return up + "/"
 
-def revnavgen(pos, pagelen, limit, nodefunc):
-    def seq(factor, limit=None):
-        if limit:
-            yield limit
-            if limit >= 20 and limit <= 40:
-                yield 50
-        else:
-            yield 1 * factor
-            yield 3 * factor
-        for f in seq(factor * 10):
-            yield f
+def _navseq(step, firststep=None):
+    if firststep:
+        yield firststep
+        if firststep >= 20 and firststep <= 40:
+            firststep = 50
+            yield firststep
+        assert step > 0
+        assert firststep > 0
+        while step <= firststep:
+            step *= 10
+    while True:
+        yield 1 * step
+        yield 3 * step
+        step *= 10
 
-    navbefore = []
-    navafter = []
+class revnav(object):
 
-    last = 0
-    for f in seq(1, pagelen):
-        if f < pagelen or f <= last:
-            continue
-        if f > limit:
-            break
-        last = f
-        if pos + f < limit:
-            navafter.append(("+%d" % f, hex(nodefunc(pos + f).node())))
-        if pos - f >= 0:
-            navbefore.insert(0, ("-%d" % f, hex(nodefunc(pos - f).node())))
+    def __init__(self, repo):
+        """Navigation generation object
 
-    navafter.append(("tip", "tip"))
-    try:
-        navbefore.insert(0, ("(0)", hex(nodefunc('0').node())))
-    except error.RepoError:
-        pass
+        :repo: repo object we generate nav for
+        """
+        # used for hex generation
+        self._revlog = repo.changelog
 
-    def gen(l):
-        def f(**map):
-            for label, node in l:
-                yield {"label": label, "node": node}
-        return f
+    def __nonzero__(self):
+        """return True if any revision to navigate over"""
+        try:
+            self._revlog.node(0)
+            return True
+        except error.RepoError:
+            return False
 
-    return (dict(before=gen(navbefore), after=gen(navafter)),)
+    def hex(self, rev):
+        return hex(self._revlog.node(rev))
+
+    def gen(self, pos, pagelen, limit):
+        """computes label and revision id for navigation link
+
+        :pos: is the revision relative to which we generate navigation.
+        :pagelen: the size of each navigation page
+        :limit: how far shall we link
+
+        The return is:
+            - a single element tuple
+            - containing a dictionary with a `before` and `after` key
+            - values are generator functions taking arbitrary number of kwargs
+            - yield items are dictionaries with `label` and `node` keys
+        """
+        if not self:
+            # empty repo
+            return ({'before': (), 'after': ()},)
+
+        targets = []
+        for f in _navseq(1, pagelen):
+            if f > limit:
+                break
+            targets.append(pos + f)
+            targets.append(pos - f)
+        targets.sort()
+
+        navbefore = [("(0)", self.hex(0))]
+        navafter = []
+        for rev in targets:
+            if rev not in self._revlog:
+                continue
+            if pos < rev < limit:
+                navafter.append(("+%d" % f, self.hex(rev)))
+            if 0 < rev < pos:
+                navbefore.append(("-%d" % f, self.hex(rev)))
+
+
+        navafter.append(("tip", "tip"))
+
+        data = lambda i: {"label": i[0], "node": i[1]}
+        return ({'before': lambda **map: (data(i) for i in navbefore),
+                 'after':  lambda **map: (data(i) for i in navafter)},)
+
+class filerevnav(revnav):
+
+    def __init__(self, repo, path):
+        """Navigation generation object
+
+        :repo: repo object we generate nav for
+        :path: path of the file we generate nav for
+        """
+        # used for iteration
+        self._changelog = repo.unfiltered().changelog
+        # used for hex generation
+        self._revlog = repo.file(path)
+
+    def hex(self, rev):
+        return hex(self._changelog.node(self._revlog.linkrev(rev)))
+
 
 def _siblings(siblings=[], hiderev=None):
     siblings = [s for s in siblings if s.node() != nullid]
@@ -140,13 +194,7 @@ def cleanpath(repo, path):
     path = path.lstrip('/')
     return scmutil.canonpath(repo.root, '', path)
 
-def changectx(repo, req):
-    changeid = "tip"
-    if 'node' in req.form:
-        changeid = req.form['node'][0]
-    elif 'manifest' in req.form:
-        changeid = req.form['manifest'][0]
-
+def changeidctx (repo, changeid):
     try:
         ctx = repo[changeid]
     except error.RepoError:
@@ -154,6 +202,28 @@ def changectx(repo, req):
         ctx = repo[man.linkrev(man.rev(man.lookup(changeid)))]
 
     return ctx
+
+def changectx (repo, req):
+    changeid = "tip"
+    if 'node' in req.form:
+        changeid = req.form['node'][0]
+        ipos=changeid.find(':')
+        if ipos != -1:
+            changeid = changeid[(ipos + 1):]
+    elif 'manifest' in req.form:
+        changeid = req.form['manifest'][0]
+
+    return changeidctx(repo, changeid)
+
+def basechangectx(repo, req):
+    if 'node' in req.form:
+        changeid = req.form['node'][0]
+        ipos=changeid.find(':')
+        if ipos != -1:
+            changeid = changeid[:ipos]
+            return changeidctx(repo, changeid)
+
+    return None
 
 def filectx(repo, req):
     if 'file' not in req.form:
@@ -178,7 +248,7 @@ def listfilediffs(tmpl, files, node, max):
     if len(files) > max:
         yield tmpl('fileellipses')
 
-def diffs(repo, tmpl, ctx, files, parity, style):
+def diffs(repo, tmpl, ctx, basectx, files, parity, style):
 
     def countgen():
         start = 1
@@ -209,8 +279,11 @@ def diffs(repo, tmpl, ctx, files, parity, style):
         m = match.always(repo.root, repo.getcwd())
 
     diffopts = patch.diffopts(repo.ui, untrusted=True)
-    parents = ctx.parents()
-    node1 = parents and parents[0].node() or nullid
+    if basectx is None:
+        parents = ctx.parents()
+        node1 = parents and parents[0].node() or nullid
+    else:
+        node1 = basectx.node()
     node2 = ctx.node()
 
     block = []
@@ -274,10 +347,10 @@ def compare(tmpl, context, leftlines, rightlines):
         for oc in s.get_grouped_opcodes(n=context):
             yield tmpl('comparisonblock', lines=getblock(oc))
 
-def diffstatgen(ctx):
+def diffstatgen(ctx, basectx):
     '''Generator function that provides the diffstat data.'''
 
-    stats = patch.diffstatdata(util.iterlines(ctx.diff()))
+    stats = patch.diffstatdata(util.iterlines(ctx.diff(basectx)))
     maxname, maxtotal, addtotal, removetotal, binary = patch.diffstatsum(stats)
     while True:
         yield stats, maxname, maxtotal, addtotal, removetotal, binary
@@ -321,7 +394,7 @@ class sessionvars(object):
         return sessionvars(copy.copy(self.vars), self.start)
     def __iter__(self):
         separator = self.start
-        for key, value in self.vars.iteritems():
+        for key, value in sorted(self.vars.iteritems()):
             yield {'name': key, 'value': str(value), 'separator': separator}
             separator = '&'
 

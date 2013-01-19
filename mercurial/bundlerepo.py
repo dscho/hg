@@ -14,25 +14,28 @@ were part of the actual repository.
 from node import nullid
 from i18n import _
 import os, tempfile, shutil
-import changegroup, util, mdiff, discovery, cmdutil
+import changegroup, util, mdiff, discovery, cmdutil, scmutil
 import localrepo, changelog, manifest, filelog, revlog, error
 
 class bundlerevlog(revlog.revlog):
     def __init__(self, opener, indexfile, bundle, linkmapper):
         # How it works:
-        # to retrieve a revision, we need to know the offset of
-        # the revision in the bundle (an unbundle object).
+        # To retrieve a revision, we need to know the offset of the revision in
+        # the bundle (an unbundle object). We store this offset in the index
+        # (start).
         #
-        # We store this offset in the index (start), to differentiate a
-        # rev in the bundle and from a rev in the revlog, we check
-        # len(index[r]). If the tuple is bigger than 7, it is a bundle
-        # (it is bigger since we store the node to which the delta is)
+        # basemap is indexed with revisions coming from the bundle, and it
+        # maps to the revision that is the base of the corresponding delta.
         #
+        # To differentiate a rev in the bundle from a rev in the revlog, we
+        # check revision against basemap.
+        opener = scmutil.readonlyvfs(opener)
         revlog.revlog.__init__(self, opener, indexfile)
         self.bundle = bundle
-        self.basemap = {}
+        self.basemap = {} # mapping rev to delta base rev
         n = len(self)
         chain = None
+        self.bundlerevs = set() # used by 'bundle()' revset expression
         while True:
             chunkdata = bundle.deltachunk(chain)
             if not chunkdata:
@@ -51,49 +54,50 @@ class bundlerevlog(revlog.revlog):
             if node in self.nodemap:
                 # this can happen if two branches make the same change
                 chain = node
+                self.bundlerevs.add(self.nodemap[node])
                 continue
 
             for p in (p1, p2):
                 if p not in self.nodemap:
                     raise error.LookupError(p, self.indexfile,
                                             _("unknown parent"))
+
+            if deltabase not in self.nodemap:
+                raise LookupError(deltabase, self.indexfile,
+                                  _('unknown delta base'))
+
+            baserev = self.rev(deltabase)
             # start, size, full unc. size, base (unused), link, p1, p2, node
             e = (revlog.offset_type(start, 0), size, -1, -1, link,
                  self.rev(p1), self.rev(p2), node)
-            self.basemap[n] = deltabase
+            self.basemap[n] = baserev
             self.index.insert(-1, e)
             self.nodemap[node] = n
+            self.bundlerevs.add(n)
             chain = node
             n += 1
 
-    def inbundle(self, rev):
-        """is rev from the bundle"""
-        if rev < 0:
-            return False
-        return rev in self.basemap
-    def bundlebase(self, rev):
-        return self.basemap[rev]
     def _chunk(self, rev):
-        # Warning: in case of bundle, the diff is against bundlebase,
+        # Warning: in case of bundle, the diff is against self.basemap,
         # not against rev - 1
         # XXX: could use some caching
-        if not self.inbundle(rev):
+        if rev not in self.basemap:
             return revlog.revlog._chunk(self, rev)
         self.bundle.seek(self.start(rev))
         return self.bundle.read(self.length(rev))
 
     def revdiff(self, rev1, rev2):
         """return or calculate a delta between two revisions"""
-        if self.inbundle(rev1) and self.inbundle(rev2):
+        if rev1 in self.basemap and rev2 in self.basemap:
             # hot path for bundle
-            revb = self.rev(self.bundlebase(rev2))
+            revb = self.basemap[rev2]
             if revb == rev1:
                 return self._chunk(rev2)
-        elif not self.inbundle(rev1) and not self.inbundle(rev2):
+        elif rev1 not in self.basemap and rev2 not in self.basemap:
             return revlog.revlog.revdiff(self, rev1, rev2)
 
         return mdiff.textdiff(self.revision(self.node(rev1)),
-                         self.revision(self.node(rev2)))
+                              self.revision(self.node(rev2)))
 
     def revision(self, nodeorrev):
         """return an uncompressed revision of a given node or revision
@@ -111,28 +115,23 @@ class bundlerevlog(revlog.revlog):
 
         text = None
         chain = []
-        iter_node = node
+        iterrev = rev
         # reconstruct the revision if it is from a changegroup
-        while self.inbundle(rev):
-            if self._cache and self._cache[0] == iter_node:
+        while iterrev in self.basemap:
+            if self._cache and self._cache[1] == iterrev:
                 text = self._cache[2]
                 break
-            chain.append(rev)
-            iter_node = self.bundlebase(rev)
-            rev = self.rev(iter_node)
+            chain.append(iterrev)
+            iterrev = self.basemap[iterrev]
         if text is None:
-            text = revlog.revlog.revision(self, iter_node)
+            text = revlog.revlog.revision(self, iterrev)
 
         while chain:
             delta = self._chunk(chain.pop())
             text = mdiff.patches(text, [delta])
 
-        p1, p2 = self.parents(node)
-        if node != revlog.hash(text, p1, p2):
-            raise error.RevlogError(_("integrity check failed on %s:%d")
-                                     % (self.datafile, self.rev(node)))
-
-        self._cache = (node, self.rev(node), text)
+        self._checkhash(text, node, rev)
+        self._cache = (node, rev, text)
         return text
 
     def addrevision(self, text, transaction, link, p1=None, p2=None, d=None):
@@ -212,7 +211,7 @@ class bundlerepository(localrepo.localrepository):
         # dict with the mapping 'filename' -> position in the bundle
         self.bundlefilespos = {}
 
-    @util.propertycache
+    @localrepo.unfilteredpropertycache
     def changelog(self):
         # consume the header if it exists
         self.bundle.changelogheader()
@@ -220,7 +219,7 @@ class bundlerepository(localrepo.localrepository):
         self.manstart = self.bundle.tell()
         return c
 
-    @util.propertycache
+    @localrepo.unfilteredpropertycache
     def manifest(self):
         self.bundle.seek(self.manstart)
         # consume the header if it exists
@@ -229,12 +228,12 @@ class bundlerepository(localrepo.localrepository):
         self.filestart = self.bundle.tell()
         return m
 
-    @util.propertycache
+    @localrepo.unfilteredpropertycache
     def manstart(self):
         self.changelog
         return self.manstart
 
-    @util.propertycache
+    @localrepo.unfilteredpropertycache
     def filestart(self):
         self.manifest
         return self.filestart
@@ -256,8 +255,6 @@ class bundlerepository(localrepo.localrepository):
                     if not c:
                         break
 
-        if f[0] == '/':
-            f = f[1:]
         if f in self.bundlefilespos:
             self.bundle.seek(self.bundlefilespos[f])
             return bundlefilelog(self.sopener, f, self.bundle,
@@ -282,9 +279,6 @@ class bundlerepository(localrepo.localrepository):
     def getcwd(self):
         return os.getcwd() # always outside the repo
 
-    def _writebranchcache(self, branches, tip, tiprev):
-        # don't overwrite the disk cache with bundle-augmented data
-        pass
 
 def instance(ui, path, create):
     if create:
@@ -384,4 +378,3 @@ def getremotechanges(ui, repo, other, onlyheads=None, bundlename=None,
         other.close()
 
     return (localrepo, csets, cleanup)
-

@@ -134,8 +134,7 @@ class statichttprepository(localrepo.localrepository):
         self.changelog = changelog.changelog(self.sopener)
         self._tags = None
         self.nodetagscache = None
-        self._branchcache = None
-        self._branchcachetip = None
+        self._branchcaches = {}
         self.encodepats = None
         self.decodepats = None
 

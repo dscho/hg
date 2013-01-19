@@ -74,8 +74,11 @@ class tarit(object):
         def _write_gzip_header(self):
             self.fileobj.write('\037\213')             # magic header
             self.fileobj.write('\010')                 # compression method
-            # Python 2.6 deprecates self.filename
-            fname = getattr(self, 'name', None) or self.filename
+            # Python 2.6 introduced self.name and deprecated self.filename
+            try:
+                fname = self.name
+            except AttributeError:
+                fname = self.filename
             if fname and fname.endswith('.gz'):
                 fname = fname[:-3]
             flags = 0
@@ -103,7 +106,6 @@ class tarit(object):
                 self.fileobj = gzfileobj
                 return tarfile.TarFile.taropen(name, mode, gzfileobj)
             else:
-                self.fileobj = fileobj
                 return tarfile.open(name, mode + kind, fileobj)
 
         if isinstance(dest, str):
@@ -191,7 +193,7 @@ class zipit(object):
                                0x5455,     # block type: "extended-timestamp"
                                1 + 4,      # size of this block
                                1,          # "modification time is present"
-                               self.mtime) # time of last modification (UTC)
+                               int(self.mtime)) # last modification (UTC)
         self.z.writestr(i, data)
 
     def done(self):
@@ -297,7 +299,7 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
     repo.ui.progress(_('archiving'), None)
 
     if subrepos:
-        for subpath in ctx.substate:
+        for subpath in sorted(ctx.substate):
             sub = ctx.sub(subpath)
             submatch = matchmod.narrowmatcher(subpath, matchfn)
             sub.archive(repo.ui, archiver, prefix, submatch)

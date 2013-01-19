@@ -257,11 +257,14 @@ class revlog(object):
         return iter(xrange(len(self)))
     def revs(self, start=0, stop=None):
         """iterate over all rev in this revlog (from start to stop)"""
-        if stop is None:
-            stop = len(self)
+        step = 1
+        if stop is not None:
+            if start > stop:
+                step = -1
+            stop += step
         else:
-            stop += 1
-        return xrange(start, stop)
+            stop = len(self)
+        return xrange(start, stop, step)
 
     @util.propertycache
     def nodemap(self):
@@ -338,33 +341,14 @@ class revlog(object):
         return len(t)
     size = rawsize
 
-    def ancestors(self, revs, stoprev=0):
+    def ancestors(self, revs, stoprev=0, inclusive=False):
         """Generate the ancestors of 'revs' in reverse topological order.
         Does not generate revs lower than stoprev.
 
-        Yield a sequence of revision numbers starting with the parents
-        of each revision in revs, i.e., each revision is *not* considered
-        an ancestor of itself.  Results are in breadth-first order:
-        parents of each rev in revs, then parents of those, etc.  Result
-        does not include the null revision."""
-        visit = util.deque(revs)
-        seen = set([nullrev])
-        while visit:
-            for parent in self.parentrevs(visit.popleft()):
-                if parent < stoprev:
-                    continue
-                if parent not in seen:
-                    visit.append(parent)
-                    seen.add(parent)
-                    yield parent
+        See the documentation for ancestor.lazyancestors for more details."""
 
-    def incancestors(self, revs, stoprev=0):
-        """Identical to ancestors() except it also generates the
-        revisions, 'revs'"""
-        for rev in revs:
-            yield rev
-        for rev in self.ancestors(revs, stoprev):
-            yield rev
+        return ancestor.lazyancestors(self, revs, stoprev=stoprev,
+                                      inclusive=inclusive)
 
     def descendants(self, revs):
         """Generate the descendants of 'revs' in revision order.
@@ -429,6 +413,29 @@ class revlog(object):
         missing.sort()
         return has, [self.node(r) for r in missing]
 
+    def findmissingrevs(self, common=None, heads=None):
+        """Return the revision numbers of the ancestors of heads that
+        are not ancestors of common.
+
+        More specifically, return a list of revision numbers corresponding to
+        nodes N such that every N satisfies the following constraints:
+
+          1. N is an ancestor of some node in 'heads'
+          2. N is not an ancestor of any node in 'common'
+
+        The list is sorted by revision number, meaning it is
+        topologically sorted.
+
+        'heads' and 'common' are both lists of revision numbers.  If heads is
+        not supplied, uses all of the revlog's heads.  If common is not
+        supplied, uses nullid."""
+        if common is None:
+            common = [nullrev]
+        if heads is None:
+            heads = self.headrevs()
+
+        return ancestor.missingancestors(heads, common, self.parentrevs)
+
     def findmissing(self, common=None, heads=None):
         """Return the ancestors of heads that are not ancestors of common.
 
@@ -444,8 +451,16 @@ class revlog(object):
         'heads' and 'common' are both lists of node IDs.  If heads is
         not supplied, uses all of the revlog's heads.  If common is not
         supplied, uses nullid."""
-        _common, missing = self.findcommonmissing(common, heads)
-        return missing
+        if common is None:
+            common = [nullid]
+        if heads is None:
+            heads = self.heads()
+
+        common = [self.rev(n) for n in common]
+        heads = [self.rev(n) for n in heads]
+
+        return [self.node(r) for r in
+                ancestor.missingancestors(heads, common, self.parentrevs)]
 
     def nodesbetween(self, roots=None, heads=None):
         """Return a topological path from 'roots' to 'heads'.

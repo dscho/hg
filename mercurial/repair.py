@@ -6,7 +6,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from mercurial import changegroup, bookmarks
+from mercurial import changegroup
 from mercurial.node import short
 from mercurial.i18n import _
 import os
@@ -56,10 +56,8 @@ def _collectbrokencsets(repo, files, striprev):
     return s
 
 def strip(ui, repo, nodelist, backup="all", topic='backup'):
-    # It simplifies the logic around updating the branchheads cache if we only
-    # have to consider the effect of the stripped revisions and not revisions
-    # missing because the cache is out-of-date.
-    repo.updatebranchcache()
+    repo = repo.unfiltered()
+    repo.destroying()
 
     cl = repo.changelog
     # TODO handle undo of merge sets
@@ -67,17 +65,6 @@ def strip(ui, repo, nodelist, backup="all", topic='backup'):
         nodelist = [nodelist]
     striplist = [cl.rev(node) for node in nodelist]
     striprev = min(striplist)
-
-    # Generate set of branches who will have nodes stripped.
-    striprevs = repo.revs("%ld::", striplist)
-    stripbranches = set([repo[rev].branch() for rev in striprevs])
-
-    # Set of potential new heads resulting from the strip.  The parents of any
-    # node removed could be a new head because the node to be removed could have
-    # been the only child of the parent.
-    newheadrevs = repo.revs("parents(%ld::) - %ld::", striprevs, striprevs)
-    newheadnodes = set([cl.node(rev) for rev in newheadrevs])
-    newheadbranches = set([repo[rev].branch() for rev in newheadrevs])
 
     keeppartialbundle = backup == 'strip'
 
@@ -111,8 +98,10 @@ def strip(ui, repo, nodelist, backup="all", topic='backup'):
         saverevs.difference_update(descendants)
     savebases = [cl.node(r) for r in saverevs]
     stripbases = [cl.node(r) for r in tostrip]
-    newbmtarget = repo.revs('sort(heads((::%ld) - (%ld)), -rev)',
-                            tostrip, tostrip)
+
+    # For a set s, max(parents(s) - s) is the same as max(heads(::s - s)), but
+    # is much faster
+    newbmtarget = repo.revs('max(parents(%ld) - (%ld))', tostrip, tostrip)
     if newbmtarget:
         newbmtarget = repo[newbmtarget[0]].node()
     else:
@@ -181,7 +170,7 @@ def strip(ui, repo, nodelist, backup="all", topic='backup'):
 
         for m in updatebm:
             bm[m] = repo[newbmtarget].node()
-        bookmarks.write(repo)
+        bm.write()
     except: # re-raises
         if backupfile:
             ui.warn(_("strip failed, full bundle stored in '%s'\n")
@@ -191,10 +180,4 @@ def strip(ui, repo, nodelist, backup="all", topic='backup'):
                     % chgrpfile)
         raise
 
-    if len(stripbranches) == 1 and len(newheadbranches) == 1 \
-            and stripbranches == newheadbranches:
-        repo.destroyed(newheadnodes)
-    else:
-        # Multiple branches involved in strip. Will allow branchcache to become
-        # invalid and later on rebuilt from scratch
-        repo.destroyed()
+    repo.destroyed()

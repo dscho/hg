@@ -59,7 +59,7 @@ revision
   
   <div class="main">
   
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>changeset 1:c78f6c5cbea9  <span class="tag">tip</span>  </h3>
   
   <form class="search" action="/log">
@@ -111,6 +111,14 @@ revision
   </table>
       </div>
     </td>
+  </tr>
+  <tr>
+   <th class="author">change baseline</th>
+   <td class="author"><a href="/rev/cb9a9f314b8b:c78f6c5cbea9">cb9a9f314b8b</a> </td>
+  </tr>
+  <tr>
+   <th class="author">current baseline</th>
+   <td class="author"><a href="/rev/cb9a9f314b8b">cb9a9f314b8b</a></td>
   </tr>
   </table>
   
@@ -182,7 +190,7 @@ diff removed file
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>diff a @ 1:c78f6c5cbea9</h3>
   
   <form class="search" action="/log">

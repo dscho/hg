@@ -275,10 +275,16 @@ Logs and changes
   <ul>
    <li><a href="/help">help</a></li>
   </ul>
+  <p>
+  <div class="atom-logo">
+  <a href="/atom-log" title="subscribe to atom feed">
+  <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed">
+  </a>
+  </div>
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>log</h3>
   
   <form class="search" action="/log">
@@ -380,7 +386,7 @@ Logs and changes
   
   <div class="main">
   
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>changeset 0:2ef0ac749a14  <span class="tag">1.0</span>  <span class="tag">anotherthing</span> </h3>
   
   <form class="search" action="/log">
@@ -440,6 +446,14 @@ Logs and changes
   </table>
       </div>
     </td>
+  </tr>
+  <tr>
+   <th class="author">change baseline</th>
+   <td class="author"></td>
+  </tr>
+  <tr>
+   <th class="author">current baseline</th>
+   <td class="author"><a href="/rev/000000000000">000000000000</a></td>
   </tr>
   </table>
   
@@ -514,7 +528,7 @@ Logs and changes
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>searching for 'base'</h3>
   
   <form class="search" action="/log">
@@ -628,7 +642,7 @@ File-related
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>view foo @ 1:a4f92ed23982</h3>
   
   <form class="search" action="/log">
@@ -738,8 +752,8 @@ Overviews
   <body>
   
   <div class="page_header">
-  <a href="http://mercurial.selenic.com/" title="Mercurial" style="float: right;">Mercurial</a><a href="/summary?style=gitweb">test</a> / summary
-  
+  <a href="http://mercurial.selenic.com/" title="Mercurial" style="float: right;">Mercurial</a>
+  <a href="/">Mercurial</a>  / summary
   <form action="/log">
   <input type="hidden" name="style" value="gitweb" />
   <div class="search">
@@ -941,7 +955,8 @@ Overviews
   <body>
   
   <div class="page_header">
-  <a href="http://mercurial.selenic.com/" title="Mercurial" style="float: right;">Mercurial</a><a href="/summary?style=gitweb">test</a> / graph
+  <a href="http://mercurial.selenic.com/" title="Mercurial" style="float: right;">Mercurial</a>
+  <a href="/">Mercurial</a>  / graph
   </div>
   
   <form action="/log">
@@ -961,8 +976,8 @@ Overviews
   <a href="/file/cad8025a2e87?style=gitweb">files</a> |
   <a href="/help?style=gitweb">help</a>
   <br/>
-  <a href="/graph/3?style=gitweb&revcount=30">less</a>
-  <a href="/graph/3?style=gitweb&revcount=120">more</a>
+  <a href="/graph/3?revcount=30&style=gitweb">less</a>
+  <a href="/graph/3?revcount=120&style=gitweb">more</a>
   | <a href="/graph/2ef0ac749a14?style=gitweb">(0)</a> <a href="/graph/tip?style=gitweb">tip</a> <br/>
   </div>
   
@@ -1034,8 +1049,8 @@ Overviews
   </script>
   
   <div class="page_nav">
-  <a href="/graph/3?style=gitweb&revcount=30">less</a>
-  <a href="/graph/3?style=gitweb&revcount=120">more</a>
+  <a href="/graph/3?revcount=30&style=gitweb">less</a>
+  <a href="/graph/3?revcount=120&style=gitweb">more</a>
   | <a href="/graph/2ef0ac749a14?style=gitweb">(0)</a> <a href="/graph/tip?style=gitweb">tip</a> 
   </div>
   

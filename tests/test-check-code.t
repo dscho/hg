@@ -110,6 +110,18 @@
    > class empty():
    class foo() not available in Python 2.4, use class foo(object)
   [1]
+  $ cat > python3-compat.py << EOF
+  > foo <> bar
+  > reduce(lambda a, b: a + b, [1, 2, 3, 4])
+  > EOF
+  $ "$check_code" python3-compat.py
+  python3-compat.py:1:
+   > foo <> bar
+   <> operator is not available in Python 3+, use !=
+  python3-compat.py:2:
+   > reduce(lambda a, b: a + b, [1, 2, 3, 4])
+   reduce is not available in Python 3+
+  [1]
 
   $ cat > is-op.py <<EOF
   > # is-operator comparing number or string literal
@@ -158,4 +170,15 @@
   warning.py:0:
    > except:
    warning: naked except clause
+  [1]
+
+  $ cat > raise-format.py <<EOF
+  > raise SomeException, message
+  > # this next line is okay
+  > raise SomeException(arg1, arg2)
+  > EOF
+  $ "$check_code" raise-format.py
+  raise-format.py:1:
+   > raise SomeException, message
+   don't use old-style two-argument raise, use Exception(message)
   [1]

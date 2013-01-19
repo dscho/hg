@@ -18,42 +18,9 @@ from mercurial import dirstate, httpconnection, match as match_, util, scmutil
 from mercurial.i18n import _
 
 shortname = '.hglf'
+shortnameslash = shortname + '/'
 longname = 'largefiles'
 
-
-# -- Portability wrappers ----------------------------------------------
-
-def dirstatewalk(dirstate, matcher, unknown=False, ignored=False):
-    return dirstate.walk(matcher, [], unknown, ignored)
-
-def repoadd(repo, list):
-    add = repo[None].add
-    return add(list)
-
-def reporemove(repo, list, unlink=False):
-    def remove(list, unlink):
-        wlock = repo.wlock()
-        try:
-            if unlink:
-                for f in list:
-                    try:
-                        util.unlinkpath(repo.wjoin(f))
-                    except OSError, inst:
-                        if inst.errno != errno.ENOENT:
-                            raise
-            repo[None].forget(list)
-        finally:
-            wlock.release()
-    return remove(list, unlink=unlink)
-
-def repoforget(repo, list):
-    forget = repo[None].forget
-    return forget(list)
-
-def findoutgoing(repo, remote, force):
-    from mercurial import discovery
-    outgoing = discovery.findcommonoutgoing(repo, remote.peer(), force=force)
-    return outgoing.missing
 
 # -- Private worker functions ------------------------------------------
 
@@ -139,24 +106,26 @@ class largefilesdirstate(dirstate.dirstate):
         return super(largefilesdirstate, self).forget(unixpath(f))
     def normallookup(self, f):
         return super(largefilesdirstate, self).normallookup(unixpath(f))
+    def _ignore(self):
+        return False
 
 def openlfdirstate(ui, repo, create=True):
     '''
     Return a dirstate object that tracks largefiles: i.e. its root is
     the repo root, but it is saved in .hg/largefiles/dirstate.
     '''
-    admin = repo.join(longname)
-    opener = scmutil.opener(admin)
+    lfstoredir = repo.join(longname)
+    opener = scmutil.opener(lfstoredir)
     lfdirstate = largefilesdirstate(opener, ui, repo.root,
                                      repo.dirstate._validate)
 
     # If the largefiles dirstate does not exist, populate and create
     # it. This ensures that we create it on the first meaningful
     # largefiles operation in a new clone.
-    if create and not os.path.exists(os.path.join(admin, 'dirstate')):
-        util.makedirs(admin)
+    if create and not os.path.exists(os.path.join(lfstoredir, 'dirstate')):
+        util.makedirs(lfstoredir)
         matcher = getstandinmatcher(repo)
-        for standin in dirstatewalk(repo.dirstate, matcher):
+        for standin in repo.dirstate.walk(matcher, [], False, False):
             lfile = splitstandin(standin)
             hash = readstandin(repo, lfile)
             lfdirstate.normallookup(lfile)
@@ -173,8 +142,11 @@ def lfdirstatestatus(lfdirstate, repo, rev):
     s = lfdirstate.status(match, [], False, False, False)
     unsure, modified, added, removed, missing, unknown, ignored, clean = s
     for lfile in unsure:
-        if repo[rev][standin(lfile)].data().strip() != \
-                hashfile(repo.wjoin(lfile)):
+        try:
+            fctx = repo[rev][standin(lfile)]
+        except LookupError:
+            fctx = None
+        if not fctx or fctx.data().strip() != hashfile(repo.wjoin(lfile)):
             modified.append(lfile)
         else:
             clean.append(lfile)
@@ -250,7 +222,7 @@ def linktousercache(repo, hash):
 
 def getstandinmatcher(repo, pats=[], opts={}):
     '''Return a match object that applies pats to the standin directory'''
-    standindir = repo.pathto(shortname)
+    standindir = repo.wjoin(shortname)
     if pats:
         # patterns supplied: search standin directory relative to current dir
         cwd = repo.getcwd()
@@ -264,19 +236,11 @@ def getstandinmatcher(repo, pats=[], opts={}):
         pats = [standindir]
     else:
         # no patterns and no standin dir: return matcher that matches nothing
-        match = match_.match(repo.root, None, [], exact=True)
-        match.matchfn = lambda f: False
-        return match
-    return getmatcher(repo, pats, opts, showbad=False)
+        return match_.match(repo.root, None, [], exact=True)
 
-def getmatcher(repo, pats=[], opts={}, showbad=True):
-    '''Wrapper around scmutil.match() that adds showbad: if false,
-    neuter the match object's bad() method so it does not print any
-    warnings about missing files or directories.'''
+    # no warnings about missing files or directories
     match = scmutil.match(repo[None], pats, opts)
-
-    if not showbad:
-        match.bad = lambda f, msg: None
+    match.bad = lambda f, msg: None
     return match
 
 def composestandinmatcher(repo, rmatcher):
@@ -296,17 +260,17 @@ def standin(filename):
     file.'''
     # Notes:
     # 1) Some callers want an absolute path, but for instance addlargefiles
-    #    needs it repo-relative so it can be passed to repoadd().  So leave
-    #    it up to the caller to use repo.wjoin() to get an absolute path.
+    #    needs it repo-relative so it can be passed to repo[None].add().  So
+    #    leave it up to the caller to use repo.wjoin() to get an absolute path.
     # 2) Join with '/' because that's what dirstate always uses, even on
     #    Windows. Change existing separator to '/' first in case we are
     #    passed filenames from an external source (like the command line).
-    return shortname + '/' + util.pconvert(filename)
+    return shortnameslash + util.pconvert(filename)
 
 def isstandin(filename):
     '''Return true if filename is a big file standin. filename must be
     in Mercurial's internal form (slash-separated).'''
-    return filename.startswith(shortname + '/')
+    return filename.startswith(shortnameslash)
 
 def splitstandin(filename):
     # Split on / because that's what dirstate always uses, even on Windows.
@@ -435,7 +399,7 @@ def unixpath(path):
 
 def islfilesrepo(repo):
     if ('largefiles' in repo.requirements and
-            util.any(shortname + '/' in f[0] for f in repo.store.datafiles())):
+            util.any(shortnameslash in f[0] for f in repo.store.datafiles())):
         return True
 
     return util.any(openlfdirstate(repo.ui, repo, False))
@@ -455,9 +419,13 @@ def getcurrentheads(repo):
 def getstandinsstate(repo):
     standins = []
     matcher = getstandinmatcher(repo)
-    for standin in dirstatewalk(repo.dirstate, matcher):
+    for standin in repo.dirstate.walk(matcher, [], False, False):
         lfile = splitstandin(standin)
-        standins.append((lfile, readstandin(repo, lfile)))
+        try:
+            hash = readstandin(repo, lfile)
+        except IOError:
+            hash = None
+        standins.append((lfile, hash))
     return standins
 
 def getlfilestoupdate(oldstandins, newstandins):

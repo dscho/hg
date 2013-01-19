@@ -8,6 +8,7 @@
 from i18n import _
 import sys, os, re
 import util, config, templatefilters, parser, error
+import types
 
 # template parsing
 
@@ -140,6 +141,10 @@ def runsymbol(context, mapping, key):
         v = context._defaults.get(key, '')
     if util.safehasattr(v, '__call__'):
         return v(**mapping)
+    if isinstance(v, types.GeneratorType):
+        v = list(v)
+        mapping[key] = v
+        return v
     return v
 
 def buildfilter(exp, context):
@@ -179,6 +184,7 @@ def runmap(context, mapping, data):
     for i in d:
         if isinstance(i, dict):
             lm.update(i)
+            lm['originalnode'] = mapping.get('node')
             yield runtemplate(context, lm, ctmpl)
         else:
             # v is not an iterable of dicts, this happen when 'key'
@@ -259,6 +265,15 @@ def ifeq(context, mapping, args):
         t = stringify(args[3][0](context, mapping, args[3][1]))
         yield runtemplate(context, mapping, compiletemplate(t, context))
 
+def label(context, mapping, args):
+    if len(args) != 2:
+        # i18n: "label" is a keyword
+        raise error.ParseError(_("label expects two arguments"))
+
+    # ignore args[0] (the label string) since this is supposed to be a a no-op
+    t = stringify(args[1][0](context, mapping, args[1][1]))
+    yield runtemplate(context, mapping, compiletemplate(t, context))
+
 methods = {
     "string": lambda e, c: (runstring, e[1]),
     "symbol": lambda e, c: (runsymbol, e[1]),
@@ -274,6 +289,7 @@ funcs = {
     "ifeq": ifeq,
     "join": join,
     "sub": sub,
+    "label": label,
 }
 
 # template engine

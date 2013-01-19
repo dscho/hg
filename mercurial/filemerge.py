@@ -171,13 +171,15 @@ def _ifail(repo, mynode, orig, fcd, fco, fca, toolconf):
 
 def _premerge(repo, toolconf, files):
     tool, toolpath, binary, symlink = toolconf
+    if symlink:
+        return 1
     a, b, c, back = files
 
     ui = repo.ui
 
     # do we attempt to simplemerge first?
     try:
-        premerge = _toolbool(ui, tool, "premerge", not (binary or symlink))
+        premerge = _toolbool(ui, tool, "premerge", not binary)
     except error.ConfigError:
         premerge = _toolstr(ui, tool, "premerge").lower()
         valid = 'keep'.split()
@@ -204,6 +206,12 @@ def _imerge(repo, mynode, orig, fcd, fco, fca, toolconf, files):
     Uses the internal non-interactive simple merge algorithm for merging
     files. It will fail if there are any conflicts and leave markers in
     the partially merged file."""
+    tool, toolpath, binary, symlink = toolconf
+    if symlink:
+        repo.ui.warn(_('warning: internal:merge cannot merge symlinks '
+                       'for %s\n') % fcd.path())
+        return False, 1
+
     r = _premerge(repo, toolconf, files)
     if r:
         a, b, c, back = files

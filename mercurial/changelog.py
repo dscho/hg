@@ -27,10 +27,13 @@ def _string_escape(text):
 
 def decodeextra(text):
     """
-    >>> decodeextra(encodeextra({'foo': 'bar', 'baz': chr(0) + '2'}))
-    {'foo': 'bar', 'baz': '\\x002', 'branch': 'default'}
-    >>> decodeextra(encodeextra({'foo': 'bar', 'baz': chr(92) + chr(0) + '2'}))
-    {'foo': 'bar', 'baz': '\\\\\\x002', 'branch': 'default'}
+    >>> sorted(decodeextra(encodeextra({'foo': 'bar', 'baz': chr(0) + '2'})
+    ...                    ).iteritems())
+    [('baz', '\\x002'), ('branch', 'default'), ('foo', 'bar')]
+    >>> sorted(decodeextra(encodeextra({'foo': 'bar',
+    ...                                 'baz': chr(92) + chr(0) + '2'})
+    ...                    ).iteritems())
+    [('baz', '\\\\\\x002'), ('branch', 'default'), ('foo', 'bar')]
     """
     extra = _defaultextra.copy()
     for l in text.split('\0'):
@@ -124,7 +127,7 @@ class changelog(revlog.revlog):
         self._realopener = opener
         self._delayed = False
         self._divert = False
-        self.filteredrevs = ()
+        self.filteredrevs = frozenset()
 
     def tip(self):
         """filtered version of revlog.tip"""
@@ -337,3 +340,10 @@ class changelog(revlog.revlog):
         l = [hex(manifest), user, parseddate] + sorted(files) + ["", desc]
         text = "\n".join(l)
         return self.addrevision(text, transaction, len(self), p1, p2)
+
+    def branch(self, rev):
+        """return the branch of a revision
+
+        This function exists because creating a changectx object
+        just to access this is costly."""
+        return encoding.tolocal(self.read(rev)[5].get("branch"))

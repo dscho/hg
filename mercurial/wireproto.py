@@ -10,7 +10,6 @@ from i18n import _
 from node import bin, hex
 import changegroup as changegroupmod
 import peer, error, encoding, util, store
-import discovery, phases
 
 # abstract batching support
 
@@ -346,6 +345,7 @@ class ooberror(object):
         self.message = message
 
 def dispatch(repo, proto, command):
+    repo = repo.filtered("served")
     func, spec = commands[command]
     args = proto.getargs(spec)
     return func(repo, proto, *args)
@@ -362,6 +362,7 @@ def options(cmd, keys, others):
     return opts
 
 def batch(repo, proto, cmds, others):
+    repo = repo.filtered("served")
     res = []
     for pair in cmds.split(';'):
         op, args = pair.split(' ', 1)
@@ -399,7 +400,7 @@ def between(repo, proto, pairs):
     return "".join(r)
 
 def branchmap(repo, proto):
-    branchmap = discovery.visiblebranchmap(repo)
+    branchmap = repo.branchmap()
     heads = []
     for branch, nodes in branchmap.iteritems():
         branchname = urllib.quote(encoding.fromlocal(branch))
@@ -455,7 +456,7 @@ def getbundle(repo, proto, others):
     return streamres(proto.groupchunks(cg))
 
 def heads(repo, proto):
-    h = discovery.visibleheads(repo)
+    h = repo.heads()
     return encodelist(h) + "\n"
 
 def hello(repo, proto):
@@ -478,8 +479,6 @@ def lookup(repo, proto, key):
     try:
         k = encoding.tolocal(key)
         c = repo[k]
-        if c.phase() == phases.secret:
-            raise error.RepoLookupError(_("unknown revision '%s'") % k)
         r = c.hex()
         success = 1
     except Exception, inst:
@@ -546,8 +545,9 @@ def stream(repo, proto):
         try:
             repo.ui.debug('scanning\n')
             for name, ename, size in repo.store.walk():
-                entries.append((name, size))
-                total_bytes += size
+                if size:
+                    entries.append((name, size))
+                    total_bytes += size
         finally:
             lock.release()
     except error.LockError:
@@ -593,7 +593,7 @@ def unbundle(repo, proto, heads):
     their_heads = decodelist(heads)
 
     def check_heads():
-        heads = discovery.visibleheads(repo)
+        heads = repo.heads()
         heads_hash = util.sha1(''.join(sorted(heads))).digest()
         return (their_heads == ['force'] or their_heads == heads or
                 their_heads == ['hashed', heads_hash])

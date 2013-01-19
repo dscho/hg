@@ -76,7 +76,7 @@ def _buildencodefun():
     cmap = dict([(chr(x), chr(x)) for x in xrange(127)])
     for x in (range(32) + range(126, 256) + winreserved):
         cmap[chr(x)] = "~%02x" % x
-    for x in range(ord("A"), ord("Z")+1) + [ord(e)]:
+    for x in range(ord("A"), ord("Z") + 1) + [ord(e)]:
         cmap[chr(x)] = e + chr(x).lower()
     dmap = {}
     for k, v in cmap.iteritems():
@@ -128,11 +128,11 @@ def _buildlowerencodefun():
     cmap = dict([(chr(x), chr(x)) for x in xrange(127)])
     for x in (range(32) + range(126, 256) + winreserved):
         cmap[chr(x)] = "~%02x" % x
-    for x in range(ord("A"), ord("Z")+1):
+    for x in range(ord("A"), ord("Z") + 1):
         cmap[chr(x)] = chr(x).lower()
     return lambda s: "".join([cmap[c] for c in s])
 
-lowerencode = _buildlowerencodefun()
+lowerencode = getattr(parsers, 'lowerencode', None) or _buildlowerencodefun()
 
 # Windows reserved names: con, prn, aux, nul, com1..com9, lpt1..lpt9
 _winres3 = ('aux', 'con', 'prn', 'nul') # length 3
@@ -255,21 +255,16 @@ def _hybridencode(path, dotencode):
     return res
 
 def _pathencode(path):
+    de = encodedir(path)
     if len(path) > _maxstorepathlen:
-        return None
-    ef = _encodefname(encodedir(path)).split('/')
+        return _hashencode(de, True)
+    ef = _encodefname(de).split('/')
     res = '/'.join(_auxencode(ef, True))
     if len(res) > _maxstorepathlen:
-        return None
+        return _hashencode(de, True)
     return res
 
 _pathencode = getattr(parsers, 'pathencode', _pathencode)
-
-def _dothybridencode(f):
-    ef = _pathencode(f)
-    if ef is None:
-        return _hashencode(encodedir(f), True)
-    return ef
 
 def _plainhybridencode(f):
     return _hybridencode(f, False)
@@ -456,7 +451,7 @@ class _fncachevfs(scmutil.abstractvfs, scmutil.auditvfs):
 class fncachestore(basicstore):
     def __init__(self, path, vfstype, dotencode):
         if dotencode:
-            encode = _dothybridencode
+            encode = _pathencode
         else:
             encode = _plainhybridencode
         self.encode = encode

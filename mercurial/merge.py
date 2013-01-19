@@ -7,7 +7,7 @@
 
 from node import nullid, nullrev, hex, bin
 from i18n import _
-import error, scmutil, util, filemerge, copies, subrepo
+import error, util, filemerge, copies, subrepo
 import errno, os, shutil
 
 class mergestate(object):
@@ -45,11 +45,11 @@ class mergestate(object):
                 f.write("\0".join([d] + v) + "\n")
             f.close()
             self._dirty = False
-    def add(self, fcl, fco, fca, fd, flags):
+    def add(self, fcl, fco, fca, fd):
         hash = util.sha1(fcl.path()).hexdigest()
         self._repo.opener.write("merge/" + hash, fcl.data())
         self._state[fd] = ['u', hash, fcl.path(), fca.path(),
-                           hex(fca.filenode()), fco.path(), flags]
+                           hex(fca.filenode()), fco.path(), fcl.flags()]
         self._dirty = True
     def __contains__(self, dfile):
         return dfile in self._state
@@ -67,12 +67,22 @@ class mergestate(object):
         if self[dfile] == 'r':
             return 0
         state, hash, lfile, afile, anode, ofile, flags = self._state[dfile]
-        f = self._repo.opener("merge/" + hash)
-        self._repo.wwrite(dfile, f.read(), flags)
-        f.close()
         fcd = wctx[dfile]
         fco = octx[ofile]
         fca = self._repo.filectx(afile, fileid=anode)
+        # "premerge" x flags
+        flo = fco.flags()
+        fla = fca.flags()
+        if 'x' in flags + flo + fla and 'l' not in flags + flo + fla:
+            if fca.node() == nullid:
+                self._repo.ui.warn(_('warning: cannot merge flags for %s\n') %
+                                   afile)
+            elif flags == fla:
+                flags = flo
+        # restore local
+        f = self._repo.opener("merge/" + hash)
+        self._repo.wwrite(dfile, f.read(), flags)
+        f.close()
         r = filemerge.filemerge(self._repo, self._local, lfile, fcd, fco, fca)
         if r is None:
             # no real conflict
@@ -162,18 +172,18 @@ def _forgetremoved(wctx, mctx, branchmerge):
     as removed.
     """
 
-    action = []
+    actions = []
     state = branchmerge and 'r' or 'f'
     for f in wctx.deleted():
         if f not in mctx:
-            action.append((f, state))
+            actions.append((f, state))
 
     if not branchmerge:
         for f in wctx.removed():
             if f not in mctx:
-                action.append((f, "f"))
+                actions.append((f, "f"))
 
-    return action
+    return actions
 
 def manifestmerge(repo, p1, p2, pa, overwrite, partial):
     """
@@ -183,44 +193,19 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
     partial = function to filter file lists
     """
 
-    def fmerge(f, f2, fa):
-        """merge flags"""
-        a, m, n = ma.flags(fa), m1.flags(f), m2.flags(f2)
-        if m == n: # flags agree
-            return m # unchanged
-        if m and n and not a: # flags set, don't agree, differ from parent
-            r = repo.ui.promptchoice(
-                _(" conflicting flags for %s\n"
-                  "(n)one, e(x)ec or sym(l)ink?") % f,
-                (_("&None"), _("E&xec"), _("Sym&link")), 0)
-            if r == 1:
-                return "x" # Exec
-            if r == 2:
-                return "l" # Symlink
-            return ""
-        if m and m != a: # changed from a to m
-            return m
-        if n and n != a: # changed from a to n
-            if (n == 'l' or a == 'l') and m1.get(f) != ma.get(f):
-                # can't automatically merge symlink flag when there
-                # are file-level conflicts here, let filemerge take
-                # care of it
-                return m
-            return n
-        return '' # flag was cleared
-
     def act(msg, m, f, *args):
         repo.ui.debug(" %s: %s -> %s\n" % (f, msg, m))
-        action.append((f, m) + args)
+        actions.append((f, m) + args)
 
-    action, copy = [], {}
+    actions, copy, movewithdir = [], {}, {}
 
     if overwrite:
         pa = p1
     elif pa == p2: # backwards
         pa = p1.p1()
     elif pa and repo.ui.configbool("merge", "followcopies", True):
-        copy, diverge, renamedelete = copies.mergecopies(repo, p1, p2, pa)
+        ret = copies.mergecopies(repo, p1, p2, pa)
+        copy, movewithdir, diverge, renamedelete = ret
         for of, fl in diverge.iteritems():
             act("divergent renames", "dr", of, fl)
         for of, fl in renamedelete.iteritems():
@@ -233,40 +218,48 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
 
     m1, m2, ma = p1.manifest(), p2.manifest(), pa.manifest()
     copied = set(copy.values())
+    copied.update(movewithdir.values())
 
     if '.hgsubstate' in m1:
         # check whether sub state is modified
-        for s in p1.substate:
+        for s in sorted(p1.substate):
             if p1.sub(s).dirty():
                 m1['.hgsubstate'] += "+"
                 break
 
     # Compare manifests
-    for f, n in m1.iteritems():
+    for f, n in sorted(m1.iteritems()):
         if partial and not partial(f):
             continue
         if f in m2:
-            rflags = fmerge(f, f, f)
+            n2 = m2[f]
+            fl1, fl2, fla = m1.flags(f), m2.flags(f), ma.flags(f)
+            nol = 'l' not in fl1 + fl2 + fla
             a = ma.get(f, nullid)
-            if n == m2[f] or m2[f] == a: # same or local newer
-                # is file locally modified or flags need changing?
-                # dirstate flags may need to be made current
-                if m1.flags(f) != rflags or n[20:]:
-                    act("update permissions", "e", f, rflags)
-            elif n == a: # remote newer
-                act("remote is newer", "g", f, rflags)
-            else: # both changed
-                act("versions differ", "m", f, f, f, rflags, False)
+            if n == n2 and fl1 == fl2:
+                pass # same - keep local
+            elif n2 == a and fl2 == fla:
+                pass # remote unchanged - keep local
+            elif n == a and fl1 == fla: # local unchanged - use remote
+                if n == n2: # optimization: keep local content
+                    act("update permissions", "e", f, fl2)
+                else:
+                    act("remote is newer", "g", f, fl2)
+            elif nol and n2 == a: # remote only changed 'x'
+                act("update permissions", "e", f, fl2)
+            elif nol and n == a: # local only changed 'x'
+                act("remote is newer", "g", f, fl)
+            else: # both changed something
+                act("versions differ", "m", f, f, f, False)
         elif f in copied: # files we'll deal with on m2 side
             pass
+        elif f in movewithdir: # directory rename
+            f2 = movewithdir[f]
+            act("remote renamed directory to " + f2, "d", f, None, f2,
+                m1.flags(f))
         elif f in copy:
             f2 = copy[f]
-            if f2 not in m2: # directory rename
-                act("remote renamed directory to " + f2, "d",
-                    f, None, f2, m1.flags(f))
-            else: # case 2 A,B/B/B or case 4,21 A/B/B
-                act("local copied/moved to " + f2, "m",
-                    f, f2, f, fmerge(f, f2, f2), False)
+            act("local copied/moved to " + f2, "m", f, f2, f, False)
         elif f in ma: # clean, a different, no remote
             if n != ma[f]:
                 if repo.ui.promptchoice(
@@ -281,28 +274,28 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
             else:
                 act("other deleted", "r", f)
 
-    for f, n in m2.iteritems():
+    for f, n in sorted(m2.iteritems()):
         if partial and not partial(f):
             continue
         if f in m1 or f in copied: # files already visited
             continue
-        if f in copy:
+        if f in movewithdir:
+            f2 = movewithdir[f]
+            act("local renamed directory to " + f2, "d", None, f, f2,
+                m2.flags(f))
+        elif f in copy:
             f2 = copy[f]
-            if f2 not in m1: # directory rename
-                act("local renamed directory to " + f2, "d",
-                    None, f, f2, m2.flags(f))
-            elif f2 in m2: # rename case 1, A/A,B/A
+            if f2 in m2:
                 act("remote copied to " + f, "m",
-                    f2, f, f, fmerge(f2, f, f2), False)
-            else: # case 3,20 A/B/A
+                    f2, f, f, False)
+            else:
                 act("remote moved to " + f, "m",
-                    f2, f, f, fmerge(f2, f, f2), True)
+                    f2, f, f, True)
         elif f not in ma:
             if (not overwrite
                 and _checkunknownfile(repo, p1, p2, f)):
-                rflags = fmerge(f, f, f)
                 act("remote differs from untracked local",
-                    "m", f, f, f, rflags, False)
+                    "m", f, f, f, False)
             else:
                 act("remote created", "g", f, m2.flags(f))
         elif n != ma[f]:
@@ -312,12 +305,12 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
                 (_("&Changed"), _("&Deleted")), 0) == 0:
                 act("prompt recreating", "g", f, m2.flags(f))
 
-    return action
+    return actions
 
 def actionkey(a):
-    return a[1] == 'r' and -1 or 0, a
+    return a[1] == "r" and -1 or 0, a
 
-def applyupdates(repo, action, wctx, mctx, actx, overwrite):
+def applyupdates(repo, actions, wctx, mctx, actx, overwrite):
     """apply the merge action list to the working directory
 
     wctx is the working copy context
@@ -332,14 +325,14 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
     ms = mergestate(repo)
     ms.reset(wctx.p1().node())
     moves = []
-    action.sort(key=actionkey)
+    actions.sort(key=actionkey)
 
     # prescan for merges
-    for a in action:
+    for a in actions:
         f, m = a[:2]
-        if m == 'm': # merge
-            f2, fd, flags, move = a[2:]
-            if f == '.hgsubstate': # merged internally
+        if m == "m": # merge
+            f2, fd, move = a[2:]
+            if fd == '.hgsubstate': # merged internally
                 continue
             repo.ui.debug("preserving %s for resolve of %s\n" % (f, fd))
             fcl = wctx[f]
@@ -353,45 +346,42 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
                 fca = fcl.ancestor(fco, actx)
             if not fca:
                 fca = repo.filectx(f, fileid=nullrev)
-            ms.add(fcl, fco, fca, fd, flags)
+            ms.add(fcl, fco, fca, fd)
             if f != fd and move:
                 moves.append(f)
 
-    audit = scmutil.pathauditor(repo.root)
+    audit = repo.wopener.audit
 
     # remove renamed files after safely stored
     for f in moves:
         if os.path.lexists(repo.wjoin(f)):
             repo.ui.debug("removing %s\n" % f)
             audit(f)
-            os.unlink(repo.wjoin(f))
+            util.unlinkpath(repo.wjoin(f))
 
-    numupdates = len(action)
-    for i, a in enumerate(action):
+    numupdates = len(actions)
+    for i, a in enumerate(actions):
         f, m = a[:2]
         repo.ui.progress(_('updating'), i + 1, item=f, total=numupdates,
                          unit=_('files'))
-        if f and f[0] == "/":
-            continue
         if m == "r": # remove
             repo.ui.note(_("removing %s\n") % f)
             audit(f)
             if f == '.hgsubstate': # subrepo states need updating
                 subrepo.submerge(repo, wctx, mctx, wctx, overwrite)
             try:
-                util.unlinkpath(repo.wjoin(f))
+                util.unlinkpath(repo.wjoin(f), ignoremissing=True)
             except OSError, inst:
-                if inst.errno != errno.ENOENT:
-                    repo.ui.warn(_("update failed to remove %s: %s!\n") %
-                                 (f, inst.strerror))
+                repo.ui.warn(_("update failed to remove %s: %s!\n") %
+                             (f, inst.strerror))
             removed += 1
         elif m == "m": # merge
-            if f == '.hgsubstate': # subrepo states need updating
+            if fd == '.hgsubstate': # subrepo states need updating
                 subrepo.submerge(repo, wctx, mctx, wctx.ancestor(mctx),
                                  overwrite)
                 continue
-            f2, fd, flags, move = a[2:]
-            repo.wopener.audit(fd)
+            f2, fd, move = a[2:]
+            audit(fd)
             r = ms.resolve(fd, wctx, mctx)
             if r is not None and r > 0:
                 unresolved += 1
@@ -400,17 +390,10 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
                     updated += 1
                 else:
                     merged += 1
-            if (move and repo.dirstate.normalize(fd) != f
-                and os.path.lexists(repo.wjoin(f))):
-                repo.ui.debug("removing %s\n" % f)
-                audit(f)
-                os.unlink(repo.wjoin(f))
         elif m == "g": # get
             flags = a[2]
             repo.ui.note(_("getting %s\n") % f)
-            t = mctx.filectx(f).data()
-            repo.wwrite(f, t, flags)
-            t = None
+            repo.wwrite(f, mctx.filectx(f).data(), flags)
             updated += 1
             if f == '.hgsubstate': # subrepo states need updating
                 subrepo.submerge(repo, wctx, mctx, wctx, overwrite)
@@ -419,13 +402,11 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
             if f:
                 repo.ui.note(_("moving %s to %s\n") % (f, fd))
                 audit(f)
-                t = wctx.filectx(f).data()
-                repo.wwrite(fd, t, flags)
+                repo.wwrite(fd, wctx.filectx(f).data(), flags)
                 util.unlinkpath(repo.wjoin(f))
             if f2:
                 repo.ui.note(_("getting %s to %s\n") % (f2, fd))
-                t = mctx.filectx(f2).data()
-                repo.wwrite(fd, t, flags)
+                repo.wwrite(fd, mctx.filectx(f2).data(), flags)
             updated += 1
         elif m == "dr": # divergent renames
             fl = a[2]
@@ -441,17 +422,39 @@ def applyupdates(repo, action, wctx, mctx, actx, overwrite):
                 repo.ui.warn(" %s\n" % nf)
         elif m == "e": # exec
             flags = a[2]
-            repo.wopener.audit(f)
+            audit(f)
             util.setflags(repo.wjoin(f), 'l' in flags, 'x' in flags)
+            updated += 1
     ms.commit()
     repo.ui.progress(_('updating'), None, total=numupdates, unit=_('files'))
 
     return updated, merged, removed, unresolved
 
-def recordupdates(repo, action, branchmerge):
+def calculateupdates(repo, tctx, mctx, ancestor, branchmerge, force, partial):
+    "Calculate the actions needed to merge mctx into tctx"
+    actions = []
+    folding = not util.checkcase(repo.path)
+    if folding:
+        # collision check is not needed for clean update
+        if (not branchmerge and
+            (force or not tctx.dirty(missing=True, branch=False))):
+            _checkcollision(mctx, None)
+        else:
+            _checkcollision(mctx, (tctx, ancestor))
+    if not force:
+        _checkunknown(repo, tctx, mctx)
+    if tctx.rev() is None:
+        actions += _forgetremoved(tctx, mctx, branchmerge)
+    actions += manifestmerge(repo, tctx, mctx,
+                             ancestor,
+                             force and not branchmerge,
+                             partial)
+    return actions
+
+def recordupdates(repo, actions, branchmerge):
     "record merge actions to the dirstate"
 
-    for a in action:
+    for a in actions:
         f, m = a[:2]
         if m == "r": # remove
             if branchmerge:
@@ -471,7 +474,7 @@ def recordupdates(repo, action, branchmerge):
             else:
                 repo.dirstate.normal(f)
         elif m == "m": # merge
-            f2, fd, flag, move = a[2:]
+            f2, fd, move = a[2:]
             if branchmerge:
                 # We've done a branch merge, mark this file as merged
                 # so that we properly record the merger later
@@ -590,7 +593,7 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
             if not force and (wc.files() or wc.deleted()):
                 raise util.Abort(_("outstanding uncommitted changes"),
                                  hint=_("use 'hg status' to list changes"))
-            for s in wc.substate:
+            for s in sorted(wc.substate):
                 if wc.sub(s).dirty():
                     raise util.Abort(_("outstanding uncommitted changes in "
                                        "subrepository '%s'") % s)
@@ -609,19 +612,8 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
                 pa = p1
 
         ### calculate phase
-        action = []
-        folding = not util.checkcase(repo.path)
-        if folding:
-            # collision check is not needed for clean update
-            if (not branchmerge and
-                (force or not wc.dirty(missing=True, branch=False))):
-                _checkcollision(p2, None)
-            else:
-                _checkcollision(p2, (wc, pa))
-        if not force:
-            _checkunknown(repo, wc, p2)
-        action += _forgetremoved(wc, p2, branchmerge)
-        action += manifestmerge(repo, wc, p2, pa, overwrite, partial)
+        actions = calculateupdates(repo, wc, p2, pa,
+                                   branchmerge, force, partial)
 
         ### apply phase
         if not branchmerge: # just jump to the new rev
@@ -629,11 +621,11 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
         if not partial:
             repo.hook('preupdate', throw=True, parent1=xp1, parent2=xp2)
 
-        stats = applyupdates(repo, action, wc, p2, pa, overwrite)
+        stats = applyupdates(repo, actions, wc, p2, pa, overwrite)
 
         if not partial:
             repo.setparents(fp1, fp2)
-            recordupdates(repo, action, branchmerge)
+            recordupdates(repo, actions, branchmerge)
             if not branchmerge:
                 repo.dirstate.setbranch(p2.branch())
     finally:

@@ -15,6 +15,7 @@
  * required.
  */
 
+#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <assert.h>
 #include <ctype.h>
@@ -481,12 +482,244 @@ static Py_ssize_t basicencode(char *dest, size_t destsize,
 
 static const Py_ssize_t maxstorepathlen = 120;
 
+static Py_ssize_t _lowerencode(char *dest, size_t destsize,
+			       const char *src, Py_ssize_t len)
+{
+	static const uint32_t onebyte[8] = {
+		1, 0x2bfffbfb, 0xe8000001, 0x2fffffff
+	};
+
+	static const uint32_t lower[8] = { 0, 0, 0x7fffffe };
+
+	Py_ssize_t i, destlen = 0;
+
+	for (i = 0; i < len; i++) {
+		if (inset(onebyte, src[i]))
+			charcopy(dest, &destlen, destsize, src[i]);
+		else if (inset(lower, src[i]))
+			charcopy(dest, &destlen, destsize, src[i] + 32);
+		else
+			escape3(dest, &destlen, destsize, src[i]);
+	}
+
+	return destlen;
+}
+
+PyObject *lowerencode(PyObject *self, PyObject *args)
+{
+	char *path;
+	Py_ssize_t len, newlen;
+	PyObject *ret;
+
+	if (!PyArg_ParseTuple(args, "s#:lowerencode", &path, &len))
+		return NULL;
+
+	newlen = _lowerencode(NULL, 0, path, len);
+	ret = PyString_FromStringAndSize(NULL, newlen);
+	if (ret)
+		newlen = _lowerencode(PyString_AS_STRING(ret), newlen,
+				      path, len);
+
+	return ret;
+}
+
+/* See store.py:_auxencode for a description. */
+static Py_ssize_t auxencode(char *dest, size_t destsize,
+			    const char *src, Py_ssize_t len)
+{
+	static const uint32_t twobytes[8];
+
+	static const uint32_t onebyte[8] = {
+		~0, 0xffff3ffe, ~0, ~0, ~0, ~0, ~0, ~0,
+	};
+
+	return _encode(twobytes, onebyte, dest, 0, destsize, src, len, 0);
+}
+
+static PyObject *hashmangle(const char *src, Py_ssize_t len, const char sha[20])
+{
+	static const Py_ssize_t dirprefixlen = 8;
+	static const Py_ssize_t maxshortdirslen = 68;
+	char *dest;
+	PyObject *ret;
+
+	Py_ssize_t i, d, p, lastslash = len - 1, lastdot = -1;
+	Py_ssize_t destsize, destlen = 0, slop, used;
+
+	while (lastslash >= 0 && src[lastslash] != '/') {
+		if (src[lastslash] == '.' && lastdot == -1)
+			lastdot = lastslash;
+		lastslash--;
+	}
+
+#if 0
+	/* All paths should end in a suffix of ".i" or ".d".
+           Unfortunately, the file names in test-hybridencode.py
+           violate this rule.  */
+	if (lastdot != len - 3) {
+		PyErr_SetString(PyExc_ValueError,
+				"suffix missing or wrong length");
+		return NULL;
+	}
+#endif
+
+	/* If src contains a suffix, we will append it to the end of
+	   the new string, so make room. */
+	destsize = 120;
+	if (lastdot >= 0)
+		destsize += len - lastdot - 1;
+
+	ret = PyString_FromStringAndSize(NULL, destsize);
+	if (ret == NULL)
+		return NULL;
+
+	dest = PyString_AS_STRING(ret);
+	memcopy(dest, &destlen, destsize, "dh/", 3);
+
+	/* Copy up to dirprefixlen bytes of each path component, up to
+	   a limit of maxshortdirslen bytes. */
+	for (i = d = p = 0; i < lastslash; i++, p++) {
+		if (src[i] == '/') {
+			char d = dest[destlen - 1];
+			/* After truncation, a directory name may end
+			   in a space or dot, which are unportable. */
+			if (d == '.' || d == ' ')
+				dest[destlen - 1] = '_';
+			if (destlen > maxshortdirslen)
+				break;
+			charcopy(dest, &destlen, destsize, src[i]);
+			p = -1;
+		}
+		else if (p < dirprefixlen)
+			charcopy(dest, &destlen, destsize, src[i]);
+	}
+
+	/* Rewind to just before the last slash copied. */
+	if (destlen > maxshortdirslen + 3)
+		do {
+			destlen--;
+		} while (destlen > 0 && dest[destlen] != '/');
+
+	if (destlen > 3) {
+		if (lastslash > 0) {
+			char d = dest[destlen - 1];
+			/* The last directory component may be
+			   truncated, so make it safe. */
+			if (d == '.' || d == ' ')
+				dest[destlen - 1] = '_';
+		}
+
+		charcopy(dest, &destlen, destsize, '/');
+	}
+
+	/* Add a prefix of the original file's name. Its length
+	   depends on the number of bytes left after accounting for
+	   hash and suffix. */
+	used = destlen + 40;
+	if (lastdot >= 0)
+		used += len - lastdot - 1;
+	slop = maxstorepathlen - used;
+	if (slop > 0) {
+		Py_ssize_t basenamelen =
+			lastslash >= 0 ? len - lastslash - 2 : len - 1;
+
+		if (basenamelen > slop)
+			basenamelen = slop;
+		if (basenamelen > 0)
+			memcopy(dest, &destlen, destsize, &src[lastslash + 1],
+				basenamelen);
+	}
+
+	/* Add hash and suffix. */
+	for (i = 0; i < 20; i++)
+		hexencode(dest, &destlen, destsize, sha[i]);
+
+	if (lastdot >= 0)
+		memcopy(dest, &destlen, destsize, &src[lastdot],
+			len - lastdot - 1);
+
+	PyString_GET_SIZE(ret) = destlen;
+
+	return ret;
+}
+
 /*
- * We currently implement only basic encoding.
- *
- * If a name is too long to encode due to Windows path name limits,
- * this function returns None.
+ * Avoiding a trip through Python would improve performance by 50%,
+ * but we don't encounter enough long names to be worth the code.
  */
+static int sha1hash(char hash[20], const char *str, Py_ssize_t len)
+{
+	static PyObject *shafunc;
+	PyObject *shaobj, *hashobj;
+
+	if (shafunc == NULL) {
+		PyObject *util, *name = PyString_FromString("mercurial.util");
+
+		if (name == NULL)
+			return -1;
+
+		util = PyImport_Import(name);
+		Py_DECREF(name);
+
+		if (util == NULL) {
+			PyErr_SetString(PyExc_ImportError, "mercurial.util");
+			return -1;
+		}
+		shafunc = PyObject_GetAttrString(util, "sha1");
+		Py_DECREF(util);
+
+		if (shafunc == NULL) {
+			PyErr_SetString(PyExc_AttributeError,
+					"module 'mercurial.util' has no "
+					"attribute 'sha1'");
+			return -1;
+		}
+	}
+
+	shaobj = PyObject_CallFunction(shafunc, "s#", str, len);
+
+	if (shaobj == NULL)
+		return -1;
+
+	hashobj = PyObject_CallMethod(shaobj, "digest", "");
+	Py_DECREF(shaobj);
+
+	if (!PyString_Check(hashobj) || PyString_GET_SIZE(hashobj) != 20) {
+		PyErr_SetString(PyExc_TypeError,
+				"result of digest is not a 20-byte hash");
+		Py_DECREF(hashobj);
+		return -1;
+	}
+
+	memcpy(hash, PyString_AS_STRING(hashobj), 20);
+	Py_DECREF(hashobj);
+	return 0;
+}
+
+#define MAXENCODE 4096 * 3
+
+static PyObject *hashencode(const char *src, Py_ssize_t len)
+{
+	char dired[MAXENCODE];
+	char lowered[MAXENCODE];
+	char auxed[MAXENCODE];
+	Py_ssize_t dirlen, lowerlen, auxlen, baselen;
+	char sha[20];
+
+	baselen = (len - 5) * 3;
+	if (baselen >= MAXENCODE) {
+		PyErr_SetString(PyExc_ValueError, "string too long");
+		return NULL;
+	}
+
+	dirlen = _encodedir(dired, baselen, src, len);
+	if (sha1hash(sha, dired, dirlen - 1) == -1)
+		return NULL;
+	lowerlen = _lowerencode(lowered, baselen, dired + 5, dirlen - 5);
+	auxlen = auxencode(auxed, baselen, lowered, lowerlen);
+	return hashmangle(auxed, auxlen, sha);
+}
+
 PyObject *pathencode(PyObject *self, PyObject *args)
 {
 	Py_ssize_t len, newlen;
@@ -501,13 +734,10 @@ PyObject *pathencode(PyObject *self, PyObject *args)
 		return NULL;
 	}
 
-	if (len > maxstorepathlen) {
-		newobj = Py_None;
-		Py_INCREF(newobj);
-		return newobj;
-	}
-
-	newlen = len ? basicencode(NULL, 0, path, len + 1) : 1;
+	if (len > maxstorepathlen)
+		newlen = maxstorepathlen + 2;
+	else
+		newlen = len ? basicencode(NULL, 0, path, len + 1) : 1;
 
 	if (newlen <= maxstorepathlen + 1) {
 		if (newlen == len + 1) {
@@ -522,10 +752,9 @@ PyObject *pathencode(PyObject *self, PyObject *args)
 			basicencode(PyString_AS_STRING(newobj), newlen, path,
 				    len + 1);
 		}
-	} else {
-		newobj = Py_None;
-		Py_INCREF(newobj);
 	}
+	else
+		newobj = hashencode(path, len + 1);
 
 	return newobj;
 }

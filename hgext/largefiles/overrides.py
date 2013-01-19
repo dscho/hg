@@ -12,7 +12,7 @@ import os
 import copy
 
 from mercurial import hg, commands, util, cmdutil, scmutil, match as match_, \
-    node, archival, error, merge
+    node, archival, error, merge, discovery
 from mercurial.i18n import _
 from mercurial.node import hex
 from hgext import rebase
@@ -116,7 +116,7 @@ def addlargefiles(ui, repo, *pats, **opts):
                     lfdirstate.add(f)
             lfdirstate.write()
             bad += [lfutil.splitstandin(f)
-                    for f in lfutil.repoadd(repo, standins)
+                    for f in repo[None].add(standins)
                     if f in m.files()]
     finally:
         wlock.release()
@@ -137,21 +137,23 @@ def removelargefiles(ui, repo, *pats, **opts):
                                         if lfutil.standin(f) in manifest]
                                        for list in [s[0], s[1], s[3], s[6]]]
 
-    def warn(files, reason):
+    def warn(files, msg):
         for f in files:
-            ui.warn(_('not removing %s: %s (use forget to undo)\n')
-                    % (m.rel(f), reason))
+            ui.warn(msg % m.rel(f))
         return int(len(files) > 0)
 
     result = 0
 
     if after:
         remove, forget = deleted, []
-        result = warn(modified + added + clean, _('file still exists'))
+        result = warn(modified + added + clean,
+                      _('not removing %s: file still exists\n'))
     else:
         remove, forget = deleted + clean, []
-        result = warn(modified, _('file is modified'))
-        result = warn(added, _('file has been marked for add')) or result
+        result = warn(modified, _('not removing %s: file is modified (use -f'
+                                  ' to force removal)\n'))
+        result = warn(added, _('not removing %s: file has been marked for add'
+                               ' (use forget to undo)\n')) or result
 
     for f in sorted(remove + forget):
         if ui.verbose or not m.exact(f):
@@ -168,19 +170,18 @@ def removelargefiles(ui, repo, *pats, **opts):
                 # are removing the file.
                 if getattr(repo, "_isaddremove", False):
                     ui.status(_('removing %s\n') % f)
-                if os.path.exists(repo.wjoin(f)):
-                    util.unlinkpath(repo.wjoin(f))
+                util.unlinkpath(repo.wjoin(f), ignoremissing=True)
             lfdirstate.remove(f)
         lfdirstate.write()
         forget = [lfutil.standin(f) for f in forget]
         remove = [lfutil.standin(f) for f in remove]
-        lfutil.repoforget(repo, forget)
+        repo[None].forget(forget)
         # If this is being called by addremove, let the original addremove
         # function handle this.
         if not getattr(repo, "_isaddremove", False):
-            lfutil.reporemove(repo, remove, unlink=True)
-        else:
-            lfutil.reporemove(repo, remove, unlink=False)
+            for f in remove:
+                util.unlinkpath(repo.wjoin(f), ignoremissing=True)
+        repo[None].forget(remove)
     finally:
         wlock.release()
 
@@ -238,11 +239,34 @@ def overridedirty(orig, repo, ignoreupdate=False):
         repo._repo.lfstatus = False
 
 def overridelog(orig, ui, repo, *pats, **opts):
+    def overridematch(ctx, pats=[], opts={}, globbed=False,
+            default='relpath'):
+        """Matcher that merges root directory with .hglf, suitable for log.
+        It is still possible to match .hglf directly.
+        For any listed files run log on the standin too.
+        matchfn tries both the given filename and with .hglf stripped.
+        """
+        match = oldmatch(ctx, pats, opts, globbed, default)
+        m = copy.copy(match)
+        standins = [lfutil.standin(f) for f in m._files]
+        m._files.extend(standins)
+        m._fmap = set(m._files)
+        origmatchfn = m.matchfn
+        def lfmatchfn(f):
+            lf = lfutil.splitstandin(f)
+            if lf is not None and origmatchfn(lf):
+                return True
+            r = origmatchfn(f)
+            return r
+        m.matchfn = lfmatchfn
+        return m
+    oldmatch = installmatchfn(overridematch)
     try:
         repo.lfstatus = True
         return orig(ui, repo, *pats, **opts)
     finally:
         repo.lfstatus = False
+        restorematchfn()
 
 def overrideverify(orig, ui, repo, *pats, **opts):
     large = opts.pop('large', False)
@@ -253,6 +277,13 @@ def overrideverify(orig, ui, repo, *pats, **opts):
     if large:
         result = result or lfcommands.verifylfiles(ui, repo, all, contents)
     return result
+
+def overridedebugstate(orig, ui, repo, *pats, **opts):
+    large = opts.pop('large', False)
+    if large:
+        lfcommands.debugdirstate(ui, repo)
+    else:
+        orig(ui, repo, *pats, **opts)
 
 # Override needs to refresh standins so that update's normal merge
 # will go through properly. Then the other update hook (overriding repo.update)
@@ -746,7 +777,7 @@ def hgclone(orig, ui, opts, *args, **kwargs):
         # .hg/largefiles, and the standin matcher won't match anything anyway.)
         if 'largefiles' in repo.requirements:
             if opts.get('noupdate'):
-                util.makedirs(repo.pathto(lfutil.shortname))
+                util.makedirs(repo.wjoin(lfutil.shortname))
                 util.makedirs(repo.join(lfutil.longname))
 
         # Caching is implicitly limited to 'rev' option, since the dest repo was
@@ -839,7 +870,7 @@ def overridearchive(orig, repo, dest, node, kind, decode=True, matchfn=None,
         write(f, 'x' in ff and 0755 or 0644, 'l' in ff, getdata)
 
     if subrepos:
-        for subpath in ctx.substate:
+        for subpath in sorted(ctx.substate):
             sub = ctx.sub(subpath)
             submatch = match_.narrowmatcher(subpath, matchfn)
             sub.archive(repo.ui, archiver, prefix, submatch)
@@ -886,7 +917,7 @@ def hgsubrepoarchive(orig, repo, ui, archiver, prefix, match=None):
 
         write(f, 'x' in ff and 0755 or 0644, 'l' in ff, getdata)
 
-    for subpath in ctx.substate:
+    for subpath in sorted(ctx.substate):
         sub = ctx.sub(subpath)
         submatch = match_.narrowmatcher(subpath, match)
         sub.archive(ui, archiver, os.path.join(prefix, repo._path) + '/',
@@ -949,8 +980,10 @@ def overrideforget(orig, ui, repo, *pats, **opts):
             else:
                 lfdirstate.remove(f)
         lfdirstate.write()
-        lfutil.reporemove(repo, [lfutil.standin(f) for f in forget],
-            unlink=True)
+        standins = [lfutil.standin(f) for f in forget]
+        for f in standins:
+            util.unlinkpath(repo.wjoin(f), ignoremissing=True)
+        repo[None].forget(standins)
     finally:
         wlock.release()
 
@@ -967,10 +1000,10 @@ def getoutgoinglfiles(ui, repo, dest=None, **opts):
         remote = hg.peer(repo, opts, dest)
     except error.RepoError:
         return None
-    o = lfutil.findoutgoing(repo, remote, False)
-    if not o:
-        return o
-    o = repo.changelog.nodesbetween(o, revs)[0]
+    outgoing = discovery.findcommonoutgoing(repo, remote.peer(), force=False)
+    if not outgoing.missing:
+        return outgoing.missing
+    o = repo.changelog.nodesbetween(outgoing.missing, revs)[0]
     if opts.get('newest_first'):
         o.reverse()
 
@@ -994,7 +1027,7 @@ def getoutgoinglfiles(ui, repo, dest=None, **opts):
                     files.add(f)
         toupload = toupload.union(
             set([f for f in files if lfutil.isstandin(f) and f in ctx]))
-    return toupload
+    return sorted(toupload)
 
 def overrideoutgoing(orig, ui, repo, dest=None, **opts):
     result = orig(ui, repo, dest, **opts)
@@ -1065,6 +1098,9 @@ def scmutiladdremove(orig, repo, pats=[], opts={}, dry_run=None,
 # Calling purge with --all will cause the largefiles to be deleted.
 # Override repo.status to prevent this from happening.
 def overridepurge(orig, ui, repo, *dirs, **opts):
+    # XXX large file status is buggy when used on repo proxy.
+    # XXX this needs to be investigate.
+    repo = repo.unfiltered()
     oldstatus = repo.status
     def overridestatus(node1='.', node2=None, match=None, ignored=False,
                         clean=False, unknown=False, listsubrepos=False):

@@ -8,7 +8,7 @@
 '''commands to interactively select changes for commit/qrefresh'''
 
 from mercurial.i18n import gettext, _
-from mercurial import cmdutil, commands, extensions, hg, mdiff, patch
+from mercurial import cmdutil, commands, extensions, hg, patch
 from mercurial import util
 import copy, cStringIO, errno, os, re, shutil, tempfile
 
@@ -520,11 +520,11 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall, *pats, **opts):
                                '(use "hg commit" instead)'))
 
         changes = repo.status(match=match)[:3]
-        diffopts = mdiff.diffopts(
+        diffopts = patch.diffopts(ui, opts=dict(
             git=True, nodates=True,
             ignorews=opts.get('ignore_all_space'),
             ignorewsamount=opts.get('ignore_space_change'),
-            ignoreblanklines=opts.get('ignore_blank_lines'))
+            ignoreblanklines=opts.get('ignore_blank_lines')))
         chunks = patch.diff(repo, changes=changes, opts=diffopts)
         fp = cStringIO.StringIO()
         fp.write(''.join(chunks))

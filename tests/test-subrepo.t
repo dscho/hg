@@ -320,7 +320,7 @@ push -f
   no changes found
   pushing subrepo s to $TESTTMP/t/s (glob)
   searching for changes
-  abort: push creates new remote head 12a213df6fa9!
+  abort: push creates new remote head 12a213df6fa9! (in subrepo s)
   (did you forget to merge? use push -f to force)
   [255]
   $ hg push -f
@@ -587,7 +587,7 @@ Issue1977: multirepo push should fail if subrepo push fails
   created new head
   $ hg -R repo2 ci -m3
   $ hg -q -R repo2 push
-  abort: push creates new remote head cc505f09a8b2!
+  abort: push creates new remote head cc505f09a8b2! (in subrepo s)
   (did you forget to merge? use push -f to force)
   [255]
   $ hg -R repo update
@@ -599,7 +599,7 @@ test if untracked file is not overwritten
   $ hg -R repo2 push -f -q
   $ hg -R repo update
   b: untracked file differs
-  abort: untracked files in working directory differ from files in requested revision
+  abort: untracked files in working directory differ from files in requested revision (in subrepo s)
   [255]
 
   $ cat repo/s/b
@@ -645,7 +645,7 @@ Create repo without default path, pull top repo, and see what happens on update
   added 2 changesets with 3 changes to 2 files
   (run 'hg update' to get a working copy)
   $ hg -R issue1852b update
-  abort: default path for subrepository sub/repo not found (glob)
+  abort: default path for subrepository not found (in subrepo sub/repo) (glob)
   [255]
 
 Pull -u now doesn't help
@@ -717,6 +717,14 @@ subrepository:
   $ hg ci -m 'Added subrepos'
   committing subrepository subrepo-2
   $ hg st subrepo-2/file
+
+Check that share works with subrepo
+  $ hg --config extensions.share= share . ../shared
+  updating working directory
+  cloning subrepo subrepo-2 from $TESTTMP/subrepo-status/subrepo-2
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ test -f ../shared/subrepo-1/.hg/sharedpath
+  [1]
 
 Check hg update --clean
   $ cd $TESTTMP/t

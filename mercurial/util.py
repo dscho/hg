@@ -64,7 +64,7 @@ shellquote = platform.shellquote
 spawndetached = platform.spawndetached
 split = platform.split
 sshargs = platform.sshargs
-statfiles = platform.statfiles
+statfiles = getattr(osutil, 'statfiles', platform.statfiles)
 termwidth = platform.termwidth
 testpid = platform.testpid
 umask = platform.umask
@@ -244,8 +244,11 @@ class propertycache(object):
         self.name = func.__name__
     def __get__(self, obj, type=None):
         result = self.func(obj)
-        setattr(obj, self.name, result)
+        self.cachevalue(obj, result)
         return result
+
+    def cachevalue(self, obj, value):
+        setattr(obj, self.name, value)
 
 def pipefilter(s, cmd):
     '''filter string S through command CMD, returning its output'''
@@ -479,11 +482,9 @@ def checksignature(func):
 
 def copyfile(src, dest):
     "copy a file, preserving mode and atime/mtime"
+    if os.path.lexists(dest):
+        unlink(dest)
     if os.path.islink(src):
-        try:
-            os.unlink(dest)
-        except OSError:
-            pass
         os.symlink(os.readlink(src), dest)
     else:
         try:

@@ -5,7 +5,8 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import heapq
+import heapq, util
+from node import nullrev
 
 def ancestor(a, b, pfunc):
     """
@@ -89,3 +90,175 @@ def ancestor(a, b, pfunc):
                 gx = x.next()
     except StopIteration:
         return None
+
+def missingancestors(revs, bases, pfunc):
+    """Return all the ancestors of revs that are not ancestors of bases.
+
+    This may include elements from revs.
+
+    Equivalent to the revset (::revs - ::bases). Revs are returned in
+    revision number order, which is a topological order.
+
+    revs and bases should both be iterables. pfunc must return a list of
+    parent revs for a given revs.
+    """
+
+    revsvisit = set(revs)
+    basesvisit = set(bases)
+    if not revsvisit:
+        return []
+    if not basesvisit:
+        basesvisit.add(nullrev)
+    start = max(max(revsvisit), max(basesvisit))
+    bothvisit = revsvisit.intersection(basesvisit)
+    revsvisit.difference_update(bothvisit)
+    basesvisit.difference_update(bothvisit)
+    # At this point, we hold the invariants that:
+    # - revsvisit is the set of nodes we know are an ancestor of at least one
+    #   of the nodes in revs
+    # - basesvisit is the same for bases
+    # - bothvisit is the set of nodes we know are ancestors of at least one of
+    #   the nodes in revs and one of the nodes in bases
+    # - a node may be in none or one, but not more, of revsvisit, basesvisit
+    #   and bothvisit at any given time
+    # Now we walk down in reverse topo order, adding parents of nodes already
+    # visited to the sets while maintaining the invariants. When a node is
+    # found in both revsvisit and basesvisit, it is removed from them and
+    # added to bothvisit instead. When revsvisit becomes empty, there are no
+    # more ancestors of revs that aren't also ancestors of bases, so exit.
+
+    missing = []
+    for curr in xrange(start, nullrev, -1):
+        if not revsvisit:
+            break
+
+        if curr in bothvisit:
+            bothvisit.remove(curr)
+            # curr's parents might have made it into revsvisit or basesvisit
+            # through another path
+            for p in pfunc(curr):
+                revsvisit.discard(p)
+                basesvisit.discard(p)
+                bothvisit.add(p)
+            continue
+
+        # curr will never be in both revsvisit and basesvisit, since if it
+        # were it'd have been pushed to bothvisit
+        if curr in revsvisit:
+            missing.append(curr)
+            thisvisit = revsvisit
+            othervisit = basesvisit
+        elif curr in basesvisit:
+            thisvisit = basesvisit
+            othervisit = revsvisit
+        else:
+            # not an ancestor of revs or bases: ignore
+            continue
+
+        thisvisit.remove(curr)
+        for p in pfunc(curr):
+            if p == nullrev:
+                pass
+            elif p in othervisit or p in bothvisit:
+                # p is implicitly in thisvisit. This means p is or should be
+                # in bothvisit
+                revsvisit.discard(p)
+                basesvisit.discard(p)
+                bothvisit.add(p)
+            else:
+                # visit later
+                thisvisit.add(p)
+
+    missing.reverse()
+    return missing
+
+class lazyancestors(object):
+    def __init__(self, cl, revs, stoprev=0, inclusive=False):
+        """Create a new object generating ancestors for the given revs. Does
+        not generate revs lower than stoprev.
+
+        This is computed lazily starting from revs. The object supports
+        iteration and membership.
+
+        cl should be a changelog and revs should be an iterable. inclusive is
+        a boolean that indicates whether revs should be included. Revs lower
+        than stoprev will not be generated.
+
+        Result does not include the null revision."""
+        self._parentrevs = cl.parentrevs
+        self._initrevs = revs
+        self._stoprev = stoprev
+        self._inclusive = inclusive
+
+        # Initialize data structures for __contains__.
+        # For __contains__, we use a heap rather than a deque because
+        # (a) it minimizes the number of parentrevs calls made
+        # (b) it makes the loop termination condition obvious
+        # Python's heap is a min-heap. Multiply all values by -1 to convert it
+        # into a max-heap.
+        self._containsvisit = [-rev for rev in revs]
+        heapq.heapify(self._containsvisit)
+        if inclusive:
+            self._containsseen = set(revs)
+        else:
+            self._containsseen = set()
+
+    def __iter__(self):
+        """Generate the ancestors of _initrevs in reverse topological order.
+
+        If inclusive is False, yield a sequence of revision numbers starting
+        with the parents of each revision in revs, i.e., each revision is *not*
+        considered an ancestor of itself.  Results are in breadth-first order:
+        parents of each rev in revs, then parents of those, etc.
+
+        If inclusive is True, yield all the revs first (ignoring stoprev),
+        then yield all the ancestors of revs as when inclusive is False.
+        If an element in revs is an ancestor of a different rev it is not
+        yielded again."""
+        seen = set()
+        revs = self._initrevs
+        if self._inclusive:
+            for rev in revs:
+                yield rev
+            seen.update(revs)
+
+        parentrevs = self._parentrevs
+        stoprev = self._stoprev
+        visit = util.deque(revs)
+
+        while visit:
+            for parent in parentrevs(visit.popleft()):
+                if parent >= stoprev and parent not in seen:
+                    visit.append(parent)
+                    seen.add(parent)
+                    yield parent
+
+    def __contains__(self, target):
+        """Test whether target is an ancestor of self._initrevs."""
+        # Trying to do both __iter__ and __contains__ using the same visit
+        # heap and seen set is complex enough that it slows down both. Keep
+        # them separate.
+        seen = self._containsseen
+        if target in seen:
+            return True
+
+        parentrevs = self._parentrevs
+        visit = self._containsvisit
+        stoprev = self._stoprev
+        heappop = heapq.heappop
+        heappush = heapq.heappush
+
+        targetseen = False
+
+        while visit and -visit[0] > target and not targetseen:
+            for parent in parentrevs(-heappop(visit)):
+                if parent < stoprev or parent in seen:
+                    continue
+                # We need to make sure we push all parents into the heap so
+                # that we leave it in a consistent state for future calls.
+                heappush(visit, -parent)
+                seen.add(parent)
+                if parent == target:
+                    targetseen = True
+
+        return targetseen

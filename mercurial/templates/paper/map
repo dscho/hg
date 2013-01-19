@@ -101,6 +101,8 @@ changelogparent = '
 
 changesetparent = '<a href="{url}rev/{node|short}{sessionvars%urlparameter}">{node|short}</a> '
 
+changesetbaseline = '<a href="{url}rev/{node|short}:{originalnode|short}{sessionvars%urlparameter}">{node|short}</a> '
+
 filerevparent = '<a href="{url}file/{node|short}/{file|urlescape}{sessionvars%urlparameter}">{rename%filerename}{node|short}</a> '
 filerevchild = '<a href="{url}file/{node|short}/{file|urlescape}{sessionvars%urlparameter}">{node|short}</a> '
 
@@ -211,6 +213,13 @@ indexentry = '
     <td>{contact|obfuscate}</td>
     <td class="age">{lastchange|rfc822date}</td>
     <td class="indexlinks">{archives%indexarchiveentry}</td>
+    <td>
+        {if(isdirectory, '',
+            '<a href="{url}atom-log" title="subscribe to repository atom feed">
+                <img class="atom-logo" src="{staticurl}feed-icon-14x14.png" alt="subscribe to repository atom feed">
+            </a>'
+            )}
+    </td>
   </tr>\n'
 indexarchiveentry = '<a href="{url}archive/{node|short}{extension|urlescape}">&nbsp;&darr;{type|escape}</a>'
 index = index.tmpl
@@ -222,3 +231,4 @@ notfound = notfound.tmpl
 error = error.tmpl
 urlparameter = '{separator}{name}={value|urlescape}'
 hiddenformentry = '<input type="hidden" name="{name}" value="{value|escape}" />'
+breadcrumb = '&gt; <a href="{url}">{name}</a> '

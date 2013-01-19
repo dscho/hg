@@ -63,7 +63,7 @@ from mercurial.i18n import _
 from mercurial.node import bin, hex, short, nullid, nullrev
 from mercurial.lock import release
 from mercurial import commands, cmdutil, hg, scmutil, util, revset
-from mercurial import repair, extensions, error, phases, bookmarks
+from mercurial import repair, extensions, error, phases
 from mercurial import patch as patchmod
 import os, re, errno, shutil
 
@@ -275,6 +275,7 @@ def newcommit(repo, phase, *args, **kwargs):
     It should be used instead of repo.commit inside the mq source for operation
     creating new changeset.
     """
+    repo = repo.unfiltered()
     if phase is None:
         if repo.ui.configbool('mq', 'secret', False):
             phase = phases.secret
@@ -826,7 +827,11 @@ class queue(object):
             if r:
                 r[None].forget(patches)
             for p in patches:
-                os.unlink(self.join(p))
+                try:
+                    os.unlink(self.join(p))
+                except OSError, inst:
+                    if inst.errno != errno.ENOENT:
+                        raise
 
         qfinished = []
         if numrevs:
@@ -924,11 +929,11 @@ class queue(object):
         self._cleanup(realpatches, numrevs, opts.get('keep'))
 
     def checktoppatch(self, repo):
+        '''check that working directory is at qtip'''
         if self.applied:
             top = self.applied[-1].node
             patch = self.applied[-1].name
-            pp = repo.dirstate.parents()
-            if top not in pp:
+            if repo.dirstate.p1() != top:
                 raise util.Abort(_("working directory revision is not qtip"))
             return top, patch
         return None, None
@@ -942,7 +947,7 @@ class queue(object):
             bctx = repo[baserev]
         else:
             bctx = wctx.parents()[0]
-        for s in wctx.substate:
+        for s in sorted(wctx.substate):
             if wctx.sub(s).dirty(True):
                 raise util.Abort(
                     _("uncommitted changes in subrepository %s") % s)
@@ -1146,7 +1151,7 @@ class queue(object):
                 return matches[0]
             if self.series and self.applied:
                 if s == 'qtip':
-                    return self.series[self.seriesend(True)-1]
+                    return self.series[self.seriesend(True) - 1]
                 if s == 'qbase':
                     return self.series[0]
             return None
@@ -1324,11 +1329,7 @@ class queue(object):
                 # created while patching
                 for f in all_files:
                     if f not in repo.dirstate:
-                        try:
-                            util.unlinkpath(repo.wjoin(f))
-                        except OSError, inst:
-                            if inst.errno != errno.ENOENT:
-                                raise
+                        util.unlinkpath(repo.wjoin(f), ignoremissing=True)
                 self.ui.warn(_('done\n'))
                 raise
 
@@ -1405,8 +1406,6 @@ class queue(object):
             self.applieddirty = True
             end = len(self.applied)
             rev = self.applied[start].node
-            if update:
-                top = self.checktoppatch(repo)[0]
 
             try:
                 heads = repo.changelog.heads(rev)
@@ -1427,7 +1426,7 @@ class queue(object):
             if update:
                 qp = self.qparents(repo, rev)
                 ctx = repo[qp]
-                m, a, r, d = repo.status(qp, top)[:4]
+                m, a, r, d = repo.status(qp, '.')[:4]
                 if d:
                     raise util.Abort(_("deletions found between repo revs"))
 
@@ -1437,11 +1436,7 @@ class queue(object):
                 self.backup(repo, tobackup)
 
                 for f in a:
-                    try:
-                        util.unlinkpath(repo.wjoin(f))
-                    except OSError, e:
-                        if e.errno != errno.ENOENT:
-                            raise
+                    util.unlinkpath(repo.wjoin(f), ignoremissing=True)
                     repo.dirstate.drop(f)
                 for f in m + r:
                     fctx = ctx[f]
@@ -1625,7 +1620,7 @@ class queue(object):
                 # if the patch excludes a modified file, mark that
                 # file with mtime=0 so status can see it.
                 mm = []
-                for i in xrange(len(m)-1, -1, -1):
+                for i in xrange(len(m) - 1, -1, -1):
                     if not matchfn(m[i]):
                         mm.append(m[i])
                         del m[i]
@@ -1675,9 +1670,10 @@ class queue(object):
                     patchf.write(chunk)
                 patchf.close()
 
+                marks = repo._bookmarks
                 for bm in bmlist:
-                    repo._bookmarks[bm] = n
-                bookmarks.write(repo)
+                    marks[bm] = n
+                marks.write()
 
                 self.applied.append(statusentry(n, patchfn))
             except: # re-raises
@@ -2999,7 +2995,7 @@ def strip(ui, repo, *revs, **opts):
             revs.update(set(rsrevs))
         if not revs:
             del marks[mark]
-            repo._writebookmarks(mark)
+            marks.write()
             ui.write(_("bookmark '%s' deleted\n") % mark)
 
     if not revs:
@@ -3036,7 +3032,7 @@ def strip(ui, repo, *revs, **opts):
             del q.applied[start:end]
             q.savedirty()
 
-    revs = list(rootnodes)
+    revs = sorted(rootnodes)
     if update and opts.get('keep'):
         wlock = repo.wlock()
         try:
@@ -3049,7 +3045,7 @@ def strip(ui, repo, *revs, **opts):
 
     if opts.get('bookmark'):
         del marks[mark]
-        repo._writebookmarks(marks)
+        marks.write()
         ui.write(_("bookmark '%s' deleted\n") % mark)
 
     repo.mq.strip(repo, revs, backup=backup, update=update,
@@ -3435,7 +3431,7 @@ def reposetup(ui, repo):
                             outapplied.pop()
                 # looking for pushed and shared changeset
                 for node in outapplied:
-                    if repo[node].phase() < phases.secret:
+                    if self[node].phase() < phases.secret:
                         raise util.Abort(_('source has mq patches applied'))
                 # no non-secret patches pushed
             super(mqrepo, self).checkpush(force, revs)
@@ -3451,7 +3447,8 @@ def reposetup(ui, repo):
             mqtags = [(patch.node, patch.name) for patch in q.applied]
 
             try:
-                self.changelog.rev(mqtags[-1][0])
+                # for now ignore filtering business
+                self.unfiltered().changelog.rev(mqtags[-1][0])
             except error.LookupError:
                 self.ui.warn(_('mq status file refers to unknown node %s\n')
                              % short(mqtags[-1][0]))
@@ -3469,41 +3466,6 @@ def reposetup(ui, repo):
                     tags[patch[1]] = patch[0]
 
             return result
-
-        def _branchtags(self, partial, lrev):
-            q = self.mq
-            cl = self.changelog
-            qbase = None
-            if not q.applied:
-                if getattr(self, '_committingpatch', False):
-                    # Committing a new patch, must be tip
-                    qbase = len(cl) - 1
-            else:
-                qbasenode = q.applied[0].node
-                try:
-                    qbase = cl.rev(qbasenode)
-                except error.LookupError:
-                    self.ui.warn(_('mq status file refers to unknown node %s\n')
-                                 % short(qbasenode))
-            if qbase is None:
-                return super(mqrepo, self)._branchtags(partial, lrev)
-
-            start = lrev + 1
-            if start < qbase:
-                # update the cache (excluding the patches) and save it
-                ctxgen = (self[r] for r in xrange(lrev + 1, qbase))
-                self._updatebranchcache(partial, ctxgen)
-                self._writebranchcache(partial, cl.node(qbase - 1), qbase - 1)
-                start = qbase
-            # if start = qbase, the cache is as updated as it should be.
-            # if start > qbase, the cache includes (part of) the patches.
-            # we might as well use it, but we won't save it.
-
-            # update the cache up to the tip
-            ctxgen = (self[r] for r in xrange(start, len(cl)))
-            self._updatebranchcache(partial, ctxgen)
-
-            return partial
 
     if repo.local():
         repo.__class__ = mqrepo

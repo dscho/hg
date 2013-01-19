@@ -23,10 +23,16 @@
 <ul>
 <li><a href="{url}help{sessionvars%urlparameter}">help</a></li>
 </ul>
+<p>
+<div class="atom-logo">
+<a href="{url}atom-bookmarks" title="subscribe to atom feed">
+<img class="atom-logo" src="{staticurl}feed-icon-14x14.png" alt="atom feed">
+</a>
+</div>
 </div>
 
 <div class="main">
-<h2><a href="{url}{sessionvars%urlparameter}">{repo|escape}</a></h2>
+<h2 class="breadcrumb"><a href="/">Mercurial</a> {pathdef%breadcrumb}</h2>
 <h3>bookmarks</h3>
 
 <form class="search" action="{url}log">

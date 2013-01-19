@@ -7,7 +7,7 @@
 
 from i18n import _
 import bdiff, mpatch, util
-import re, struct
+import re, struct, base85, zlib
 
 def splitnewlines(text):
     '''like str.splitlines, but only split on newlines.'''
@@ -142,20 +142,7 @@ def allblocks(text1, text2, opts=None, lines1=None, lines2=None, refine=False):
             yield s, type
         yield s1, '='
 
-def diffline(revs, a, b, opts):
-    parts = ['diff']
-    if opts.git:
-        parts.append('--git')
-    if revs and not opts.git:
-        parts.append(' '.join(["-r %s" % rev for rev in revs]))
-    if opts.git:
-        parts.append('a/%s' % a)
-        parts.append('b/%s' % b)
-    else:
-        parts.append(a)
-    return ' '.join(parts) + '\n'
-
-def unidiff(a, ad, b, bd, fn1, fn2, r=None, opts=defaultopts):
+def unidiff(a, ad, b, bd, fn1, fn2, opts=defaultopts):
     def datetag(date, fn=None):
         if not opts.git and not opts.nodates:
             return '\t%s\n' % date
@@ -205,9 +192,6 @@ def unidiff(a, ad, b, bd, fn1, fn2, r=None, opts=defaultopts):
     for ln in xrange(len(l)):
         if l[ln][-1] != '\n':
             l[ln] += "\n\ No newline at end of file\n"
-
-    if r:
-        l.insert(0, diffline(r, fn1, fn2, opts))
 
     return "".join(l)
 
@@ -313,6 +297,41 @@ def _unidiff(t1, t2, l1, l2, opts=defaultopts):
     if hunk:
         for x in yieldhunk(hunk):
             yield x
+
+def b85diff(to, tn):
+    '''print base85-encoded binary diff'''
+    def fmtline(line):
+        l = len(line)
+        if l <= 26:
+            l = chr(ord('A') + l - 1)
+        else:
+            l = chr(l - 26 + ord('a') - 1)
+        return '%c%s\n' % (l, base85.b85encode(line, True))
+
+    def chunk(text, csize=52):
+        l = len(text)
+        i = 0
+        while i < l:
+            yield text[i:i + csize]
+            i += csize
+
+    if to is None:
+        to = ''
+    if tn is None:
+        tn = ''
+
+    if to == tn:
+        return ''
+
+    # TODO: deltas
+    ret = []
+    ret.append('GIT binary patch\n')
+    ret.append('literal %s\n' % len(tn))
+    for l in chunk(zlib.compress(tn)):
+        ret.append(fmtline(l))
+    ret.append('\n')
+
+    return ''.join(ret)
 
 def patchtext(bin):
     pos = 0

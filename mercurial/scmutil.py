@@ -252,9 +252,9 @@ class vfs(abstractvfs):
     def _setmustaudit(self, onoff):
         self._audit = onoff
         if onoff:
-            self.auditor = pathauditor(self.base)
+            self.audit = pathauditor(self.base)
         else:
-            self.auditor = util.always
+            self.audit = util.always
 
     mustaudit = property(_getmustaudit, _setmustaudit)
 
@@ -276,51 +276,52 @@ class vfs(abstractvfs):
             r = util.checkosfilename(path)
             if r:
                 raise util.Abort("%s: %r" % (r, path))
-        self.auditor(path)
+        self.audit(path)
         f = self.join(path)
 
         if not text and "b" not in mode:
             mode += "b" # for that other OS
 
         nlink = -1
-        dirname, basename = util.split(f)
-        # If basename is empty, then the path is malformed because it points
-        # to a directory. Let the posixfile() call below raise IOError.
-        if basename and mode not in ('r', 'rb'):
-            if atomictemp:
-                if not os.path.isdir(dirname):
-                    util.makedirs(dirname, self.createmode)
-                return util.atomictempfile(f, mode, self.createmode)
-            try:
-                if 'w' in mode:
-                    util.unlink(f)
+        if mode not in ('r', 'rb'):
+            dirname, basename = util.split(f)
+            # If basename is empty, then the path is malformed because it points
+            # to a directory. Let the posixfile() call below raise IOError.
+            if basename:
+                if atomictemp:
+                    if not os.path.isdir(dirname):
+                        util.makedirs(dirname, self.createmode)
+                    return util.atomictempfile(f, mode, self.createmode)
+                try:
+                    if 'w' in mode:
+                        util.unlink(f)
+                        nlink = 0
+                    else:
+                        # nlinks() may behave differently for files on Windows
+                        # shares if the file is open.
+                        fd = util.posixfile(f)
+                        nlink = util.nlinks(f)
+                        if nlink < 1:
+                            nlink = 2 # force mktempcopy (issue1922)
+                        fd.close()
+                except (OSError, IOError), e:
+                    if e.errno != errno.ENOENT:
+                        raise
                     nlink = 0
-                else:
-                    # nlinks() may behave differently for files on Windows
-                    # shares if the file is open.
-                    fd = util.posixfile(f)
-                    nlink = util.nlinks(f)
-                    if nlink < 1:
-                        nlink = 2 # force mktempcopy (issue1922)
-                    fd.close()
-            except (OSError, IOError), e:
-                if e.errno != errno.ENOENT:
-                    raise
-                nlink = 0
-                if not os.path.isdir(dirname):
-                    util.makedirs(dirname, self.createmode)
-            if nlink > 0:
-                if self._trustnlink is None:
-                    self._trustnlink = nlink > 1 or util.checknlink(f)
-                if nlink > 1 or not self._trustnlink:
-                    util.rename(util.mktempcopy(f), f)
+                    if not os.path.isdir(dirname):
+                        util.makedirs(dirname, self.createmode)
+                if nlink > 0:
+                    if self._trustnlink is None:
+                        self._trustnlink = nlink > 1 or util.checknlink(f)
+                    if nlink > 1 or not self._trustnlink:
+                        util.rename(util.mktempcopy(f), f)
         fp = util.posixfile(f, mode)
         if nlink == 0:
             self._fixfilemode(f)
         return fp
 
     def symlink(self, src, dst):
-        self.auditor(dst)
+        self.audit(dst)
         linkname = self.join(dst)
         try:
             os.unlink(linkname)
@@ -339,9 +340,6 @@ class vfs(abstractvfs):
                               (src, err.strerror), linkname)
         else:
             self.write(dst, src)
-
-    def audit(self, path):
-        self.auditor(path)
 
     def join(self, path):
         if path:
@@ -380,6 +378,18 @@ class filtervfs(abstractvfs, auditvfs):
             return self.vfs.join(path)
 
 filteropener = filtervfs
+
+class readonlyvfs(abstractvfs, auditvfs):
+    '''Wrapper vfs preventing any writing.'''
+
+    def __init__(self, vfs):
+        auditvfs.__init__(self, vfs)
+
+    def __call__(self, path, mode='r', *args, **kw):
+        if mode not in ('r', 'rb'):
+            raise util.Abort('this vfs is read only')
+        return self.vfs(path, mode, *args, **kw)
+
 
 def canonpath(root, cwd, myname, auditor=None):
     '''return the canonical path of myname, given cwd and root'''
@@ -425,7 +435,7 @@ def canonpath(root, cwd, myname, auditor=None):
                 break
             name = dirname
 
-        raise util.Abort('%s not under root' % myname)
+        raise util.Abort(_("%s not under root '%s'") % (myname, root))
 
 def walkrepos(path, followsym=False, seen_dirs=None, recurse=False):
     '''yield every hg repository under path, always recursively.
@@ -637,13 +647,13 @@ def revrange(repo, revs):
                 start, end = spec.split(_revrangesep, 1)
                 start = revfix(repo, start, 0)
                 end = revfix(repo, end, len(repo) - 1)
-                step = start > end and -1 or 1
+                rangeiter = repo.changelog.revs(start, end)
                 if not seen and not l:
                     # by far the most common case: revs = ["-1:0"]
-                    l = range(start, end + step, step)
+                    l = list(rangeiter)
                     # defer syncing seen until next iteration
                     continue
-                newrevs = set(xrange(start, end + step, step))
+                newrevs = set(rangeiter)
                 if seen:
                     newrevs.difference_update(seen)
                     seen.update(newrevs)
@@ -850,15 +860,19 @@ def readrequires(opener, supported):
     return requirements
 
 class filecacheentry(object):
-    def __init__(self, path):
+    def __init__(self, path, stat=True):
         self.path = path
-        self.cachestat = filecacheentry.stat(self.path)
+        self.cachestat = None
+        self._cacheable = None
 
-        if self.cachestat:
-            self._cacheable = self.cachestat.cacheable()
-        else:
-            # None means we don't know yet
-            self._cacheable = None
+        if stat:
+            self.cachestat = filecacheentry.stat(self.path)
+
+            if self.cachestat:
+                self._cacheable = self.cachestat.cacheable()
+            else:
+                # None means we don't know yet
+                self._cacheable = None
 
     def refresh(self):
         if self.cacheable():
@@ -933,6 +947,7 @@ class filecache(object):
     def __get__(self, obj, type=None):
         # do we need to check if the file changed?
         if self.name in obj.__dict__:
+            assert self.name in obj._filecache, self.name
             return obj.__dict__[self.name]
 
         entry = obj._filecache.get(self.name)
@@ -954,12 +969,19 @@ class filecache(object):
         return entry.obj
 
     def __set__(self, obj, value):
-        if self.name in obj._filecache:
-            obj._filecache[self.name].obj = value # update cached copy
+        if self.name not in obj._filecache:
+            # we add an entry for the missing value because X in __dict__
+            # implies X in _filecache
+            ce = filecacheentry(self.join(obj, self.path), False)
+            obj._filecache[self.name] = ce
+        else:
+            ce = obj._filecache[self.name]
+
+        ce.obj = value # update cached copy
         obj.__dict__[self.name] = value # update copy returned by obj.x
 
     def __delete__(self, obj):
         try:
             del obj.__dict__[self.name]
         except KeyError:
-            raise AttributeError, self.name
+            raise AttributeError(self.name)

@@ -144,7 +144,6 @@ except ImportError:
     import pickle
 import os
 
-from mercurial import bookmarks
 from mercurial import cmdutil
 from mercurial import discovery
 from mercurial import error
@@ -176,6 +175,31 @@ editcomment = _("""# Edit history between %s and %s
 #  m, mess = edit message without changing commit content
 #
 """)
+
+def commitfuncfor(repo, src):
+    """Build a commit function for the replacement of <src>
+
+    This function ensure we apply the same treatement to all changesets.
+
+    - Add a 'histedit_source' entry in extra.
+
+    Note that fold have its own separated logic because its handling is a bit
+    different and not easily factored out of the fold method.
+    """
+    phasemin = src.phase()
+    def commitfunc(**kwargs):
+        phasebackup = repo.ui.backupconfig('phases', 'new-commit')
+        try:
+            repo.ui.setconfig('phases', 'new-commit', phasemin)
+            extra = kwargs.get('extra', {}).copy()
+            extra['histedit_source'] = src.hex()
+            kwargs['extra'] = extra
+            return repo.commit(**kwargs)
+        finally:
+            repo.ui.restoreconfig(phasebackup)
+    return commitfunc
+
+
 
 def applychanges(ui, repo, ctx, opts):
     """Merge changeset from ctx (only) in the current working directory"""
@@ -255,7 +279,7 @@ def collapse(repo, first, last, commitopts):
         message = first.description()
     user = commitopts.get('user')
     date = commitopts.get('date')
-    extra = first.extra()
+    extra = commitopts.get('extra')
 
     parents = (first.p1().node(), first.p2().node())
     new = context.memctx(repo,
@@ -280,8 +304,9 @@ def pick(ui, repo, ctx, ha, opts):
         raise util.Abort(_('Fix up the change and run '
                            'hg histedit --continue'))
     # drop the second merge parent
-    n = repo.commit(text=oldctx.description(), user=oldctx.user(),
-                    date=oldctx.date(), extra=oldctx.extra())
+    commit = commitfuncfor(repo, oldctx)
+    n = commit(text=oldctx.description(), user=oldctx.user(),
+               date=oldctx.date(), extra=oldctx.extra())
     if n is None:
         ui.warn(_('%s: empty changeset\n')
                      % node.hex(ha))
@@ -332,7 +357,19 @@ def finishfold(ui, repo, ctx, oldctx, newnode, opts, internalchanges):
     commitopts['message'] = newmessage
     # date
     commitopts['date'] = max(ctx.date(), oldctx.date())
-    n = collapse(repo, ctx, repo[newnode], commitopts)
+    extra = ctx.extra().copy()
+    # histedit_source
+    # note: ctx is likely a temporary commit but that the best we can do here
+    #       This is sufficient to solve issue3681 anyway
+    extra['histedit_source'] = '%s,%s' % (ctx.hex(), oldctx.hex())
+    commitopts['extra'] = extra
+    phasebackup = repo.ui.backupconfig('phases', 'new-commit')
+    try:
+        phasemin = max(ctx.phase(), oldctx.phase())
+        repo.ui.setconfig('phases', 'new-commit', phasemin)
+        n = collapse(repo, ctx, repo[newnode], commitopts)
+    finally:
+        repo.ui.restoreconfig(phasebackup)
     if n is None:
         return ctx, []
     hg.update(repo, n)
@@ -357,8 +394,9 @@ def message(ui, repo, ctx, ha, opts):
                            'hg histedit --continue'))
     message = oldctx.description() + '\n'
     message = ui.edit(message, ui.username())
-    new = repo.commit(text=message, user=oldctx.user(), date=oldctx.date(),
-                      extra=oldctx.extra())
+    commit = commitfuncfor(repo, oldctx)
+    new = commit(text=message, user=oldctx.user(), date=oldctx.date(),
+                 extra=oldctx.extra())
     newctx = repo[new]
     if oldctx.node() != newctx.node():
         return newctx, [(oldctx.node(), (new,))]
@@ -559,9 +597,10 @@ def bootstrapcontinue(ui, repo, parentctx, rules, opts):
             editor = cmdutil.commitforceeditor
         else:
             editor = False
-        new = repo.commit(text=message, user=ctx.user(),
-                          date=ctx.date(), extra=ctx.extra(),
-                          editor=editor)
+        commit = commitfuncfor(repo, ctx)
+        new = commit(text=message, user=ctx.user(),
+                     date=ctx.date(), extra=ctx.extra(),
+                     editor=editor)
         if new is not None:
             newchildren.append(new)
 
@@ -594,7 +633,8 @@ def between(repo, old, new, keep):
     When keep is false, the specified set can't have children."""
     ctxs = list(repo.set('%n::%n', old, new))
     if ctxs and not keep:
-        if repo.revs('(%ld::) - (%ld + hidden())', ctxs, ctxs):
+        if (not obsolete._enabled and
+            repo.revs('(%ld::) - (%ld)', ctxs, ctxs)):
             raise util.Abort(_('cannot edit history that would orphan nodes'))
         root = ctxs[0] # list is already sorted by repo.set
         if not root.phase():
@@ -720,9 +760,9 @@ def movebookmarks(ui, repo, mapping, oldtopmost, newtopmost):
         # if nothing got rewritten there is not purpose for this function
         return
     moves = []
-    for bk, old in repo._bookmarks.iteritems():
+    for bk, old in sorted(repo._bookmarks.iteritems()):
         if old == oldtopmost:
-            # special case ensure bookmark stay on tip. 
+            # special case ensure bookmark stay on tip.
             #
             # This is arguably a feature and we may only want that for the
             # active bookmark. But the behavior is kept compatible with the old
@@ -740,12 +780,13 @@ def movebookmarks(ui, repo, mapping, oldtopmost, newtopmost):
             # nothing to move
         moves.append((bk, new[-1]))
     if moves:
+        marks = repo._bookmarks
         for mark, new in moves:
-            old = repo._bookmarks[mark]
+            old = marks[mark]
             ui.note(_('histedit: moving bookmarks %s from %s to %s\n')
                     % (mark, node.short(old), node.short(new)))
-            repo._bookmarks[mark] = new
-        bookmarks.write(repo)
+            marks[mark] = new
+        marks.write()
 
 def cleanupnode(ui, repo, name, nodes):
     """strip a group of nodes from the repository

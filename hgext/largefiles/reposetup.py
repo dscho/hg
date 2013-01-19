@@ -11,9 +11,11 @@ import copy
 import types
 import os
 
-from mercurial import context, error, manifest, match as match_, util
+from mercurial import context, error, manifest, match as match_, util, \
+    discovery
 from mercurial import node as node_
 from mercurial.i18n import _
+from mercurial import localrepo
 
 import lfcommands
 import proto
@@ -88,6 +90,9 @@ def reposetup(ui, repo):
         # appropriate list in the result. Also removes standin files
         # from the listing. Revert to the original status if
         # self.lfstatus is False.
+        # XXX large file status is buggy when used on repo proxy.
+        # XXX this needs to be investigated.
+        @localrepo.unfilteredmethod
         def status(self, node1='.', node2=None, match=None, ignored=False,
                 clean=False, unknown=False, listsubrepos=False):
             listignored, listclean, listunknown = ignored, clean, unknown
@@ -153,78 +158,54 @@ def reposetup(ui, repo):
                             newfiles.append(f)
                     return newfiles
 
-                # Create a function that we can use to override what is
-                # normally the ignore matcher.  We've already checked
-                # for ignored files on the first dirstate walk, and
-                # unnecessarily re-checking here causes a huge performance
-                # hit because lfdirstate only knows about largefiles
-                def _ignoreoverride(self):
-                    return False
-
                 m = copy.copy(match)
                 m._files = tostandins(m._files)
 
                 result = super(lfilesrepo, self).status(node1, node2, m,
                     ignored, clean, unknown, listsubrepos)
                 if working:
-                    try:
-                        # Any non-largefiles that were explicitly listed must be
-                        # taken out or lfdirstate.status will report an error.
-                        # The status of these files was already computed using
-                        # super's status.
-                        # Override lfdirstate's ignore matcher to not do
-                        # anything
-                        origignore = lfdirstate._ignore
-                        lfdirstate._ignore = _ignoreoverride
 
-                        def sfindirstate(f):
-                            sf = lfutil.standin(f)
-                            dirstate = self.dirstate
-                            return sf in dirstate or sf in dirstate.dirs()
-                        match._files = [f for f in match._files
-                                        if sfindirstate(f)]
-                        # Don't waste time getting the ignored and unknown
-                        # files again; we already have them
-                        s = lfdirstate.status(match, [], False,
-                                listclean, False)
-                        (unsure, modified, added, removed, missing, unknown,
-                                ignored, clean) = s
-                        # Replace the list of ignored and unknown files with
-                        # the previously calculated lists, and strip out the
-                        # largefiles
-                        lfiles = set(lfdirstate._map)
-                        ignored = set(result[5]).difference(lfiles)
-                        unknown = set(result[4]).difference(lfiles)
-                        if parentworking:
-                            for lfile in unsure:
-                                standin = lfutil.standin(lfile)
-                                if standin not in ctx1:
-                                    # from second parent
-                                    modified.append(lfile)
-                                elif ctx1[standin].data().strip() \
-                                        != lfutil.hashfile(self.wjoin(lfile)):
+                    def sfindirstate(f):
+                        sf = lfutil.standin(f)
+                        dirstate = self.dirstate
+                        return sf in dirstate or sf in dirstate.dirs()
+
+                    match._files = [f for f in match._files
+                                    if sfindirstate(f)]
+                    # Don't waste time getting the ignored and unknown
+                    # files from lfdirstate
+                    s = lfdirstate.status(match, [], False,
+                            listclean, False)
+                    (unsure, modified, added, removed, missing, _unknown,
+                            _ignored, clean) = s
+                    if parentworking:
+                        for lfile in unsure:
+                            standin = lfutil.standin(lfile)
+                            if standin not in ctx1:
+                                # from second parent
+                                modified.append(lfile)
+                            elif ctx1[standin].data().strip() \
+                                    != lfutil.hashfile(self.wjoin(lfile)):
+                                modified.append(lfile)
+                            else:
+                                clean.append(lfile)
+                                lfdirstate.normal(lfile)
+                    else:
+                        tocheck = unsure + modified + added + clean
+                        modified, added, clean = [], [], []
+
+                        for lfile in tocheck:
+                            standin = lfutil.standin(lfile)
+                            if inctx(standin, ctx1):
+                                if ctx1[standin].data().strip() != \
+                                        lfutil.hashfile(self.wjoin(lfile)):
                                     modified.append(lfile)
                                 else:
                                     clean.append(lfile)
-                                    lfdirstate.normal(lfile)
-                        else:
-                            tocheck = unsure + modified + added + clean
-                            modified, added, clean = [], [], []
+                            else:
+                                added.append(lfile)
 
-                            for lfile in tocheck:
-                                standin = lfutil.standin(lfile)
-                                if inctx(standin, ctx1):
-                                    if ctx1[standin].data().strip() != \
-                                            lfutil.hashfile(self.wjoin(lfile)):
-                                        modified.append(lfile)
-                                    else:
-                                        clean.append(lfile)
-                                else:
-                                    added.append(lfile)
-                    finally:
-                        # Replace the original ignore function
-                        lfdirstate._ignore = origignore
-
+                    # Standins no longer found in lfdirstate has been removed
                     for standin in ctx1.manifest():
                         if not lfutil.isstandin(standin):
                             continue
@@ -239,20 +220,17 @@ def reposetup(ui, repo):
 
                     # Largefiles are not really removed when they're
                     # still in the normal dirstate. Likewise, normal
-                    # files are not really removed if it's still in
+                    # files are not really removed if they are still in
                     # lfdirstate. This happens in merges where files
                     # change type.
                     removed = [f for f in removed if f not in self.dirstate]
                     result[2] = [f for f in result[2] if f not in lfdirstate]
 
+                    lfiles = set(lfdirstate._map)
                     # Unknown files
-                    unknown = set(unknown).difference(ignored)
-                    result[4] = [f for f in unknown
-                                 if (self.dirstate[f] == '?' and
-                                     not lfutil.isstandin(f))]
-                    # Ignored files were calculated earlier by the dirstate,
-                    # and we already stripped out the largefiles from the list
-                    result[5] = ignored
+                    result[4] = set(result[4]).difference(lfiles)
+                    # Ignored files
+                    result[5] = set(result[5]).difference(lfiles)
                     # combine normal files and largefiles
                     normals = [[fn for fn in filelist
                                 if not lfutil.isstandin(fn)]
@@ -361,7 +339,7 @@ def reposetup(ui, repo):
                 # Case 2: user calls commit with specified patterns: refresh
                 # any matching big files.
                 smatcher = lfutil.composestandinmatcher(self, match)
-                standins = lfutil.dirstatewalk(self.dirstate, smatcher)
+                standins = self.dirstate.walk(smatcher, [], False, False)
 
                 # No matching big files: get out of the way and pass control to
                 # the usual commit() method.
@@ -377,7 +355,7 @@ def reposetup(ui, repo):
                 lfdirstate = lfutil.openlfdirstate(ui, self)
                 for standin in standins:
                     lfile = lfutil.splitstandin(standin)
-                    if lfdirstate[lfile] <> 'r':
+                    if lfdirstate[lfile] != 'r':
                         lfutil.updatestandin(self, standin)
                         lfdirstate.normal(lfile)
                     else:
@@ -427,10 +405,11 @@ def reposetup(ui, repo):
                 wlock.release()
 
         def push(self, remote, force=False, revs=None, newbranch=False):
-            o = lfutil.findoutgoing(self, remote, force)
-            if o:
+            outgoing = discovery.findcommonoutgoing(repo, remote.peer(),
+                                                    force=force)
+            if outgoing.missing:
                 toupload = set()
-                o = self.changelog.nodesbetween(o, revs)[0]
+                o = self.changelog.nodesbetween(outgoing.missing, revs)[0]
                 for n in o:
                     parents = [p for p in self.changelog.parents(n)
                                if p != node_.nullid]

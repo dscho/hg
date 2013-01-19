@@ -24,6 +24,30 @@ perms = {
     'pushkey': 'push',
 }
 
+def makebreadcrumb(url):
+    '''Return a 'URL breadcrumb' list
+
+    A 'URL breadcrumb' is a list of URL-name pairs,
+    corresponding to each of the path items on a URL.
+    This can be used to create path navigation entries.
+    '''
+    if url.endswith('/'):
+        url = url[:-1]
+    relpath = url
+    if relpath.startswith('/'):
+        relpath = relpath[1:]
+
+    breadcrumb = []
+    urlel = url
+    pathitems = [''] + relpath.split('/')
+    for pathel in reversed(pathitems):
+        if not pathel or not urlel:
+            break
+        breadcrumb.append({'url': urlel, 'name': pathel})
+        urlel = os.path.dirname(urlel)
+    return reversed(breadcrumb)
+
+
 class hgweb(object):
     def __init__(self, repo, name=None, baseui=None):
         if isinstance(repo, str):
@@ -35,6 +59,7 @@ class hgweb(object):
         else:
             self.repo = repo
 
+        self.repo =  self.repo.filtered('served')
         self.repo.ui.setconfig('ui', 'report_untrusted', 'off')
         self.repo.ui.setconfig('ui', 'nontty', 'true')
         hook.redirect(True)
@@ -71,6 +96,7 @@ class hgweb(object):
             self.mtime = st.st_mtime
             self.size = st.st_size
             self.repo = hg.repository(self.repo.ui, self.repo.root)
+            self.repo =  self.repo.filtered('served')
             self.maxchanges = int(self.config("web", "maxchanges", 10))
             self.stripecount = int(self.config("web", "stripes", 1))
             self.maxshortchanges = int(self.config("web", "maxshortchanges",
@@ -134,8 +160,9 @@ class hgweb(object):
                                  '').lower() != '100-continue') or
                     req.env.get('X-HgHttp2', '')):
                     req.drain()
-                req.respond(inst, protocol.HGTYPE)
-                return '0\n%s\n' % inst.message
+                req.respond(inst, protocol.HGTYPE,
+                            body='0\n%s\n' % inst.message)
+                return ''
 
         # translate user-visible url structure to internal structure
 
@@ -285,7 +312,8 @@ class hgweb(object):
                                              "header": header,
                                              "footer": footer,
                                              "motd": motd,
-                                             "sessionvars": sessionvars
+                                             "sessionvars": sessionvars,
+                                             "pathdef": makebreadcrumb(req.url),
                                             })
         return tmpl
 

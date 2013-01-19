@@ -183,8 +183,8 @@ def _runcatch(req):
         else:
             raise
     except OSError, inst:
-        if getattr(inst, "filename", None):
-            ui.warn(_("abort: %s: %s\n") % (inst.strerror, inst.filename))
+        if getattr(inst, "filename", None) is not None:
+            ui.warn(_("abort: %s: '%s'\n") % (inst.strerror, inst.filename))
         else:
             ui.warn(_("abort: %s\n") % inst.strerror)
     except KeyboardInterrupt:
@@ -710,6 +710,8 @@ def _dispatch(req):
                 repo = hg.repository(ui, path=path)
                 if not repo.local():
                     raise util.Abort(_("repository '%s' is not local") % path)
+                if options['hidden']:
+                    repo = repo.unfiltered()
                 repo.ui.setconfig("bundle", "mainreporoot", repo.root)
             except error.RequirementError:
                 raise

@@ -156,10 +156,15 @@ tip - two revisions
   <ul>
   <li><a href="/help">help</a></li>
   </ul>
+  <p>
+  <div class="atom-logo">
+  <a href="/atom-log/01de2d66a28d/a" title="subscribe to atom feed">
+  <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed"></a>
+  </div>
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>log a</h3>
   
   <form class="search" action="/log">
@@ -258,10 +263,15 @@ second version - two revisions
   <ul>
   <li><a href="/help">help</a></li>
   </ul>
+  <p>
+  <div class="atom-logo">
+  <a href="/atom-log/01de2d66a28d/a" title="subscribe to atom feed">
+  <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed"></a>
+  </div>
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>log a</h3>
   
   <form class="search" action="/log">
@@ -360,10 +370,15 @@ first deleted - one revision
   <ul>
   <li><a href="/help">help</a></li>
   </ul>
+  <p>
+  <div class="atom-logo">
+  <a href="/atom-log/5ed941583260/a" title="subscribe to atom feed">
+  <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed"></a>
+  </div>
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>log a</h3>
   
   <form class="search" action="/log">
@@ -457,10 +472,15 @@ first version - one revision
   <ul>
   <li><a href="/help">help</a></li>
   </ul>
+  <p>
+  <div class="atom-logo">
+  <a href="/atom-log/5ed941583260/a" title="subscribe to atom feed">
+  <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed"></a>
+  </div>
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>log a</h3>
   
   <form class="search" action="/log">
@@ -542,7 +562,7 @@ before addition - error
   
   <div class="main">
   
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>error</h3>
   
   <form class="search" action="/log">
@@ -605,7 +625,7 @@ should show base link, use spartan because it shows it
   <a type="application/atom+xml" href="/atom-log/tip/c" title="Atom feed for test:c">atom</a>
   </div>
   
-  <h2>c revision history</h2>
+  <h2><a href="/">Mercurial</a>  / c revision history</h2>
   
   <p>navigate: <small class="navigate"><a href="/log/1a6696706df2/c?style=spartan">(0)</a> <a href="/log/tip/c?style=spartan">tip</a> </small></p>
   

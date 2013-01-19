@@ -60,6 +60,12 @@ body {
   border: 0;
 }
 
+.atom-logo img{
+  width: 14px;
+  height: 14px;
+  border: 0;
+}
+
 .menu a { color: black; display: block; }
 
 .search {
@@ -311,4 +317,12 @@ ul#graphnodes li .info {
 
 .block {
     border-top: 1px solid #999;
+}
+
+.breadcrumb {
+    color: gray;
+}
+
+.breadcrumb a {
+    color: blue;
 }

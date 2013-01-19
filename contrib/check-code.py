@@ -129,13 +129,14 @@ pypats = [
     (r'(?<!def)\s+(cmp)\(', "cmp is not available in Python 3+"),
     (r'\breduce\s*\(.*', "reduce is not available in Python 3+"),
     (r'\.has_key\b', "dict.has_key is not available in Python 3+"),
+    (r'\s<>\s', '<> operator is not available in Python 3+, use !='),
     (r'^\s*\t', "don't use tabs"),
     (r'\S;\s*\n', "semicolon"),
     (r'[^_]_\("[^"]+"\s*%', "don't use % inside _()"),
     (r"[^_]_\('[^']+'\s*%", "don't use % inside _()"),
-    (r'\w,\w', "missing whitespace after ,"),
-    (r'\w[+/*\-<>]\w', "missing whitespace in expression"),
-    (r'^\s+\w+=\w+[^,)\n]$', "missing whitespace in assignment"),
+    (r'(\w|\)),\w', "missing whitespace after ,"),
+    (r'(\w|\))[+/*\-<>]\w', "missing whitespace in expression"),
+    (r'^\s+(\w|\.)+=\w[^,()\n]*$', "missing whitespace in assignment"),
     (r'(\s+)try:\n((?:\n|\1\s.*\n)+?)\1except.*?:\n'
      r'((?:\n|\1\s.*\n)+?)\1finally:', 'no try/except/finally in Python 2.4'),
     (r'(\s+)try:\n((?:\n|\1\s.*\n)*?)\1\s*yield\b.*?'
@@ -185,6 +186,8 @@ pypats = [
     (r'[^^+=*/!<>&| %-](\s=|=\s)[^= ]',
      "wrong whitespace around ="),
     (r'raise Exception', "don't raise generic exceptions"),
+    (r'raise [^,(]+, (\([^\)]+\)|[^,\(\)]+)$',
+     "don't use old-style two-argument raise, use Exception(message)"),
     (r' is\s+(not\s+)?["\'0-9-]', "object comparison with literal"),
     (r' [=!]=\s+(True|False|None)',
      "comparison with singleton, use 'is' or 'is not' instead"),
@@ -211,11 +214,11 @@ pypats = [
     (r'\.strip\(\)\.split\(\)', "no need to strip before splitting"),
     (r'^\s*except\s*:', "warning: naked except clause", r'#.*re-raises'),
     (r':\n(    )*( ){1,3}[^ ]', "must indent 4 spaces"),
+    (r'ui\.(status|progress|write|note|warn)\([\'\"]x',
+     "missing _() in ui message (use () to hide false-positives)"),
   ],
   # warnings
   [
-    (r'ui\.(status|progress|write|note|warn)\([\'\"]x',
-     "warning: unwrapped ui message"),
   ]
 ]
 

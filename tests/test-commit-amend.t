@@ -488,14 +488,33 @@ ride of)
   | |
 
 
-Test that amend does not make it easy to create obsoletescence cycle
+Test that amend does not make it easy to create obsolescence cycle
 ---------------------------------------------------------------------
 
-
-  $ hg id -r 14
+  $ hg id -r 14 --hidden
   b650e6ee8614 (a)
-  $ hg revert -ar 14
+  $ hg revert -ar 14 --hidden
   reverting a
   $ hg commit --amend
   $ hg id
   b99e5df575f7 (a) tip
+
+Test that rewriting leaving instability behind is allowed
+---------------------------------------------------------------------
+
+  $ hg up '.^'
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo 'b' >> a
+  $ hg log --style compact -r 'children(.)'
+  18[tip]:11   b99e5df575f7   1970-01-01 00:00 +0000   test
+    babar
+  
+  $ hg commit --amend
+  $ hg log -r 'unstable()'
+  changeset:   18:b99e5df575f7
+  branch:      a
+  parent:      11:3334b7925910
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     babar
+  

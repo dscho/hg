@@ -507,6 +507,7 @@ amend
   $ hg -q commit -d '14 1' -m 'prepare amend'
 
   $ hg --debug commit --amend -d '15 1' -m 'amend without changes' | grep keywords
+  invalid branchheads cache (served): tip differs
   overwriting a expanding keywords
   $ hg -q id
   67d8c481a6be
@@ -576,9 +577,10 @@ Copy and show added kwfiles
 Commit and show expansion in original and copy
 
   $ hg --debug commit -ma2c -d '1 0' -u 'User Name <user@example.com>'
+  invalid branchheads cache (served): tip differs
   c
    c: copy a:0045e12f6c5791aac80ca6cbfd97709a88307292
-  removing unknown node 40a904bbbe4c from 1-phase boundary
+  invalid branchheads cache (served): tip differs
   overwriting c expanding keywords
   committed changeset 2:25736cf2f5cbe41f6be4e6784ef6ecf9f3bbcc7d
   $ cat a c
@@ -747,9 +749,22 @@ Interrupted commit should not change state
 
 Commit with multi-line message and custom expansion
 
+|Note:
+|
+| After the last rollback, the "unserved" branchheads cache became invalid, but
+| all changesets in the repo were public. For filtering this means:
+|   "mutable" == "unserved" == ø.
+|
+| As the "unserved" cache is invalid, we fall back to the "mutable" cache. But
+| no update is needed between "mutable" and "unserved" and the "unserved" cache
+| is not updated on disk. The on-disk version therefore stays invalid for some
+| time. This explains why the "unserved" branchheads cache is detected as
+| invalid here.
+
   $ hg --debug commit -l log -d '2 0' -u 'User Name <user@example.com>'
+  invalid branchheads cache (served): tip differs
   a
-  removing unknown node 40a904bbbe4c from 1-phase boundary
+  invalid branchheads cache (served): tip differs
   overwriting a expanding keywords
   committed changeset 2:bb948857c743469b22bbf51f7ec8112279ca5d83
   $ rm log

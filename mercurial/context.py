@@ -12,6 +12,7 @@ import copies
 import match as matchmod
 import os, errno, stat
 import obsolete as obsmod
+import repoview
 
 propertycache = util.propertycache
 
@@ -25,8 +26,12 @@ class changectx(object):
         self._repo = repo
 
         if isinstance(changeid, int):
+            try:
+                self._node = repo.changelog.node(changeid)
+            except IndexError:
+                raise error.RepoLookupError(
+                    _("unknown revision '%s'") % changeid)
             self._rev = changeid
-            self._node = repo.changelog.node(changeid)
             return
         if isinstance(changeid, long):
             changeid = str(changeid)
@@ -62,7 +67,7 @@ class changectx(object):
             self._rev = r
             self._node = repo.changelog.node(r)
             return
-        except (ValueError, OverflowError):
+        except (ValueError, OverflowError, IndexError):
             pass
 
         if len(changeid) == 40:
@@ -95,7 +100,10 @@ class changectx(object):
 
         # lookup failed
         # check if it might have come from damaged dirstate
-        if changeid in repo.dirstate.parents():
+        #
+        # XXX we could avoid the unfiltered if we had a recognizable exception
+        # for filtered changeset access
+        if changeid in repo.unfiltered().dirstate.parents():
             raise error.Abort(_("working directory has unknown parent '%s'!")
                               % short(changeid))
         try:
@@ -204,7 +212,7 @@ class changectx(object):
     def mutable(self):
         return self.phase() > phases.public
     def hidden(self):
-        return self._rev in self._repo.hiddenrevs
+        return self._rev in repoview.filterrevs(self._repo, 'visible')
 
     def parents(self):
         """return contexts for each parent changeset"""
@@ -249,6 +257,34 @@ class changectx(object):
         Only non-public and non-obsolete changesets may be bumped.
         """
         return self.rev() in obsmod.getrevs(self._repo, 'bumped')
+
+    def divergent(self):
+        """Is a successors of a changeset with multiple possible successors set
+
+        Only non-public and non-obsolete changesets may be divergent.
+        """
+        return self.rev() in obsmod.getrevs(self._repo, 'divergent')
+
+    def troubled(self):
+        """True if the changeset is either unstable, bumped or divergent"""
+        return self.unstable() or self.bumped() or self.divergent()
+
+    def troubles(self):
+        """return the list of troubles affecting this changesets.
+
+        Troubles are returned as strings. possible values are:
+        - unstable,
+        - bumped,
+        - divergent.
+        """
+        troubles = []
+        if self.unstable():
+            troubles.append('unstable')
+        if self.bumped():
+            troubles.append('bumped')
+        if self.divergent():
+            troubles.append('divergent')
+        return troubles
 
     def _fileinfo(self, path):
         if '_manifest' in self.__dict__:
@@ -352,6 +388,9 @@ class changectx(object):
     def dirs(self):
         return self._dirs
 
+    def dirty(self):
+        return False
+
 class filectx(object):
     """A filecontext object makes access to data related to a particular
        filerevision convenient."""
@@ -380,7 +419,26 @@ class filectx(object):
 
     @propertycache
     def _changectx(self):
-        return changectx(self._repo, self._changeid)
+        try:
+            return changectx(self._repo, self._changeid)
+        except error.RepoLookupError:
+            # Linkrev may point to any revision in the repository.  When the
+            # repository is filtered this may lead to `filectx` trying to build
+            # `changectx` for filtered revision. In such case we fallback to
+            # creating `changectx` on the unfiltered version of the reposition.
+            # This fallback should not be an issue because`changectx` from
+            # `filectx` are not used in complexe operation that care about
+            # filtering.
+            #
+            # This fallback is a cheap and dirty fix that prevent several
+            # crash. It does not ensure the behavior is correct. However the
+            # behavior was not correct before filtering either and "incorrect
+            # behavior" is seen as better as "crash"
+            #
+            # Linkrevs have several serious troubles with filtering that are
+            # complicated to solve. Proper handling of the issue here should be
+            # considered when solving linkrev issue are on the table.
+            return changectx(self._repo.unfiltered(), self._changeid)
 
     @propertycache
     def _filelog(self):
@@ -977,13 +1035,13 @@ class workingctx(changectx):
         return self._parents[0].ancestor(c2) # punt on two parents for now
 
     def walk(self, match):
-        return sorted(self._repo.dirstate.walk(match, self.substate.keys(),
+        return sorted(self._repo.dirstate.walk(match, sorted(self.substate),
                                                True, False))
 
     def dirty(self, missing=False, merge=True, branch=True):
         "check whether a working directory is modified"
         # check subrepos first
-        for s in self.substate:
+        for s in sorted(self.substate):
             if self.sub(s).dirty():
                 return True
         # check current working dir

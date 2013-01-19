@@ -48,10 +48,16 @@ Some tests for hgweb in an empty repository
   <ul>
    <li><a href="/help">help</a></li>
   </ul>
+  <p>
+  <div class="atom-logo">
+  <a href="/atom-log" title="subscribe to atom feed">
+  <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed">
+  </a>
+  </div>
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>log</h3>
   
   <form class="search" action="/log">
@@ -133,10 +139,16 @@ Some tests for hgweb in an empty repository
   <ul>
    <li><a href="/help">help</a></li>
   </ul>
+  <p>
+  <div class="atom-logo">
+  <a href="/atom-log" title="subscribe to atom feed">
+  <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed">
+  </a>
+  </div>
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>log</h3>
   
   <form class="search" action="/log">
@@ -216,10 +228,16 @@ Some tests for hgweb in an empty repository
   <ul>
    <li><a href="/help">help</a></li>
   </ul>
+  <p>
+  <div class="atom-logo">
+  <a href="/atom-log" title="subscribe to atom feed">
+  <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed">
+  </a>
+  </div>
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>graph</h3>
   
   <form class="search" action="/log">
@@ -355,7 +373,7 @@ Some tests for hgweb in an empty repository
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>directory / @ -1:000000000000 <span class="tag">tip</span> </h3>
   
   <form class="search" action="/log">

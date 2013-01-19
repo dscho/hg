@@ -98,9 +98,9 @@ def catcommit(ui, repo, n, prefix, ctx=None):
     if ctx is None:
         ctx = repo[n]
     # use ctx.node() instead ??
-    ui.write("tree %s\n" % short(ctx.changeset()[0]))
+    ui.write(("tree %s\n" % short(ctx.changeset()[0])))
     for p in ctx.parents():
-        ui.write("parent %s\n" % p)
+        ui.write(("parent %s\n" % p))
 
     date = ctx.date()
     description = ctx.description().replace("\0", "")
@@ -108,12 +108,13 @@ def catcommit(ui, repo, n, prefix, ctx=None):
     if lines and lines[-1].startswith('committer:'):
         committer = lines[-1].split(': ')[1].rstrip()
     else:
-        committer = ctx.user()
+        committer = ""
 
-    ui.write("author %s %s %s\n" % (ctx.user(), int(date[0]), date[1]))
-    ui.write("committer %s %s %s\n" % (committer, int(date[0]), date[1]))
-    ui.write("revision %d\n" % ctx.rev())
-    ui.write("branch %s\n\n" % ctx.branch())
+    ui.write(("author %s %s %s\n" % (ctx.user(), int(date[0]), date[1])))
+    if committer != '':
+        ui.write(("committer %s %s %s\n" % (committer, int(date[0]), date[1])))
+    ui.write(("revision %d\n" % ctx.rev()))
+    ui.write(("branch %s\n\n" % ctx.branch()))
 
     if prefix != "":
         ui.write("%s%s\n" % (prefix,
@@ -302,7 +303,7 @@ def revlist(ui, repo, *revs, **opts):
 def config(ui, repo, **opts):
     """print extension options"""
     def writeopt(name, value):
-        ui.write('k=%s\nv=%s\n' % (name, value))
+        ui.write(('k=%s\nv=%s\n' % (name, value)))
 
     writeopt('vdiff', ui.config('hgk', 'vdiff', ''))
 

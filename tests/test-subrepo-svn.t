@@ -119,7 +119,7 @@ missing svn file, commit should fail
   $ rm s/alpha
   $ hg commit --subrepos -m 'abort on missing file'
   committing subrepository s
-  abort: cannot commit missing svn entries
+  abort: cannot commit missing svn entries (in subrepo s)
   [255]
   $ svn revert s/alpha > /dev/null
 
@@ -180,7 +180,7 @@ this commit fails because of externals changes
   $ echo zzz > s/externals/other
   $ hg ci --subrepos -m 'amend externals from hg'
   committing subrepository s
-  abort: cannot commit svn externals
+  abort: cannot commit svn externals (in subrepo s)
   [255]
   $ hg diff --subrepos -r 1:2 | grep -v diff
   --- a/.hgsubstate	Thu Jan 01 00:00:00 1970 +0000
@@ -202,7 +202,7 @@ this commit fails because of externals meta changes
   property 'svn:mime-type' set on 's/externals/other' (glob)
   $ hg ci --subrepos -m 'amend externals from hg'
   committing subrepository s
-  abort: cannot commit svn externals
+  abort: cannot commit svn externals (in subrepo s)
   [255]
   $ svn revert -q s/externals/other
 
@@ -544,11 +544,11 @@ Test archive
   archiving: .hgsubstate 2/2 files (100.00%)
   archiving (obstruct): 0/1 files (0.00%)
   archiving (obstruct): 1/1 files (100.00%)
+  archiving (recreated): 0/1 files (0.00%)
+  archiving (recreated): 1/1 files (100.00%)
   archiving (s): 0/2 files (0.00%)
   archiving (s): 1/2 files (50.00%)
   archiving (s): 2/2 files (100.00%)
-  archiving (recreated): 0/1 files (0.00%)
-  archiving (recreated): 1/1 files (100.00%)
 
   $ hg archive -S ../archive-exclude --debug -X **old
   archiving: 0/2 files (0.00%)
@@ -556,10 +556,10 @@ Test archive
   archiving: .hgsubstate 2/2 files (100.00%)
   archiving (obstruct): 0/1 files (0.00%)
   archiving (obstruct): 1/1 files (100.00%)
+  archiving (recreated): 0 files
   archiving (s): 0/2 files (0.00%)
   archiving (s): 1/2 files (50.00%)
   archiving (s): 2/2 files (100.00%)
-  archiving (recreated): 0 files
   $ find ../archive-exclude | sort
   ../archive-exclude
   ../archive-exclude/.hg_archival.txt

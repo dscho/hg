@@ -276,6 +276,16 @@ int entkind(struct dirent *ent)
 	return -1;
 }
 
+static PyObject *makestat(const struct stat *st)
+{
+	PyObject *stat;
+
+	stat = PyObject_CallObject((PyObject *)&listdir_stat_type, NULL);
+	if (stat)
+		memcpy(&((struct listdir_stat *)stat)->st, st, sizeof(*st));
+	return stat;
+}
+
 static PyObject *_listdir(char *path, int pathlen, int keepstat, char *skip)
 {
 	PyObject *list, *elem, *stat, *ret = NULL;
@@ -351,10 +361,9 @@ static PyObject *_listdir(char *path, int pathlen, int keepstat, char *skip)
 		}
 
 		if (keepstat) {
-			stat = PyObject_CallObject((PyObject *)&listdir_stat_type, NULL);
+			stat = makestat(&st);
 			if (!stat)
 				goto error;
-			memcpy(&((struct listdir_stat *)stat)->st, &st, sizeof(st));
 			elem = Py_BuildValue("siN", ent->d_name, kind, stat);
 		} else
 			elem = Py_BuildValue("si", ent->d_name, kind);
@@ -378,6 +387,55 @@ error_dir:
 #endif
 error_value:
 	return ret;
+}
+
+static PyObject *statfiles(PyObject *self, PyObject *args)
+{
+	PyObject *names, *stats;
+	Py_ssize_t i, count;
+
+	if (!PyArg_ParseTuple(args, "O:statfiles", &names))
+		return NULL;
+
+	count = PySequence_Length(names);
+	if (count == -1) {
+		PyErr_SetString(PyExc_TypeError, "not a sequence");
+		return NULL;
+	}
+
+	stats = PyList_New(count);
+	if (stats == NULL)
+		return NULL;
+
+	for (i = 0; i < count; i++) {
+		PyObject *stat;
+		struct stat st;
+		int ret, kind;
+		char *path;
+
+		path = PyString_AsString(PySequence_GetItem(names, i));
+		if (path == NULL) {
+			PyErr_SetString(PyExc_TypeError, "not a string");
+			goto bail;
+		}
+		ret = lstat(path, &st);
+		kind = st.st_mode & S_IFMT;
+		if (ret != -1 && (kind == S_IFREG || kind == S_IFLNK)) {
+			stat = makestat(&st);
+			if (stat == NULL)
+				goto bail;
+			PyList_SET_ITEM(stats, i, stat);
+		} else {
+			Py_INCREF(Py_None);
+			PyList_SET_ITEM(stats, i, Py_None);
+		}
+	}
+
+	return stats;
+
+bail:
+	Py_DECREF(stats);
+	return NULL;
 }
 
 #endif /* ndef _WIN32 */
@@ -544,6 +602,10 @@ static PyMethodDef methods[] = {
 	{"posixfile", (PyCFunction)posixfile, METH_VARARGS | METH_KEYWORDS,
 	 "Open a file with POSIX-like semantics.\n"
 "On error, this function may raise either a WindowsError or an IOError."},
+#else
+	{"statfiles", (PyCFunction)statfiles, METH_VARARGS | METH_KEYWORDS,
+	 "stat a series of files or symlinks\n"
+"Returns None for non-existent entries and entries of other types.\n"},
 #endif
 #ifdef __APPLE__
 	{
