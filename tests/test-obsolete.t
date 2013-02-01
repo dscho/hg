@@ -55,6 +55,17 @@ Killing a single changeset without replacement
   $ hg debugobsolete -d '0 0' `getid kill_me` -u babar
   $ hg debugobsolete
   97b7c2d76b1845ed3eb988cd612611e72406cef0 0 {'date': '0 0', 'user': 'babar'}
+
+(test that mercurial is not confused)
+
+  $ hg up null --quiet # having 0 as parent prevents it to be hidden
+  $ hg tip
+  changeset:   -1:000000000000
+  tag:         tip
+  user:        
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  
+  $ hg up --hidden tip --quiet
   $ cd ..
 
 Killing a single changeset with replacement
@@ -307,11 +318,38 @@ Exchange Test
 Destination repo does not have any data
 ---------------------------------------
 
-Try to pull markers
-(extinct changeset are excluded but marker are pushed)
+Simple incoming test
 
   $ hg init tmpc
   $ cd tmpc
+  $ hg incoming ../tmpb
+  comparing with ../tmpb
+  changeset:   0:1f0dee641bb7
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     add a
+  
+  changeset:   1:7c3bad9141dc
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     add b
+  
+  changeset:   2:245bde4270cd
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     add original_c
+  
+  changeset:   6:6f9641995072
+  tag:         tip
+  parent:      1:7c3bad9141dc
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     add n3w_3_c
+  
+
+Try to pull markers
+(extinct changeset are excluded but marker are pushed)
+
   $ hg pull ../tmpb
   pulling from ../tmpb
   requesting all changes
@@ -350,7 +388,7 @@ Rollback//Transaction support
 
   $ cd ..
 
-Try to pull markers
+Try to push markers
 
   $ hg init tmpd
   $ hg -R tmpb push tmpd
@@ -652,6 +690,16 @@ Do not warn about new head when the new head is a successors of a remote one
   $ mkcommit obsolete_e
   created new head
   $ hg debugobsolete `getid 'original_e'` `getid 'obsolete_e'`
+  $ hg outgoing ../tmpf # parasite hg outgoing testin
+  comparing with ../tmpf
+  searching for changes
+  changeset:   6:3de5eca88c00
+  tag:         tip
+  parent:      3:6f9641995072
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     add obsolete_e
+  
   $ hg push ../tmpf
   pushing to ../tmpf
   searching for changes
@@ -659,6 +707,8 @@ Do not warn about new head when the new head is a successors of a remote one
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files (+1 heads)
+
+#if serve
 
 check hgweb does not explode
 ====================================
@@ -693,6 +743,24 @@ check filelog view
 
   $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT 'log/'`hg id --debug --id`/'babar'
   200 Script output follows
+
+  $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT 'rev/68'
+  200 Script output follows
+  $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT 'rev/67'
+  404 Not Found
+  [1]
+
+check that web.view config option:
+
+  $ kill `cat hg.pid`
+  $ cat >> .hg/hgrc << EOF
+  > [web]
+  > view=all
+  > EOF
+  $ wait
+  $ hg serve -n test -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log
+  $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT 'rev/67'
+  200 Script output follows
   $ kill `cat hg.pid`
 
 Checking _enable=False warning if obsolete marker exists
@@ -708,3 +776,4 @@ Checking _enable=False warning if obsolete marker exists
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     add celestine
   
+#endif

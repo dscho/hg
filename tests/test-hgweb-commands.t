@@ -447,14 +447,6 @@ Logs and changes
       </div>
     </td>
   </tr>
-  <tr>
-   <th class="author">change baseline</th>
-   <td class="author"></td>
-  </tr>
-  <tr>
-   <th class="author">current baseline</th>
-   <td class="author"><a href="/rev/000000000000">000000000000</a></td>
-  </tr>
   </table>
   
   <div class="overflow">
@@ -1369,5 +1361,64 @@ Test paging
   changeset:   b4e73ffab476
 
   $ cat errors.log
+
+bookmarks view doesn't choke on bookmarks on secret changesets (issue3774)
+
+  $ hg phase -fs 4
+  $ hg bookmark -r4 secret
+  $ cat > hgweb.cgi <<HGWEB
+  > from mercurial import demandimport; demandimport.enable()
+  > from mercurial.hgweb import hgweb
+  > from mercurial.hgweb import wsgicgi
+  > app = hgweb('.', 'test')
+  > wsgicgi.launch(app)
+  > HGWEB
+  $ . "$TESTDIR/cgienv"
+  $ PATH_INFO=/bookmarks; export PATH_INFO
+  $ QUERY_STRING='style=raw'
+  $ python hgweb.cgi
+
+listbookmarks hides secret bookmarks
+
+  $ PATH_INFO=/; export PATH_INFO
+  $ QUERY_STRING='cmd=listkeys&namespace=bookmarks'
+  $ python hgweb.cgi
+
+search works with filtering
+
+  $ PATH_INFO=/log; export PATH_INFO
+  $ QUERY_STRING='rev=babar'
+  $ python hgweb.cgi > search
+  $ grep Status search
+  Status: 200 Script output follows\r (esc)
+
+proper status for filtered revision
+
+
+(missing rev)
+
+  $ PATH_INFO=/rev/5; export PATH_INFO
+  $ QUERY_STRING='style=raw'
+  $ python hgweb.cgi #> search
+  Status: 404 Not Found\r (esc)
+  ETag: *\r (glob) (esc)
+  Content-Type: text/plain; charset=ascii\r (esc)
+  \r (esc)
+  
+  error: unknown revision '5'
+
+
+
+(filtered rev)
+
+  $ PATH_INFO=/rev/4; export PATH_INFO
+  $ QUERY_STRING='style=raw'
+  $ python hgweb.cgi #> search
+  Status: 404 Not Found\r (esc)
+  ETag: *\r (glob) (esc)
+  Content-Type: text/plain; charset=ascii\r (esc)
+  \r (esc)
+  
+  error: unknown revision '4'
 
   $ cd ..

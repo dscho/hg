@@ -669,18 +669,18 @@ def overriderevert(orig, ui, repo, *pats, **opts):
     finally:
         wlock.release()
 
-def hgupdate(orig, repo, node):
-    # Only call updatelfiles the standins that have changed to save time
-    oldstandins = lfutil.getstandinsstate(repo)
-    result = orig(repo, node)
-    newstandins = lfutil.getstandinsstate(repo)
-    filelist = lfutil.getlfilestoupdate(oldstandins, newstandins)
-    lfcommands.updatelfiles(repo.ui, repo, filelist=filelist, printmessage=True)
-    return result
+def hgupdaterepo(orig, repo, node, overwrite):
+    if not overwrite:
+        # Only call updatelfiles on the standins that have changed to save time
+        oldstandins = lfutil.getstandinsstate(repo)
 
-def hgclean(orig, repo, node, show_stats=True):
-    result = orig(repo, node, show_stats)
-    lfcommands.updatelfiles(repo.ui, repo)
+    result = orig(repo, node, overwrite)
+
+    filelist = None
+    if not overwrite:
+        newstandins = lfutil.getstandinsstate(repo)
+        filelist = lfutil.getlfilestoupdate(oldstandins, newstandins)
+    lfcommands.updatelfiles(repo.ui, repo, filelist=filelist)
     return result
 
 def hgmerge(orig, repo, node, force=None, remind=True):
@@ -1149,10 +1149,25 @@ def overridetransplant(orig, ui, repo, *revs, **opts):
 
 def overridecat(orig, ui, repo, file1, *pats, **opts):
     ctx = scmutil.revsingle(repo, opts.get('rev'))
-    if not lfutil.standin(file1) in ctx:
-        result = orig(ui, repo, file1, *pats, **opts)
-        return result
-    return lfcommands.catlfile(repo, file1, ctx.rev(), opts.get('output'))
+    err = 1
+    notbad = set()
+    m = scmutil.match(ctx, (file1,) + pats, opts)
+    origmatchfn = m.matchfn
+    def lfmatchfn(f):
+        lf = lfutil.splitstandin(f)
+        if lf is None:
+            return origmatchfn(f)
+        notbad.add(lf)
+        return origmatchfn(lf)
+    m.matchfn = lfmatchfn
+    m.bad = lambda f, msg: f not in notbad
+    for f in ctx.walk(m):
+        lf = lfutil.splitstandin(f)
+        if lf is None:
+            err = orig(ui, repo, f, **opts)
+        else:
+            err = lfcommands.catlfile(repo, lf, ctx.rev(), opts.get('output'))
+    return err
 
 def mercurialsinkbefore(orig, sink):
     sink.repo._isconverting = True

@@ -9,7 +9,7 @@
 import copy
 import phases
 import util
-import obsolete, bookmarks, revset
+import obsolete, revset
 
 
 def hideablerevs(repo):
@@ -32,7 +32,7 @@ def computehidden(repo):
                       if r not in hideable]
         for par in repo[None].parents():
             blockers.append(par.rev())
-        for bm in bookmarks.listbookmarks(repo).values():
+        for bm in repo._bookmarks.values():
             blockers.append(repo[bm].rev())
         blocked = cl.ancestors(blockers, inclusive=True)
         return frozenset(r for r in hideable if r not in blocked)
@@ -72,7 +72,7 @@ def computemutable(repo):
 def computeimpactable(repo):
     """Everything impactable by mutable revision
 
-    The mutable filter still have some chance to get invalidated. This will
+    The immutable filter still have some chance to get invalidated. This will
     happen when:
 
     - you garbage collect hidden changeset,

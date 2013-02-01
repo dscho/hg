@@ -228,7 +228,10 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
                 break
 
     # Compare manifests
-    for f, n in sorted(m1.iteritems()):
+    visit = m1.iteritems()
+    if repo.ui.debugflag:
+        visit = sorted(visit)
+    for f, n in visit:
         if partial and not partial(f):
             continue
         if f in m2:
@@ -248,7 +251,7 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
             elif nol and n2 == a: # remote only changed 'x'
                 act("update permissions", "e", f, fl2)
             elif nol and n == a: # local only changed 'x'
-                act("remote is newer", "g", f, fl)
+                act("remote is newer", "g", f, fl1)
             else: # both changed something
                 act("versions differ", "m", f, f, f, False)
         elif f in copied: # files we'll deal with on m2 side
@@ -274,7 +277,10 @@ def manifestmerge(repo, p1, p2, pa, overwrite, partial):
             else:
                 act("other deleted", "r", f)
 
-    for f, n in sorted(m2.iteritems()):
+    visit = m2.iteritems()
+    if repo.ui.debugflag:
+        visit = sorted(visit)
+    for f, n in visit:
         if partial and not partial(f):
             continue
         if f in m1 or f in copied: # files already visited

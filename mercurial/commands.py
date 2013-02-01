@@ -785,6 +785,10 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False,
     repositories to support bookmarks. For versions prior to 1.8, this means
     the bookmarks extension must be enabled.
 
+    If you set a bookmark called '@', new clones of the repository will
+    have that revision checked out (and the bookmark made active) by
+    default.
+
     With -i/--inactive, the new bookmark will not be made the active
     bookmark. If -r/--rev is given, the new bookmark will not be made
     active even if -i/--inactive is not given. If no NAME is given, the
@@ -869,7 +873,7 @@ def bookmark(ui, repo, mark=None, rev=None, force=False, delete=False,
     else: # show bookmarks
         for bmark, n in sorted(marks.iteritems()):
             current = repo._bookmarkcurrent
-            if bmark == current and n == cur:
+            if bmark == current:
                 prefix, label = '*', 'bookmarks.current'
             else:
                 prefix, label = ' ', ''
@@ -1146,6 +1150,9 @@ def clone(ui, source, dest=None, **opts):
     tag will include the tagged changeset but not the changeset
     containing the tag.
 
+    If the source repository has a bookmark called '@' set, that
+    revision will be checked out in the new repository by default.
+
     To check out a particular version, use -u/--update, or
     -U/--noupdate to create a clone with no working directory.
 
@@ -1181,8 +1188,9 @@ def clone(ui, source, dest=None, **opts):
       d) the changeset specified with -r
       e) the tipmost head specified with -b
       f) the tipmost head specified with the url#branch source syntax
-      g) the tipmost head of the default branch
-      h) tip
+      g) the revision marked with the '@' bookmark, if present
+      h) the tipmost head of the default branch
+      i) tip
 
       Examples:
 
@@ -2473,13 +2481,13 @@ def debugsuccessorssets(ui, repo, *revs):
     succeed A. It contains non-obsolete changesets only.
 
     In most cases a changeset A has a single successors set containing a single
-    successors (changeset A replaced by A').
+    successor (changeset A replaced by A').
 
     A changeset that is made obsolete with no successors are called "pruned".
     Such changesets have no successors sets at all.
 
     A changeset that has been "split" will have a successors set containing
-    more than one successors.
+    more than one successor.
 
     A changeset that has been rewritten in multiple different ways is called
     "divergent". Such changesets have multiple successor sets (each of which
@@ -5866,7 +5874,7 @@ def tip(ui, repo, **opts):
     Returns 0 on success.
     """
     displayer = cmdutil.show_changeset(ui, repo, opts)
-    displayer.show(repo[len(repo) - 1])
+    displayer.show(repo['tip'])
     displayer.close()
 
 @command('unbundle',
@@ -5961,7 +5969,12 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
     # with no argument, we also move the current bookmark, if any
     movemarkfrom = None
     if rev is None:
-        movemarkfrom = repo['.'].node()
+        curmark = repo._bookmarkcurrent
+        if bookmarks.iscurrent(repo):
+            movemarkfrom = repo['.'].node()
+        elif curmark:
+            ui.status(_("updating to active bookmark %s\n") % curmark)
+            rev = curmark
 
     # if we defined a bookmark, we have to remember the original bookmark name
     brev = rev

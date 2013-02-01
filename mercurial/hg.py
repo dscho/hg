@@ -171,14 +171,11 @@ def share(ui, source, dest=None, update=True):
     r = repository(ui, root)
 
     default = srcrepo.ui.config('paths', 'default')
-    if not default:
-        # set default to source for being able to clone subrepos
-        default = os.path.abspath(util.urllocalpath(origsource))
-    fp = r.opener("hgrc", "w", text=True)
-    fp.write("[paths]\n")
-    fp.write("default = %s\n" % default)
-    fp.close()
-    r.ui.setconfig('paths', 'default', default)
+    if default:
+        fp = r.opener("hgrc", "w", text=True)
+        fp.write("[paths]\n")
+        fp.write("default = %s\n" % default)
+        fp.close()
 
     if update:
         r.ui.status(_("updating working directory\n"))
@@ -558,7 +555,7 @@ def _outgoing(ui, repo, dest, opts):
         revs = [repo.lookup(rev) for rev in scmutil.revrange(repo, revs)]
 
     other = peer(repo, opts, dest)
-    outgoing = discovery.findcommonoutgoing(repo, other, revs,
+    outgoing = discovery.findcommonoutgoing(repo.unfiltered(), other, revs,
                                             force=opts.get('force'))
     o = outgoing.missing
     if not o:

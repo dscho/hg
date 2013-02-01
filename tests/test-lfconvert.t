@@ -78,9 +78,9 @@ Test link+rename largefile codepath
 "lfconvert" converts content correctly
   $ cd largefiles-repo
   $ hg up
-  4 files updated, 0 files merged, 0 files removed, 0 files unresolved
   getting changed largefiles
   2 largefiles updated, 0 removed
+  4 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg locate
   .hglf/large
   .hglf/sub/maybelarge.dat
@@ -187,9 +187,9 @@ lfconvert with rename, merge, and remove
   normal1
   stuff/normal2
   $ hg update
-  3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   getting changed largefiles
   1 largefiles updated, 0 removed
+  3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cat stuff/normal2
   alsonormal
   blah
@@ -349,7 +349,7 @@ Ensure the abort message is useful if a largefile is entirely unavailable
   $ rm largefiles-repo/.hg/largefiles/*
   $ hg lfconvert --to-normal issue3519 normalized3519
   initializing destination normalized3519
-  error getting 2e000fa7e85759c7f4c254d4d9c33ef481e459a7 from file:$TESTTMP/largefiles-repo for large: can't get file locally (glob)
+  error getting id 2e000fa7e85759c7f4c254d4d9c33ef481e459a7 from url file:$TESTTMP/largefiles-repo for file large: can't get file locally (glob)
   abort: missing largefile 'large' from revision d4892ec57ce212905215fad1d9018f56b99202ad
   [255]
 

@@ -129,9 +129,10 @@ def _search(web, req, tmpl):
         qw = lower(query).split()
 
         def revgen():
+            cl = web.repo.changelog
             for i in xrange(len(web.repo) - 1, 0, -100):
                 l = []
-                for j in xrange(max(0, i - 100), i + 1):
+                for j in cl.revs(max(0, i - 100), i + 1):
                     ctx = web.repo[j]
                     l.append(ctx)
                 l.reverse()
@@ -188,7 +189,7 @@ def changelog(web, req, tmpl, shortlog=False):
         if 'rev' in req.form:
             hi = req.form['rev'][0]
         else:
-            hi = len(web.repo) - 1
+            hi = 'tip'
         try:
             ctx = web.repo[hi]
         except error.RepoError:
@@ -292,7 +293,7 @@ def changeset(web, req, tmpl):
                 node=ctx.hex(),
                 parent=webutil.parents(ctx),
                 child=webutil.children(ctx),
-                currentbaseline=basectx.hex(),
+                basenode=basectx.hex(),
                 changesettag=showtags,
                 changesetbookmark=showbookmarks,
                 changesetbranch=showbranch,
@@ -424,7 +425,7 @@ def tags(web, req, tmpl):
                 latestentry=lambda **x: entries(True, True, **x))
 
 def bookmarks(web, req, tmpl):
-    i = web.repo._bookmarks.items()
+    i = [b for b in web.repo._bookmarks.items() if b[1] in web.repo]
     parity = paritygen(web.stripecount)
 
     def entries(latestonly, **map):

@@ -68,6 +68,9 @@ def rebase(ui, repo, **opts):
     same rebase or they will end up with duplicated changesets after
     pulling in your rebased changesets.
 
+    In its default configuration, Mercurial will prevent you from
+    rebasing published changes. See :hg:`help phases` for details.
+
     If you don't specify a destination changeset (``-d/--dest``),
     rebase uses the tipmost head of the current named branch as the
     destination. (The destination changeset is not modified by
@@ -84,6 +87,11 @@ def rebase(ui, repo, **opts):
     specify any changeset in the source branch, and rebase will select
     the whole branch. If you specify neither ``-s`` nor ``-b``, rebase
     uses the parent of the working directory as the base.
+
+    For advanced usage, a third way is available through the ``--rev``
+    option. It allows you to specify an arbitrary set of changesets to
+    rebase. Descendants of revs you specify with this option are not
+    automatically included in the rebase.
 
     By default, rebase recreates the changesets in the source branch
     as descendants of dest and then destroys the originals. Use
@@ -316,7 +324,7 @@ def rebase(ui, repo, **opts):
             clearrebased(ui, repo, state, skipped, collapsedas)
 
         if currentbookmarks:
-            updatebookmarks(repo, nstate, currentbookmarks, **opts)
+            updatebookmarks(repo, dest, nstate, currentbookmarks)
 
         clearstatus(repo)
         ui.note(_("rebase completed\n"))
@@ -493,14 +501,15 @@ def updatemq(repo, state, skipped, **opts):
         mq.seriesdirty = True
         mq.savedirty()
 
-def updatebookmarks(repo, nstate, originalbookmarks, **opts):
-    'Move bookmarks to their correct changesets'
+def updatebookmarks(repo, dest, nstate, originalbookmarks):
+    'Move bookmarks to their correct changesets, and delete divergent ones'
+    destnode = dest.node()
     marks = repo._bookmarks
     for k, v in originalbookmarks.iteritems():
         if v in nstate:
-            if nstate[v] > nullmerge:
-                # update the bookmarks for revs that have moved
-                marks[k] = nstate[v]
+            # update the bookmarks for revs that have moved
+            marks[k] = nstate[v]
+            bookmarks.deletedivergent(repo, [destnode], k)
 
     marks.write()
 
