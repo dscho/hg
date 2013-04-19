@@ -368,9 +368,9 @@ def uploadlfiles(ui, rsrc, rdst, files):
     ui.progress(_('uploading largefiles'), None)
 
 def verifylfiles(ui, repo, all=False, contents=False):
-    '''Verify that every big file revision in the current changeset
+    '''Verify that every largefile revision in the current changeset
     exists in the central store.  With --contents, also verify that
-    the contents of each big file revision are correct (SHA-1 hash
+    the contents of each local largefile file revision are correct (SHA-1 hash
     matches the revision ID).  With --all, check every changeset in
     this repository.'''
     if all:
@@ -530,22 +530,40 @@ def _updatelfile(repo, lfdirstate, lfile):
         lfdirstate.drop(lfile)
     return ret
 
-def catlfile(repo, lfile, rev, filename):
-    hash = lfutil.readstandin(repo, lfile, rev)
-    if not lfutil.inusercache(repo.ui, hash):
-        store = basestore._openstore(repo)
-        success, missing = store.get([(lfile, hash)])
-        if len(success) != 1:
-            raise util.Abort(
-                _('largefile %s is not in cache and could not be downloaded')
-                    % lfile)
-    path = lfutil.usercachepath(repo.ui, hash)
-    fpout = cmdutil.makefileobj(repo, filename)
-    fpin = open(path, "rb")
-    fpout.write(fpin.read())
-    fpout.close()
-    fpin.close()
-    return 0
+def lfpull(ui, repo, source="default", **opts):
+    """pull largefiles for the specified revisions from the specified source
+
+    Pull largefiles that are referenced from local changesets but missing
+    locally, pulling from a remote repository to the local cache.
+
+    If SOURCE is omitted, the 'default' path will be used.
+    See :hg:`help urls` for more information.
+
+    .. container:: verbose
+
+      Some examples:
+
+      - pull largefiles for all branch heads::
+
+          hg lfpull -r "head() and not closed()"
+
+      - pull largefiles on the default branch::
+
+          hg lfpull -r "branch(default)"
+    """
+    repo.lfpullsource = source
+
+    revs = opts.get('rev', [])
+    if not revs:
+        raise util.Abort(_('no revisions specified'))
+    revs = scmutil.revrange(repo, revs)
+
+    numcached = 0
+    for rev in revs:
+        ui.note(_('pulling largefiles for revision %s\n') % rev)
+        (cached, missing) = cachelfiles(ui, repo, rev)
+        numcached += len(cached)
+    ui.status(_("%d largefiles cached\n") % numcached)
 
 # -- hg commands declarations ------------------------------------------------
 
@@ -559,6 +577,11 @@ cmdtable = {
                    _('convert from a largefiles repo to a normal repo')),
                   ],
                   _('hg lfconvert SOURCE DEST [FILE ...]')),
+    'lfpull': (lfpull,
+               [('r', 'rev', [], _('pull largefiles for these revisions'))
+                ] +  commands.remoteopts,
+               _('-r REV... [-e CMD] [--remotecmd CMD] [SOURCE]')
+               ),
     }
 
 commands.inferrepo += " lfconvert"

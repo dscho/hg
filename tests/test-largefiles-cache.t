@@ -40,8 +40,6 @@ repo as "default" path in .hg/hgrc.
   adding file changes
   added 2 changesets with 1 changes to 1 files
   (run 'hg update' to get a working copy)
-  caching new largefiles
-  0 largefiles cached
 
 Update working directory to "tip", which requires largefile("large"),
 but there is no cache file for it.  So, hg must treat it as
@@ -49,7 +47,7 @@ but there is no cache file for it.  So, hg must treat it as
 
   $ hg update -r0
   getting changed largefiles
-  error getting id 7f7097b041ccf68cc5561e9600da4655d21c6d18 from url file:$TESTTMP/mirror for file large: can't get file locally (glob)
+  large: largefile 7f7097b041ccf68cc5561e9600da4655d21c6d18 not available from file:$TESTTMP/mirror
   0 largefiles updated, 0 removed
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg status
@@ -66,7 +64,7 @@ Update working directory to tip, again.
 
   $ hg update -r0
   getting changed largefiles
-  error getting id 7f7097b041ccf68cc5561e9600da4655d21c6d18 from url file:$TESTTMP/mirror for file large: can't get file locally (glob)
+  large: largefile 7f7097b041ccf68cc5561e9600da4655d21c6d18 not available from file:$TESTTMP/mirror
   0 largefiles updated, 0 removed
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg status
@@ -83,8 +81,6 @@ Verify that largefiles from pulled branchheads are fetched, also to an empty rep
   adding file changes
   added 1 changesets with 1 changes to 1 files
   (run 'hg update' to get a working copy)
-  caching new largefiles
-  1 largefiles cached
 
 #if unix-permissions
 

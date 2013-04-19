@@ -103,7 +103,7 @@ disable color.
 import os
 
 from mercurial import commands, dispatch, extensions, ui as uimod, util
-from mercurial import templater
+from mercurial import templater, error
 from mercurial.i18n import _
 
 testedwith = 'internal'
@@ -379,16 +379,15 @@ def templatelabel(context, mapping, args):
     return repo.ui.label(thing, label)
 
 def uisetup(ui):
-    global _terminfo_params
     if ui.plain():
         return
+    if not issubclass(ui.__class__, colorui):
+        colorui.__bases__ = (ui.__class__,)
+        ui.__class__ = colorui
     def colorcmd(orig, ui_, opts, cmd, cmdfunc):
         mode = _modesetup(ui_, opts)
         if mode:
             colorui._colormode = mode
-            if not issubclass(ui_.__class__, colorui):
-                colorui.__bases__ = (ui_.__class__,)
-                ui_.__class__ = colorui
             extstyles()
             configstyles(ui_)
         return orig(ui_, opts, cmd, cmdfunc)

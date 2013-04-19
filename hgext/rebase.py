@@ -15,7 +15,7 @@ http://mercurial.selenic.com/wiki/RebaseExtension
 '''
 
 from mercurial import hg, util, repair, merge, cmdutil, commands, bookmarks
-from mercurial import extensions, patch, scmutil, phases, obsolete
+from mercurial import extensions, patch, scmutil, phases, obsolete, error
 from mercurial.commands import templateopts
 from mercurial.node import nullrev
 from mercurial.lock import release
@@ -209,10 +209,6 @@ def rebase(ui, repo, **opts):
                     _("can't remove original changesets with"
                       " unrebased descendants"),
                     hint=_('use --keep to keep original changesets'))
-            elif not keepf and not repo[root].mutable():
-                raise util.Abort(_("can't rebase immutable changeset %s")
-                                 % repo[root],
-                                 hint=_('see hg help phases for details'))
             else:
                 result = buildstate(repo, dest, rebaseset, collapsef)
 
@@ -220,6 +216,10 @@ def rebase(ui, repo, **opts):
                 # Empty state built, nothing to rebase
                 ui.status(_('nothing to rebase\n'))
                 return 1
+            elif not keepf and not repo[root].mutable():
+                raise util.Abort(_("can't rebase immutable changeset %s")
+                                 % repo[root],
+                                 hint=_('see hg help phases for details'))
             else:
                 originalwd, target, state = result
                 if collapsef:
@@ -269,8 +269,9 @@ def rebase(ui, repo, **opts):
                         ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
                         stats = rebasenode(repo, rev, p1, state, collapsef)
                         if stats and stats[3] > 0:
-                            raise util.Abort(_('unresolved conflicts (see hg '
-                                        'resolve, then hg rebase --continue)'))
+                            raise error.InterventionRequired(
+                                _('unresolved conflicts (see hg '
+                                  'resolve, then hg rebase --continue)'))
                     finally:
                         ui.setconfig('ui', 'forcemerge', '')
                 cmdutil.duplicatecopies(repo, rev, target)
@@ -699,8 +700,8 @@ def buildstate(repo, dest, rebaseset, collapse):
         # If we have multiple roots, we may have "hole" in the rebase set.
         # Rebase roots that descend from those "hole" should not be detached as
         # other root are. We use the special `revignored` to inform rebase that
-        # the revision should be ignored but that `defineparent` should search
-        # a rebase destination that make sense regarding rebaset topology.
+        # the revision should be ignored but that `defineparents` should search
+        # a rebase destination that make sense regarding rebased topology.
         rebasedomain = set(repo.revs('%ld::%ld', rebaseset, rebaseset))
         for ignored in set(rebasedomain) - set(rebaseset):
             state[ignored] = revignored

@@ -78,9 +78,6 @@
   $ hg branch all
   marked working directory as branch all
   (branches are permanent and global, did you want a bookmark?)
-  $ hg ci --close-branch -Aqm8
-  abort: can only close branch heads
-  [255]
 
   $ hg co 4
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -218,17 +215,29 @@ quoting needed
   $ log 'date(2005) and 1::'
   4
 
+ancestor can accept 0 or more arguments
+
+  $ log 'ancestor()'
   $ log 'ancestor(1)'
-  hg: parse error: ancestor requires two arguments
-  [255]
+  1
   $ log 'ancestor(4,5)'
   1
   $ log 'ancestor(4,5) and 4'
+  $ log 'ancestor(0,0,1,3)'
+  0
+  $ log 'ancestor(3,1,5,3,5,1)'
+  1
+  $ log 'ancestor(0,1,3,5)'
+  0
+  $ log 'ancestor(1,2,3,4,5)'
+  1
   $ log 'ancestors(5)'
   0
   1
   3
   5
+  $ log 'ancestor(ancestors(5))'
+  0
   $ log 'author(bob)'
   2
   $ log 'author("re:bob|test")'
@@ -425,8 +434,6 @@ we can use patterns when searching for tags
   $ log 'tag("literal:1.0")'
   6
   $ log 'tag("re:0..*")'
-  abort: no tags exist that match '0..*'
-  [255]
 
   $ log 'tag(unknown)'
   abort: tag 'unknown' does not exist

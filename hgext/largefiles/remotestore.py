@@ -29,7 +29,7 @@ class remotestore(basestore.basestore):
             _('remotestore: put %s to remote store %s') % (source, self.url))
 
     def exists(self, hashes):
-        return self._verify(hashes)
+        return dict((h, s == 0) for (h, s) in self._stat(hashes).iteritems())
 
     def sendfile(self, filename, hash):
         self.ui.debug('remotestore: sendfile(%s, %s)\n' % (filename, hash))
@@ -47,18 +47,8 @@ class remotestore(basestore.basestore):
                 fd.close()
 
     def _getfile(self, tmpfile, filename, hash):
-        # quit if the largefile isn't there
-        stat = self._stat([hash])[hash]
-        if stat == 1:
-            raise util.Abort(_('remotestore: largefile %s is invalid') % hash)
-        elif stat == 2:
-            raise util.Abort(_('remotestore: largefile %s is missing') % hash)
-        elif stat != 0:
-            raise RuntimeError('error getting file: unexpected response from '
-                               'statlfile (%r)' % stat)
-
         try:
-            length, infile = self._get(hash)
+            chunks = self._get(hash)
         except urllib2.HTTPError, e:
             # 401s get converted to util.Aborts; everything else is fine being
             # turned into a StoreError
@@ -71,13 +61,7 @@ class remotestore(basestore.basestore):
         except IOError, e:
             raise basestore.StoreError(filename, hash, self.url, str(e))
 
-        # Mercurial does not close its SSH connections after writing a stream
-        if length is not None:
-            infile = lfutil.limitreader(infile, length)
-        return lfutil.copyandhash(lfutil.blockstream(infile), tmpfile)
-
-    def _verify(self, hashes):
-        return dict((h, s == 0) for (h, s) in self._stat(hashes).iteritems())
+        return lfutil.copyandhash(chunks, tmpfile)
 
     def _verifyfile(self, cctx, cset, contents, standin, verified):
         filename = lfutil.splitstandin(standin)

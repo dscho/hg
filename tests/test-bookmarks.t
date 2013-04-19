@@ -239,8 +239,8 @@ bookmark with reserved name
 
 bookmark with existing name
 
-  $ hg bookmark Z
-  abort: bookmark 'Z' already exists (use -f to force)
+  $ hg bookmark X2
+  abort: bookmark 'X2' already exists (use -f to force)
   [255]
 
   $ hg bookmark -m Y Z
@@ -255,6 +255,12 @@ bookmark with name of branch
 
   $ hg bookmark -m Y default
   abort: a bookmark cannot have the name of an existing branch
+  [255]
+
+bookmark with integer name
+
+  $ hg bookmark 10
+  abort: a bookmark cannot have an integer as its name
   [255]
 
 incompatible options
@@ -273,7 +279,21 @@ incompatible options
 
 force bookmark with existing name
 
-  $ hg bookmark -f Z
+  $ hg bookmark -f X2
+
+force bookmark back to where it was, should deactivate it
+
+  $ hg bookmark -fr1 X2
+  $ hg bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+     Z                         0:f7b1eb17ad24
+     x  y                      2:db815d6d32e6
+
+forward bookmark to descendant without --force
+
+  $ hg bookmark Z
+  moving bookmark 'Z' forward from f7b1eb17ad24
 
 list bookmarks
 
@@ -348,8 +368,13 @@ test rollback
   $ hg bookmarks
      X2                        1:925d80f479bb
      Y                         2:db815d6d32e6
-   * Z                         2:db815d6d32e6
+     Z                         2:db815d6d32e6
      x  y                      2:db815d6d32e6
+
+activate bookmark on working dir parent without --force
+
+  $ hg bookmark --inactive Z
+  $ hg bookmark Z
 
 test clone
 
@@ -461,6 +486,13 @@ create bundle with two heads
 
 update to current bookmark if it's not the parent
 
+  $ hg summary
+  parent: 2:db815d6d32e6 
+   2
+  branch: default
+  bookmarks: [Z] Y x  y
+  commit: 1 added, 1 unknown (new branch head)
+  update: 2 new changesets (update)
   $ hg update
   updating to active bookmark Z
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved

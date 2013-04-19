@@ -65,8 +65,8 @@ Conflicting rebase:
   merging common
   warning: conflicts during merge.
   merging common incomplete! (edit conflicts, then use 'hg resolve --mark')
-  abort: unresolved conflicts (see hg resolve, then hg rebase --continue)
-  [255]
+  unresolved conflicts (see hg resolve, then hg rebase --continue)
+  [1]
 
 Try to continue without solving the conflict:
 

@@ -89,6 +89,7 @@ def _filerevision(web, tmpl, fctx):
                 author=fctx.user(),
                 date=fctx.date(),
                 desc=fctx.description(),
+                extra=fctx.extra(),
                 branch=webutil.nodebranchnodefault(fctx),
                 parent=webutil.parents(fctx),
                 child=webutil.children(fctx),
@@ -162,6 +163,7 @@ def _search(web, req, tmpl):
                        child=webutil.children(ctx),
                        changelogtag=showtags,
                        desc=ctx.description(),
+                       extra=ctx.extra(),
                        date=ctx.date(),
                        files=files,
                        rev=ctx.rev(),
@@ -216,6 +218,7 @@ def changelog(web, req, tmpl, shortlog=False):
                       "child": webutil.children(ctx, i + 1),
                       "changelogtag": showtags,
                       "desc": ctx.description(),
+                      "extra": ctx.extra(),
                       "date": ctx.date(),
                       "files": files,
                       "rev": i,
@@ -299,6 +302,7 @@ def changeset(web, req, tmpl):
                 changesetbranch=showbranch,
                 author=ctx.user(),
                 desc=ctx.description(),
+                extra=ctx.extra(),
                 date=ctx.date(),
                 files=files,
                 diffsummary=lambda **x: webutil.diffsummary(diffstatgen),
@@ -531,6 +535,7 @@ def summary(web, req, tmpl):
                 parity=parity.next(),
                 author=ctx.user(),
                 desc=ctx.description(),
+                extra=ctx.extra(),
                 date=ctx.date(),
                 rev=i,
                 node=hn,
@@ -590,6 +595,7 @@ def filediff(web, req, tmpl):
                 rev=ctx.rev(),
                 date=ctx.date(),
                 desc=ctx.description(),
+                extra=ctx.extra(),
                 author=ctx.user(),
                 rename=rename,
                 branch=webutil.nodebranchnodefault(ctx),
@@ -651,6 +657,7 @@ def comparison(web, req, tmpl):
                 rev=ctx.rev(),
                 date=ctx.date(),
                 desc=ctx.description(),
+                extra=ctx.extra(),
                 author=ctx.user(),
                 rename=rename,
                 branch=webutil.nodebranchnodefault(ctx),
@@ -689,6 +696,7 @@ def annotate(web, req, tmpl):
                    "rev": f.rev(),
                    "author": f.user(),
                    "desc": f.description(),
+                   "extra": f.extra(),
                    "file": f.path(),
                    "targetline": targetline,
                    "line": l,
@@ -705,6 +713,7 @@ def annotate(web, req, tmpl):
                 author=fctx.user(),
                 date=fctx.date(),
                 desc=fctx.description(),
+                extra=fctx.extra(),
                 rename=webutil.renamelink(fctx),
                 branch=webutil.nodebranchnodefault(fctx),
                 parent=webutil.parents(fctx),
@@ -770,6 +779,7 @@ def filelog(web, req, tmpl):
                       "parent": webutil.parents(iterfctx),
                       "child": webutil.children(iterfctx),
                       "desc": iterfctx.description(),
+                      "extra": iterfctx.extra(),
                       "tags": webutil.nodetagsdict(repo, iterfctx.node()),
                       "bookmarks": webutil.nodebookmarksdict(
                           repo, iterfctx.node()),
@@ -806,6 +816,20 @@ def archive(web, req, tmpl):
     if cnode == key or key == 'tip':
         arch_version = short(cnode)
     name = "%s-%s" % (reponame, arch_version)
+
+    ctx = webutil.changectx(web.repo, req)
+    pats = []
+    matchfn = None
+    file = req.form.get('file', None)
+    if file:
+        pats = ['path:' + file[0]]
+        matchfn = scmutil.match(ctx, pats, default='path')
+        if pats:
+            files = [f for f in ctx.manifest().keys() if matchfn(f)]
+            if not files:
+                raise ErrorResponse(HTTP_NOT_FOUND,
+                    'file(s) not found: %s' % file[0])
+
     mimetype, artype, extension, encoding = web.archive_specs[type_]
     headers = [
         ('Content-Disposition', 'attachment; filename=%s%s' % (name, extension))
@@ -815,9 +839,8 @@ def archive(web, req, tmpl):
     req.headers.extend(headers)
     req.respond(HTTP_OK, mimetype)
 
-    ctx = webutil.changectx(web.repo, req)
     archival.archive(web.repo, req, cnode, artype, prefix=name,
-                     matchfn=scmutil.match(ctx, []),
+                     matchfn=matchfn,
                      subrepos=web.configbool("web", "archivesubrepos"))
     return []
 
@@ -832,7 +855,8 @@ def static(web, req, tmpl):
         if isinstance(tp, str):
             tp = [tp]
         static = [os.path.join(p, 'static') for p in tp]
-    return [staticfile(static, fname, req)]
+    staticfile(static, fname, req)
+    return []
 
 def graph(web, req, tmpl):
 
@@ -982,11 +1006,9 @@ def help(web, req, tmpl):
                     othercommands=othercommands, title='Index')
 
     u = webutil.wsgiui()
-    u.pushbuffer()
     u.verbose = True
     try:
-        commands.help_(u, topicname)
+        doc = helpmod.help_(u, topicname)
     except error.UnknownCommand:
         raise ErrorResponse(HTTP_NOT_FOUND)
-    doc = u.popbuffer()
     return tmpl('help', topic=topicname, doc=doc)
