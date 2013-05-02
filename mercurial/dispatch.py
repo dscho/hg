@@ -485,6 +485,22 @@ def _earlygetopt(aliases, args):
 
     The values are listed in the order they appear in args.
     The options and values are removed from args.
+
+    >>> args = ['x', '--cwd', 'foo', 'y']
+    >>> _earlygetopt(['--cwd'], args), args
+    (['foo'], ['x', 'y'])
+
+    >>> args = ['x', '--cwd=bar', 'y']
+    >>> _earlygetopt(['--cwd'], args), args
+    (['bar'], ['x', 'y'])
+
+    >>> args = ['x', '-R', 'foo', 'y']
+    >>> _earlygetopt(['-R'], args), args
+    (['foo'], ['x', 'y'])
+
+    >>> args = ['x', '-Rbar', 'y']
+    >>> _earlygetopt(['-R'], args), args
+    (['bar'], ['x', 'y'])
     """
     try:
         argcount = args.index("--")
@@ -494,14 +510,22 @@ def _earlygetopt(aliases, args):
     values = []
     pos = 0
     while pos < argcount:
-        if args[pos] in aliases:
-            if pos + 1 >= argcount:
-                # ignore and let getopt report an error if there is no value
-                break
+        fullarg = arg = args[pos]
+        equals = arg.find('=')
+        if equals > -1:
+            arg = arg[:equals]
+        if arg in aliases:
             del args[pos]
-            values.append(args.pop(pos))
-            argcount -= 2
-        elif args[pos][:2] in shortopts:
+            if equals > -1:
+                values.append(fullarg[equals + 1:])
+                argcount -= 1
+            else:
+                if pos + 1 >= argcount:
+                    # ignore and let getopt report an error if there is no value
+                    break
+                values.append(args.pop(pos))
+                argcount -= 2
+        elif arg[:2] in shortopts:
             # short option can have no following space, e.g. hg log -Rfoo
             values.append(args.pop(pos)[2:])
             argcount -= 1

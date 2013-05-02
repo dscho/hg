@@ -317,6 +317,9 @@ def configstyles(ui):
 
 class colorui(uimod.ui):
     def popbuffer(self, labeled=False):
+        if self._colormode is None:
+            return super(colorui, self).popbuffer(labeled)
+
         if labeled:
             return ''.join(self.label(a, label) for a, label
                            in self._buffers.pop())
@@ -324,6 +327,9 @@ class colorui(uimod.ui):
 
     _colormode = 'ansi'
     def write(self, *args, **opts):
+        if self._colormode is None:
+            return super(colorui, self).write(*args, **opts)
+
         label = opts.get('label', '')
         if self._buffers:
             self._buffers[-1].extend([(str(a), label) for a in args])
@@ -335,6 +341,9 @@ class colorui(uimod.ui):
                 *[self.label(str(a), label) for a in args], **opts)
 
     def write_err(self, *args, **opts):
+        if self._colormode is None:
+            return super(colorui, self).write_err(*args, **opts)
+
         label = opts.get('label', '')
         if self._colormode == 'win32':
             for a in args:
@@ -344,6 +353,9 @@ class colorui(uimod.ui):
                 *[self.label(str(a), label) for a in args], **opts)
 
     def label(self, msg, label):
+        if self._colormode is None:
+            return super(colorui, self).label(msg, label)
+
         effects = []
         for l in label.split():
             s = _styles.get(l, '')
@@ -386,8 +398,8 @@ def uisetup(ui):
         ui.__class__ = colorui
     def colorcmd(orig, ui_, opts, cmd, cmdfunc):
         mode = _modesetup(ui_, opts)
+        colorui._colormode = mode
         if mode:
-            colorui._colormode = mode
             extstyles()
             configstyles(ui_)
         return orig(ui_, opts, cmd, cmdfunc)
