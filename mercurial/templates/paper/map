@@ -42,7 +42,7 @@ navgraph = '{before%navgraphentry}{after%navgraphentry}'
 filenav = '{before%filenaventry}{after%filenaventry}'
 
 direntry = '
-  <tr class="fileline parity{parity}">
+  <tr class="fileline">
     <td class="name">
       <a href="{url|urlescape}file/{node|short}{path|urlescape}{sessionvars%urlparameter}">
         <img src="{staticurl|urlescape}coal-folder.png" alt="dir."/> {basename|escape}/
@@ -56,7 +56,7 @@ direntry = '
   </tr>'
 
 fileentry = '
-  <tr class="fileline parity{parity}">
+  <tr class="fileline">
     <td class="filename">
       <a href="{url|urlescape}file/{node|short}/{file|urlescape}{sessionvars%urlparameter}">
         <img src="{staticurl|urlescape}coal-file.png" alt="file"/> {basename|escape}
@@ -72,32 +72,36 @@ filediff = filediff.tmpl
 filecomparison = filecomparison.tmpl
 filelog = filelog.tmpl
 fileline = '
-  <div class="parity{parity} source"><a href="#{lineid}" id="{lineid}">{linenumber}</a> {line|escape}</div>'
+  <span id="{lineid}">{strip(line|escape, '\r\n')}</span><a href="#{lineid}"></a>'
 filelogentry = filelogentry.tmpl
 
 annotateline = '
-  <tr class="parity{parity}">
+  <tr id="{lineid}">
     <td class="annotate">
       <a href="{url|urlescape}annotate/{node|short}/{file|urlescape}{sessionvars%urlparameter}#l{targetline}"
          title="{node|short}: {desc|escape|firstline}">{author|user}@{rev}</a>
     </td>
-    <td class="source"><a href="#{lineid}" id="{lineid}">{linenumber}</a> {line|escape}</td>
+    <td class="source"><a href="#{lineid}">{linenumber}</a> {line|escape}</td>
   </tr>'
 
-diffblock = '<div class="source bottomline parity{parity}"><pre>{lines}</pre></div>'
-difflineplus = '<a href="#{lineid}" id="{lineid}">{linenumber}</a> <span class="plusline">{line|escape}</span>'
-difflineminus = '<a href="#{lineid}" id="{lineid}">{linenumber}</a> <span class="minusline">{line|escape}</span>'
-difflineat = '<a href="#{lineid}" id="{lineid}">{linenumber}</a> <span class="atline">{line|escape}</span>'
-diffline = '<a href="#{lineid}" id="{lineid}">{linenumber}</a> {line|escape}'
+diffblock = '<div class="bottomline inc-lineno"><pre class="sourcelines wrap">{lines}</pre></div>'
+difflineplus = '
+  <span id="{lineid}" class="plusline">{strip(line|escape, '\r\n')}</span><a href="#{lineid}"></a>'
+difflineminus = '
+  <span id="{lineid}" class="minusline">{strip(line|escape, '\r\n')}</span><a href="#{lineid}"></a>'
+difflineat = '
+  <span id="{lineid}" class="atline">{strip(line|escape, '\r\n')}</span><a href="#{lineid}"></a>'
+diffline = '
+  <span id="{lineid}">{strip(line|escape, '\r\n')}</span><a href="#{lineid}"></a>'
 
 comparisonblock ='
   <tbody class="block">
   {lines}
   </tbody>'
 comparisonline = '
-  <tr>
-    <td class="source {type}"><a href="#{lineid}" id="{lineid}">{leftlinenumber}</a> {leftline|escape}</td>
-    <td class="source {type}"><a href="#{lineid}" id="{lineid}">{rightlinenumber}</a> {rightline|escape}</td>
+  <tr id="{lineid}">
+    <td class="source {type}"><a href="#{lineid}">{leftlinenumber}</a> {leftline|escape}</td>
+    <td class="source {type}"><a href="#{lineid}">{rightlinenumber}</a> {rightline|escape}</td>
   </tr>'
 
 changelogparent = '
@@ -151,7 +155,7 @@ fileannotatechild = '
   </tr>'
 tags = tags.tmpl
 tagentry = '
-  <tr class="tagEntry parity{parity}">
+  <tr class="tagEntry">
     <td>
       <a href="{url|urlescape}rev/{node|short}{sessionvars%urlparameter}">
         {tag|escape}
@@ -163,7 +167,7 @@ tagentry = '
   </tr>'
 bookmarks = bookmarks.tmpl
 bookmarkentry = '
-  <tr class="tagEntry parity{parity}">
+  <tr class="tagEntry">
     <td>
       <a href="{url|urlescape}rev/{node|short}{sessionvars%urlparameter}">
         {bookmark|escape}
@@ -175,7 +179,7 @@ bookmarkentry = '
   </tr>'
 branches = branches.tmpl
 branchentry = '
-  <tr class="tagEntry parity{parity}">
+  <tr class="tagEntry">
     <td>
       <a href="{url|urlescape}shortlog/{node|short}{sessionvars%urlparameter}" class="{status}">
         {branch|escape}
@@ -214,7 +218,7 @@ filelogchild = '
   </tr>'
 
 indexentry = '
-  <tr class="parity{parity}">
+  <tr>
     <td><a href="{url|urlescape}{sessionvars%urlparameter}">{name|escape}</a></td>
     <td>{description}</td>
     <td>{contact|obfuscate}</td>

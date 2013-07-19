@@ -199,14 +199,46 @@ def buildfunc(exp, context):
     if n in funcs:
         f = funcs[n]
         return (f, args)
-    if n in templatefilters.funcs:
-        f = templatefilters.funcs[n]
-        return (f, args)
     if n in context._filters:
         if len(args) != 1:
             raise error.ParseError(_("filter %s expects one argument") % n)
         f = context._filters[n]
         return (runfilter, (args[0][0], args[0][1], f))
+
+def date(context, mapping, args):
+    if not (1 <= len(args) <= 2):
+        raise error.ParseError(_("date expects one or two arguments"))
+
+    date = args[0][0](context, mapping, args[0][1])
+    if len(args) == 2:
+        fmt = stringify(args[1][0](context, mapping, args[1][1]))
+        return util.datestr(date, fmt)
+    return util.datestr(date)
+
+def fill(context, mapping, args):
+    if not (1 <= len(args) <= 4):
+        raise error.ParseError(_("fill expects one to four arguments"))
+
+    text = stringify(args[0][0](context, mapping, args[0][1]))
+    width = 76
+    initindent = ''
+    hangindent = ''
+    if 2 <= len(args) <= 4:
+        try:
+            width = int(stringify(args[1][0](context, mapping, args[1][1])))
+        except ValueError:
+            raise error.ParseError(_("fill expects an integer width"))
+        try:
+            initindent = stringify(args[2][0](context, mapping, args[2][1]))
+            initindent = stringify(runtemplate(context, mapping,
+                                     compiletemplate(initindent, context)))
+            hangindent = stringify(args[3][0](context, mapping, args[3][1]))
+            hangindent = stringify(runtemplate(context, mapping,
+                                     compiletemplate(hangindent, context)))
+        except IndexError:
+            pass
+
+    return templatefilters.fill(text, width, initindent, hangindent)
 
 def get(context, mapping, args):
     if len(args) != 2:
@@ -220,40 +252,6 @@ def get(context, mapping, args):
 
     key = args[1][0](context, mapping, args[1][1])
     yield dictarg.get(key)
-
-def join(context, mapping, args):
-    if not (1 <= len(args) <= 2):
-        # i18n: "join" is a keyword
-        raise error.ParseError(_("join expects one or two arguments"))
-
-    joinset = args[0][0](context, mapping, args[0][1])
-    if util.safehasattr(joinset, '__call__'):
-        jf = joinset.joinfmt
-        joinset = [jf(x) for x in joinset()]
-
-    joiner = " "
-    if len(args) > 1:
-        joiner = args[1][0](context, mapping, args[1][1])
-
-    first = True
-    for x in joinset:
-        if first:
-            first = False
-        else:
-            yield joiner
-        yield x
-
-def sub(context, mapping, args):
-    if len(args) != 3:
-        # i18n: "sub" is a keyword
-        raise error.ParseError(_("sub expects three arguments"))
-
-    pat = stringify(args[0][0](context, mapping, args[0][1]))
-    rpl = stringify(args[1][0](context, mapping, args[1][1]))
-    src = stringify(args[2][0](context, mapping, args[2][1]))
-    src = stringify(runtemplate(context, mapping,
-                                compiletemplate(src, context)))
-    yield re.sub(pat, rpl, src)
 
 def if_(context, mapping, args):
     if not (2 <= len(args) <= 3):
@@ -282,6 +280,28 @@ def ifeq(context, mapping, args):
         t = stringify(args[3][0](context, mapping, args[3][1]))
         yield runtemplate(context, mapping, compiletemplate(t, context))
 
+def join(context, mapping, args):
+    if not (1 <= len(args) <= 2):
+        # i18n: "join" is a keyword
+        raise error.ParseError(_("join expects one or two arguments"))
+
+    joinset = args[0][0](context, mapping, args[0][1])
+    if util.safehasattr(joinset, '__call__'):
+        jf = joinset.joinfmt
+        joinset = [jf(x) for x in joinset()]
+
+    joiner = " "
+    if len(args) > 1:
+        joiner = args[1][0](context, mapping, args[1][1])
+
+    first = True
+    for x in joinset:
+        if first:
+            first = False
+        else:
+            yield joiner
+        yield x
+
 def label(context, mapping, args):
     if len(args) != 2:
         # i18n: "label" is a keyword
@@ -301,6 +321,28 @@ def rstdoc(context, mapping, args):
 
     return minirst.format(text, style=style, keep=['verbose'])
 
+def strip(context, mapping, args):
+    if not (1 <= len(args) <= 2):
+        raise error.ParseError(_("strip expects one or two arguments"))
+
+    text = args[0][0](context, mapping, args[0][1])
+    if len(args) == 2:
+        chars = args[1][0](context, mapping, args[1][1])
+        return text.strip(chars)
+    return text.strip()
+
+def sub(context, mapping, args):
+    if len(args) != 3:
+        # i18n: "sub" is a keyword
+        raise error.ParseError(_("sub expects three arguments"))
+
+    pat = stringify(args[0][0](context, mapping, args[0][1]))
+    rpl = stringify(args[1][0](context, mapping, args[1][1]))
+    src = stringify(args[2][0](context, mapping, args[2][1]))
+    src = stringify(runtemplate(context, mapping,
+                                compiletemplate(src, context)))
+    yield re.sub(pat, rpl, src)
+
 methods = {
     "string": lambda e, c: (runstring, e[1]),
     "symbol": lambda e, c: (runsymbol, e[1]),
@@ -312,12 +354,15 @@ methods = {
     }
 
 funcs = {
+    "date": date,
+    "fill": fill,
     "get": get,
     "if": if_,
     "ifeq": ifeq,
     "join": join,
     "label": label,
     "rstdoc": rstdoc,
+    "strip": strip,
     "sub": sub,
 }
 
@@ -394,6 +439,16 @@ class engine(object):
 
 engines = {'default': engine}
 
+def stylelist():
+    path = templatepath()[0]
+    dirlist =  os.listdir(path)
+    stylelist = []
+    for file in dirlist:
+        split = file.split(".")
+        if split[0] == "map-cmdline":
+            stylelist.append(split[1])
+    return ", ".join(sorted(stylelist))
+
 class templater(object):
 
     def __init__(self, mapfile, filters={}, defaults={}, cache={},
@@ -415,7 +470,8 @@ class templater(object):
         if not mapfile:
             return
         if not os.path.exists(mapfile):
-            raise util.Abort(_('style not found: %s') % mapfile)
+            raise util.Abort(_("style '%s' not found") % mapfile,
+                             hint=_("available styles: %s") % stylelist())
 
         conf = config.config()
         conf.read(mapfile)

@@ -316,8 +316,8 @@ class mercurial_source(converter_source):
             if name in self.ignored:
                 continue
             try:
-                copysource, copynode = ctx.filectx(name).renamed()
-                if copysource in self.ignored or not self.keep(copynode):
+                copysource, _copynode = ctx.filectx(name).renamed()
+                if copysource in self.ignored:
                     continue
                 # Ignore copy sources not in parent revisions
                 found = False
@@ -397,3 +397,7 @@ class mercurial_source(converter_source):
 
     def getbookmarks(self):
         return bookmarks.listbookmarks(self.repo)
+
+    def checkrevformat(self, revstr):
+        """ Mercurial, revision string is a 40 byte hex """
+        self.checkhexformat(revstr)

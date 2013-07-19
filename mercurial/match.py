@@ -119,8 +119,12 @@ class match(object):
         found/accessed, with an error message
         '''
         pass
-    def dir(self, f):
-        pass
+    # If this is set, it will be called when an explicitly listed directory is
+    # visited.
+    explicitdir = None
+    # If this is set, it will be called when a directory discovered by recursive
+    # traversal is visited.
+    traversedir = None
     def missing(self, f):
         pass
     def exact(self, f):

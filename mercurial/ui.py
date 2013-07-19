@@ -6,7 +6,7 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-import errno, getpass, os, re, socket, sys, tempfile, traceback
+import errno, getpass, os, socket, sys, tempfile, traceback
 import config, scmutil, util, error, formatter
 
 class ui(object):
@@ -284,22 +284,16 @@ class ui(object):
         ConfigError: foo.invalid is not a byte quantity ('somevalue')
         """
 
-        orig = string = self.config(section, name)
-        if orig is None:
+        value = self.config(section, name)
+        if value is None:
             if not isinstance(default, str):
                 return default
-            orig = string = default
-        multiple = 1
-        m = re.match(r'([^kmbg]+?)\s*([kmg]?)b?$', string, re.I)
-        if m:
-            string, key = m.groups()
-            key = key.lower()
-            multiple = dict(k=1024, m=1048576, g=1073741824).get(key, 1)
+            value = default
         try:
-            return int(float(string) * multiple)
-        except ValueError:
+            return util.sizetoint(value)
+        except error.ParseError:
             raise error.ConfigError(_("%s.%s is not a byte quantity ('%s')")
-                                    % (section, name, orig))
+                                    % (section, name, value))
 
     def configlist(self, section, name, default=None, untrusted=False):
         """parse a configuration element as a list of comma/space separated
@@ -645,13 +639,20 @@ class ui(object):
         except EOFError:
             raise util.Abort(_('response expected'))
 
-    def promptchoice(self, msg, choices, default=0):
-        """Prompt user with msg, read response, and ensure it matches
-        one of the provided choices. The index of the choice is returned.
-        choices is a sequence of acceptable responses with the format:
-        ('&None', 'E&xec', 'Sym&link') Responses are case insensitive.
-        If ui is not interactive, the default is returned.
+    def promptchoice(self, prompt, default=0):
+        """Prompt user with a message, read response, and ensure it matches
+        one of the provided choices. The prompt is formatted as follows:
+
+           "would you like fries with that (Yn)? $$ &Yes $$ &No"
+
+        The index of the choice is returned. Responses are case
+        insensitive. If ui is not interactive, the default is
+        returned.
         """
+
+        parts = prompt.split('$$')
+        msg = parts[0].rstrip(' ')
+        choices = [p.strip(' ') for p in parts[1:]]
         resps = [s[s.index('&') + 1].lower() for s in choices]
         while True:
             r = self.prompt(msg, resps[default])

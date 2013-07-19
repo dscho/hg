@@ -140,38 +140,6 @@ Logs and changes
    <updated>1970-01-01T00:00:00+00:00</updated>
   
    <entry>
-    <title>branch commit with null character: </title>
-    <id>http://*:$HGPORT/#changeset-cad8025a2e87f88c06259790adfa15acb4080123</id> (glob)
-    <link href="http://*:$HGPORT/rev/cad8025a2e87"/> (glob)
-    <author>
-     <name>test</name>
-     <email>&#116;&#101;&#115;&#116;</email>
-    </author>
-    <updated>1970-01-01T00:00:00+00:00</updated>
-    <published>1970-01-01T00:00:00+00:00</published>
-    <content type="xhtml">
-     <div xmlns="http://www.w3.org/1999/xhtml">
-      <pre xml:space="preserve">branch commit with null character: </pre>
-     </div>
-    </content>
-   </entry>
-   <entry>
-    <title>branch</title>
-    <id>http://*:$HGPORT/#changeset-1d22e65f027e5a0609357e7d8e7508cd2ba5d2fe</id> (glob)
-    <link href="http://*:$HGPORT/rev/1d22e65f027e"/> (glob)
-    <author>
-     <name>test</name>
-     <email>&#116;&#101;&#115;&#116;</email>
-    </author>
-    <updated>1970-01-01T00:00:00+00:00</updated>
-    <published>1970-01-01T00:00:00+00:00</published>
-    <content type="xhtml">
-     <div xmlns="http://www.w3.org/1999/xhtml">
-      <pre xml:space="preserve">branch</pre>
-     </div>
-    </content>
-   </entry>
-   <entry>
     <title>Added tag 1.0 for changeset 2ef0ac749a14</title>
     <id>http://*:$HGPORT/#changeset-a4f92ed23982be056b9852de5dfe873eaac7f0de</id> (glob)
     <link href="http://*:$HGPORT/rev/a4f92ed23982"/> (glob)
@@ -289,7 +257,7 @@ Logs and changes
   
   <form class="search" action="/log">
   
-  <p><input name="rev" id="search1" type="text" size="30" /></p>
+  <p><input name="rev" id="search1" type="text" size="30" value="" /></p>
   <div id="hint">find changesets by author, revision,
   files, or words in the commit message</div>
   </form>
@@ -306,27 +274,29 @@ Logs and changes
     <th class="author">author</th>
     <th class="description">description</th>
    </tr>
-   <tr class="parity0">
+  <tbody class="stripes2">
+   <tr>
     <td class="age">Thu, 01 Jan 1970 00:00:00 +0000</td>
     <td class="author">test</td>
     <td class="description"><a href="/rev/cad8025a2e87">branch commit with null character: </a><span class="branchhead">unstable</span> <span class="tag">tip</span> <span class="tag">something</span> </td>
    </tr>
-   <tr class="parity1">
+   <tr>
     <td class="age">Thu, 01 Jan 1970 00:00:00 +0000</td>
     <td class="author">test</td>
     <td class="description"><a href="/rev/1d22e65f027e">branch</a><span class="branchhead">stable</span> </td>
    </tr>
-   <tr class="parity0">
+   <tr>
     <td class="age">Thu, 01 Jan 1970 00:00:00 +0000</td>
     <td class="author">test</td>
     <td class="description"><a href="/rev/a4f92ed23982">Added tag 1.0 for changeset 2ef0ac749a14</a><span class="branchhead">default</span> </td>
    </tr>
-   <tr class="parity1">
+   <tr>
     <td class="age">Thu, 01 Jan 1970 00:00:00 +0000</td>
     <td class="author">test</td>
     <td class="description"><a href="/rev/2ef0ac749a14">base</a><span class="tag">1.0</span> <span class="tag">anotherthing</span> </td>
    </tr>
   
+  </tbody>
   </table>
   
   <div class="navigate">
@@ -423,11 +393,11 @@ Logs and changes
     <td class="diffstat">
        2 files changed, 2 insertions(+), 0 deletions(-)
   
-      <a id="diffstatexpand" href="javascript:showDiffstat()"/>[<tt>+</tt>]</a>
+      <a id="diffstatexpand" href="javascript:toggleDiffstat()"/>[<tt>+</tt>]</a>
       <div id="diffstatdetails" style="display:none;">
-        <a href="javascript:hideDiffstat()"/>[<tt>-</tt>]</a>
+        <a href="javascript:toggleDiffstat()"/>[<tt>-</tt>]</a>
         <p>
-        <table>  <tr class="parity0">
+        <table class="stripes2">  <tr>
       <td class="diffstat-file"><a href="#l1.1">da/foo</a></td>
       <td class="diffstat-total" align="right">1</td>
       <td class="diffstat-graph">
@@ -435,7 +405,7 @@ Logs and changes
         <span class="diffstat-remove" style="width:0.0%;">&nbsp;</span>
       </td>
     </tr>
-    <tr class="parity1">
+    <tr>
       <td class="diffstat-file"><a href="#l2.1">foo</a></td>
       <td class="diffstat-total" align="right">1</td>
       <td class="diffstat-graph">
@@ -450,17 +420,19 @@ Logs and changes
   </table>
   
   <div class="overflow">
-  <div class="sourcefirst">   line diff</div>
-  
-  <div class="source bottomline parity0"><pre><a href="#l1.1" id="l1.1">     1.1</a> <span class="minusline">--- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-  </span><a href="#l1.2" id="l1.2">     1.2</a> <span class="plusline">+++ b/da/foo	Thu Jan 01 00:00:00 1970 +0000
-  </span><a href="#l1.3" id="l1.3">     1.3</a> <span class="atline">@@ -0,0 +1,1 @@
-  </span><a href="#l1.4" id="l1.4">     1.4</a> <span class="plusline">+foo
-  </span></pre></div><div class="source bottomline parity1"><pre><a href="#l2.1" id="l2.1">     2.1</a> <span class="minusline">--- /dev/null	Thu Jan 01 00:00:00 1970 +0000
-  </span><a href="#l2.2" id="l2.2">     2.2</a> <span class="plusline">+++ b/foo	Thu Jan 01 00:00:00 1970 +0000
-  </span><a href="#l2.3" id="l2.3">     2.3</a> <span class="atline">@@ -0,0 +1,1 @@
-  </span><a href="#l2.4" id="l2.4">     2.4</a> <span class="plusline">+foo
-  </span></pre></div>
+  <div class="sourcefirst linewraptoggle">line wrap: <a class="linewraplink" href="javascript:toggleLinewrap()">on</a></div>
+  <div class="sourcefirst"> line diff</div>
+  <div class="stripes2 diffblocks">
+  <div class="bottomline inc-lineno"><pre class="sourcelines wrap">
+  <span id="l1.1" class="minusline">--- /dev/null	Thu Jan 01 00:00:00 1970 +0000</span><a href="#l1.1"></a>
+  <span id="l1.2" class="plusline">+++ b/da/foo	Thu Jan 01 00:00:00 1970 +0000</span><a href="#l1.2"></a>
+  <span id="l1.3" class="atline">@@ -0,0 +1,1 @@</span><a href="#l1.3"></a>
+  <span id="l1.4" class="plusline">+foo</span><a href="#l1.4"></a></pre></div><div class="bottomline inc-lineno"><pre class="sourcelines wrap">
+  <span id="l2.1" class="minusline">--- /dev/null	Thu Jan 01 00:00:00 1970 +0000</span><a href="#l2.1"></a>
+  <span id="l2.2" class="plusline">+++ b/foo	Thu Jan 01 00:00:00 1970 +0000</span><a href="#l2.2"></a>
+  <span id="l2.3" class="atline">@@ -0,0 +1,1 @@</span><a href="#l2.3"></a>
+  <span id="l2.4" class="plusline">+foo</span><a href="#l2.4"></a></pre></div>
+  </div>
   </div>
   
   </div>
@@ -525,7 +497,7 @@ Logs and changes
   
   <form class="search" action="/log">
   
-  <p><input name="rev" id="search1" type="text" size="30"></p>
+  <p><input name="rev" id="search1" type="text" size="30" value="base"></p>
   <div id="hint">find changesets by author, revision,
   files, or words in the commit message</div>
   </form>
@@ -541,12 +513,14 @@ Logs and changes
     <th class="author">author</th>
     <th class="description">description</th>
    </tr>
-   <tr class="parity0">
+  <tbody class="stripes2">
+   <tr>
     <td class="age">Thu, 01 Jan 1970 00:00:00 +0000</td>
     <td class="author">test</td>
     <td class="description"><a href="/rev/2ef0ac749a14">base</a><span class="tag">1.0</span> <span class="tag">anotherthing</span> </td>
    </tr>
   
+  </tbody>
   </table>
   
   <div class="navigate">
@@ -667,10 +641,10 @@ File-related
   </table>
   
   <div class="overflow">
+  <div class="sourcefirst linewraptoggle">line wrap: <a class="linewraplink" href="javascript:toggleLinewrap()">on</a></div>
   <div class="sourcefirst"> line source</div>
-  
-  <div class="parity0 source"><a href="#l1" id="l1">     1</a> foo
-  </div>
+  <pre class="sourcelines stripes4 wrap">
+  <span id="l1">foo</span><a href="#l1"></a></pre>
   <div class="sourcelast"></div>
   </div>
   </div>

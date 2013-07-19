@@ -94,8 +94,12 @@ a { text-decoration:none; }
 .age { white-space:nowrap; }
 .date { white-space:nowrap; }
 .indexlinks { white-space:nowrap; }
-.parity0 { background-color: #f0f0f0; }
-.parity1 { background-color: white; }
+.parity0,
+.stripes4 > :nth-child(4n+1),
+.stripes2 > :nth-child(2n+1) { background-color: #f0f0f0; }
+.parity1,
+.stripes4 > :nth-child(4n+3),
+.stripes2 > :nth-child(2n+2) { background-color: white; }
 .plusline { color: green; }
 .minusline { color: #dc143c; } /* crimson */
 .atline { color: purple; }
@@ -208,6 +212,57 @@ h3 {
 .sourcelast { border-top: 1px solid #999; }
 .source a { color: #999; font-size: smaller; font-family: monospace;}
 .bottomline { border-bottom: 1px solid #999; }
+
+.sourcelines {
+  font-size: 90%;
+  position: relative;
+  counter-reset: lineno;
+}
+
+.wrap > span {
+    white-space: pre-wrap;
+}
+
+.linewraptoggle {
+    float: right;
+}
+
+.diffblocks { counter-reset: lineno; }
+.diffblocks > div { counter-increment: lineno; }
+
+.sourcelines > span {
+  display: inline-block;
+  width: 100%;
+  padding: 1px 0px;
+  counter-increment: lineno;
+}
+
+.sourcelines > span:before {
+  -moz-user-select: -moz-none;
+  -khtml-user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  display: inline-block;
+  width: 4em;
+  margin-right: 1em;
+  font-size: smaller;
+  color: #999;
+  text-align: right;
+  content: counters(lineno, ".");
+}
+
+.sourcelines > span:target, tr:target td {
+  background-color: #bfdfff;
+}
+
+.sourcelines > a {
+    display: inline-block;
+    position: absolute;
+    left: 0px;
+    width: 4em;
+    height: 1em;
+}
 
 .fileline { font-family: monospace; }
 .fileline img { border: 0; }

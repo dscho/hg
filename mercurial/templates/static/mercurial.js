@@ -265,12 +265,35 @@ process_dates = (function(document, RegExp, Math, isNaN, Date, _false, _true){
 	}
 })(document, RegExp, Math, isNaN, Date, false, true)
 
-function showDiffstat() {
-	document.getElementById('diffstatdetails').style.display = 'inline';
-	document.getElementById('diffstatexpand').style.display = 'none';
+function toggleDiffstat() {
+    var curdetails = document.getElementById('diffstatdetails').style.display;
+    var curexpand = curdetails == 'none' ? 'inline' : 'none';
+    document.getElementById('diffstatdetails').style.display = curexpand;
+    document.getElementById('diffstatexpand').style.display = curdetails;
 }
 
-function hideDiffstat() {
-	document.getElementById('diffstatdetails').style.display = 'none';
-	document.getElementById('diffstatexpand').style.display = 'inline';
+function toggleLinewrap() {
+    function getLinewrap() {
+        var nodes = document.getElementsByClassName('sourcelines');
+        // if there are no such nodes, error is thrown here
+        return nodes[0].classList.contains('wrap');
+    }
+
+    function setLinewrap(enable) {
+        var nodes = document.getElementsByClassName('sourcelines');
+        for (var i = 0; i < nodes.length; i++) {
+            if (enable) {
+                nodes[i].classList.add('wrap');
+            } else {
+                nodes[i].classList.remove('wrap');
+            }
+        }
+
+        var links = document.getElementsByClassName('linewraplink');
+        for (var i = 0; i < links.length; i++) {
+            links[i].innerHTML = enable ? 'on' : 'off';
+        }
+    }
+
+    setLinewrap(!getLinewrap());
 }

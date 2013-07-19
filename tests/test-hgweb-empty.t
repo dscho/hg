@@ -62,7 +62,7 @@ Some tests for hgweb in an empty repository
   
   <form class="search" action="/log">
   
-  <p><input name="rev" id="search1" type="text" size="30" /></p>
+  <p><input name="rev" id="search1" type="text" size="30" value="" /></p>
   <div id="hint">find changesets by author, revision,
   files, or words in the commit message</div>
   </form>
@@ -79,7 +79,9 @@ Some tests for hgweb in an empty repository
     <th class="author">author</th>
     <th class="description">description</th>
    </tr>
+  <tbody class="stripes2">
   
+  </tbody>
   </table>
   
   <div class="navigate">
@@ -155,7 +157,7 @@ Some tests for hgweb in an empty repository
   
   <form class="search" action="/log">
   
-  <p><input name="rev" id="search1" type="text" size="30" /></p>
+  <p><input name="rev" id="search1" type="text" size="30" value="" /></p>
   <div id="hint">find changesets by author, revision,
   files, or words in the commit message</div>
   </form>
@@ -172,7 +174,9 @@ Some tests for hgweb in an empty repository
     <th class="author">author</th>
     <th class="description">description</th>
    </tr>
+  <tbody class="stripes2">
   
+  </tbody>
   </table>
   
   <div class="navigate">
@@ -258,7 +262,7 @@ Some tests for hgweb in an empty repository
   <noscript><p>The revision graph only works with JavaScript-enabled browsers.</p></noscript>
   
   <div id="wrapper">
-  <ul id="nodebgs"></ul>
+  <ul id="nodebgs" class="stripes2"></ul>
   <canvas id="graph" width="480" height="12"></canvas>
   <ul id="graphnodes"></ul>
   </div>
@@ -277,7 +281,7 @@ Some tests for hgweb in an empty repository
   	this.ctx.arc(x, y, radius, 0, Math.PI * 2, true);
   	this.ctx.fill();
   	
-  	var bg = '<li class="bg parity' + parity + '"></li>';
+  	var bg = '<li class="bg"></li>';
   	var left = (this.bg_height - this.box_size) + (this.columns + 1) * this.box_size;
   	var nstyle = 'padding-left: ' + left + 'px;';
   
@@ -391,13 +395,15 @@ Some tests for hgweb in an empty repository
     <th class="size">size</th>
     <th class="permissions">permissions</th>
   </tr>
-  <tr class="fileline parity0">
+  <tbody class="stripes2">
+  <tr class="fileline">
     <td class="name"><a href="/file/000000000000/">[up]</a></td>
     <td class="size"></td>
     <td class="permissions">drwxr-xr-x</td>
   </tr>
   
   
+  </tbody>
   </table>
   </div>
   </div>

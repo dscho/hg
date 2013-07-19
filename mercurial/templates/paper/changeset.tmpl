@@ -66,20 +66,22 @@ files, or words in the commit message</div>
   <th class="diffstat">diffstat</th>
   <td class="diffstat">
     {diffsummary}
-    <a id="diffstatexpand" href="javascript:showDiffstat()"/>[<tt>+</tt>]</a>
+    <a id="diffstatexpand" href="javascript:toggleDiffstat()"/>[<tt>+</tt>]</a>
     <div id="diffstatdetails" style="display:none;">
-      <a href="javascript:hideDiffstat()"/>[<tt>-</tt>]</a>
+      <a href="javascript:toggleDiffstat()"/>[<tt>-</tt>]</a>
       <p>
-      <table>{diffstat}</table>
+      <table class="stripes2">{diffstat}</table>
     </div>
   </td>
 </tr>
 </table>
 
 <div class="overflow">
-<div class="sourcefirst">   line diff</div>
-
+<div class="sourcefirst linewraptoggle">line wrap: <a class="linewraplink" href="javascript:toggleLinewrap()">on</a></div>
+<div class="sourcefirst"> line diff</div>
+<div class="stripes2 diffblocks">
 {diff}
+</div>
 </div>
 
 </div>

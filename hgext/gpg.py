@@ -48,19 +48,19 @@ class gpg(object):
                     pass
         keys = []
         key, fingerprint = None, None
-        err = ""
         for l in ret.splitlines():
             # see DETAILS in the gnupg documentation
             # filter the logger output
             if not l.startswith("[GNUPG:]"):
                 continue
             l = l[9:]
-            if l.startswith("ERRSIG"):
-                err = _("error while verifying signature")
-                break
-            elif l.startswith("VALIDSIG"):
+            if l.startswith("VALIDSIG"):
                 # fingerprint of the primary key
                 fingerprint = l.split()[10]
+            elif l.startswith("ERRSIG"):
+                key = l.split(" ", 3)[:2]
+                key.append("")
+                fingerprint = None
             elif (l.startswith("GOODSIG") or
                   l.startswith("EXPSIG") or
                   l.startswith("EXPKEYSIG") or
@@ -69,11 +69,9 @@ class gpg(object):
                     keys.append(key + [fingerprint])
                 key = l.split(" ", 2)
                 fingerprint = None
-        if err:
-            return err, []
         if key is not None:
             keys.append(key + [fingerprint])
-        return err, keys
+        return keys
 
 def newgpg(ui, **opts):
     """create a new gpg instance"""
@@ -119,14 +117,15 @@ def getkeys(ui, repo, mygpg, sigdata, context):
 
     data = node2txt(repo, node, version)
     sig = binascii.a2b_base64(sig)
-    err, keys = mygpg.verify(data, sig)
-    if err:
-        ui.warn("%s:%d %s\n" % (fn, ln , err))
-        return None
+    keys = mygpg.verify(data, sig)
 
     validkeys = []
     # warn for expired key and/or sigs
     for key in keys:
+        if key[0] == "ERRSIG":
+            ui.write(_("%s Unknown key ID \"%s\"\n")
+                     % (prefix, shortkey(ui, key[1][:15])))
+            continue
         if key[0] == "BADSIG":
             ui.write(_("%s Bad signature from \"%s\"\n") % (prefix, key[2]))
             continue
@@ -280,6 +279,13 @@ def sign(ui, repo, *revs, **opts):
         repo.commit(message, opts['user'], opts['date'], match=msigs)
     except ValueError, inst:
         raise util.Abort(str(inst))
+
+def shortkey(ui, key):
+    if len(key) != 16:
+        ui.debug("key ID \"%s\" format error\n" % key)
+        return key
+
+    return key[-8:]
 
 def node2txt(repo, node, ver):
     """map a manifest into some text"""

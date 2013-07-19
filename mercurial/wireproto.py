@@ -281,13 +281,15 @@ class wirepeer(peer.peerrepository):
                              bases=bases, heads=heads)
         return changegroupmod.unbundle10(self._decompress(f), 'UN')
 
-    def getbundle(self, source, heads=None, common=None):
+    def getbundle(self, source, heads=None, common=None, bundlecaps=None):
         self.requirecap('getbundle', _('look up remote changes'))
         opts = {}
         if heads is not None:
             opts['heads'] = encodelist(heads)
         if common is not None:
             opts['common'] = encodelist(common)
+        if bundlecaps is not None:
+            opts['bundlecaps'] = ','.join(bundlecaps)
         f = self._callstream("getbundle", **opts)
         return changegroupmod.unbundle10(self._decompress(f), 'UN')
 
@@ -449,9 +451,12 @@ def debugwireargs(repo, proto, one, two, others):
     return repo.debugwireargs(one, two, **opts)
 
 def getbundle(repo, proto, others):
-    opts = options('getbundle', ['heads', 'common'], others)
+    opts = options('getbundle', ['heads', 'common', 'bundlecaps'], others)
     for k, v in opts.iteritems():
-        opts[k] = decodelist(v)
+        if k in ('heads', 'common'):
+            opts[k] = decodelist(v)
+        elif k == 'bundlecaps':
+            opts[k] = set(v.split(','))
     cg = repo.getbundle('serve', **opts)
     return streamres(proto.groupchunks(cg))
 
@@ -523,6 +528,10 @@ def pushkey(repo, proto, namespace, key, old, new):
 def _allowstream(ui):
     return ui.configbool('server', 'uncompressed', True, untrusted=True)
 
+def _walkstreamfiles(repo):
+    # this is it's own function so extensions can override it
+    return repo.store.walk()
+
 def stream(repo, proto):
     '''If the server supports streaming clone, it advertises the "stream"
     capability with a value representing the version and flags of the repo
@@ -544,7 +553,7 @@ def stream(repo, proto):
         lock = repo.lock()
         try:
             repo.ui.debug('scanning\n')
-            for name, ename, size in repo.store.walk():
+            for name, ename, size in _walkstreamfiles(repo):
                 if size:
                     entries.append((name, size))
                     total_bytes += size

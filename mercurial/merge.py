@@ -61,6 +61,8 @@ class mergestate(object):
         l.sort()
         for f in l:
             yield f
+    def files(self):
+        return self._state.keys()
     def mark(self, dfile, state):
         self._state[dfile][0] = state
         self._dirty = True
@@ -95,6 +97,7 @@ class mergestate(object):
 def _checkunknownfile(repo, wctx, mctx, f):
     return (not repo.dirstate._ignore(f)
         and os.path.isfile(repo.wjoin(f))
+        and repo.wopener.audit.check(f)
         and repo.dirstate.normalize(f) not in repo.dirstate
         and mctx[f].cmp(wctx[f]))
 
@@ -364,8 +367,8 @@ def manifestmerge(repo, wctx, p2, pa, branchmerge, force, partial,
                 actions.append((f, "r", None, "remote delete"))
             elif repo.ui.promptchoice(
                 _("local changed %s which remote deleted\n"
-                  "use (c)hanged version or (d)elete?") % f,
-                (_("&Changed"), _("&Delete")), 0):
+                  "use (c)hanged version or (d)elete?"
+                  "$$ &Changed $$ &Delete") % f, 0):
                 actions.append((f, "r", None, "prompt delete"))
             else:
                 actions.append((f, "a", None, "prompt keep"))
@@ -374,8 +377,8 @@ def manifestmerge(repo, wctx, p2, pa, branchmerge, force, partial,
                 actions.append((f, "g", (m2.flags(f),), "remote recreating"))
             elif repo.ui.promptchoice(
                 _("remote changed %s which local deleted\n"
-                  "use (c)hanged version or leave (d)eleted?") % f,
-                (_("&Changed"), _("&Deleted")), 0) == 0:
+                  "use (c)hanged version or leave (d)eleted?"
+                  "$$ &Changed $$ &Deleted") % f, 0) == 0:
                 actions.append((f, "g", (m2.flags(f),), "prompt recreating"))
         else: assert False, m
     return actions

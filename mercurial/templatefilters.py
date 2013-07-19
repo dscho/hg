@@ -5,9 +5,8 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
 import cgi, re, os, time, urllib
-import encoding, node, util, error
+import encoding, node, util
 import hbisect
 
 def addbreaks(text):
@@ -100,8 +99,8 @@ def escape(text):
 para_re = None
 space_re = None
 
-def fill(text, width):
-    '''fill many paragraphs.'''
+def fill(text, width, initindent = '', hangindent = ''):
+    '''fill many paragraphs with optional indentation.'''
     global para_re, space_re
     if para_re is None:
         para_re = re.compile('(\n\n|\n\\s*[-*]\\s*)', re.M)
@@ -122,7 +121,8 @@ def fill(text, width):
             yield text[start:m.start(0)], m.group(1)
             start = m.end(1)
 
-    return "".join([space_re.sub(' ', util.wrap(para, width=width)) + rest
+    return "".join([util.wrap(space_re.sub(' ', util.wrap(para, width)),
+                              width, initindent, hangindent) + rest
                     for para, rest in findparas()])
 
 def fill68(text):
@@ -400,35 +400,6 @@ def websub(text, websubtable):
         for regexp, format in websubtable:
             text = regexp.sub(format, text)
     return text
-
-def fillfunc(context, mapping, args):
-    if not (1 <= len(args) <= 2):
-        raise error.ParseError(_("fill expects one or two arguments"))
-
-    text = stringify(args[0][0](context, mapping, args[0][1]))
-    width = 76
-    if len(args) == 2:
-        try:
-            width = int(stringify(args[1][0](context, mapping, args[1][1])))
-        except ValueError:
-            raise error.ParseError(_("fill expects an integer width"))
-
-    return fill(text, width)
-
-def datefunc(context, mapping, args):
-    if not (1 <= len(args) <= 2):
-        raise error.ParseError(_("date expects one or two arguments"))
-
-    date = args[0][0](context, mapping, args[0][1])
-    if len(args) == 2:
-        fmt = stringify(args[1][0](context, mapping, args[1][1]))
-        return util.datestr(date, fmt)
-    return util.datestr(date)
-
-funcs = {
-    "fill": fillfunc,
-    "date": datefunc,
-}
 
 # tell hggettext to extract docstrings from these functions:
 i18nfunctions = filters.values()

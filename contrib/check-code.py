@@ -10,6 +10,20 @@
 import re, glob, os, sys
 import keyword
 import optparse
+try:
+    import re2
+except ImportError:
+    re2 = None
+
+def compilere(pat, multiline=False):
+    if multiline:
+        pat = '(?m)' + pat
+    if re2:
+        try:
+            return re2.compile(pat)
+        except re2.error:
+            pass
+    return re.compile(pat)
 
 def repquote(m):
     t = re.sub(r"\w", "x", m.group('text'))
@@ -54,8 +68,8 @@ testpats = [
     (r'head -c', "don't use 'head -c', use 'dd'"),
     (r'sha1sum', "don't use sha1sum, use $TESTDIR/md5sum.py"),
     (r'ls.*-\w*R', "don't use 'ls -R', use 'find'"),
-    (r'printf.*\\([1-9]|0\d)', "don't use 'printf \NNN', use Python"),
-    (r'printf.*\\x', "don't use printf \\x, use Python"),
+    (r'printf.*[^\\]\\([1-9]|0\d)', "don't use 'printf \NNN', use Python"),
+    (r'printf.*[^\\]\\x', "don't use printf \\x, use Python"),
     (r'\$\(.*\)', "don't use $(expr), use `expr`"),
     (r'rm -rf \*', "don't use naked rm -rf, target a directory"),
     (r'(^|\|\s*)grep (-\w\s+)*[^|]*[(|]\w',
@@ -109,11 +123,21 @@ utestpats = [
     (r'^  changeset .* references (corrupted|missing) \$TESTTMP/.*[^)]$',
      winglobmsg),
     (r'^  pulling from \$TESTTMP/.*[^)]$', winglobmsg, '\$TESTTMP/unix-repo$'),
+    (r'^  reverting .*/.*[^)]$', winglobmsg, '\$TESTTMP/unix-repo$'),
+    (r'^  cloning subrepo \S+/.*[^)]$', winglobmsg, '\$TESTTMP/unix-repo$'),
+    (r'^  pushing to \$TESTTMP/.*[^)]$', winglobmsg, '\$TESTTMP/unix-repo$'),
+    (r'^  pushing subrepo \S+/\S+ to.*[^)]$', winglobmsg,
+     '\$TESTTMP/unix-repo$'),
+    (r'^  moving \S+/.*[^)]$', winglobmsg),
+    (r'^  no changes made to subrepo since.*/.*[^)]$',
+     winglobmsg, '\$TESTTMP/unix-repo$'),
+    (r'^  .*: largefile \S+ not available from file:.*/.*[^)]$',
+     winglobmsg, '\$TESTTMP/unix-repo$'),
   ],
   # warnings
   [
     (r'^  [^*?/\n]* \(glob\)$',
-     "warning: glob match with no glob character (?*/)"),
+     "glob match with no glob character (?*/)"),
   ]
 ]
 
@@ -307,6 +331,24 @@ checks = [
     ('txt', r'.*\.txt$', txtfilters, txtpats),
 ]
 
+def _preparepats():
+    for c in checks:
+        failandwarn = c[-1]
+        for pats in failandwarn:
+            for i, pseq in enumerate(pats):
+                # fix-up regexes for multi-line searches
+                p = pseq[0]
+                # \s doesn't match \n
+                p = re.sub(r'(?<!\\)\\s', r'[ \\t]', p)
+                # [^...] doesn't match newline
+                p = re.sub(r'(?<!\\)\[\^', r'[^\\n', p)
+
+                pats[i] = (re.compile(p, re.MULTILINE),) + pseq[1:]
+        filters = c[2]
+        for i, flt in enumerate(filters):
+            filters[i] = re.compile(flt[0]), flt[1]
+_preparepats()
+
 class norepeatlogger(object):
     def __init__(self):
         self._lastseen = None
@@ -368,13 +410,14 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
         fp = open(f)
         pre = post = fp.read()
         fp.close()
-        if "no-" + "check-code" in pre:
+        if "no-" "check-code" in pre:
             if debug:
-                print "Skipping %s for %s it has no- and check-code" % (
+                print "Skipping %s for %s it has no-" " check-code" % (
                        name, f)
             break
         for p, r in filters:
             post = re.sub(p, r, post)
+        nerrs = len(pats[0]) # nerr elements are errors
         if warnings:
             pats = pats[0] + pats[1]
         else:
@@ -386,25 +429,16 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
 
         prelines = None
         errors = []
-        for pat in pats:
+        for i, pat in enumerate(pats):
             if len(pat) == 3:
                 p, msg, ignore = pat
             else:
                 p, msg = pat
                 ignore = None
 
-            # fix-up regexes for multi-line searches
-            po = p
-            # \s doesn't match \n
-            p = re.sub(r'(?<!\\)\\s', r'[ \\t]', p)
-            # [^...] doesn't match newline
-            p = re.sub(r'(?<!\\)\[\^', r'[^\\n', p)
-
-            #print po, '=>', p
-
             pos = 0
             n = 0
-            for m in re.finditer(p, post, re.MULTILINE):
+            for m in p.finditer(post):
                 if prelines is None:
                     prelines = pre.splitlines()
                     postlines = post.splitlines(True)
@@ -418,9 +452,9 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
                     n += 1
                 l = prelines[n]
 
-                if "check-code" + "-ignore" in l:
+                if "check-code" "-ignore" in l:
                     if debug:
-                        print "Skipping %s for %s:%s (check-code -ignore)" % (
+                        print "Skipping %s for %s:%s (check-code" "-ignore)" % (
                             name, f, n)
                     continue
                 elif ignore and re.search(ignore, l, re.MULTILINE):
@@ -434,6 +468,8 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
                         bl, bu, br = blamecache[n]
                         if bl == l:
                             bd = '%s@%s' % (bu, br)
+                if i >= nerrs:
+                    msg = "warning: " + msg
                 errors.append((f, lineno and n + 1, l, msg, bd))
                 result = False
 

@@ -15,9 +15,9 @@ from monotone import monotone_source
 from gnuarch import gnuarch_source
 from bzr import bzr_source
 from p4 import p4_source
-import filemap, common
+import filemap
 
-import os, shutil
+import os, shutil, shlex
 from mercurial import hg, util, encoding
 from mercurial.i18n import _
 
@@ -118,8 +118,52 @@ class converter(object):
             self.readauthormap(opts.get('authormap'))
             self.authorfile = self.dest.authorfile()
 
-        self.splicemap = common.parsesplicemap(opts.get('splicemap'))
+        self.splicemap = self.parsesplicemap(opts.get('splicemap'))
         self.branchmap = mapfile(ui, opts.get('branchmap'))
+
+    def parsesplicemap(self, path):
+        """ check and validate the splicemap format and
+            return a child/parents dictionary.
+            Format checking has two parts.
+            1. generic format which is same across all source types
+            2. specific format checking which may be different for
+               different source type.  This logic is implemented in
+               checkrevformat function in source files like
+               hg.py, subversion.py etc.
+        """
+
+        if not path:
+            return {}
+        m = {}
+        try:
+            fp = open(path, 'r')
+            for i, line in enumerate(fp):
+                line = line.splitlines()[0].rstrip()
+                if not line:
+                    # Ignore blank lines
+                    continue
+                # split line
+                lex = shlex.shlex(line, posix=True)
+                lex.whitespace_split = True
+                lex.whitespace += ','
+                line = list(lex)
+                # check number of parents
+                if not (2 <= len(line) <= 3):
+                    raise util.Abort(_('syntax error in %s(%d): child parent1'
+                                       '[,parent2] expected') % (path, i + 1))
+                for part in line:
+                    self.source.checkrevformat(part)
+                child, p1, p2 = line[0], line[1:2], line[2:]
+                if p1 == p2:
+                    m[child] = p1
+                else:
+                    m[child] = p1 + p2
+         # if file does not exist or error reading, exit
+        except IOError:
+            raise util.Abort(_('splicemap file not found or error reading %s:')
+                               % path)
+        return m
+
 
     def walktree(self, heads):
         '''Return a mapping that identifies the uncommitted parents of every

@@ -1,14 +1,18 @@
+"""usage: %s DOC ...
+
+where DOC is the name of a document
+"""
+
 import os, sys, textwrap
 # import from the live mercurial repo
 sys.path.insert(0, "..")
 # fall back to pure modules if required C extensions are not available
 sys.path.append(os.path.join('..', 'mercurial', 'pure'))
 from mercurial import demandimport; demandimport.enable()
-from mercurial import encoding
 from mercurial import minirst
 from mercurial.commands import table, globalopts
-from mercurial.i18n import _
-from mercurial.help import helptable
+from mercurial.i18n import gettext, _
+from mercurial.help import helptable, loaddoc
 from mercurial import extensions
 from mercurial import util
 
@@ -51,7 +55,7 @@ def get_cmd(cmd, cmdtable):
 
     d['cmd'] = cmds[0]
     d['aliases'] = cmd.split("|")[1:]
-    d['desc'] = get_desc(attr[0].__doc__)
+    d['desc'] = get_desc(gettext(attr[0].__doc__))
     d['opts'] = list(get_opts(attr[1]))
 
     s = 'hg ' + cmds[0]
@@ -64,7 +68,7 @@ def get_cmd(cmd, cmdtable):
 
     return d
 
-def show_doc(ui):
+def showdoc(ui):
     # print options
     ui.write(minirst.section(_("Options")))
     for optstr, desc in get_opts(globalopts):
@@ -74,20 +78,9 @@ def show_doc(ui):
     ui.write(minirst.section(_("Commands")))
     commandprinter(ui, table, minirst.subsection)
 
-    # print topics
-    for names, sec, doc in helptable:
-        if names[0] == "config":
-            # The config help topic is included in the hgrc.5 man
-            # page.
-            continue
-        for name in names:
-            ui.write(".. _%s:\n" % name)
-        ui.write("\n")
-        ui.write(minirst.section(sec))
-        if util.safehasattr(doc, '__call__'):
-            doc = doc()
-        ui.write(doc)
-        ui.write("\n")
+    # print help topics
+    # The config help topic is included in the hgrc.5 man page.
+    helpprinter(ui, helptable, minirst.section, exclude=['config'])
 
     ui.write(minirst.section(_("Extensions")))
     ui.write(_("This section contains help for extensions that are "
@@ -102,11 +95,38 @@ def show_doc(ui):
     for extensionname in sorted(allextensionnames()):
         mod = extensions.load(None, extensionname, None)
         ui.write(minirst.subsection(extensionname))
-        ui.write("%s\n\n" % mod.__doc__)
+        ui.write("%s\n\n" % gettext(mod.__doc__))
         cmdtable = getattr(mod, 'cmdtable', None)
         if cmdtable:
             ui.write(minirst.subsubsection(_('Commands')))
             commandprinter(ui, cmdtable, minirst.subsubsubsection)
+
+def showtopic(ui, topic):
+    extrahelptable = [
+        (["common"], '', loaddoc('common')),
+        (["hg.1"], '', loaddoc('hg.1')),
+        (["hgignore.5"], '', loaddoc('hgignore.5')),
+        (["hgrc.5"], '', loaddoc('hgrc.5')),
+        (["hgignore.5.gendoc"], '', loaddoc('hgignore')),
+        (["hgrc.5.gendoc"], '', loaddoc('config')),
+    ]
+    helpprinter(ui, helptable + extrahelptable, None, include=[topic])
+
+def helpprinter(ui, helptable, sectionfunc, include=[], exclude=[]):
+    for names, sec, doc in helptable:
+        if exclude and names[0] in exclude:
+            continue
+        if include and names[0] not in include:
+            continue
+        for name in names:
+            ui.write(".. _%s:\n" % name)
+        ui.write("\n")
+        if sectionfunc:
+            ui.write(sectionfunc(sec))
+        if util.safehasattr(doc, '__call__'):
+            doc = doc()
+        ui.write(doc)
+        ui.write("\n")
 
 def commandprinter(ui, cmdtable, sectionfunc):
     h = {}
@@ -153,4 +173,11 @@ def allextensionnames():
     return extensions.enabled().keys() + extensions.disabled().keys()
 
 if __name__ == "__main__":
-    show_doc(sys.stdout)
+    doc = 'hg.1.gendoc'
+    if len(sys.argv) > 1:
+        doc = sys.argv[1]
+
+    if doc == 'hg.1.gendoc':
+        showdoc(sys.stdout)
+    else:
+        showtopic(sys.stdout, sys.argv[1])

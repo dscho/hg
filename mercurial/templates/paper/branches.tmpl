@@ -47,18 +47,9 @@ files, or words in the commit message</div>
  <th>branch</th>
  <th>node</th>
 </tr>
-{entries %
-' <tr class="tagEntry parity{parity}">
-    <td>
-      <a href="{url|urlescape}shortlog/{node|short}{sessionvars%urlparameter}" class="{status}">
-        {branch|escape}
-      </a>
-    </td>
-    <td class="node">
-      {node|short}
-    </td>
-  </tr>'
-}
+<tbody class="stripes2">
+{entries % branchentry}
+</tbody>
 </table>
 </div>
 </div>

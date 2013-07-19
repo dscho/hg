@@ -6,8 +6,8 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-from node import nullrev
-import mdiff, util
+from node import nullrev, hex
+import mdiff, util, dagutil
 import struct, os, bz2, zlib, tempfile
 
 _BUNDLE10_DELTA_HEADER = "20s20s20s20s"
@@ -225,13 +225,188 @@ def readbundle(fh, fname):
 
 class bundle10(object):
     deltaheader = _BUNDLE10_DELTA_HEADER
-    def __init__(self, lookup):
-        self._lookup = lookup
+    def __init__(self, repo, bundlecaps=None):
+        """Given a source repo, construct a bundler.
+
+        bundlecaps is optional and can be used to specify the set of
+        capabilities which can be used to build the bundle.
+        """
+        # Set of capabilities we can use to build the bundle.
+        if bundlecaps is None:
+            bundlecaps = set()
+        self._bundlecaps = bundlecaps
+        self._changelog = repo.changelog
+        self._manifest = repo.manifest
+        reorder = repo.ui.config('bundle', 'reorder', 'auto')
+        if reorder == 'auto':
+            reorder = None
+        else:
+            reorder = util.parsebool(reorder)
+        self._repo = repo
+        self._reorder = reorder
+        self._progress = repo.ui.progress
     def close(self):
         return closechunk()
+
     def fileheader(self, fname):
         return chunkheader(len(fname)) + fname
-    def revchunk(self, revlog, rev, prev):
+
+    def group(self, nodelist, revlog, lookup, units=None, reorder=None):
+        """Calculate a delta group, yielding a sequence of changegroup chunks
+        (strings).
+
+        Given a list of changeset revs, return a set of deltas and
+        metadata corresponding to nodes. The first delta is
+        first parent(nodelist[0]) -> nodelist[0], the receiver is
+        guaranteed to have this parent as it has all history before
+        these changesets. In the case firstparent is nullrev the
+        changegroup starts with a full revision.
+
+        If units is not None, progress detail will be generated, units specifies
+        the type of revlog that is touched (changelog, manifest, etc.).
+        """
+        # if we don't have any revisions touched by these changesets, bail
+        if len(nodelist) == 0:
+            yield self.close()
+            return
+
+        # for generaldelta revlogs, we linearize the revs; this will both be
+        # much quicker and generate a much smaller bundle
+        if (revlog._generaldelta and reorder is not False) or reorder:
+            dag = dagutil.revlogdag(revlog)
+            revs = set(revlog.rev(n) for n in nodelist)
+            revs = dag.linearize(revs)
+        else:
+            revs = sorted([revlog.rev(n) for n in nodelist])
+
+        # add the parent of the first rev
+        p = revlog.parentrevs(revs[0])[0]
+        revs.insert(0, p)
+
+        # build deltas
+        total = len(revs) - 1
+        msgbundling = _('bundling')
+        for r in xrange(len(revs) - 1):
+            if units is not None:
+                self._progress(msgbundling, r + 1, unit=units, total=total)
+            prev, curr = revs[r], revs[r + 1]
+            linknode = lookup(revlog.node(curr))
+            for c in self.revchunk(revlog, curr, prev, linknode):
+                yield c
+
+        yield self.close()
+
+    # filter any nodes that claim to be part of the known set
+    def prune(self, revlog, missing, commonrevs, source):
+        rr, rl = revlog.rev, revlog.linkrev
+        return [n for n in missing if rl(rr(n)) not in commonrevs]
+
+    def generate(self, commonrevs, clnodes, fastpathlinkrev, source):
+        '''yield a sequence of changegroup chunks (strings)'''
+        repo = self._repo
+        cl = self._changelog
+        mf = self._manifest
+        reorder = self._reorder
+        progress = self._progress
+
+        # for progress output
+        msgbundling = _('bundling')
+
+        mfs = {} # needed manifests
+        fnodes = {} # needed file nodes
+        changedfiles = set()
+
+        # Callback for the changelog, used to collect changed files and manifest
+        # nodes.
+        # Returns the linkrev node (identity in the changelog case).
+        def lookupcl(x):
+            c = cl.read(x)
+            changedfiles.update(c[3])
+            # record the first changeset introducing this manifest version
+            mfs.setdefault(c[0], x)
+            return x
+
+        # Callback for the manifest, used to collect linkrevs for filelog
+        # revisions.
+        # Returns the linkrev node (collected in lookupcl).
+        def lookupmf(x):
+            clnode = mfs[x]
+            if not fastpathlinkrev:
+                mdata = mf.readfast(x)
+                for f, n in mdata.iteritems():
+                    if f in changedfiles:
+                        # record the first changeset introducing this filelog
+                        # version
+                        fnodes[f].setdefault(n, clnode)
+            return clnode
+
+        for chunk in self.group(clnodes, cl, lookupcl, units=_('changesets'),
+                                reorder=reorder):
+            yield chunk
+        progress(msgbundling, None)
+
+        for f in changedfiles:
+            fnodes[f] = {}
+        mfnodes = self.prune(mf, mfs, commonrevs, source)
+        for chunk in self.group(mfnodes, mf, lookupmf, units=_('manifests'),
+                                reorder=reorder):
+            yield chunk
+        progress(msgbundling, None)
+
+        mfs.clear()
+
+        def linknodes(filerevlog, fname):
+            if fastpathlinkrev:
+                ln, llr = filerevlog.node, filerevlog.linkrev
+                needed = set(cl.rev(x) for x in clnodes)
+                def genfilenodes():
+                    for r in filerevlog:
+                        linkrev = llr(r)
+                        if linkrev in needed:
+                            yield filerevlog.node(r), cl.node(linkrev)
+                fnodes[fname] = dict(genfilenodes())
+            return fnodes.get(fname, {})
+
+        for chunk in self.generatefiles(changedfiles, linknodes, commonrevs,
+                                        source):
+            yield chunk
+
+        yield self.close()
+        progress(msgbundling, None)
+
+        if clnodes:
+            repo.hook('outgoing', node=hex(clnodes[0]), source=source)
+
+    def generatefiles(self, changedfiles, linknodes, commonrevs, source):
+        repo = self._repo
+        progress = self._progress
+        reorder = self._reorder
+        msgbundling = _('bundling')
+
+        total = len(changedfiles)
+        # for progress output
+        msgfiles = _('files')
+        for i, fname in enumerate(sorted(changedfiles)):
+            filerevlog = repo.file(fname)
+            if not filerevlog:
+                raise util.Abort(_("empty or missing revlog for %s") % fname)
+
+            linkrevnodes = linknodes(filerevlog, fname)
+            # Lookup for filenodes, we collected the linkrev nodes above in the
+            # fastpath case and with lookupmf in the slowpath case.
+            def lookupfilelog(x):
+                return linkrevnodes[x]
+
+            filenodes = self.prune(filerevlog, linkrevnodes, commonrevs, source)
+            if filenodes:
+                progress(msgbundling, i + 1, item=fname, unit=msgfiles,
+                         total=total)
+                yield self.fileheader(fname)
+                for chunk in self.group(filenodes, filerevlog, lookupfilelog,
+                                        reorder=reorder):
+                    yield chunk
+
+    def revchunk(self, revlog, rev, prev, linknode):
         node = revlog.node(rev)
         p1, p2 = revlog.parentrevs(rev)
         base = prev
@@ -242,7 +417,6 @@ class bundle10(object):
             prefix = mdiff.trivialdiffheader(len(delta))
         else:
             delta = revlog.revdiff(base, rev)
-        linknode = self._lookup(revlog, node)
         p1n, p2n = revlog.parents(node)
         basenode = revlog.node(base)
         meta = self.builddeltaheader(node, p1n, p2n, basenode, linknode)

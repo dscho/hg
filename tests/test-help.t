@@ -89,7 +89,6 @@ Short help:
    rename        rename files; equivalent of copy + remove
    resolve       redo merges or set/view the merge status of files
    revert        restore files to their checkout state
-   rollback      roll back the last transaction (dangerous)
    root          print the root (top) of the current working directory
    serve         start stand-alone webserver
    showconfig    show combined config settings from all hgrc files
@@ -97,7 +96,6 @@ Short help:
    summary       summarize working directory state
    tag           add one or more tags for the current or given revision
    tags          list repository tags
-   tip           show the tip revision
    unbundle      apply one or more changegroup files
    update        update working directory (or switch revisions)
    verify        verify the integrity of the repository
@@ -167,7 +165,6 @@ Short help:
    rename        rename files; equivalent of copy + remove
    resolve       redo merges or set/view the merge status of files
    revert        restore files to their checkout state
-   rollback      roll back the last transaction (dangerous)
    root          print the root (top) of the current working directory
    serve         start stand-alone webserver
    showconfig    show combined config settings from all hgrc files
@@ -175,7 +172,6 @@ Short help:
    summary       summarize working directory state
    tag           add one or more tags for the current or given revision
    tags          list repository tags
-   tip           show the tip revision
    unbundle      apply one or more changegroup files
    update        update working directory (or switch revisions)
    verify        verify the integrity of the repository
@@ -345,7 +341,7 @@ Test help option with version option
   Mercurial Distributed SCM (version *) (glob)
   (see http://mercurial.selenic.com for more information)
   
-  Copyright (C) 2005-2012 Matt Mackall and others
+  Copyright (C) 2005-2013 Matt Mackall and others
   This is free software; see the source for copying conditions. There is NO
   warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
@@ -654,7 +650,6 @@ Test that default list of commands omits extension commands
    rename        rename files; equivalent of copy + remove
    resolve       redo merges or set/view the merge status of files
    revert        restore files to their checkout state
-   rollback      roll back the last transaction (dangerous)
    root          print the root (top) of the current working directory
    serve         start stand-alone webserver
    showconfig    show combined config settings from all hgrc files
@@ -662,7 +657,6 @@ Test that default list of commands omits extension commands
    summary       summarize working directory state
    tag           add one or more tags for the current or given revision
    tags          list repository tags
-   tip           show the tip revision
    unbundle      apply one or more changegroup files
    update        update working directory (or switch revisions)
    verify        verify the integrity of the repository
@@ -1390,13 +1384,6 @@ Dish up an empty repo; serve it cold.
   restore files to their checkout state
   </td></tr>
   <tr><td>
-  <a href="/help/rollback">
-  rollback
-  </a>
-  </td><td>
-  roll back the last transaction (dangerous)
-  </td></tr>
-  <tr><td>
   <a href="/help/root">
   root
   </a>
@@ -1423,13 +1410,6 @@ Dish up an empty repo; serve it cold.
   </a>
   </td><td>
   list repository tags
-  </td></tr>
-  <tr><td>
-  <a href="/help/tip">
-  tip
-  </a>
-  </td><td>
-  show the tip revision
   </td></tr>
   <tr><td>
   <a href="/help/unbundle">

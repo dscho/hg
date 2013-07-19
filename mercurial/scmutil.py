@@ -685,26 +685,11 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
     if similarity is None:
         similarity = float(opts.get('similarity') or 0)
     # we'd use status here, except handling of symlinks and ignore is tricky
-    added, unknown, deleted, removed = [], [], [], []
-    audit_path = pathauditor(repo.root)
     m = match(repo[None], pats, opts)
     rejected = []
     m.bad = lambda x, y: rejected.append(x)
 
-    ctx = repo[None]
-    dirstate = repo.dirstate
-    walkresults = dirstate.walk(m, sorted(ctx.substate), True, False)
-    for abs, st in walkresults.iteritems():
-        dstate = dirstate[abs]
-        if dstate == '?' and audit_path.check(abs):
-            unknown.append(abs)
-        elif dstate != 'r' and not st:
-            deleted.append(abs)
-        # for finding renames
-        elif dstate == 'r':
-            removed.append(abs)
-        elif dstate == 'a':
-            added.append(abs)
+    added, unknown, deleted, removed = _interestingfiles(repo, m)
 
     unknownset = set(unknown)
     toprint = unknownset.copy()
@@ -718,31 +703,100 @@ def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
                 status = _('removing %s\n') % ((pats and rel) or abs)
             repo.ui.status(status)
 
-    copies = {}
-    if similarity > 0:
-        for old, new, score in similar.findrenames(repo,
-                added + unknown, removed + deleted, similarity):
-            if repo.ui.verbose or not m.exact(old) or not m.exact(new):
-                repo.ui.status(_('recording removal of %s as rename to %s '
-                                 '(%d%% similar)\n') %
-                               (m.rel(old), m.rel(new), score * 100))
-            copies[new] = old
+    renames = _findrenames(repo, m, added + unknown, removed + deleted,
+                           similarity)
 
     if not dry_run:
-        wctx = repo[None]
-        wlock = repo.wlock()
-        try:
-            wctx.forget(deleted)
-            wctx.add(unknown)
-            for new, old in copies.iteritems():
-                wctx.copy(old, new)
-        finally:
-            wlock.release()
+        _markchanges(repo, unknown, deleted, renames)
 
     for f in rejected:
         if f in m.files():
             return 1
     return 0
+
+def marktouched(repo, files, similarity=0.0):
+    '''Assert that files have somehow been operated upon. files are relative to
+    the repo root.'''
+    m = matchfiles(repo, files)
+    rejected = []
+    m.bad = lambda x, y: rejected.append(x)
+
+    added, unknown, deleted, removed = _interestingfiles(repo, m)
+
+    if repo.ui.verbose:
+        unknownset = set(unknown)
+        toprint = unknownset.copy()
+        toprint.update(deleted)
+        for abs in sorted(toprint):
+            if abs in unknownset:
+                status = _('adding %s\n') % abs
+            else:
+                status = _('removing %s\n') % abs
+            repo.ui.status(status)
+
+    renames = _findrenames(repo, m, added + unknown, removed + deleted,
+                           similarity)
+
+    _markchanges(repo, unknown, deleted, renames)
+
+    for f in rejected:
+        if f in m.files():
+            return 1
+    return 0
+
+def _interestingfiles(repo, matcher):
+    '''Walk dirstate with matcher, looking for files that addremove would care
+    about.
+
+    This is different from dirstate.status because it doesn't care about
+    whether files are modified or clean.'''
+    added, unknown, deleted, removed = [], [], [], []
+    audit_path = pathauditor(repo.root)
+
+    ctx = repo[None]
+    dirstate = repo.dirstate
+    walkresults = dirstate.walk(matcher, sorted(ctx.substate), True, False)
+    for abs, st in walkresults.iteritems():
+        dstate = dirstate[abs]
+        if dstate == '?' and audit_path.check(abs):
+            unknown.append(abs)
+        elif dstate != 'r' and not st:
+            deleted.append(abs)
+        # for finding renames
+        elif dstate == 'r':
+            removed.append(abs)
+        elif dstate == 'a':
+            added.append(abs)
+
+    return added, unknown, deleted, removed
+
+def _findrenames(repo, matcher, added, removed, similarity):
+    '''Find renames from removed files to added ones.'''
+    renames = {}
+    if similarity > 0:
+        for old, new, score in similar.findrenames(repo, added, removed,
+                                                   similarity):
+            if (repo.ui.verbose or not matcher.exact(old)
+                or not matcher.exact(new)):
+                repo.ui.status(_('recording removal of %s as rename to %s '
+                                 '(%d%% similar)\n') %
+                               (matcher.rel(old), matcher.rel(new),
+                                score * 100))
+            renames[new] = old
+    return renames
+
+def _markchanges(repo, unknown, deleted, renames):
+    '''Marks the files in unknown as added, the files in deleted as removed,
+    and the files in renames as copied.'''
+    wctx = repo[None]
+    wlock = repo.wlock()
+    try:
+        wctx.forget(deleted)
+        wctx.add(unknown)
+        for new, old in renames.iteritems():
+            wctx.copy(old, new)
+    finally:
+        wlock.release()
 
 def dirstatecopy(ui, repo, wctx, src, dst, dryrun=False, cwd=None):
     """Update the dirstate to reflect the intent of copying src to dst. For

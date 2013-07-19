@@ -89,11 +89,8 @@ def _posixworker(ui, func, staticargs, args):
                 os._exit(0)
             except KeyboardInterrupt:
                 os._exit(255)
-            except: # re-raises (close enough for debugging anyway)
-                try:
-                    ui.traceback()
-                finally:
-                    os._exit(255)
+                # other exceptions are allowed to propagate, we rely
+                # on lock.py's pid checks to avoid release callbacks
         pids.append(pid)
     pids.reverse()
     os.close(wfd)
@@ -109,7 +106,7 @@ def _posixworker(ui, func, staticargs, args):
     def waitforworkers():
         for _ in pids:
             st = _exitstatus(os.wait()[1])
-            if st and not problem:
+            if st and not problem[0]:
                 problem[0] = st
                 killworkers()
     t = threading.Thread(target=waitforworkers)

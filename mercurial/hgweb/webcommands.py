@@ -110,20 +110,6 @@ def file(web, req, tmpl):
 
 def _search(web, req, tmpl):
 
-    query = req.form['rev'][0]
-    revcount = web.maxchanges
-    if 'revcount' in req.form:
-        revcount = int(req.form.get('revcount', [revcount])[0])
-        revcount = max(revcount, 1)
-        tmpl.defaults['sessionvars']['revcount'] = revcount
-
-    lessvars = copy.copy(tmpl.defaults['sessionvars'])
-    lessvars['revcount'] = max(revcount / 2, 1)
-    lessvars['rev'] = query
-    morevars = copy.copy(tmpl.defaults['sessionvars'])
-    morevars['revcount'] = revcount * 2
-    morevars['rev'] = query
-
     def changelist(**map):
         count = 0
         lower = encoding.lower
@@ -176,6 +162,20 @@ def _search(web, req, tmpl):
             if count >= revcount:
                 break
 
+    query = req.form['rev'][0]
+    revcount = web.maxchanges
+    if 'revcount' in req.form:
+        revcount = int(req.form.get('revcount', [revcount])[0])
+        revcount = max(revcount, 1)
+        tmpl.defaults['sessionvars']['revcount'] = revcount
+
+    lessvars = copy.copy(tmpl.defaults['sessionvars'])
+    lessvars['revcount'] = max(revcount / 2, 1)
+    lessvars['rev'] = query
+    morevars = copy.copy(tmpl.defaults['sessionvars'])
+    morevars['revcount'] = revcount * 2
+    morevars['rev'] = query
+
     tip = web.repo['tip']
     parity = paritygen(web.stripecount)
 
@@ -185,16 +185,18 @@ def _search(web, req, tmpl):
 
 def changelog(web, req, tmpl, shortlog=False):
 
+    query = ''
     if 'node' in req.form:
         ctx = webutil.changectx(web.repo, req)
     else:
         if 'rev' in req.form:
-            hi = req.form['rev'][0]
+            query = req.form['rev'][0]
+            hi = query
         else:
             hi = 'tip'
         try:
             ctx = web.repo[hi]
-        except error.RepoError:
+        except (error.RepoError, error.LookupError):
             return _search(web, req, tmpl) # XXX redirect to 404 page?
 
     def changelist(latestonly, **map):
@@ -245,8 +247,7 @@ def changelog(web, req, tmpl, shortlog=False):
     count = len(web.repo)
     pos = ctx.rev()
     start = max(0, pos - revcount + 1)
-    end = min(count, start + revcount)
-    pos = end - 1
+    end = pos + 1
     parity = paritygen(web.stripecount, offset=start - end)
 
     changenav = webutil.revnav(web.repo).gen(pos, revcount, count)
@@ -256,7 +257,7 @@ def changelog(web, req, tmpl, shortlog=False):
                 entries=lambda **x: changelist(latestonly=False, **x),
                 latestentry=lambda **x: changelist(latestonly=True, **x),
                 archives=web.archivelist("tip"), revcount=revcount,
-                morevars=morevars, lessvars=lessvars)
+                morevars=morevars, lessvars=lessvars, query=query)
 
 def shortlog(web, req, tmpl):
     return changelog(web, req, tmpl, shortlog = True)

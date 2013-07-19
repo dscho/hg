@@ -673,8 +673,8 @@ def compilere(pat, flags=0):
     global _re2
     if _re2 is None:
         try:
-            re2.compile
-            _re2 = True
+            # check if match works, see issue3964
+            _re2 = bool(re2.match(r'\[([^\[]+)\]', '[ui]'))
         except ImportError:
             _re2 = False
     if _re2 and (flags & ~(re.IGNORECASE | re.MULTILINE)) == 0:
@@ -997,15 +997,18 @@ def filechunkiter(f, size=65536, limit=None):
             limit -= len(s)
         yield s
 
-def makedate():
-    ct = time.time()
-    if ct < 0:
+def makedate(timestamp=None):
+    '''Return a unix timestamp (or the current time) as a (unixtime,
+    offset) tuple based off the local timezone.'''
+    if timestamp is None:
+        timestamp = time.time()
+    if timestamp < 0:
         hint = _("check your clock")
-        raise Abort(_("negative timestamp: %d") % ct, hint=hint)
-    delta = (datetime.datetime.utcfromtimestamp(ct) -
-             datetime.datetime.fromtimestamp(ct))
+        raise Abort(_("negative timestamp: %d") % timestamp, hint=hint)
+    delta = (datetime.datetime.utcfromtimestamp(timestamp) -
+             datetime.datetime.fromtimestamp(timestamp))
     tz = delta.days * 86400 + delta.seconds
-    return ct, tz
+    return timestamp, tz
 
 def datestr(date=None, format='%a %b %d %H:%M:%S %Y %1%2'):
     """represent a (unixtime, offset) tuple as a localized time.
@@ -1924,3 +1927,41 @@ def timed(func):
                              (' ' * _timenesting[0], func.__name__,
                               timecount(elapsed)))
     return wrapper
+
+_sizeunits = (('m', 2**20), ('k', 2**10), ('g', 2**30),
+              ('kb', 2**10), ('mb', 2**20), ('gb', 2**30), ('b', 1))
+
+def sizetoint(s):
+    '''Convert a space specifier to a byte count.
+
+    >>> sizetoint('30')
+    30
+    >>> sizetoint('2.2kb')
+    2252
+    >>> sizetoint('6M')
+    6291456
+    '''
+    t = s.strip().lower()
+    try:
+        for k, u in _sizeunits:
+            if t.endswith(k):
+                return int(float(t[:-len(k)]) * u)
+        return int(t)
+    except ValueError:
+        raise error.ParseError(_("couldn't parse size: %s") % s)
+
+class hooks(object):
+    '''A collection of hook functions that can be used to extend a
+    function's behaviour. Hooks are called in lexicographic order,
+    based on the names of their sources.'''
+
+    def __init__(self):
+        self._hooks = []
+
+    def add(self, source, hook):
+        self._hooks.append((source, hook))
+
+    def __call__(self, *args):
+        self._hooks.sort(key=lambda x: x[0])
+        for source, hook in self._hooks:
+            hook(*args)

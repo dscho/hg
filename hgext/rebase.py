@@ -72,9 +72,9 @@ def rebase(ui, repo, **opts):
     rebasing published changes. See :hg:`help phases` for details.
 
     If you don't specify a destination changeset (``-d/--dest``),
-    rebase uses the tipmost head of the current named branch as the
-    destination. (The destination changeset is not modified by
-    rebasing, but new changesets are added as its descendants.)
+    rebase uses the current branch tip as the destination. (The
+    destination changeset is not modified by rebasing, but new
+    changesets are added as its descendants.)
 
     You can specify which changesets to rebase in two ways: as a
     "source" changeset or as a "base" changeset. Both are shorthand
@@ -101,7 +101,7 @@ def rebase(ui, repo, **opts):
 
     One result of the rules for selecting the destination changeset
     and source branch is that, unlike ``merge``, rebase will do
-    nothing if you are at the latest (tipmost) head of a named branch
+    nothing if you are at the branch tip of a named branch
     with two heads. You need to explicitly specify source and/or
     destination (or ``update`` to the other head, if it's the head of
     the intended source branch).
@@ -779,6 +779,17 @@ def pullrebase(orig, ui, repo, *args, **opts):
             raise util.Abort(_('--tool can only be used with --rebase'))
         orig(ui, repo, *args, **opts)
 
+def summaryhook(ui, repo):
+    if not os.path.exists(repo.join('rebasestate')):
+        return
+    state = restorestatus(repo)[2]
+    numrebased = len([i for i in state.itervalues() if i != -1])
+    # i18n: column positioning for "hg summary"
+    ui.write(_('rebase: %s, %s (rebase --continue)\n') %
+             (ui.label(_('%d rebased'), 'rebase.rebased') % numrebased,
+              ui.label(_('%d remaining'), 'rebase.remaining') %
+              (len(state) - numrebased)))
+
 def uisetup(ui):
     'Replace pull with a decorator to provide --rebase option'
     entry = extensions.wrapcommand(commands.table, 'pull', pullrebase)
@@ -786,3 +797,4 @@ def uisetup(ui):
                      _("rebase working directory to branch head")))
     entry[1].append(('t', 'tool', '',
                      _("specify merge tool for rebase")))
+    cmdutil.summaryhooks.add('rebase', summaryhook)
