@@ -1976,7 +1976,7 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
             #   make backup if not in target manifest
             (modified, revert, remove, True, True),
             (added, revert, remove, True, False),
-            (removed, undelete, None, False, False),
+            (removed, undelete, None, True, False),
             (deleted, revert, remove, False, False),
             )
 
@@ -1986,7 +1986,8 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
             def handle(xlist, dobackup):
                 xlist[0].append(abs)
                 if (dobackup and not opts.get('no_backup') and
-                    os.path.lexists(target)):
+                    os.path.lexists(target) and
+                    abs in ctx and repo[None][abs].cmp(ctx[abs])):
                     bakname = "%s.orig" % rel
                     ui.note(_('saving current version of %s as %s\n') %
                             (rel, bakname))
@@ -2103,3 +2104,36 @@ def command(table):
 
 # a list of (ui, repo) functions called by commands.summary
 summaryhooks = util.hooks()
+
+# A list of state files kept by multistep operations like graft.
+# Since graft cannot be aborted, it is considered 'clearable' by update.
+# note: bisect is intentionally excluded
+# (state file, clearable, allowcommit, error, hint)
+unfinishedstates = [
+    ('graftstate', True, False, _('graft in progress'),
+     _("use 'hg graft --continue' or 'hg update' to abort")),
+    ('updatestate', True, False, _('last update was interrupted'),
+     _("use 'hg update' to get a consistent checkout"))
+    ]
+
+def checkunfinished(repo, commit=False):
+    '''Look for an unfinished multistep operation, like graft, and abort
+    if found. It's probably good to check this right before
+    bailifchanged().
+    '''
+    for f, clearable, allowcommit, msg, hint in unfinishedstates:
+        if commit and allowcommit:
+            continue
+        if repo.vfs.exists(f):
+            raise util.Abort(msg, hint=hint)
+
+def clearunfinished(repo):
+    '''Check for unfinished operations (as above), and clear the ones
+    that are clearable.
+    '''
+    for f, clearable, allowcommit, msg, hint in unfinishedstates:
+        if not clearable and repo.vfs.exists(f):
+            raise util.Abort(msg, hint=hint)
+    for f, clearable, allowcommit, msg, hint in unfinishedstates:
+        if clearable and repo.vfs.exists(f):
+            util.unlink(repo.join(f))

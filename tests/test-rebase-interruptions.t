@@ -66,11 +66,11 @@ Rebasing B onto E:
 
 Force a commit on C during the interruption:
 
-  $ hg up -q -C 2
+  $ hg up -q -C 2 --config 'extensions.rebase=!'
 
   $ echo 'Extra' > Extra
   $ hg add Extra
-  $ hg ci -m 'Extra'
+  $ hg ci -m 'Extra' --config 'extensions.rebase=!'
 
 Force this commit onto secret phase
 
@@ -156,11 +156,11 @@ Rebasing B onto E:
 
 Force a commit on B' during the interruption:
 
-  $ hg up -q -C 5
+  $ hg up -q -C 5 --config 'extensions.rebase=!'
 
   $ echo 'Extra' > Extra
   $ hg add Extra
-  $ hg ci -m 'Extra'
+  $ hg ci -m 'Extra' --config 'extensions.rebase=!'
 
   $ hg tglog
   @  6: 'Extra'
@@ -180,8 +180,8 @@ Force a commit on B' during the interruption:
 Abort the rebasing:
 
   $ hg rebase --abort
-  warning: new changesets detected on target branch, can't abort
-  [255]
+  warning: new changesets detected on target branch, can't strip
+  rebase aborted
 
   $ hg tglog
   @  6: 'Extra'
@@ -227,7 +227,7 @@ Rebasing B onto E:
 
 Change phase on B and B'
 
-  $ hg up -q -C 5
+  $ hg up -q -C 5 --config 'extensions.rebase=!'
   $ hg phase --public 1
   $ hg phase --public 5
   $ hg phase --secret -f 2
@@ -248,9 +248,8 @@ Change phase on B and B'
 Abort the rebasing:
 
   $ hg rebase --abort
-  abort: can't abort rebase due to immutable changesets 45396c49d53b
-  (see hg help phases for details)
-  [255]
+  warning: can't clean up immutable changesets 45396c49d53b
+  rebase aborted
 
   $ hg tglogp
   @  5:public 'B'

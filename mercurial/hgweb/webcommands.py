@@ -119,7 +119,7 @@ def _search(web, req, tmpl):
             cl = web.repo.changelog
             for i in xrange(len(web.repo) - 1, 0, -100):
                 l = []
-                for j in cl.revs(max(0, i - 100), i + 1):
+                for j in cl.revs(max(0, i - 99), i):
                     ctx = web.repo[j]
                     l.append(ctx)
                 l.reverse()
@@ -200,38 +200,37 @@ def changelog(web, req, tmpl, shortlog=False):
             return _search(web, req, tmpl) # XXX redirect to 404 page?
 
     def changelist(latestonly, **map):
-        l = [] # build a list in forward order for efficiency
         revs = []
-        if start < end:
-            revs = web.repo.changelog.revs(start, end - 1)
+        if pos != -1:
+            revs = web.repo.changelog.revs(pos, 0)
         if latestonly:
-            for r in revs:
-                pass
-            revs = (r,)
+            revs = (revs.next(),)
+        curcount = 0
         for i in revs:
             ctx = web.repo[i]
             n = ctx.node()
             showtags = webutil.showtag(web.repo, tmpl, 'changelogtag', n)
             files = webutil.listfilediffs(tmpl, ctx.files(), n, web.maxfiles)
 
-            l.append({"parity": parity.next(),
-                      "author": ctx.user(),
-                      "parent": webutil.parents(ctx, i - 1),
-                      "child": webutil.children(ctx, i + 1),
-                      "changelogtag": showtags,
-                      "desc": ctx.description(),
-                      "extra": ctx.extra(),
-                      "date": ctx.date(),
-                      "files": files,
-                      "rev": i,
-                      "node": hex(n),
-                      "tags": webutil.nodetagsdict(web.repo, n),
-                      "bookmarks": webutil.nodebookmarksdict(web.repo, n),
-                      "inbranch": webutil.nodeinbranch(web.repo, ctx),
-                      "branches": webutil.nodebranchdict(web.repo, ctx)
-                     })
-        for e in reversed(l):
-            yield e
+            curcount += 1
+            if curcount > revcount:
+                break
+            yield {"parity": parity.next(),
+                   "author": ctx.user(),
+                   "parent": webutil.parents(ctx, i - 1),
+                   "child": webutil.children(ctx, i + 1),
+                   "changelogtag": showtags,
+                   "desc": ctx.description(),
+                   "extra": ctx.extra(),
+                   "date": ctx.date(),
+                   "files": files,
+                   "rev": i,
+                   "node": hex(n),
+                   "tags": webutil.nodetagsdict(web.repo, n),
+                   "bookmarks": webutil.nodebookmarksdict(web.repo, n),
+                   "inbranch": webutil.nodeinbranch(web.repo, ctx),
+                   "branches": webutil.nodebranchdict(web.repo, ctx)
+            }
 
     revcount = shortlog and web.maxshortchanges or web.maxchanges
     if 'revcount' in req.form:
@@ -246,9 +245,7 @@ def changelog(web, req, tmpl, shortlog=False):
 
     count = len(web.repo)
     pos = ctx.rev()
-    start = max(0, pos - revcount + 1)
-    end = pos + 1
-    parity = paritygen(web.stripecount, offset=start - end)
+    parity = paritygen(web.stripecount)
 
     changenav = webutil.revnav(web.repo).gen(pos, revcount, count)
 
@@ -878,17 +875,20 @@ def graph(web, req, tmpl):
 
     count = len(web.repo)
     pos = rev
-    start = max(0, pos - revcount + 1)
-    end = min(count, start + revcount)
-    pos = end - 1
 
     uprev = min(max(0, count - 1), rev + revcount)
     downrev = max(0, rev - revcount)
     changenav = webutil.revnav(web.repo).gen(pos, revcount, count)
 
     tree = []
-    if start < end:
-        revs = list(web.repo.changelog.revs(end - 1, start))
+    if pos != -1:
+        allrevs = web.repo.changelog.revs(pos, 0)
+        revs = []
+        for i in allrevs:
+            revs.append(i)
+            if len(revs) >= revcount:
+                break
+
         dag = graphmod.dagwalker(web.repo, revs)
         tree = list(graphmod.colored(dag, web.repo))
 

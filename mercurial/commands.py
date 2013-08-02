@@ -428,6 +428,7 @@ def backout(ui, repo, node=None, rev=None, **opts):
     if date:
         opts['date'] = util.parsedate(date)
 
+    cmdutil.checkunfinished(repo)
     cmdutil.bailifchanged(repo)
     node = scmutil.revsingle(repo, rev).node()
 
@@ -650,6 +651,8 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
             reset = True
     elif extra or good + bad + skip + reset + extend + bool(command) > 1:
         raise util.Abort(_('incompatible arguments'))
+
+    cmdutil.checkunfinished(repo)
 
     if reset:
         p = repo.join("bisect.state")
@@ -1333,9 +1336,7 @@ def commit(ui, repo, *pats, **opts):
     # Save this for restoring it later
     oldcommitphase = ui.config('phases', 'new-commit')
 
-    if repo.vfs.exists('graftstate'):
-        raise util.Abort(_('cannot commit an interrupted graft operation'),
-                         hint=_('use "hg graft -c" to continue graft'))
+    cmdutil.checkunfinished(repo, commit=True)
 
     branch = repo[None].branch()
     bheads = repo.branchheads(branch)
@@ -2977,6 +2978,7 @@ def graft(ui, repo, *revs, **opts):
                 raise
             raise util.Abort(_("no graft state found, can't continue"))
     else:
+        cmdutil.checkunfinished(repo)
         cmdutil.bailifchanged(repo)
         if not revs:
             raise util.Abort(_('no revisions specified'))
@@ -3320,19 +3322,17 @@ def grep(ui, repo, pattern, *pats, **opts):
     ] + templateopts,
     _('[-ct] [-r STARTREV] [REV]...'))
 def heads(ui, repo, *branchrevs, **opts):
-    """show current repository heads or show branch heads
+    """show branch heads
 
-    With no arguments, show all repository branch heads.
+    With no arguments, show all open branch heads in the repository.
+    Branch heads are changesets that have no descendants on the
+    same branch. They are where development generally takes place and
+    are the usual targets for update and merge operations.
 
-    Repository "heads" are changesets with no child changesets. They are
-    where development generally takes place and are the usual targets
-    for update and merge operations. Branch heads are changesets that have
-    no child changeset on the same branch.
-
-    If one or more REVs are given, only branch heads on the branches
-    associated with the specified changesets are shown. This means
-    that you can use :hg:`heads foo` to see the heads on a branch
-    named ``foo``.
+    If one or more REVs are given, only open branch heads on the
+    branches associated with the specified changesets are shown. This
+    means that you can use :hg:`heads .` to see the heads on the
+    currently checked-out branch.
 
     If -c/--closed is specified, also show branch heads marked closed
     (see :hg:`commit --close-branch`).
@@ -3341,7 +3341,7 @@ def heads(ui, repo, *branchrevs, **opts):
     STARTREV will be displayed.
 
     If -t/--topo is specified, named branch mechanics will be ignored and only
-    changesets without children will be shown.
+    topological heads (changesets with no children) will be shown.
 
     Returns 0 if matching heads are found, 1 if not.
     """
@@ -3658,6 +3658,8 @@ def import_(ui, repo, patch1=None, *patches, **opts):
     if sim and not update:
         raise util.Abort(_('cannot use --similarity with --bypass'))
 
+    if update:
+        cmdutil.checkunfinished(repo)
     if (opts.get('exact') or not opts.get('force')) and update:
         cmdutil.bailifchanged(repo)
 
@@ -4518,7 +4520,7 @@ def postincoming(ui, repo, modheads, optupdate, checkout):
     if modheads == 0:
         return
     if optupdate:
-        movemarkfrom = repo['.'].node()
+        checkout, movemarkfrom = bookmarks.calculateupdate(ui, repo, checkout)
         try:
             ret = hg.update(repo, checkout)
         except util.Abort, inst:
@@ -5480,7 +5482,9 @@ def summary(ui, repo, **opts):
     t = ', '.join(t)
     cleanworkdir = False
 
-    if len(parents) > 1:
+    if repo.vfs.exists('updatestate'):
+        t += _(' (interrupted update)')
+    elif len(parents) > 1:
         t += _(' (merge)')
     elif branch != parents[0].branch():
         t += _(' (new branch)')
@@ -5822,15 +5826,10 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
     if rev is None or rev == '':
         rev = node
 
+    cmdutil.clearunfinished(repo)
+
     # with no argument, we also move the current bookmark, if any
-    movemarkfrom = None
-    if rev is None:
-        curmark = repo._bookmarkcurrent
-        if bookmarks.iscurrent(repo):
-            movemarkfrom = repo['.'].node()
-        elif curmark:
-            ui.status(_("updating to active bookmark %s\n") % curmark)
-            rev = curmark
+    rev, movemarkfrom = bookmarks.calculateupdate(ui, repo, rev)
 
     # if we defined a bookmark, we have to remember the original bookmark name
     brev = rev

@@ -173,6 +173,8 @@ pypats = [
     (r'^\s+(\w|\.)+=\w[^,()\n]*$', "missing whitespace in assignment"),
     (r'(\s+)try:\n((?:\n|\1\s.*\n)+?)\1except.*?:\n'
      r'((?:\n|\1\s.*\n)+?)\1finally:', 'no try/except/finally in Python 2.4'),
+    (r'(?<!def)(\s+|^|\()next\(.+\)',
+     'no next(foo) in Python 2.4 and 2.5, use foo.next() instead'),
     (r'(\s+)try:\n((?:\n|\1\s.*\n)*?)\1\s*yield\b.*?'
      r'((?:\n|\1\s.*\n)+?)\1finally:',
      'no yield inside try/finally in Python 2.4'),
@@ -407,7 +409,11 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
                 print "Skipping %s for %s it doesn't match %s" % (
                        name, match, f)
             continue
-        fp = open(f)
+        try:
+            fp = open(f)
+        except IOError, e:
+            print "Skipping %s, %s" % (f, str(e).split(':', 1)[0])
+            continue
         pre = post = fp.read()
         fp.close()
         if "no-" "check-code" in pre:

@@ -506,12 +506,20 @@ def histedit(ui, repo, *freeargs, **opts):
         (parentctxnode, rules, keep, topmost, replacements) = readstate(repo)
         mapping, tmpnodes, leafs, _ntm = processreplacement(repo, replacements)
         ui.debug('restore wc to old parent %s\n' % node.short(topmost))
-        hg.clean(repo, topmost)
+        # check whether we should update away
+        parentnodes = [c.node() for c in repo[None].parents()]
+        for n in leafs | set([parentctxnode]):
+            if n in parentnodes:
+                hg.clean(repo, topmost)
+                break
+        else:
+            pass
         cleanupnode(ui, repo, 'created', tmpnodes)
         cleanupnode(ui, repo, 'temp', leafs)
         os.unlink(os.path.join(repo.path, 'histedit-state'))
         return
     else:
+        cmdutil.checkunfinished(repo)
         cmdutil.bailifchanged(repo)
 
         topmost, empty = repo.dirstate.parents()
@@ -679,6 +687,8 @@ def between(repo, old, new, keep):
         if (not obsolete._enabled and
             repo.revs('(%ld::) - (%ld)', ctxs, ctxs)):
             raise util.Abort(_('cannot edit history that would orphan nodes'))
+        if repo.revs('(%ld) and merge()', ctxs):
+            raise util.Abort(_('cannot edit history that contains merges'))
         root = ctxs[0] # list is already sorted by repo.set
         if not root.phase():
             raise util.Abort(_('cannot edit immutable changeset: %s') % root)
@@ -870,3 +880,6 @@ def summaryhook(ui, repo):
 
 def extsetup(ui):
     cmdutil.summaryhooks.add('histedit', summaryhook)
+    cmdutil.unfinishedstates.append(
+        ['histedit-state', False, True, _('histedit in progress'),
+         _("use 'hg histedit --continue' or 'hg histedit --abort'")])

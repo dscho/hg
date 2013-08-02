@@ -1311,6 +1311,9 @@ static PyObject *find_deepest(indexObject *self, PyObject *revs)
 		goto bail;
 	}
 
+	if (PyList_Sort(revs) == -1)
+		goto bail;
+
 	for (i = 0; i < revcount; i++) {
 		int n = (int)PyInt_AsLong(PyList_GET_ITEM(revs, i));
 		long b = 1l << i;
@@ -1359,10 +1362,10 @@ static PyObject *find_deepest(indexObject *self, PyObject *revs)
 				if (nsp == sp)
 					continue;
 				seen[p] = nsp;
-				interesting[nsp] += 1;
 				interesting[sp] -= 1;
-				if (interesting[sp] == 0)
+				if (interesting[sp] == 0 && interesting[nsp] > 0)
 					ninteresting -= 1;
+				interesting[nsp] += 1;
 			}
 		}
 		interesting[sv] -= 1;
@@ -1385,8 +1388,7 @@ static PyObject *find_deepest(indexObject *self, PyObject *revs)
 	if (dict == NULL)
 		goto bail;
 
-	j = ninteresting;
-	for (i = 0; i < revcount && j > 0; i++) {
+	for (i = 0; i < revcount; i++) {
 		PyObject *key;
 
 		if ((final & (1 << i)) == 0)
@@ -1400,7 +1402,6 @@ static PyObject *find_deepest(indexObject *self, PyObject *revs)
 			Py_DECREF(Py_None);
 			goto bail;
 		}
-		j -= 1;
 	}
 
 	keys = PyDict_Keys(dict);

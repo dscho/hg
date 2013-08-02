@@ -174,6 +174,7 @@ def rebase(ui, repo, **opts):
                 raise util.Abort(_('cannot specify both a '
                                    'revision and a source'))
 
+            cmdutil.checkunfinished(repo)
             cmdutil.bailifchanged(repo)
 
             if not destf:
@@ -258,10 +259,10 @@ def rebase(ui, repo, **opts):
             if state[rev] == -1:
                 ui.progress(_("rebasing"), pos, ("%d:%s" % (rev, repo[rev])),
                             _('changesets'), total)
-                storestatus(repo, originalwd, target, state, collapsef, keepf,
-                            keepbranchesf, external, activebookmark)
                 p1, p2 = defineparents(repo, rev, target, state,
                                                         targetancestors)
+                storestatus(repo, originalwd, target, state, collapsef, keepf,
+                            keepbranchesf, external, activebookmark)
                 if len(repo.parents()) == 2:
                     repo.ui.debug('resuming interrupted rebase\n')
                 else:
@@ -591,33 +592,52 @@ def restorestatus(repo):
             raise
         raise util.Abort(_('no rebase in progress'))
 
+def inrebase(repo, originalwd, state):
+    '''check whether the workdir is in an interrupted rebase'''
+    parents = [p.rev() for p in repo.parents()]
+    if originalwd in parents:
+        return True
+
+    for newrev in state.itervalues():
+        if newrev in parents:
+            return True
+
+    return False
+
 def abort(repo, originalwd, target, state):
     'Restore the repository to its original state'
     dstates = [s for s in state.values() if s != nullrev]
     immutable = [d for d in dstates if not repo[d].mutable()]
+    cleanup = True
     if immutable:
-        raise util.Abort(_("can't abort rebase due to immutable changesets %s")
-                         % ', '.join(str(repo[r]) for r in immutable),
-                         hint=_('see hg help phases for details'))
+        repo.ui.warn(_("warning: can't clean up immutable changesets %s\n")
+                     % ', '.join(str(repo[r]) for r in immutable),
+                     hint=_('see hg help phases for details'))
+        cleanup = False
 
     descendants = set()
     if dstates:
         descendants = set(repo.changelog.descendants(dstates))
     if descendants - set(dstates):
         repo.ui.warn(_("warning: new changesets detected on target branch, "
-                       "can't abort\n"))
-        return -1
-    else:
+                       "can't strip\n"))
+        cleanup = False
+
+    if cleanup:
+        # Update away from the rebase if necessary
+        if inrebase(repo, originalwd, state):
+            merge.update(repo, repo[originalwd].rev(), False, True, False)
+
         # Strip from the first rebased revision
-        merge.update(repo, repo[originalwd].rev(), False, True, False)
         rebased = filter(lambda x: x > -1 and x != target, state.values())
         if rebased:
             strippoints = [c.node()  for c in repo.set('roots(%ld)', rebased)]
             # no backup of rebased cset versions needed
             repair.strip(repo.ui, repo, strippoints)
-        clearstatus(repo)
-        repo.ui.warn(_('rebase aborted\n'))
-        return 0
+
+    clearstatus(repo)
+    repo.ui.warn(_('rebase aborted\n'))
+    return 0
 
 def buildstate(repo, dest, rebaseset, collapse):
     '''Define which revisions are going to be rebased and where
@@ -798,3 +818,6 @@ def uisetup(ui):
     entry[1].append(('t', 'tool', '',
                      _("specify merge tool for rebase")))
     cmdutil.summaryhooks.add('rebase', summaryhook)
+    cmdutil.unfinishedstates.append(
+        ['rebasestate', False, False, _('rebase in progress'),
+         _("use 'hg rebase --continue' or 'hg rebase --abort'")])
