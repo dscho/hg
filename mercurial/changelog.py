@@ -59,11 +59,12 @@ def stripdesc(desc):
 class appender(object):
     '''the changelog index must be updated last on disk, so we use this class
     to delay writes to it'''
-    def __init__(self, fp, buf):
+    def __init__(self, vfs, name, mode, buf):
         self.data = buf
+        fp = vfs(name, mode)
         self.fp = fp
         self.offset = fp.tell()
-        self.size = util.fstat(fp).st_size
+        self.size = vfs.fstat(fp).st_size
 
     def end(self):
         return self.size + len("".join(self.data))
@@ -114,7 +115,7 @@ def delayopener(opener, target, divert, buf):
         if divert:
             return opener(name + ".a", mode.replace('a', 'w'))
         # otherwise, divert to memory
-        return appender(opener(name, mode), buf)
+        return appender(opener, name, mode, buf)
     return o
 
 class changelog(revlog.revlog):
@@ -224,10 +225,10 @@ class changelog(revlog.revlog):
         self.opener = self._realopener
         # move redirected index data back into place
         if self._divert:
-            nfile = self.opener(self.indexfile + ".a")
-            n = nfile.name
+            tmpname = self.indexfile + ".a"
+            nfile = self.opener.open(tmpname)
             nfile.close()
-            util.rename(n, n[:-2])
+            self.opener.rename(tmpname, self.indexfile)
         elif self._delaybuf:
             fp = self.opener(self.indexfile, 'a')
             fp.write("".join(self._delaybuf))

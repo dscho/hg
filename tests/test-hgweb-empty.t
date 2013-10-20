@@ -63,8 +63,8 @@ Some tests for hgweb in an empty repository
   <form class="search" action="/log">
   
   <p><input name="rev" id="search1" type="text" size="30" value="" /></p>
-  <div id="hint">find changesets by author, revision,
-  files, or words in the commit message</div>
+  <div id="hint">Find changesets by keywords (author, files, the commit message), revision
+  number or hash, or <a href="/help/revsets">revset expression</a>.</div>
   </form>
   
   <div class="navigate">
@@ -89,6 +89,21 @@ Some tests for hgweb in an empty repository
   <a href="/shortlog/-1?revcount=120">more</a>
   | rev -1: 
   </div>
+  
+  <script type="text/javascript">
+      ajaxScrollInit(
+              '/shortlog/%next%',
+              '', <!-- NEXTHASH
+              function (htmlText, previousVal) {
+                  var m = htmlText.match(/'(\w+)', <!-- NEXTHASH/);
+                  return m ? m[1] : null;
+              },
+              '.bigtable > tbody:nth-of-type(2)',
+              '<tr class="%class%">\
+              <td colspan="3" style="text-align: center;">%text%</td>\
+              </tr>'
+      );
+  </script>
   
   </div>
   </div>
@@ -158,8 +173,8 @@ Some tests for hgweb in an empty repository
   <form class="search" action="/log">
   
   <p><input name="rev" id="search1" type="text" size="30" value="" /></p>
-  <div id="hint">find changesets by author, revision,
-  files, or words in the commit message</div>
+  <div id="hint">Find changesets by keywords (author, files, the commit message), revision
+  number or hash, or <a href="/help/revsets">revset expression</a>.</div>
   </form>
   
   <div class="navigate">
@@ -184,6 +199,21 @@ Some tests for hgweb in an empty repository
   <a href="/shortlog/-1?revcount=20">more</a>
   | rev -1: 
   </div>
+  
+  <script type="text/javascript">
+      ajaxScrollInit(
+              '/shortlog/%next%',
+              '', <!-- NEXTHASH
+              function (htmlText, previousVal) {
+                  var m = htmlText.match(/'(\w+)', <!-- NEXTHASH/);
+                  return m ? m[1] : null;
+              },
+              '.bigtable > tbody:nth-of-type(2)',
+              '<tr class="%class%">\
+              <td colspan="3" style="text-align: center;">%text%</td>\
+              </tr>'
+      );
+  </script>
   
   </div>
   </div>
@@ -249,8 +279,8 @@ Some tests for hgweb in an empty repository
   <form class="search" action="/log">
   
   <p><input name="rev" id="search1" type="text" size="30" /></p>
-  <div id="hint">find changesets by author, revision,
-  files, or words in the commit message</div>
+  <div id="hint">Find changesets by keywords (author, files, the commit message), revision
+  number or hash, or <a href="/help/revsets">revset expression</a>.</div>
   </form>
   
   <div class="navigate">
@@ -329,6 +359,17 @@ Some tests for hgweb in an empty repository
   | rev -1: 
   </div>
   
+  <script type="text/javascript">
+      ajaxScrollInit(
+              '/graph/-1?revcount=%next%',
+              60+60,
+              function (htmlText, previousVal) { return previousVal + 60; },
+              '#wrapper',
+              '<div class="%class%" style="text-align: center;">%text%</div>',
+              'graph'
+      );
+  </script>
+  
   </div>
   </div>
   
@@ -385,8 +426,8 @@ Some tests for hgweb in an empty repository
   <form class="search" action="/log">
   
   <p><input name="rev" id="search1" type="text" size="30" /></p>
-  <div id="hint">find changesets by author, revision,
-  files, or words in the commit message</div>
+  <div id="hint">Find changesets by keywords (author, files, the commit message), revision
+  number or hash, or <a href="/help/revsets">revset expression</a>.</div>
   </form>
   
   <table class="bigtable">

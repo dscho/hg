@@ -1599,6 +1599,75 @@ symbols = {
     "_list": _list,
 }
 
+# symbols which can't be used for a DoS attack for any given input
+# (e.g. those which accept regexes as plain strings shouldn't be included)
+# functions that just return a lot of changesets (like all) don't count here
+safesymbols = set([
+    "adds",
+    "all",
+    "ancestor",
+    "ancestors",
+    "_firstancestors",
+    "author",
+    "bisect",
+    "bisected",
+    "bookmark",
+    "branch",
+    "branchpoint",
+    "bumped",
+    "bundle",
+    "children",
+    "closed",
+    "converted",
+    "date",
+    "desc",
+    "descendants",
+    "_firstdescendants",
+    "destination",
+    "divergent",
+    "draft",
+    "extinct",
+    "extra",
+    "file",
+    "filelog",
+    "first",
+    "follow",
+    "_followfirst",
+    "head",
+    "heads",
+    "hidden",
+    "id",
+    "keyword",
+    "last",
+    "limit",
+    "_matchfiles",
+    "max",
+    "merge",
+    "min",
+    "modifies",
+    "obsolete",
+    "origin",
+    "outgoing",
+    "p1",
+    "p2",
+    "parents",
+    "present",
+    "public",
+    "remote",
+    "removes",
+    "rev",
+    "reverse",
+    "roots",
+    "sort",
+    "secret",
+    "matching",
+    "tag",
+    "tagged",
+    "user",
+    "unstable",
+    "_list",
+])
+
 methods = {
     "range": rangeset,
     "dagrange": dagrange,
@@ -1934,6 +2003,23 @@ def prettyformat(tree):
     _prettyformat(tree, 0, lines)
     output = '\n'.join(('  '*l + s) for l, s in lines)
     return output
+
+def depth(tree):
+    if isinstance(tree, tuple):
+        return max(map(depth, tree)) + 1
+    else:
+        return 0
+
+def funcsused(tree):
+    if not isinstance(tree, tuple) or tree[0] in ('string', 'symbol'):
+        return set()
+    else:
+        funcs = set()
+        for s in tree[1:]:
+            funcs |= funcsused(s)
+        if tree[0] == 'func':
+            funcs.add(tree[1][1])
+        return funcs
 
 # tell hggettext to extract docstrings from these functions:
 i18nfunctions = symbols.values()

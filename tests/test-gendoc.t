@@ -9,7 +9,11 @@ Test document extraction
   >     echo "% extracting documentation from $LOCALE"
   >     echo ".. -*- coding: utf-8 -*-" > gendoc-$LOCALE.txt
   >     echo "" >> gendoc-$LOCALE.txt
-  >     LC_ALL=$LOCALE python "$TESTDIR/../doc/gendoc.py" >> gendoc-$LOCALE.txt 2> /dev/null || exit
+  >     LANGUAGE=$LOCALE python "$TESTDIR/../doc/gendoc.py" >> gendoc-$LOCALE.txt 2> /dev/null || exit
+  > 
+  >     if [ $LOCALE != C ]; then
+  >         cmp -s gendoc-C.txt gendoc-$LOCALE.txt && echo '** NOTHING TRANSLATED **'
+  >     fi
   > 
   >     # We call runrst without adding "--halt warning" to make it report
   >     # all errors instead of stopping on the first one.

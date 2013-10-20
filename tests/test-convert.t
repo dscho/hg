@@ -135,9 +135,8 @@
                     store original revision ID in changeset (forces target IDs
                     to change). It takes a boolean argument and defaults to
                     False.
-      convert.hg.startrev
-                    convert start revision and its descendants. It takes a hg
-                    revision identifier and defaults to 0.
+      convert.hg.revs
+                    revset specifying the source revisions to convert.
   
       CVS Source
       ##########
@@ -262,7 +261,7 @@
   
    -s --source-type TYPE source repository type
    -d --dest-type TYPE   destination repository type
-   -r --rev REV          import up to target revision REV
+   -r --rev REV          import up to source revision REV
    -A --authormap FILE   remap usernames using this file
       --filemap FILE     remap file names using contents of file
       --splicemap FILE   splice synthesized history into place

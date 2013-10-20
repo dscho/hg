@@ -45,8 +45,7 @@
 <form class="search" action="{url|urlescape}log">
 {sessionvars%hiddenformentry}
 <p><input name="rev" id="search1" type="text" size="30" value="{query|escape}" /></p>
-<div id="hint">find changesets by author, revision,
-files, or words in the commit message</div>
+<div id="hint">{searchhint}</div>
 </form>
 
 <div class="navigate">
@@ -71,6 +70,21 @@ files, or words in the commit message</div>
 <a href="{url|urlescape}shortlog/{rev}{morevars%urlparameter}">more</a>
 | rev {rev}: {changenav%navshort}
 </div>
+
+<script type="text/javascript">
+    ajaxScrollInit(
+            '{url|urlescape}shortlog/%next%',
+            '{nextentry%"{node}"}', <!-- NEXTHASH
+            function (htmlText, previousVal) \{
+                var m = htmlText.match(/'(\w+)', <!-- NEXTHASH/);
+                return m ? m[1] : null;
+            },
+            '.bigtable > tbody:nth-of-type(2)',
+            '<tr class="%class%">\
+            <td colspan="3" style="text-align: center;">%text%</td>\
+            </tr>'
+    );
+</script>
 
 </div>
 </div>

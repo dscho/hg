@@ -14,16 +14,32 @@
 
 #include "util.h"
 
+static int8_t hextable[256] = {
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, -1, -1, -1, -1, -1, -1, /* 0-9 */
+	-1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* A-F */
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, /* a-f */
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+};
+
 static inline int hexdigit(const char *p, Py_ssize_t off)
 {
-	char c = p[off];
+	int8_t val = hextable[(unsigned char)p[off]];
 
-	if (c >= '0' && c <= '9')
-		return c - '0';
-	if (c >= 'a' && c <= 'f')
-		return c - 'a' + 10;
-	if (c >= 'A' && c <= 'F')
-		return c - 'A' + 10;
+	if (val >= 0) {
+		return val;
+	}
 
 	PyErr_SetString(PyExc_ValueError, "input contains non-hex character");
 	return 0;
@@ -61,7 +77,7 @@ static PyObject *unhexlify(const char *str, int len)
 static PyObject *parse_manifest(PyObject *self, PyObject *args)
 {
 	PyObject *mfdict, *fdict;
-	char *str, *cur, *start, *zero;
+	char *str, *start, *end;
 	int len;
 
 	if (!PyArg_ParseTuple(args, "O!O!s#:parse_manifest",
@@ -70,21 +86,25 @@ static PyObject *parse_manifest(PyObject *self, PyObject *args)
 			      &str, &len))
 		goto quit;
 
-	for (start = cur = str, zero = NULL; cur < str + len; cur++) {
+	start = str;
+	end = str + len;
+	while (start < end) {
 		PyObject *file = NULL, *node = NULL;
 		PyObject *flags = NULL;
+		char *zero = NULL, *newline = NULL;
 		ptrdiff_t nlen;
 
-		if (!*cur) {
-			zero = cur;
-			continue;
-		}
-		else if (*cur != '\n')
-			continue;
-
+		zero = memchr(start, '\0', end - start);
 		if (!zero) {
 			PyErr_SetString(PyExc_ValueError,
 					"manifest entry has no separator");
+			goto quit;
+		}
+
+		newline = memchr(zero + 1, '\n', end - (zero + 1));
+		if (!newline) {
+			PyErr_SetString(PyExc_ValueError,
+					"manifest contains trailing garbage");
 			goto quit;
 		}
 
@@ -93,7 +113,7 @@ static PyObject *parse_manifest(PyObject *self, PyObject *args)
 		if (!file)
 			goto bail;
 
-		nlen = cur - zero - 1;
+		nlen = newline - zero - 1;
 
 		node = unhexlify(zero + 1, nlen > 40 ? 40 : (int)nlen);
 		if (!node)
@@ -112,8 +132,7 @@ static PyObject *parse_manifest(PyObject *self, PyObject *args)
 		if (PyDict_SetItem(mfdict, file, node) == -1)
 			goto bail;
 
-		start = cur + 1;
-		zero = NULL;
+		start = newline + 1;
 
 		Py_XDECREF(flags);
 		Py_XDECREF(node);
@@ -123,12 +142,6 @@ static PyObject *parse_manifest(PyObject *self, PyObject *args)
 		Py_XDECREF(flags);
 		Py_XDECREF(node);
 		Py_XDECREF(file);
-		goto quit;
-	}
-
-	if (len > 0 && *(cur - 1) != '\n') {
-		PyErr_SetString(PyExc_ValueError,
-				"manifest contains trailing garbage");
 		goto quit;
 	}
 
@@ -142,8 +155,8 @@ static PyObject *parse_dirstate(PyObject *self, PyObject *args)
 {
 	PyObject *dmap, *cmap, *parents = NULL, *ret = NULL;
 	PyObject *fname = NULL, *cname = NULL, *entry = NULL;
-	char *str, *cur, *end, *cpos;
-	int state, mode, size, mtime;
+	char state, *str, *cur, *end, *cpos;
+	int mode, size, mtime;
 	unsigned int flen;
 	int len;
 
@@ -330,7 +343,7 @@ static PyObject *pack_dirstate(PyObject *self, PyObject *args)
 			 * this. */
 			if (PyDict_SetItem(map, k, dirstate_unset) == -1)
 				goto bail;
-			mode = 0, size = -1, mtime = -1;
+			mtime = -1;
 		}
 		putbe32(mode, p);
 		putbe32(size, p + 4);
@@ -524,11 +537,12 @@ static PyObject *index_get(indexObject *self, Py_ssize_t pos)
 			      uncomp_len, base_rev, link_rev,
 			      parent_1, parent_2, c_node_id, 20);
 
-	if (entry)
+	if (entry) {
 		PyObject_GC_UnTrack(entry);
+		Py_INCREF(entry);
+	}
 
 	self->cache[pos] = entry;
-	Py_INCREF(entry);
 
 	return entry;
 }
@@ -1195,14 +1209,19 @@ static PyObject *find_gca_candidates(indexObject *self, const int *revs,
 	long sp;
 	bitmask *seen;
 
+	if (gca == NULL)
+		return PyErr_NoMemory();
+
 	for (i = 0; i < revcount; i++) {
 		if (revs[i] > maxrev)
 			maxrev = revs[i];
 	}
 
 	seen = calloc(sizeof(*seen), maxrev + 1);
-	if (seen == NULL)
+	if (seen == NULL) {
+		Py_DECREF(gca);
 		return PyErr_NoMemory();
+	}
 
 	for (i = 0; i < revcount; i++)
 		seen[revs[i]] = 1ull << i;

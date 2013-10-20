@@ -84,7 +84,7 @@ def bailifchanged(repo):
         raise util.Abort(_('outstanding uncommitted merge'))
     modified, added, removed, deleted = repo.status()[:4]
     if modified or added or removed or deleted:
-        raise util.Abort(_("outstanding uncommitted changes"))
+        raise util.Abort(_('uncommitted changes'))
     ctx = repo[None]
     for s in sorted(ctx.substate):
         if ctx.sub(s).dirty():
@@ -468,6 +468,13 @@ def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
     runargs=None, appendpid=False):
     '''Run a command as a service.'''
 
+    def writepid(pid):
+        if opts['pid_file']:
+            mode = appendpid and 'a' or 'w'
+            fp = open(opts['pid_file'], mode)
+            fp.write(str(pid) + '\n')
+            fp.close()
+
     if opts['daemon'] and not opts['daemon_pipefds']:
         # Signal child process startup with file removal
         lockfd, lockpath = tempfile.mkstemp(prefix='hg-service-')
@@ -490,6 +497,7 @@ def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
             pid = util.rundetached(runargs, condfn)
             if pid < 0:
                 raise util.Abort(_('child process failed to start'))
+            writepid(pid)
         finally:
             try:
                 os.unlink(lockpath)
@@ -504,11 +512,8 @@ def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
     if initfn:
         initfn()
 
-    if opts['pid_file']:
-        mode = appendpid and 'a' or 'w'
-        fp = open(opts['pid_file'], mode)
-        fp.write(str(os.getpid()) + '\n')
-        fp.close()
+    if not opts['daemon']:
+        writepid(os.getpid())
 
     if opts['daemon_pipefds']:
         lockpath = opts['daemon_pipefds']
@@ -928,7 +933,7 @@ def show_changeset(ui, repo, opts, buffered=False):
     regular display via changeset_printer() is done.
     """
     # options
-    patch = False
+    patch = None
     if opts.get('patch') or opts.get('stat'):
         patch = scmutil.matchall(repo)
 
@@ -1172,12 +1177,34 @@ def walkchangerevs(repo, match, opts, prepare):
                                'filenames'))
 
         # The slow path checks files modified in every changeset.
-        for i in sorted(revs):
-            ctx = change(i)
-            matches = filter(match, ctx.files())
-            if matches:
-                fncache[i] = matches
-                wanted.add(i)
+        # This is really slow on large repos, so compute the set lazily.
+        class lazywantedset(object):
+            def __init__(self):
+                self.set = set()
+                self.revs = set(revs)
+
+            # No need to worry about locality here because it will be accessed
+            # in the same order as the increasing window below.
+            def __contains__(self, value):
+                if value in self.set:
+                    return True
+                elif not value in self.revs:
+                    return False
+                else:
+                    self.revs.discard(value)
+                    ctx = change(value)
+                    matches = filter(match, ctx.files())
+                    if matches:
+                        fncache[value] = matches
+                        self.set.add(value)
+                        return True
+                    return False
+
+            def discard(self, value):
+                self.revs.discard(value)
+                self.set.discard(value)
+
+        wanted = lazywantedset()
 
     class followfilter(object):
         def __init__(self, onlyfirst=False):

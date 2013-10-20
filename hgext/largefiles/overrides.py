@@ -315,7 +315,7 @@ def overrideupdate(orig, ui, repo, *pats, **opts):
                     lfdirstate.normal(lfile)
             lfdirstate.write()
             if mod:
-                raise util.Abort(_('uncommitted local changes'))
+                raise util.Abort(_('uncommitted changes'))
         # XXX handle removed differently
         if not opts['clean']:
             for lfile in unsure + modified + added:
@@ -717,7 +717,6 @@ def overridepull(orig, ui, repo, source=None, **opts):
                 ui.debug('--update and --rebase are not compatible, ignoring '
                          'the update flag\n')
             del opts['rebase']
-            cmdutil.bailifchanged(repo)
             origpostincoming = commands.postincoming
             def _dummy(*args, **kwargs):
                 pass
@@ -947,7 +946,7 @@ def overridebailifchanged(orig, repo):
     modified, added, removed, deleted = repo.status()[:4]
     repo.lfstatus = False
     if modified or added or removed or deleted:
-        raise util.Abort(_('outstanding uncommitted changes'))
+        raise util.Abort(_('uncommitted changes'))
 
 # Fetch doesn't use cmdutil.bailifchanged so override it to add the check
 def overridefetch(orig, ui, repo, *pats, **opts):
@@ -955,7 +954,7 @@ def overridefetch(orig, ui, repo, *pats, **opts):
     modified, added, removed, deleted = repo.status()[:4]
     repo.lfstatus = False
     if modified or added or removed or deleted:
-        raise util.Abort(_('outstanding uncommitted changes'))
+        raise util.Abort(_('uncommitted changes'))
     return orig(ui, repo, *pats, **opts)
 
 def overrideforget(orig, ui, repo, *pats, **opts):

@@ -656,19 +656,21 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
     -c  -C  dirty  rev  |  linear   same  cross
      n   n    n     n   |    ok     (1)     x
      n   n    n     y   |    ok     ok     ok
-     n   n    y     *   |   merge   (2)    (2)
+     n   n    y     n   |   merge   (2)    (2)
+     n   n    y     y   |   merge   (3)    (3)
      n   y    *     *   |    ---  discard  ---
-     y   n    y     *   |    ---    (3)    ---
+     y   n    y     *   |    ---    (4)    ---
      y   n    n     *   |    ---    ok     ---
-     y   y    *     *   |    ---    (4)    ---
+     y   y    *     *   |    ---    (5)    ---
 
     x = can't happen
     * = don't-care
-    1 = abort: crosses branches (use 'hg merge' or 'hg update -c')
-    2 = abort: crosses branches (use 'hg merge' to merge or
-                 use 'hg update -C' to discard changes)
-    3 = abort: uncommitted local changes
-    4 = incompatible options (checked in commands.py)
+    1 = abort: not a linear update (merge or update --check to force update)
+    2 = abort: uncommitted changes (commit and merge, or update --clean to
+                 discard changes)
+    3 = abort: uncommitted changes (commit or update --clean to discard changes)
+    4 = abort: uncommitted changes (checked in commands.py)
+    5 = incompatible options (checked in commands.py)
 
     Return the same tuple as applyupdates().
     """
@@ -709,14 +711,20 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
                                      hint=_("use 'hg update' "
                                             "or check 'hg heads'"))
             if not force and (wc.files() or wc.deleted()):
-                raise util.Abort(_("outstanding uncommitted changes"),
+                raise util.Abort(_("uncommitted changes"),
                                  hint=_("use 'hg status' to list changes"))
             for s in sorted(wc.substate):
                 if wc.sub(s).dirty():
-                    raise util.Abort(_("outstanding uncommitted changes in "
+                    raise util.Abort(_("uncommitted changes in "
                                        "subrepository '%s'") % s)
 
         elif not overwrite:
+            if p1 == p2: # no-op update
+                # call the hooks and exit early
+                repo.hook('preupdate', throw=True, parent1=xp2, parent2='')
+                repo.hook('update', parent1=xp2, parent2='', error=0)
+                return 0, 0, 0, 0
+
             if pa not in (p1, p2):  # nolinear
                 dirty = wc.dirty(missing=True)
                 if dirty or onode is None:
@@ -727,13 +735,18 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
                     if repo[node].node() in foreground:
                         pa = p1  # allow updating to successors
                     elif dirty:
-                        msg = _("crosses branches (merge branches or use"
-                                " --clean to discard changes)")
-                        raise util.Abort(msg)
+                        msg = _("uncommitted changes")
+                        if onode is None:
+                            hint = _("commit and merge, or update --clean to"
+                                     " discard changes")
+                        else:
+                            hint = _("commit or update --clean to discard"
+                                     " changes")
+                        raise util.Abort(msg, hint=hint)
                     else:  # node is none
-                        msg = _("crosses branches (merge branches or update"
-                                " --check to force update)")
-                        raise util.Abort(msg)
+                        msg = _("not a linear update")
+                        hint = _("merge or update --check to force update")
+                        raise util.Abort(msg, hint=hint)
                 else:
                     # Allow jumping branches if clean and specific rev given
                     pa = p1

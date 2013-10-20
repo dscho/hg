@@ -217,6 +217,10 @@ class abstractvfs(object):
                 raise
         return ""
 
+    def open(self, path, mode="r", text=False, atomictemp=False):
+        self.open = self.__call__
+        return self.__call__(path, mode, text, atomictemp)
+
     def read(self, path):
         fp = self(path, 'rb')
         try:
@@ -241,11 +245,17 @@ class abstractvfs(object):
     def exists(self, path=None):
         return os.path.exists(self.join(path))
 
+    def fstat(self, fp):
+        return util.fstat(fp)
+
     def isdir(self, path=None):
         return os.path.isdir(self.join(path))
 
     def islink(self, path=None):
         return os.path.islink(self.join(path))
+
+    def lstat(self, path=None):
+        return os.lstat(self.join(path))
 
     def makedir(self, path=None, notindexed=True):
         return util.makedir(self.join(path), notindexed)
@@ -270,6 +280,12 @@ class abstractvfs(object):
 
     def stat(self, path=None):
         return os.stat(self.join(path))
+
+    def unlink(self, path=None):
+        return util.unlink(self.join(path))
+
+    def utime(self, path=None, t=None):
+        return os.utime(self.join(path), t)
 
 class vfs(abstractvfs):
     '''Operate files relative to a base directory
@@ -755,7 +771,8 @@ def _interestingfiles(repo, matcher):
 
     ctx = repo[None]
     dirstate = repo.dirstate
-    walkresults = dirstate.walk(matcher, sorted(ctx.substate), True, False)
+    walkresults = dirstate.walk(matcher, sorted(ctx.substate), True, False,
+                                full=False)
     for abs, st in walkresults.iteritems():
         dstate = dirstate[abs]
         if dstate == '?' and audit_path.check(abs):

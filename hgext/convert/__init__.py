@@ -155,8 +155,7 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
         (forces target IDs to change). It takes a boolean argument and
         defaults to False.
 
-    :convert.hg.startrev: convert start revision and its descendants.
-        It takes a hg revision identifier and defaults to 0.
+    :convert.hg.revs: revset specifying the source revisions to convert.
 
     CVS Source
     ##########
@@ -311,7 +310,7 @@ cmdtable = {
           ('d', 'dest-type', '',
            _('destination repository type'), _('TYPE')),
           ('r', 'rev', '',
-           _('import up to target revision REV'), _('REV')),
+           _('import up to source revision REV'), _('REV')),
           ('A', 'authormap', '',
            _('remap usernames using this file'), _('FILE')),
           ('', 'filemap', '',

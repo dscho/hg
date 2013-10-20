@@ -16,11 +16,197 @@ import repoview
 
 propertycache = util.propertycache
 
-class changectx(object):
+class basectx(object):
+    """A basectx object represents the common logic for its children:
+    changectx: read-only context that is already present in the repo,
+    workingctx: a context that represents the working directory and can
+                be committed,
+    memctx: a context that represents changes in-memory and can also
+            be committed."""
+    def __new__(cls, repo, changeid='', *args, **kwargs):
+        if isinstance(changeid, basectx):
+            return changeid
+
+        o = super(basectx, cls).__new__(cls)
+
+        o._repo = repo
+        o._rev = nullrev
+        o._node = nullid
+
+        return o
+
+    def __str__(self):
+        return short(self.node())
+
+    def __int__(self):
+        return self.rev()
+
+    def __repr__(self):
+        return "<%s %s>" % (type(self).__name__, str(self))
+
+    def __eq__(self, other):
+        try:
+            return type(self) == type(other) and self._rev == other._rev
+        except AttributeError:
+            return False
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    def __contains__(self, key):
+        return key in self._manifest
+
+    def __getitem__(self, key):
+        return self.filectx(key)
+
+    def __iter__(self):
+        for f in sorted(self._manifest):
+            yield f
+
+    @propertycache
+    def substate(self):
+        return subrepo.state(self, self._repo.ui)
+
+    def rev(self):
+        return self._rev
+    def node(self):
+        return self._node
+    def hex(self):
+        return hex(self.node())
+    def manifest(self):
+        return self._manifest
+    def phasestr(self):
+        return phases.phasenames[self.phase()]
+    def mutable(self):
+        return self.phase() > phases.public
+
+    def obsolete(self):
+        """True if the changeset is obsolete"""
+        return self.rev() in obsmod.getrevs(self._repo, 'obsolete')
+
+    def extinct(self):
+        """True if the changeset is extinct"""
+        return self.rev() in obsmod.getrevs(self._repo, 'extinct')
+
+    def unstable(self):
+        """True if the changeset is not obsolete but it's ancestor are"""
+        return self.rev() in obsmod.getrevs(self._repo, 'unstable')
+
+    def bumped(self):
+        """True if the changeset try to be a successor of a public changeset
+
+        Only non-public and non-obsolete changesets may be bumped.
+        """
+        return self.rev() in obsmod.getrevs(self._repo, 'bumped')
+
+    def divergent(self):
+        """Is a successors of a changeset with multiple possible successors set
+
+        Only non-public and non-obsolete changesets may be divergent.
+        """
+        return self.rev() in obsmod.getrevs(self._repo, 'divergent')
+
+    def troubled(self):
+        """True if the changeset is either unstable, bumped or divergent"""
+        return self.unstable() or self.bumped() or self.divergent()
+
+    def troubles(self):
+        """return the list of troubles affecting this changesets.
+
+        Troubles are returned as strings. possible values are:
+        - unstable,
+        - bumped,
+        - divergent.
+        """
+        troubles = []
+        if self.unstable():
+            troubles.append('unstable')
+        if self.bumped():
+            troubles.append('bumped')
+        if self.divergent():
+            troubles.append('divergent')
+        return troubles
+
+    def parents(self):
+        """return contexts for each parent changeset"""
+        return self._parents
+
+    def p1(self):
+        return self._parents[0]
+
+    def p2(self):
+        if len(self._parents) == 2:
+            return self._parents[1]
+        return changectx(self._repo, -1)
+
+    def _fileinfo(self, path):
+        if '_manifest' in self.__dict__:
+            try:
+                return self._manifest[path], self._manifest.flags(path)
+            except KeyError:
+                raise error.ManifestLookupError(self._node, path,
+                                                _('not found in manifest'))
+        if '_manifestdelta' in self.__dict__ or path in self.files():
+            if path in self._manifestdelta:
+                return (self._manifestdelta[path],
+                        self._manifestdelta.flags(path))
+        node, flag = self._repo.manifest.find(self._changeset[0], path)
+        if not node:
+            raise error.ManifestLookupError(self._node, path,
+                                            _('not found in manifest'))
+
+        return node, flag
+
+    def filenode(self, path):
+        return self._fileinfo(path)[0]
+
+    def flags(self, path):
+        try:
+            return self._fileinfo(path)[1]
+        except error.LookupError:
+            return ''
+
+    def sub(self, path):
+        return subrepo.subrepo(self, path)
+
+    def match(self, pats=[], include=None, exclude=None, default='glob'):
+        r = self._repo
+        return matchmod.match(r.root, r.getcwd(), pats,
+                              include, exclude, default,
+                              auditor=r.auditor, ctx=self)
+
+    def diff(self, ctx2=None, match=None, **opts):
+        """Returns a diff generator for the given contexts and matcher"""
+        if ctx2 is None:
+            ctx2 = self.p1()
+        if ctx2 is not None:
+            ctx2 = self._repo[ctx2]
+        diffopts = patch.diffopts(self._repo.ui, opts)
+        return patch.diff(self._repo, ctx2.node(), self.node(),
+                          match=match, opts=diffopts)
+
+    @propertycache
+    def _dirs(self):
+        return scmutil.dirs(self._manifest)
+
+    def dirs(self):
+        return self._dirs
+
+    def dirty(self):
+        return False
+
+class changectx(basectx):
     """A changecontext object makes access to data related to a particular
-    changeset convenient."""
+    changeset convenient. It represents a read-only context already presnt in
+    the repo."""
     def __init__(self, repo, changeid=''):
         """changeid is a revision number, node, or tag"""
+
+        # since basectx.__new__ already took care of copying the object, we
+        # don't need to do anything in __init__, so we just exit here
+        if isinstance(changeid, basectx):
+            return
+
         if changeid == '':
             changeid = '.'
         self._repo = repo
@@ -114,29 +300,11 @@ class changectx(object):
         raise error.RepoLookupError(
             _("unknown revision '%s'") % changeid)
 
-    def __str__(self):
-        return short(self.node())
-
-    def __int__(self):
-        return self.rev()
-
-    def __repr__(self):
-        return "<changectx %s>" % str(self)
-
     def __hash__(self):
         try:
             return hash(self._rev)
         except AttributeError:
             return id(self)
-
-    def __eq__(self, other):
-        try:
-            return self._rev == other._rev
-        except AttributeError:
-            return False
-
-    def __ne__(self, other):
-        return not (self == other)
 
     def __nonzero__(self):
         return self._rev != nullrev
@@ -160,33 +328,11 @@ class changectx(object):
             p = p[:-1]
         return [changectx(self._repo, x) for x in p]
 
-    @propertycache
-    def substate(self):
-        return subrepo.state(self, self._repo.ui)
-
-    def __contains__(self, key):
-        return key in self._manifest
-
-    def __getitem__(self, key):
-        return self.filectx(key)
-
-    def __iter__(self):
-        for f in sorted(self._manifest):
-            yield f
-
     def changeset(self):
         return self._changeset
-    def manifest(self):
-        return self._manifest
     def manifestnode(self):
         return self._changeset[0]
 
-    def rev(self):
-        return self._rev
-    def node(self):
-        return self._node
-    def hex(self):
-        return hex(self._node)
     def user(self):
         return self._changeset[1]
     def date(self):
@@ -207,24 +353,8 @@ class changectx(object):
         return self._repo.nodebookmarks(self._node)
     def phase(self):
         return self._repo._phasecache.phase(self._repo, self._rev)
-    def phasestr(self):
-        return phases.phasenames[self.phase()]
-    def mutable(self):
-        return self.phase() > phases.public
     def hidden(self):
         return self._rev in repoview.filterrevs(self._repo, 'visible')
-
-    def parents(self):
-        """return contexts for each parent changeset"""
-        return self._parents
-
-    def p1(self):
-        return self._parents[0]
-
-    def p2(self):
-        if len(self._parents) == 2:
-            return self._parents[1]
-        return changectx(self._repo, -1)
 
     def children(self):
         """return contexts for each child changeset"""
@@ -238,80 +368,6 @@ class changectx(object):
     def descendants(self):
         for d in self._repo.changelog.descendants([self._rev]):
             yield changectx(self._repo, d)
-
-    def obsolete(self):
-        """True if the changeset is obsolete"""
-        return self.rev() in obsmod.getrevs(self._repo, 'obsolete')
-
-    def extinct(self):
-        """True if the changeset is extinct"""
-        return self.rev() in obsmod.getrevs(self._repo, 'extinct')
-
-    def unstable(self):
-        """True if the changeset is not obsolete but it's ancestor are"""
-        return self.rev() in obsmod.getrevs(self._repo, 'unstable')
-
-    def bumped(self):
-        """True if the changeset try to be a successor of a public changeset
-
-        Only non-public and non-obsolete changesets may be bumped.
-        """
-        return self.rev() in obsmod.getrevs(self._repo, 'bumped')
-
-    def divergent(self):
-        """Is a successors of a changeset with multiple possible successors set
-
-        Only non-public and non-obsolete changesets may be divergent.
-        """
-        return self.rev() in obsmod.getrevs(self._repo, 'divergent')
-
-    def troubled(self):
-        """True if the changeset is either unstable, bumped or divergent"""
-        return self.unstable() or self.bumped() or self.divergent()
-
-    def troubles(self):
-        """return the list of troubles affecting this changesets.
-
-        Troubles are returned as strings. possible values are:
-        - unstable,
-        - bumped,
-        - divergent.
-        """
-        troubles = []
-        if self.unstable():
-            troubles.append('unstable')
-        if self.bumped():
-            troubles.append('bumped')
-        if self.divergent():
-            troubles.append('divergent')
-        return troubles
-
-    def _fileinfo(self, path):
-        if '_manifest' in self.__dict__:
-            try:
-                return self._manifest[path], self._manifest.flags(path)
-            except KeyError:
-                raise error.ManifestLookupError(self._node, path,
-                                                _('not found in manifest'))
-        if '_manifestdelta' in self.__dict__ or path in self.files():
-            if path in self._manifestdelta:
-                return (self._manifestdelta[path],
-                        self._manifestdelta.flags(path))
-        node, flag = self._repo.manifest.find(self._changeset[0], path)
-        if not node:
-            raise error.ManifestLookupError(self._node, path,
-                                            _('not found in manifest'))
-
-        return node, flag
-
-    def filenode(self, path):
-        return self._fileinfo(path)[0]
-
-    def flags(self, path):
-        try:
-            return self._fileinfo(path)[1]
-        except error.LookupError:
-            return ''
 
     def filectx(self, path, fileid=None, filelog=None):
         """get a file context from this changeset"""
@@ -353,83 +409,15 @@ class changectx(object):
             if match.bad(fn, _('no such file in rev %s') % self) and match(fn):
                 yield fn
 
-    def sub(self, path):
-        return subrepo.subrepo(self, path)
-
-    def match(self, pats=[], include=None, exclude=None, default='glob'):
-        r = self._repo
-        return matchmod.match(r.root, r.getcwd(), pats,
-                              include, exclude, default,
-                              auditor=r.auditor, ctx=self)
-
-    def diff(self, ctx2=None, match=None, **opts):
-        """Returns a diff generator for the given contexts and matcher"""
-        if ctx2 is None:
-            ctx2 = self.p1()
-        if ctx2 is not None and not isinstance(ctx2, changectx):
-            ctx2 = self._repo[ctx2]
-        diffopts = patch.diffopts(self._repo.ui, opts)
-        return patch.diff(self._repo, ctx2.node(), self.node(),
-                          match=match, opts=diffopts)
-
-    @propertycache
-    def _dirs(self):
-        return scmutil.dirs(self._manifest)
-
-    def dirs(self):
-        return self._dirs
-
-    def dirty(self):
-        return False
-
-class filectx(object):
-    """A filecontext object makes access to data related to a particular
-       filerevision convenient."""
-    def __init__(self, repo, path, changeid=None, fileid=None,
-                 filelog=None, changectx=None):
-        """changeid can be a changeset revision, node, or tag.
-           fileid can be a file revision or node."""
-        self._repo = repo
-        self._path = path
-
-        assert (changeid is not None
-                or fileid is not None
-                or changectx is not None), \
-                ("bad args: changeid=%r, fileid=%r, changectx=%r"
-                 % (changeid, fileid, changectx))
-
-        if filelog is not None:
-            self._filelog = filelog
-
-        if changeid is not None:
-            self._changeid = changeid
-        if changectx is not None:
-            self._changectx = changectx
-        if fileid is not None:
-            self._fileid = fileid
-
-    @propertycache
-    def _changectx(self):
-        try:
-            return changectx(self._repo, self._changeid)
-        except error.RepoLookupError:
-            # Linkrev may point to any revision in the repository.  When the
-            # repository is filtered this may lead to `filectx` trying to build
-            # `changectx` for filtered revision. In such case we fallback to
-            # creating `changectx` on the unfiltered version of the reposition.
-            # This fallback should not be an issue because `changectx` from
-            # `filectx` are not used in complex operations that care about
-            # filtering.
-            #
-            # This fallback is a cheap and dirty fix that prevent several
-            # crashes. It does not ensure the behavior is correct. However the
-            # behavior was not correct before filtering either and "incorrect
-            # behavior" is seen as better as "crash"
-            #
-            # Linkrevs have several serious troubles with filtering that are
-            # complicated to solve. Proper handling of the issue here should be
-            # considered when solving linkrev issue are on the table.
-            return changectx(self._repo.unfiltered(), self._changeid)
+class basefilectx(object):
+    """A filecontext object represents the common logic for its children:
+    filectx: read-only access to a filerevision that is already present
+             in the repo,
+    workingfilectx: a filecontext that represents files from the working
+                    directory,
+    memfilectx: a filecontext that represents files in-memory."""
+    def __new__(cls, repo, path, *args, **kwargs):
+        return super(basefilectx, cls).__new__(cls)
 
     @propertycache
     def _filelog(self):
@@ -468,10 +456,10 @@ class filectx(object):
             return False
 
     def __str__(self):
-        return "%s@%s" % (self.path(), short(self.node()))
+        return "%s@%s" % (self.path(), self._changectx)
 
     def __repr__(self):
-        return "<filectx %s>" % str(self)
+        return "<%s %s>" % (type(self).__name__, str(self))
 
     def __hash__(self):
         try:
@@ -481,19 +469,13 @@ class filectx(object):
 
     def __eq__(self, other):
         try:
-            return (self._path == other._path
+            return (type(self) == type(other) and self._path == other._path
                     and self._filenode == other._filenode)
         except AttributeError:
             return False
 
     def __ne__(self, other):
         return not (self == other)
-
-    def filectx(self, fileid):
-        '''opens an arbitrary revision of the file without
-        opening a new filelog'''
-        return filectx(self._repo, self._path, fileid=fileid,
-                       filelog=self._filelog)
 
     def filerev(self):
         return self._filerev
@@ -510,7 +492,7 @@ class filectx(object):
     def node(self):
         return self._changectx.node()
     def hex(self):
-        return hex(self.node())
+        return self._changectx.hex()
     def user(self):
         return self._changectx.user()
     def date(self):
@@ -532,12 +514,8 @@ class filectx(object):
     def changectx(self):
         return self._changectx
 
-    def data(self):
-        return self._filelog.read(self._filenode)
     def path(self):
         return self._path
-    def size(self):
-        return self._filelog.size(self._filerev)
 
     def isbinary(self):
         try:
@@ -560,31 +538,6 @@ class filectx(object):
 
         return True
 
-    def renamed(self):
-        """check if file was actually renamed in this changeset revision
-
-        If rename logged in file revision, we report copy for changeset only
-        if file revisions linkrev points back to the changeset in question
-        or both changeset parents contain different file revisions.
-        """
-
-        renamed = self._filelog.renamed(self._filenode)
-        if not renamed:
-            return renamed
-
-        if self.rev() == self.linkrev():
-            return renamed
-
-        name = self.path()
-        fnode = self._filenode
-        for p in self._changectx.parents():
-            try:
-                if fnode == p.filenode(name):
-                    return None
-            except error.LookupError:
-                pass
-        return renamed
-
     def parents(self):
         p = self._path
         fl = self._filelog
@@ -605,12 +558,6 @@ class filectx(object):
         if len(p) == 2:
             return p[1]
         return filectx(self._repo, self._path, fileid=-1, filelog=self._filelog)
-
-    def children(self):
-        # hard for renames
-        c = self._filelog.children(self._filenode)
-        return [filectx(self._repo, self._path, fileid=x,
-                        filelog=self._filelog) for x in c]
 
     def annotate(self, follow=False, linenumber=None, diffopts=None):
         '''returns a list of tuples of (ctx, line) for each line
@@ -783,15 +730,100 @@ class filectx(object):
             self._copycache[sc2] = copies.pathcopies(c2)
         return self._copycache[sc2]
 
-class workingctx(changectx):
-    """A workingctx object makes access to data related to
-    the current working directory convenient.
-    date - any valid date string or (unixtime, offset), or None.
-    user - username string, or None.
-    extra - a dictionary of extra values, or None.
-    changes - a list of file lists as returned by localrepo.status()
-               or None to use the repository status.
-    """
+class filectx(basefilectx):
+    """A filecontext object makes access to data related to a particular
+       filerevision convenient."""
+    def __init__(self, repo, path, changeid=None, fileid=None,
+                 filelog=None, changectx=None):
+        """changeid can be a changeset revision, node, or tag.
+           fileid can be a file revision or node."""
+        self._repo = repo
+        self._path = path
+
+        assert (changeid is not None
+                or fileid is not None
+                or changectx is not None), \
+                ("bad args: changeid=%r, fileid=%r, changectx=%r"
+                 % (changeid, fileid, changectx))
+
+        if filelog is not None:
+            self._filelog = filelog
+
+        if changeid is not None:
+            self._changeid = changeid
+        if changectx is not None:
+            self._changectx = changectx
+        if fileid is not None:
+            self._fileid = fileid
+
+    @propertycache
+    def _changectx(self):
+        try:
+            return changectx(self._repo, self._changeid)
+        except error.RepoLookupError:
+            # Linkrev may point to any revision in the repository.  When the
+            # repository is filtered this may lead to `filectx` trying to build
+            # `changectx` for filtered revision. In such case we fallback to
+            # creating `changectx` on the unfiltered version of the reposition.
+            # This fallback should not be an issue because `changectx` from
+            # `filectx` are not used in complex operations that care about
+            # filtering.
+            #
+            # This fallback is a cheap and dirty fix that prevent several
+            # crashes. It does not ensure the behavior is correct. However the
+            # behavior was not correct before filtering either and "incorrect
+            # behavior" is seen as better as "crash"
+            #
+            # Linkrevs have several serious troubles with filtering that are
+            # complicated to solve. Proper handling of the issue here should be
+            # considered when solving linkrev issue are on the table.
+            return changectx(self._repo.unfiltered(), self._changeid)
+
+    def filectx(self, fileid):
+        '''opens an arbitrary revision of the file without
+        opening a new filelog'''
+        return filectx(self._repo, self._path, fileid=fileid,
+                       filelog=self._filelog)
+
+    def data(self):
+        return self._filelog.read(self._filenode)
+    def size(self):
+        return self._filelog.size(self._filerev)
+
+    def renamed(self):
+        """check if file was actually renamed in this changeset revision
+
+        If rename logged in file revision, we report copy for changeset only
+        if file revisions linkrev points back to the changeset in question
+        or both changeset parents contain different file revisions.
+        """
+
+        renamed = self._filelog.renamed(self._filenode)
+        if not renamed:
+            return renamed
+
+        if self.rev() == self.linkrev():
+            return renamed
+
+        name = self.path()
+        fnode = self._filenode
+        for p in self._changectx.parents():
+            try:
+                if fnode == p.filenode(name):
+                    return None
+            except error.LookupError:
+                pass
+        return renamed
+
+    def children(self):
+        # hard for renames
+        c = self._filelog.children(self._filenode)
+        return [filectx(self._repo, self._path, fileid=x,
+                        filelog=self._filelog) for x in c]
+
+class committablectx(basectx):
+    """A committablectx object provides common functionality for a context that
+    wants the ability to commit, e.g. workingctx or memctx."""
     def __init__(self, repo, text="", user=None, date=None, extra=None,
                  changes=None):
         self._repo = repo
@@ -826,9 +858,6 @@ class workingctx(changectx):
 
     def __str__(self):
         return str(self._parents[0]) + "+"
-
-    def __repr__(self):
-        return "<workingctx %s>" % str(self)
 
     def __nonzero__(self):
         return True
@@ -904,12 +933,6 @@ class workingctx(changectx):
 
         return man
 
-    def __iter__(self):
-        d = self._repo.dirstate
-        for f in d:
-            if d[f] != 'r':
-                yield f
-
     @propertycache
     def _status(self):
         return self._repo.status()[:4]
@@ -921,13 +944,6 @@ class workingctx(changectx):
     @propertycache
     def _date(self):
         return util.makedate()
-
-    @propertycache
-    def _parents(self):
-        p = self._repo.dirstate.parents()
-        if p[1] == nullid:
-            p = p[:-1]
-        return [changectx(self._repo, x) for x in p]
 
     def status(self, ignored=False, clean=False, unknown=False):
         """Explicit status query
@@ -945,8 +961,6 @@ class workingctx(changectx):
         self._status = stat[:4]
         return stat
 
-    def manifest(self):
-        return self._manifest
     def user(self):
         return self._user or self._repo.ui.username()
     def date(self):
@@ -1016,11 +1030,6 @@ class workingctx(changectx):
         except OSError:
             return ''
 
-    def filectx(self, path, filelog=None):
-        """get a file context from the working directory"""
-        return workingfilectx(self._repo, path, workingctx=self,
-                              filelog=filelog)
-
     def ancestor(self, c2):
         """return the ancestor context of self and c2"""
         return self._parents[0].ancestor(c2) # punt on two parents for now
@@ -1028,6 +1037,61 @@ class workingctx(changectx):
     def walk(self, match):
         return sorted(self._repo.dirstate.walk(match, sorted(self.substate),
                                                True, False))
+
+    def ancestors(self):
+        for a in self._repo.changelog.ancestors(
+            [p.rev() for p in self._parents]):
+            yield changectx(self._repo, a)
+
+    def markcommitted(self, node):
+        """Perform post-commit cleanup necessary after committing this ctx
+
+        Specifically, this updates backing stores this working context
+        wraps to reflect the fact that the changes reflected by this
+        workingctx have been committed.  For example, it marks
+        modified and added files as normal in the dirstate.
+
+        """
+
+        for f in self.modified() + self.added():
+            self._repo.dirstate.normal(f)
+        for f in self.removed():
+            self._repo.dirstate.drop(f)
+        self._repo.dirstate.setparents(node)
+
+    def dirs(self):
+        return self._repo.dirstate.dirs()
+
+class workingctx(committablectx):
+    """A workingctx object makes access to data related to
+    the current working directory convenient.
+    date - any valid date string or (unixtime, offset), or None.
+    user - username string, or None.
+    extra - a dictionary of extra values, or None.
+    changes - a list of file lists as returned by localrepo.status()
+               or None to use the repository status.
+    """
+    def __init__(self, repo, text="", user=None, date=None, extra=None,
+                 changes=None):
+        super(workingctx, self).__init__(repo, text, user, date, extra, changes)
+
+    def __iter__(self):
+        d = self._repo.dirstate
+        for f in d:
+            if d[f] != 'r':
+                yield f
+
+    @propertycache
+    def _parents(self):
+        p = self._repo.dirstate.parents()
+        if p[1] == nullid:
+            p = p[:-1]
+        return [changectx(self._repo, x) for x in p]
+
+    def filectx(self, path, filelog=None):
+        """get a file context from the working directory"""
+        return workingfilectx(self._repo, path, workingctx=self,
+                              filelog=filelog)
 
     def dirty(self, missing=False, merge=True, branch=True):
         "check whether a working directory is modified"
@@ -1047,11 +1111,11 @@ class workingctx(changectx):
         ui, ds = self._repo.ui, self._repo.dirstate
         try:
             rejected = []
+            lstat = self._repo.wvfs.lstat
             for f in list:
                 scmutil.checkportable(ui, join(f))
-                p = self._repo.wjoin(f)
                 try:
-                    st = os.lstat(p)
+                    st = lstat(f)
                 except OSError:
                     ui.warn(_("%s does not exist!\n") % join(f))
                     rejected.append(f)
@@ -1065,7 +1129,7 @@ class workingctx(changectx):
                 if not (stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode)):
                     ui.warn(_("%s not added: only files and symlinks "
                               "supported currently\n") % join(f))
-                    rejected.append(p)
+                    rejected.append(f)
                 elif ds[f] in 'amn':
                     ui.warn(_("%s already tracked!\n") % join(f))
                 elif ds[f] == 'r':
@@ -1093,11 +1157,6 @@ class workingctx(changectx):
         finally:
             wlock.release()
 
-    def ancestors(self):
-        for a in self._repo.changelog.ancestors(
-            [p.rev() for p in self._parents]):
-            yield changectx(self._repo, a)
-
     def undelete(self, list):
         pctxs = self.parents()
         wlock = self._repo.wlock()
@@ -1114,10 +1173,14 @@ class workingctx(changectx):
             wlock.release()
 
     def copy(self, source, dest):
-        p = self._repo.wjoin(dest)
-        if not os.path.lexists(p):
+        try:
+            st = self._repo.wvfs.lstat(dest)
+        except OSError, err:
+            if err.errno != errno.ENOENT:
+                raise
             self._repo.ui.warn(_("%s does not exist!\n") % dest)
-        elif not (os.path.isfile(p) or os.path.islink(p)):
+            return
+        if not (stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode)):
             self._repo.ui.warn(_("copy failed: %s is not a file or a "
                                  "symbolic link\n") % dest)
         else:
@@ -1129,31 +1192,10 @@ class workingctx(changectx):
             finally:
                 wlock.release()
 
-    def markcommitted(self, node):
-        """Perform post-commit cleanup necessary after committing this ctx
-
-        Specifically, this updates backing stores this working context
-        wraps to reflect the fact that the changes reflected by this
-        workingctx have been committed.  For example, it marks
-        modified and added files as normal in the dirstate.
-
-        """
-
-        for f in self.modified() + self.added():
-            self._repo.dirstate.normal(f)
-        for f in self.removed():
-            self._repo.dirstate.drop(f)
-        self._repo.dirstate.setparents(node)
-
-    def dirs(self):
-        return self._repo.dirstate.dirs()
-
-class workingfilectx(filectx):
-    """A workingfilectx object makes access to data related to a particular
-       file in the working directory convenient."""
-    def __init__(self, repo, path, filelog=None, workingctx=None):
-        """changeid can be a changeset revision, node, or tag.
-           fileid can be a file revision or node."""
+class committablefilectx(basefilectx):
+    """A committablefilectx provides common functionality for a file context
+    that wants the ability to commit, e.g. workingfilectx or memfilectx."""
+    def __init__(self, repo, path, filelog=None, ctx=None):
         self._repo = repo
         self._path = path
         self._changeid = None
@@ -1161,29 +1203,11 @@ class workingfilectx(filectx):
 
         if filelog is not None:
             self._filelog = filelog
-        if workingctx:
-            self._changectx = workingctx
-
-    @propertycache
-    def _changectx(self):
-        return workingctx(self._repo)
+        if ctx:
+            self._changectx = ctx
 
     def __nonzero__(self):
         return True
-
-    def __str__(self):
-        return "%s@%s" % (self.path(), self._changectx)
-
-    def __repr__(self):
-        return "<workingfilectx %s>" % str(self)
-
-    def data(self):
-        return self._repo.wread(self._path)
-    def renamed(self):
-        rp = self._repo.dirstate.copied(self._path)
-        if not rp:
-            return None
-        return rp, self._changectx._parents[0]._manifest.get(rp, nullid)
 
     def parents(self):
         '''return parent filectxs, following copies if necessary'''
@@ -1209,12 +1233,30 @@ class workingfilectx(filectx):
     def children(self):
         return []
 
+class workingfilectx(committablefilectx):
+    """A workingfilectx object makes access to data related to a particular
+       file in the working directory convenient."""
+    def __init__(self, repo, path, filelog=None, workingctx=None):
+        super(workingfilectx, self).__init__(repo, path, filelog, workingctx)
+
+    @propertycache
+    def _changectx(self):
+        return workingctx(self._repo)
+
+    def data(self):
+        return self._repo.wread(self._path)
+    def renamed(self):
+        rp = self._repo.dirstate.copied(self._path)
+        if not rp:
+            return None
+        return rp, self._changectx._parents[0]._manifest.get(rp, nullid)
+
     def size(self):
-        return os.lstat(self._repo.wjoin(self._path)).st_size
+        return self._repo.wvfs.lstat(self._path).st_size
     def date(self):
         t, tz = self._changectx.date()
         try:
-            return (int(os.lstat(self._repo.wjoin(self._path)).st_mtime), tz)
+            return (int(self._repo.wvfs.lstat(self._path).st_mtime), tz)
         except OSError, err:
             if err.errno != errno.ENOENT:
                 raise

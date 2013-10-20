@@ -7,7 +7,7 @@
 import posixpath
 import shlex
 from mercurial.i18n import _
-from mercurial import util
+from mercurial import util, error
 from common import SKIPREV, converter_source
 
 def rpairs(name):
@@ -195,12 +195,19 @@ class filemap_source(converter_source):
         self.seenchildren.clear()
         for rev, wanted, arg in self.convertedorder:
             if rev not in self.origparents:
-                self.origparents[rev] = self.getcommit(rev).parents
+                try:
+                    self.origparents[rev] = self.getcommit(rev).parents
+                except error.RepoLookupError:
+                    self.ui.debug("unknown revmap source: %s\n" % rev)
+                    continue
             if arg is not None:
                 self.children[arg] = self.children.get(arg, 0) + 1
 
         for rev, wanted, arg in self.convertedorder:
-            parents = self.origparents[rev]
+            try:
+                parents = self.origparents[rev]
+            except KeyError:
+                continue # unknown revmap source
             if wanted:
                 self.mark_wanted(rev, parents)
             else:
@@ -231,8 +238,8 @@ class filemap_source(converter_source):
                 continue
             self.seenchildren[r] = self.seenchildren.get(r, 0) + 1
             if self.seenchildren[r] == self.children[r]:
-                del self.wantedancestors[r]
-                del self.parentmap[r]
+                self.wantedancestors.pop(r, None)
+                self.parentmap.pop(r, None)
                 del self.seenchildren[r]
                 if self._rebuilt:
                     del self.children[r]
@@ -281,7 +288,11 @@ class filemap_source(converter_source):
         # of wanted ancestors of its parents. Plus rev itself.
         wrev = set()
         for p in parents:
-            wrev.update(self.wantedancestors[p])
+            if p in self.wantedancestors:
+                wrev.update(self.wantedancestors[p])
+            else:
+                self.ui.warn(_('warning: %s parent %s is missing\n') %
+                             (rev, p))
         wrev.add(rev)
         self.wantedancestors[rev] = wrev
 
@@ -398,3 +409,6 @@ class filemap_source(converter_source):
 
     def getbookmarks(self):
         return self.base.getbookmarks()
+
+    def converted(self, rev, sinkrev):
+        self.base.converted(rev, sinkrev)

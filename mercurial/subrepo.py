@@ -5,7 +5,8 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import errno, os, re, xml.dom.minidom, shutil, posixpath, sys
+import errno, os, re, shutil, posixpath, sys
+import xml.dom.minidom
 import stat, subprocess, tarfile
 from i18n import _
 import config, scmutil, util, node, error, cmdutil, bookmarks, match as matchmod
@@ -201,9 +202,24 @@ def submerge(repo, wctx, mctx, actx, overwrite):
                 wctx.sub(s).get(r, overwrite)
                 sm[s] = r
             else:
-                debug(s, "both sides changed, merge with", r)
-                wctx.sub(s).merge(r)
-                sm[s] = l
+                debug(s, "both sides changed")
+                option = repo.ui.promptchoice(
+                    _(' subrepository %s diverged (local revision: %s, '
+                      'remote revision: %s)\n'
+                      '(M)erge, keep (l)ocal or keep (r)emote?'
+                      '$$ &Merge $$ &Local $$ &Remote')
+                    % (s, l[1][:12], r[1][:12]), 0)
+                if option == 0:
+                    wctx.sub(s).merge(r)
+                    sm[s] = l
+                    debug(s, "merge with", r)
+                elif option == 1:
+                    sm[s] = l
+                    debug(s, "keep local subrepo revision", l)
+                else:
+                    wctx.sub(s).get(r, overwrite)
+                    sm[s] = r
+                    debug(s, "get remote subrepo revision", r)
         elif ld == a: # remote removed, local unchanged
             debug(s, "remote removed, remove")
             wctx.sub(s).remove()
@@ -237,6 +253,7 @@ def submerge(repo, wctx, mctx, actx, overwrite):
 
     # record merged .hgsubstate
     writestate(repo, sm)
+    return sm
 
 def _updateprompt(ui, sub, dirty, local, remote):
     if dirty:

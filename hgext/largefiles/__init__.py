@@ -105,16 +105,23 @@ explicitly do so with the --large flag passed to the :hg:`add`
 command.
 '''
 
-from mercurial import commands
+from mercurial import commands, localrepo
 
 import lfcommands
 import reposetup
-import uisetup
+import uisetup as uisetupmod
 
 testedwith = 'internal'
 
 reposetup = reposetup.reposetup
-uisetup = uisetup.uisetup
+
+def featuresetup(ui, supported):
+    # don't die on seeing a repo with the largefiles requirement
+    supported |= set(['largefiles'])
+
+def uisetup(ui):
+    localrepo.localrepository.featuresetupfuncs.add(featuresetup)
+    uisetupmod.uisetup(ui)
 
 commands.norepo += " lfconvert"
 

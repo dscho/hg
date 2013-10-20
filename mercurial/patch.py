@@ -6,8 +6,12 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import cStringIO, email.Parser, os, errno, re, posixpath
+import cStringIO, email, os, errno, re, posixpath
 import tempfile, zlib, shutil
+# On python2.4 you have to import these by name or they fail to
+# load. This was not a problem on Python 2.7.
+import email.Generator
+import email.Parser
 
 from i18n import _
 from node import hex, short

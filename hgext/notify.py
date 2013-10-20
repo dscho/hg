@@ -133,9 +133,13 @@ web.baseurl
 
 '''
 
+import email, socket, time
+# On python2.4 you have to import this by name or they fail to
+# load. This was not a problem on Python 2.7.
+import email.Parser
 from mercurial.i18n import _
 from mercurial import patch, cmdutil, templater, util, mail
-import email.Parser, email.Errors, fnmatch, socket, time
+import fnmatch
 
 testedwith = 'internal'
 

@@ -14,7 +14,7 @@ and O(changes) merge between branches.
 # import stuff from node for others to import from revlog
 from node import bin, hex, nullid, nullrev
 from i18n import _
-import ancestor, mdiff, parsers, error, util
+import ancestor, mdiff, parsers, error, util, templatefilters
 import struct, zlib, errno
 
 _pack = struct.pack
@@ -845,16 +845,43 @@ class revlog(object):
 
     def _chunkraw(self, startrev, endrev):
         start = self.start(startrev)
-        length = self.end(endrev) - start
+        end = self.end(endrev)
         if self._inline:
             start += (startrev + 1) * self._io.size
+            end += (endrev + 1) * self._io.size
+        length = end - start
         return self._getchunk(start, length)
 
     def _chunk(self, rev):
         return decompress(self._chunkraw(rev, rev))
 
-    def _chunkbase(self, rev):
-        return self._chunk(rev)
+    def _chunks(self, revs):
+        '''faster version of [self._chunk(rev) for rev in revs]
+
+        Assumes that revs is in ascending order.'''
+        if not revs:
+            return []
+        start = self.start
+        length = self.length
+        inline = self._inline
+        iosize = self._io.size
+        buffer = util.buffer
+
+        l = []
+        ladd = l.append
+
+        # preload the cache
+        self._chunkraw(revs[0], revs[-1])
+        offset, data = self._chunkcache
+
+        for rev in revs:
+            chunkstart = start(rev)
+            if inline:
+                chunkstart += (rev + 1) * iosize
+            chunklength = length(rev)
+            ladd(decompress(buffer(data, chunkstart - offset, chunklength)))
+
+        return l
 
     def _chunkclear(self):
         self._chunkcache = (0, '')
@@ -919,21 +946,22 @@ class revlog(object):
             else:
                 iterrev -= 1
             e = index[iterrev]
-        chain.reverse()
-        base = iterrev
 
         if iterrev == cachedrev:
             # cache hit
             text = self._cache[2]
+        else:
+            chain.append(iterrev)
+        chain.reverse()
 
         # drop cache to save memory
         self._cache = None
 
-        self._chunkraw(base, rev)
+        bins = self._chunks(chain)
         if text is None:
-            text = str(self._chunkbase(base))
+            text = str(bins[0])
+            bins = bins[1:]
 
-        bins = [self._chunk(r) for r in chain]
         text = mdiff.patches(text, bins)
 
         text = self._checkhash(text, node, rev)
@@ -943,10 +971,16 @@ class revlog(object):
 
     def _checkhash(self, text, node, rev):
         p1, p2 = self.parents(node)
-        if node != hash(text, p1, p2):
-            raise RevlogError(_("integrity check failed on %s:%d")
-                              % (self.indexfile, rev))
+        self.checkhash(text, p1, p2, node, rev)
         return text
+
+    def checkhash(self, text, p1, p2, node, rev=None):
+        if node != hash(text, p1, p2):
+            revornode = rev
+            if revornode is None:
+                revornode = templatefilters.short(hex(node))
+            raise RevlogError(_("integrity check failed on %s:%s")
+                % (self.indexfile, revornode))
 
     def checkinlinesize(self, tr, fp=None):
         if not self._inline or (self.start(-2) + self.length(-2)) < _maxinline:
@@ -987,7 +1021,8 @@ class revlog(object):
         tr.replace(self.indexfile, trindex * self._io.size)
         self._chunkclear()
 
-    def addrevision(self, text, transaction, link, p1, p2, cachedelta=None):
+    def addrevision(self, text, transaction, link, p1, p2, cachedelta=None,
+                    node=None):
         """add a revision to the log
 
         text - the revision data to add
@@ -995,11 +1030,14 @@ class revlog(object):
         link - the linkrev data to add
         p1, p2 - the parent nodeids of the revision
         cachedelta - an optional precomputed delta
+        node - nodeid of revision; typically node is not specified, and it is
+            computed by default as hash(text, p1, p2), however subclasses might
+            use different hashing method (and override checkhash() in such case)
         """
         if link == nullrev:
             raise RevlogError(_("attempted to add linkrev -1 to %s")
                               % self.indexfile)
-        node = hash(text, p1, p2)
+        node = node or hash(text, p1, p2)
         if node in self.nodemap:
             return node
 
@@ -1063,9 +1101,7 @@ class revlog(object):
             ifh.flush()
             basetext = self.revision(self.node(cachedelta[0]))
             btext[0] = mdiff.patch(basetext, cachedelta[1])
-            chk = hash(btext[0], p1, p2)
-            if chk != node:
-                raise RevlogError(_("consistency error in delta"))
+            self.checkhash(btext[0], p1, p2, node)
             return btext[0]
 
         def builddelta(rev):

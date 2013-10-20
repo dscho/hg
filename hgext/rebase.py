@@ -29,6 +29,25 @@ cmdtable = {}
 command = cmdutil.command(cmdtable)
 testedwith = 'internal'
 
+def _savegraft(ctx, extra):
+    s = ctx.extra().get('source', None)
+    if s is not None:
+        extra['source'] = s
+
+def _savebranch(ctx, extra):
+    extra['branch'] = ctx.branch()
+
+def _makeextrafn(copiers):
+    """make an extrafn out of the given copy-functions.
+
+    A copy function takes a context and an extra dict, and mutates the
+    extra dict as needed based on the given context.
+    """
+    def extrafn(ctx, extra):
+        for c in copiers:
+            c(ctx, extra)
+    return extrafn
+
 @command('rebase',
     [('s', 'source', '',
      _('rebase from the specified changeset'), _('REV')),
@@ -136,7 +155,10 @@ def rebase(ui, repo, **opts):
         abortf = opts.get('abort')
         collapsef = opts.get('collapse', False)
         collapsemsg = cmdutil.logmessage(ui, opts)
-        extrafn = opts.get('extrafn') # internal, used by e.g. hgsubversion
+        e = opts.get('extrafn') # internal, used by e.g. hgsubversion
+        extrafns = [_savegraft]
+        if e:
+            extrafns = [e]
         keepf = opts.get('keep', False)
         keepbranchesf = opts.get('keepbranches', False)
         # keepopen is not meant for use on the command line, but by
@@ -240,9 +262,10 @@ def rebase(ui, repo, **opts):
                     external = checkexternal(repo, state, targetancestors)
 
         if keepbranchesf:
-            assert not extrafn, 'cannot use both keepbranches and extrafn'
-            def extrafn(ctx, extra):
-                extra['branch'] = ctx.branch()
+            # insert _savebranch at the start of extrafns so if
+            # there's a user-provided extrafn it can clobber branch if
+            # desired
+            extrafns.insert(0, _savebranch)
             if collapsef:
                 branches = set()
                 for rev in state:
@@ -261,6 +284,8 @@ def rebase(ui, repo, **opts):
         activebookmark = activebookmark or repo._bookmarkcurrent
         if activebookmark:
             bookmarks.unsetcurrent(repo)
+
+        extrafn = _makeextrafn(extrafns)
 
         sortedstate = sorted(state)
         total = len(sortedstate)
@@ -334,6 +359,13 @@ def rebase(ui, repo, **opts):
             # this should probably be cleaned up
             targetnode = repo[target].node()
 
+        # restore original working directory
+        # (we do this before stripping)
+        newwd = state.get(originalwd, originalwd)
+        if newwd not in [c.rev() for c in repo[None].parents()]:
+            ui.note(_("update back to initial working directory parent\n"))
+            hg.updaterepo(repo, newwd, False)
+
         if not keepf:
             collapsedas = None
             if collapsef:
@@ -350,7 +382,7 @@ def rebase(ui, repo, **opts):
             ui.note(_("%d revisions have been skipped\n") % len(skipped))
 
         if (activebookmark and
-            repo['tip'].node() == repo._bookmarks[activebookmark]):
+            repo['.'].node() == repo._bookmarks[activebookmark]):
                 bookmarks.setcurrent(repo, activebookmark)
 
     finally:
@@ -780,7 +812,6 @@ def pullrebase(orig, ui, repo, *args, **opts):
                      'the update flag\n')
 
         movemarkfrom = repo['.'].node()
-        cmdutil.bailifchanged(repo)
         revsprepull = len(repo)
         origpostincoming = commands.postincoming
         def _dummy(*args, **kwargs):

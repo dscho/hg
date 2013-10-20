@@ -12,7 +12,8 @@ import os, re, difflib, time, tempfile, errno
 import hg, scmutil, util, revlog, copies, error, bookmarks
 import patch, help, encoding, templatekw, discovery
 import archival, changegroup, cmdutil, hbisect
-import sshserver, hgweb, hgweb.server, commandserver
+import sshserver, hgweb, commandserver
+from hgweb import server as hgweb_server
 import merge as mergemod
 import minirst, revset, fileset
 import dagparser, context, simplemerge, graphmod
@@ -1807,7 +1808,7 @@ def debugdag(ui, repo, file_=None, *revs, **opts):
     [('c', 'changelog', False, _('open changelog')),
      ('m', 'manifest', False, _('open manifest'))],
     _('-c|-m|FILE REV'))
-def debugdata(ui, repo, file_, rev = None, **opts):
+def debugdata(ui, repo, file_, rev=None, **opts):
     """dump the contents of a data file revision"""
     if opts.get('changelog') or opts.get('manifest'):
         file_, rev = None, file_
@@ -1918,11 +1919,12 @@ def debugfileset(ui, repo, expr, **opts):
         ui.write("%s\n" % f)
 
 @command('debugfsinfo', [], _('[PATH]'))
-def debugfsinfo(ui, path = "."):
+def debugfsinfo(ui, path="."):
     """show information detected about current filesystem"""
     util.writefile('.debugfsinfo', '')
     ui.write(('exec: %s\n') % (util.checkexec(path) and 'yes' or 'no'))
     ui.write(('symlink: %s\n') % (util.checklink(path) and 'yes' or 'no'))
+    ui.write(('hardlink: %s\n') % (util.checknlink(path) and 'yes' or 'no'))
     ui.write(('case-sensitive: %s\n') % (util.checkcase('.debugfsinfo')
                                 and 'yes' or 'no'))
     os.unlink('.debugfsinfo')
@@ -1972,7 +1974,7 @@ def debugignore(ui, repo, *values, **opts):
      ('m', 'manifest', False, _('open manifest')),
      ('f', 'format', 0, _('revlog format'), _('FORMAT'))],
     _('[-f FORMAT] -c|-m|FILE'))
-def debugindex(ui, repo, file_ = None, **opts):
+def debugindex(ui, repo, file_=None, **opts):
     """dump the contents of an index file"""
     r = cmdutil.openrevlog(repo, 'debugindex', file_, opts)
     format = opts.get('format', 0)
@@ -2353,7 +2355,7 @@ def debugrename(ui, repo, file1, *pats, **opts):
      ('m', 'manifest', False, _('open manifest')),
      ('d', 'dump', False, _('dump index data'))],
      _('-c|-m|FILE'))
-def debugrevlog(ui, repo, file_ = None, **opts):
+def debugrevlog(ui, repo, file_=None, **opts):
     """show data and statistics about a revlog"""
     r = cmdutil.openrevlog(repo, 'debugrevlog', file_, opts)
 
@@ -3019,11 +3021,12 @@ def graft(ui, repo, *revs, **opts):
         if n in ids:
             r = repo[n].rev()
             if r in revs:
-                ui.warn(_('skipping already grafted revision %s\n') % r)
+                ui.warn(_('skipping revision %s (already grafted to %s)\n')
+                        % (r, rev))
                 revs.remove(r)
             elif ids[n] in revs:
                 ui.warn(_('skipping already grafted revision %s '
-                            '(same origin %d)\n') % (ids[n], r))
+                            '(%s also has origin %d)\n') % (ids[n], rev, r))
                 revs.remove(ids[n])
         elif ctx.hex() in ids:
             r = ids[ctx.hex()]
@@ -4525,6 +4528,8 @@ def postincoming(ui, repo, modheads, optupdate, checkout):
             ret = hg.update(repo, checkout)
         except util.Abort, inst:
             ui.warn(_("not updating: %s\n") % str(inst))
+            if inst.hint:
+                ui.warn(_("(%s)\n") % inst.hint)
             return 0
         if not ret and not checkout:
             if bookmarks.update(repo, [movemarkfrom], repo['.'].node()):
@@ -4646,8 +4651,10 @@ def push(ui, repo, dest=None, **opts):
     branch that is not present at the destination. This allows you to
     only create a new branch without forcing other changes.
 
-    Use -f/--force to override the default behavior and push all
-    changesets on all branches.
+    .. note::
+      Extra care should be used with the -f/--force option,
+      which will push all new heads on all branches, an action which will
+      almost always cause confusion for collaborators.
 
     If -r/--rev is used, the specified revision and all its ancestors
     will be pushed to the remote repository.
@@ -5178,46 +5185,50 @@ def serve(ui, repo, **opts):
         o = repo
 
     app = hgweb.hgweb(o, baseui=baseui)
-
-    class service(object):
-        def init(self):
-            util.setsignalhandler()
-            self.httpd = hgweb.server.create_server(ui, app)
-
-            if opts['port'] and not ui.verbose:
-                return
-
-            if self.httpd.prefix:
-                prefix = self.httpd.prefix.strip('/') + '/'
-            else:
-                prefix = ''
-
-            port = ':%d' % self.httpd.port
-            if port == ':80':
-                port = ''
-
-            bindaddr = self.httpd.addr
-            if bindaddr == '0.0.0.0':
-                bindaddr = '*'
-            elif ':' in bindaddr: # IPv6
-                bindaddr = '[%s]' % bindaddr
-
-            fqaddr = self.httpd.fqaddr
-            if ':' in fqaddr:
-                fqaddr = '[%s]' % fqaddr
-            if opts['port']:
-                write = ui.status
-            else:
-                write = ui.write
-            write(_('listening at http://%s%s/%s (bound to %s:%d)\n') %
-                  (fqaddr, port, prefix, bindaddr, self.httpd.port))
-
-        def run(self):
-            self.httpd.serve_forever()
-
-    service = service()
-
+    service = httpservice(ui, app, opts)
     cmdutil.service(opts, initfn=service.init, runfn=service.run)
+
+class httpservice(object):
+    def __init__(self, ui, app, opts):
+        self.ui = ui
+        self.app = app
+        self.opts = opts
+
+    def init(self):
+        util.setsignalhandler()
+        self.httpd = hgweb_server.create_server(self.ui, self.app)
+
+        if self.opts['port'] and not self.ui.verbose:
+            return
+
+        if self.httpd.prefix:
+            prefix = self.httpd.prefix.strip('/') + '/'
+        else:
+            prefix = ''
+
+        port = ':%d' % self.httpd.port
+        if port == ':80':
+            port = ''
+
+        bindaddr = self.httpd.addr
+        if bindaddr == '0.0.0.0':
+            bindaddr = '*'
+        elif ':' in bindaddr: # IPv6
+            bindaddr = '[%s]' % bindaddr
+
+        fqaddr = self.httpd.fqaddr
+        if ':' in fqaddr:
+            fqaddr = '[%s]' % fqaddr
+        if self.opts['port']:
+            write = self.ui.status
+        else:
+            write = self.ui.write
+        write(_('listening at http://%s%s/%s (bound to %s:%d)\n') %
+              (fqaddr, port, prefix, bindaddr, self.httpd.port))
+
+    def run(self):
+        self.httpd.serve_forever()
+
 
 @command('showconfig|debugconfig',
     [('u', 'untrusted', None, _('show untrusted configuration options'))],
@@ -5846,7 +5857,7 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
     if check:
         c = repo[None]
         if c.dirty(merge=False, branch=False, missing=True):
-            raise util.Abort(_("uncommitted local changes"))
+            raise util.Abort(_("uncommitted changes"))
         if rev is None:
             rev = repo[repo[None].branch()].rev()
         mergemod._checkunknown(repo, repo[None], repo[rev])

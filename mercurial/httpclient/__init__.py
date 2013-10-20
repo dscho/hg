@@ -292,7 +292,7 @@ class HTTPConnection(object):
     def __init__(self, host, port=None, use_ssl=None, ssl_validator=None,
                  timeout=TIMEOUT_DEFAULT,
                  continue_timeout=TIMEOUT_ASSUME_CONTINUE,
-                 proxy_hostport=None, **ssl_opts):
+                 proxy_hostport=None, ssl_wrap_socket=None, **ssl_opts):
         """Create a new HTTPConnection.
 
         Args:
@@ -307,12 +307,23 @@ class HTTPConnection(object):
                    "100 Continue" response. Default is TIMEOUT_ASSUME_CONTINUE.
           proxy_hostport: Optional. Tuple of (host, port) to use as an http
                        proxy for the connection. Default is to not use a proxy.
+          ssl_wrap_socket: Optional function to use for wrapping
+            sockets. If unspecified, the one from the ssl module will
+            be used if available, or something that's compatible with
+            it if on a Python older than 2.6.
+
+        Any extra keyword arguments to this function will be provided
+        to the ssl_wrap_socket method. If no ssl
         """
         if port is None and host.count(':') == 1 or ']:' in host:
             host, port = host.rsplit(':', 1)
             port = int(port)
             if '[' in host:
                 host = host[1:-1]
+        if ssl_wrap_socket is not None:
+            self._ssl_wrap_socket = ssl_wrap_socket
+        else:
+            self._ssl_wrap_socket = socketutil.wrap_socket
         if use_ssl is None and port is None:
             use_ssl = False
             port = 80
@@ -387,7 +398,7 @@ class HTTPConnection(object):
             sock.setblocking(1)
             logger.debug('wrapping socket for ssl with options %r',
                          self.ssl_opts)
-            sock = socketutil.wrap_socket(sock, **self.ssl_opts)
+            sock = self._ssl_wrap_socket(sock, **self.ssl_opts)
             if self._ssl_validator:
                 self._ssl_validator(sock)
         sock.setblocking(0)
@@ -495,6 +506,10 @@ class HTTPConnection(object):
             else:
                 raise BadRequestData('body has no __len__() nor read()')
 
+        # If we're reusing the underlying socket, there are some
+        # conditions where we'll want to retry, so make a note of the
+        # state of self.sock
+        fresh_socket = self.sock is None
         self._connect()
         outgoing_headers = self._buildheaders(
             method, path, hdrs, self.http_version)
@@ -640,6 +655,26 @@ class HTTPConnection(object):
         # the whole request
         if response is None:
             response = self.response_class(self.sock, self.timeout, method)
+            if not fresh_socket:
+                if not response._select():
+                    # This means the response failed to get any response
+                    # data at all, and in all probability the socket was
+                    # closed before the server even saw our request. Try
+                    # the request again on a fresh socket.
+                    logging.debug('response._select() failed during request().'
+                                  ' Assuming request needs to be retried.')
+                    self.sock = None
+                    # Call this method explicitly to re-try the
+                    # request. We don't use self.request() because
+                    # some tools (notably Mercurial) expect to be able
+                    # to subclass and redefine request(), and they
+                    # don't have the same argspec as we do.
+                    #
+                    # TODO restructure sending of requests to avoid
+                    # this recursion
+                    return HTTPConnection.request(
+                        self, method, path, body=body, headers=headers,
+                        expect_continue=expect_continue)
         data_left = bool(outgoing_headers or body)
         if data_left:
             logger.info('stopped sending request early, '

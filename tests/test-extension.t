@@ -129,6 +129,136 @@ Check hgweb's load order:
   $ echo 'foo = !' >> $HGRCPATH
   $ echo 'bar = !' >> $HGRCPATH
 
+Check "from __future__ import absolute_import" support for external libraries
+
+  $ mkdir $TESTTMP/libroot
+  $ echo "s = 'libroot/ambig.py'" > $TESTTMP/libroot/ambig.py
+  $ mkdir $TESTTMP/libroot/mod
+  $ touch $TESTTMP/libroot/mod/__init__.py
+  $ echo "s = 'libroot/mod/ambig.py'" > $TESTTMP/libroot/mod/ambig.py
+
+#if absimport
+  $ cat > $TESTTMP/libroot/mod/ambigabs.py <<EOF
+  > from __future__ import absolute_import
+  > import ambig # should load "libroot/ambig.py"
+  > s = ambig.s
+  > EOF
+  $ cat > loadabs.py <<EOF
+  > import mod.ambigabs as ambigabs
+  > def extsetup():
+  >     print 'ambigabs.s=%s' % ambigabs.s
+  > EOF
+  $ (PYTHONPATH=$PYTHONPATH:$TESTTMP/libroot; hg --config extensions.loadabs=loadabs.py root)
+  ambigabs.s=libroot/ambig.py
+  $TESTTMP/a
+#endif
+
+#if no-py3k
+  $ cat > $TESTTMP/libroot/mod/ambigrel.py <<EOF
+  > import ambig # should load "libroot/mod/ambig.py"
+  > s = ambig.s
+  > EOF
+  $ cat > loadrel.py <<EOF
+  > import mod.ambigrel as ambigrel
+  > def extsetup():
+  >     print 'ambigrel.s=%s' % ambigrel.s
+  > EOF
+  $ (PYTHONPATH=$PYTHONPATH:$TESTTMP/libroot; hg --config extensions.loadrel=loadrel.py root)
+  ambigrel.s=libroot/mod/ambig.py
+  $TESTTMP/a
+#endif
+
+Check absolute/relative import of extension specific modules
+
+  $ mkdir $TESTTMP/extroot
+  $ cat > $TESTTMP/extroot/bar.py <<EOF
+  > s = 'this is extroot.bar'
+  > EOF
+  $ mkdir $TESTTMP/extroot/sub1
+  $ cat > $TESTTMP/extroot/sub1/__init__.py <<EOF
+  > s = 'this is extroot.sub1.__init__'
+  > EOF
+  $ cat > $TESTTMP/extroot/sub1/baz.py <<EOF
+  > s = 'this is extroot.sub1.baz'
+  > EOF
+  $ cat > $TESTTMP/extroot/__init__.py <<EOF
+  > s = 'this is extroot.__init__'
+  > import foo
+  > def extsetup(ui):
+  >     ui.write('(extroot) ', foo.func(), '\n')
+  > EOF
+
+  $ cat > $TESTTMP/extroot/foo.py <<EOF
+  > # test absolute import
+  > buf = []
+  > def func():
+  >     # "not locals" case
+  >     import extroot.bar
+  >     buf.append('import extroot.bar in func(): %s' % extroot.bar.s)
+  > 
+  >     return '\n(extroot) '.join(buf)
+  > 
+  > # "fromlist == ('*',)" case
+  > from extroot.bar import *
+  > buf.append('from extroot.bar import *: %s' % s)
+  > 
+  > # "not fromlist" and "if '.' in name" case
+  > import extroot.sub1.baz
+  > buf.append('import extroot.sub1.baz: %s' % extroot.sub1.baz.s)
+  > 
+  > # "not fromlist" and NOT "if '.' in name" case
+  > import extroot
+  > buf.append('import extroot: %s' % extroot.s)
+  > 
+  > # NOT "not fromlist" and NOT "level != -1" case
+  > from extroot.bar import s
+  > buf.append('from extroot.bar import s: %s' % s)
+  > EOF
+  $ hg --config extensions.extroot=$TESTTMP/extroot root
+  (extroot) from extroot.bar import *: this is extroot.bar
+  (extroot) import extroot.sub1.baz: this is extroot.sub1.baz
+  (extroot) import extroot: this is extroot.__init__
+  (extroot) from extroot.bar import s: this is extroot.bar
+  (extroot) import extroot.bar in func(): this is extroot.bar
+  $TESTTMP/a
+
+#if no-py3k
+  $ rm -f $TESTTMP/extroot/foo.*
+  $ cat > $TESTTMP/extroot/foo.py <<EOF
+  > # test relative import
+  > buf = []
+  > def func():
+  >     # "not locals" case
+  >     import bar
+  >     buf.append('import bar in func(): %s' % bar.s)
+  > 
+  >     return '\n(extroot) '.join(buf)
+  > 
+  > # "fromlist == ('*',)" case
+  > from bar import *
+  > buf.append('from bar import *: %s' % s)
+  > 
+  > # "not fromlist" and "if '.' in name" case
+  > import sub1.baz
+  > buf.append('import sub1.baz: %s' % sub1.baz.s)
+  > 
+  > # "not fromlist" and NOT "if '.' in name" case
+  > import sub1
+  > buf.append('import sub1: %s' % sub1.s)
+  > 
+  > # NOT "not fromlist" and NOT "level != -1" case
+  > from bar import s
+  > buf.append('from bar import s: %s' % s)
+  > EOF
+  $ hg --config extensions.extroot=$TESTTMP/extroot root
+  (extroot) from bar import *: this is extroot.bar
+  (extroot) import sub1.baz: this is extroot.sub1.baz
+  (extroot) import sub1: this is extroot.sub1.__init__
+  (extroot) from bar import s: this is extroot.bar
+  (extroot) import bar in func(): this is extroot.bar
+  $TESTTMP/a
+#endif
+
   $ cd ..
 
 hide outer repo
@@ -406,17 +536,21 @@ Issue811: Problem loading extensions twice (by site and by user)
   > EOF
   $ echo "debugissue811 = $debugpath" >> $HGRCPATH
   $ echo "mq=" >> $HGRCPATH
+  $ echo "strip=" >> $HGRCPATH
   $ echo "hgext.mq=" >> $HGRCPATH
   $ echo "hgext/mq=" >> $HGRCPATH
 
 Show extensions:
+(note that mq force load strip, also checking it's not loaded twice)
 
   $ hg debugextensions
   debugissue811
+  strip
   mq
 
 Disabled extension commands:
 
+  $ ORGHGRCPATH=$HGRCPATH
   $ HGRCPATH=
   $ export HGRCPATH
   $ hg help email
@@ -573,3 +707,134 @@ Declare the version as supporting this hg version, show regular bts link:
   ** Python * (glob)
   ** Mercurial Distributed SCM (*) (glob)
   ** Extensions loaded: throw
+
+Restore HGRCPATH
+
+  $ HGRCPATH=$ORGHGRCPATH
+  $ export HGRCPATH
+
+Commands handling multiple repositories at a time should invoke only
+"reposetup()" of extensions enabling in the target repository.
+
+  $ mkdir reposetup-test
+  $ cd reposetup-test
+
+  $ cat > $TESTTMP/reposetuptest.py <<EOF
+  > from mercurial import extensions
+  > def reposetup(ui, repo):
+  >     ui.write('reposetup() for %s\n' % (repo.root))
+  > EOF
+  $ hg init src
+  $ echo a > src/a
+  $ hg -R src commit -Am '#0 at src/a'
+  adding a
+  $ echo '[extensions]' >> src/.hg/hgrc
+  $ echo '# enable extension locally' >> src/.hg/hgrc
+  $ echo "reposetuptest = $TESTTMP/reposetuptest.py" >> src/.hg/hgrc
+  $ hg -R src status
+  reposetup() for $TESTTMP/reposetup-test/src
+
+  $ hg clone -U src clone-dst1
+  reposetup() for $TESTTMP/reposetup-test/src
+  $ hg init push-dst1
+  $ hg -q -R src push push-dst1
+  reposetup() for $TESTTMP/reposetup-test/src
+  $ hg init pull-src1
+  $ hg -q -R pull-src1 pull src
+  reposetup() for $TESTTMP/reposetup-test/src
+
+  $ echo '[extensions]' >> $HGRCPATH
+  $ echo '# disable extension globally and explicitly' >> $HGRCPATH
+  $ echo 'reposetuptest = !' >> $HGRCPATH
+  $ hg clone -U src clone-dst2
+  reposetup() for $TESTTMP/reposetup-test/src
+  $ hg init push-dst2
+  $ hg -q -R src push push-dst2
+  reposetup() for $TESTTMP/reposetup-test/src
+  $ hg init pull-src2
+  $ hg -q -R pull-src2 pull src
+  reposetup() for $TESTTMP/reposetup-test/src
+
+  $ echo '[extensions]' >> $HGRCPATH
+  $ echo '# enable extension globally' >> $HGRCPATH
+  $ echo "reposetuptest = $TESTTMP/reposetuptest.py" >> $HGRCPATH
+  $ hg clone -U src clone-dst3
+  reposetup() for $TESTTMP/reposetup-test/src
+  reposetup() for $TESTTMP/reposetup-test/clone-dst3
+  $ hg init push-dst3
+  reposetup() for $TESTTMP/reposetup-test/push-dst3
+  $ hg -q -R src push push-dst3
+  reposetup() for $TESTTMP/reposetup-test/src
+  reposetup() for $TESTTMP/reposetup-test/push-dst3
+  $ hg init pull-src3
+  reposetup() for $TESTTMP/reposetup-test/pull-src3
+  $ hg -q -R pull-src3 pull src
+  reposetup() for $TESTTMP/reposetup-test/pull-src3
+  reposetup() for $TESTTMP/reposetup-test/src
+
+  $ echo '[extensions]' >> src/.hg/hgrc
+  $ echo '# disable extension locally' >> src/.hg/hgrc
+  $ echo 'reposetuptest = !' >> src/.hg/hgrc
+  $ hg clone -U src clone-dst4
+  reposetup() for $TESTTMP/reposetup-test/clone-dst4
+  $ hg init push-dst4
+  reposetup() for $TESTTMP/reposetup-test/push-dst4
+  $ hg -q -R src push push-dst4
+  reposetup() for $TESTTMP/reposetup-test/push-dst4
+  $ hg init pull-src4
+  reposetup() for $TESTTMP/reposetup-test/pull-src4
+  $ hg -q -R pull-src4 pull src
+  reposetup() for $TESTTMP/reposetup-test/pull-src4
+
+disabling in command line overlays with all configuration
+  $ hg --config extensions.reposetuptest=! clone -U src clone-dst5
+  $ hg --config extensions.reposetuptest=! init push-dst5
+  $ hg --config extensions.reposetuptest=! -q -R src push push-dst5
+  $ hg --config extensions.reposetuptest=! init pull-src5
+  $ hg --config extensions.reposetuptest=! -q -R pull-src5 pull src
+
+  $ echo '[extensions]' >> $HGRCPATH
+  $ echo '# disable extension globally and explicitly' >> $HGRCPATH
+  $ echo 'reposetuptest = !' >> $HGRCPATH
+  $ hg init parent
+  $ hg init parent/sub1
+  $ echo 1 > parent/sub1/1
+  $ hg -R parent/sub1 commit -Am '#0 at parent/sub1'
+  adding 1
+  $ hg init parent/sub2
+  $ hg init parent/sub2/sub21
+  $ echo 21 > parent/sub2/sub21/21
+  $ hg -R parent/sub2/sub21 commit -Am '#0 at parent/sub2/sub21'
+  adding 21
+  $ cat > parent/sub2/.hgsub <<EOF
+  > sub21 = sub21
+  > EOF
+  $ hg -R parent/sub2 commit -Am '#0 at parent/sub2'
+  adding .hgsub
+  $ hg init parent/sub3
+  $ echo 3 > parent/sub3/3
+  $ hg -R parent/sub3 commit -Am '#0 at parent/sub3'
+  adding 3
+  $ cat > parent/.hgsub <<EOF
+  > sub1 = sub1
+  > sub2 = sub2
+  > sub3 = sub3
+  > EOF
+  $ hg -R parent commit -Am '#0 at parent'
+  adding .hgsub
+  $ echo '[extensions]' >> parent/.hg/hgrc
+  $ echo '# enable extension locally' >> parent/.hg/hgrc
+  $ echo "reposetuptest = $TESTTMP/reposetuptest.py" >> parent/.hg/hgrc
+  $ cp parent/.hg/hgrc parent/sub2/.hg/hgrc
+  $ hg -R parent status -S -A
+  reposetup() for $TESTTMP/reposetup-test/parent
+  reposetup() for $TESTTMP/reposetup-test/parent/sub2
+  C .hgsub
+  C .hgsubstate
+  C sub1/1
+  C sub2/.hgsub
+  C sub2/.hgsubstate
+  C sub2/sub21/21
+  C sub3/3
+
+  $ cd ..

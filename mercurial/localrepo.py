@@ -147,11 +147,15 @@ class locallegacypeer(localpeer):
 class localrepository(object):
 
     supportedformats = set(('revlogv1', 'generaldelta'))
-    supported = supportedformats | set(('store', 'fncache', 'shared',
-                                        'dotencode'))
+    _basesupported = supportedformats | set(('store', 'fncache', 'shared',
+                                             'dotencode'))
     openerreqs = set(('revlogv1', 'generaldelta'))
     requirements = ['revlogv1']
     filtername = None
+
+    # a list of (ui, featureset) functions.
+    # only functions defined in module of enabled extensions are invoked
+    featuresetupfuncs = set()
 
     def _baserequirements(self, create):
         return self.requirements[:]
@@ -176,6 +180,16 @@ class localrepository(object):
             extensions.loadall(self.ui)
         except IOError:
             pass
+
+        if self.featuresetupfuncs:
+            self.supported = set(self._basesupported) # use private copy
+            extmods = set(m.__name__ for n, m
+                          in extensions.extensions(self.ui))
+            for setupfunc in self.featuresetupfuncs:
+                if setupfunc.__module__ in extmods:
+                    setupfunc(self.ui, self.supported)
+        else:
+            self.supported = self._basesupported
 
         if not self.vfs.isdir():
             if create:
@@ -804,7 +818,7 @@ class localrepository(object):
     def wwritedata(self, filename, data):
         return self._filter(self._decodefilterpats, filename, data)
 
-    def transaction(self, desc):
+    def transaction(self, desc, report=None):
         tr = self._transref and self._transref() or None
         if tr and tr.running():
             return tr.nest()
@@ -816,8 +830,8 @@ class localrepository(object):
 
         self._writejournal(desc)
         renames = [(vfs, x, undoname(x)) for vfs, x in self._journalfiles()]
-
-        tr = transaction.transaction(self.ui.warn, self.sopener,
+        rp = report and report or self.ui.warn
+        tr = transaction.transaction(rp, self.sopener,
                                      self.sjoin("journal"),
                                      aftertrans(renames),
                                      self.store.createmode)
@@ -1460,14 +1474,8 @@ class localrepository(object):
                     del mf[fn]
             return mf
 
-        if isinstance(node1, context.changectx):
-            ctx1 = node1
-        else:
-            ctx1 = self[node1]
-        if isinstance(node2, context.changectx):
-            ctx2 = node2
-        else:
-            ctx2 = self[node2]
+        ctx1 = self[node1]
+        ctx2 = self[node2]
 
         working = ctx2.rev() is None
         parentworking = working and ctx1 == self['.']
@@ -1564,7 +1572,7 @@ class localrepository(object):
             for f in modified:
                 if ctx2.flags(f) == 'l':
                     d = ctx2[f].data()
-                    if len(d) >= 1024 or '\n' in d or util.binary(d):
+                    if d == '' or len(d) >= 1024 or '\n' in d or util.binary(d):
                         self.ui.debug('ignoring suspect symlink placeholder'
                                       ' "%s"\n' % f)
                         continue
@@ -1656,6 +1664,14 @@ class localrepository(object):
         return r
 
     def pull(self, remote, heads=None, force=False):
+        if remote.local():
+            missing = set(remote.requirements) - self.supported
+            if missing:
+                msg = _("required features are not"
+                        " supported in the destination:"
+                        " %s") % (', '.join(sorted(missing)))
+                raise util.Abort(msg)
+
         # don't open transaction for nothing or you break future useful
         # rollback call
         tr = None
@@ -1756,6 +1772,14 @@ class localrepository(object):
             we have outgoing changesets but refused to push
           - other values as described by addchangegroup()
         '''
+        if remote.local():
+            missing = set(self.requirements) - remote.local().supported
+            if missing:
+                msg = _("required features are not"
+                        " supported in the destination:"
+                        " %s") % (', '.join(sorted(missing)))
+                raise util.Abort(msg)
+
         # there are two ways to push to remote repo:
         #
         # addchangegroup assumes local user can lock remote
@@ -2210,6 +2234,12 @@ class localrepository(object):
                     # In other case we can safely update cache on disk.
                     branchmap.updatecache(self.filtered('served'))
                 def runhooks():
+                    # These hooks run when the lock releases, not when the
+                    # transaction closes. So it's possible for the changelog
+                    # to have changed since we last saw it.
+                    if clstart >= len(self):
+                        return
+
                     # forcefully update the on-disk branch cache
                     self.ui.debug("updating the branch cache\n")
                     self.hook("changegroup", node=hex(cl.node(clstart)),

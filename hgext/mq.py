@@ -57,15 +57,19 @@ discarded. Setting::
 make them behave as if --keep-changes were passed, and non-conflicting
 local changes will be tolerated and preserved. If incompatible options
 such as -f/--force or --exact are passed, this setting is ignored.
+
+This extension used to provide a strip command. This command now lives
+in the strip extension.
 '''
 
 from mercurial.i18n import _
 from mercurial.node import bin, hex, short, nullid, nullrev
 from mercurial.lock import release
 from mercurial import commands, cmdutil, hg, scmutil, util, revset
-from mercurial import repair, extensions, error, phases, bookmarks
+from mercurial import extensions, error, phases
 from mercurial import patch as patchmod
 from mercurial import localrepo
+from mercurial import subrepo
 import os, re, errno, shutil
 
 commands.norepo += " qclone"
@@ -75,6 +79,22 @@ seriesopts = [('s', 'summary', None, _('print first line of patch header'))]
 cmdtable = {}
 command = cmdutil.command(cmdtable)
 testedwith = 'internal'
+
+# force load strip extension formely included in mq and import some utility
+try:
+    stripext = extensions.find('strip')
+except KeyError:
+    # note: load is lazy so we could avoid the try-except,
+    # but I (marmoute) prefer this explicite code.
+    class dummyui(object):
+        def debug(self, msg):
+            pass
+    stripext = extensions.load(dummyui(), 'strip', '')
+
+strip = stripext.strip
+checksubstate = stripext.checksubstate
+checklocalchanges = stripext.checklocalchanges
+
 
 # Patch names looks like unix-file names.
 # They must be joinable with queue directory and result in the patch path.
@@ -282,15 +302,11 @@ def newcommit(repo, phase, *args, **kwargs):
             phase = phases.secret
     if phase is not None:
         backup = repo.ui.backupconfig('phases', 'new-commit')
-    # Marking the repository as committing an mq patch can be used
-    # to optimize operations like branchtags().
-    repo._committingpatch = True
     try:
         if phase is not None:
             repo.ui.setconfig('phases', 'new-commit', phase)
         return repo.commit(*args, **kwargs)
     finally:
-        repo._committingpatch = False
         if phase is not None:
             repo.ui.restoreconfig(backup)
 
@@ -331,6 +347,7 @@ class queue(object):
         except error.ConfigError:
             self.gitmode = ui.config('mq', 'git', 'auto').lower()
         self.plainmode = ui.configbool('mq', 'plain', False)
+        self.checkapplied = True
 
     @util.propertycache
     def applied(self):
@@ -606,7 +623,7 @@ class queue(object):
 
         # apply failed, strip away that rev and merge.
         hg.clean(repo, head)
-        self.strip(repo, [n], update=False, backup='strip')
+        strip(self.ui, repo, [n], update=False, backup='strip')
 
         ctx = repo[rev]
         ret = hg.merge(repo, rev)
@@ -631,6 +648,14 @@ class queue(object):
         return (0, n)
 
     def qparents(self, repo, rev=None):
+        """return the mq handled parent or p1
+
+        In some case where mq get himself in being the parent of a merge the
+        paappropriate parent may be p2.
+        (eg: an in progress merge started with mq disabled)
+
+        If no parent are managed by mq, p1 is returned.
+        """
         if rev is None:
             (p1, p2) = repo.dirstate.parents()
             if p2 == nullid:
@@ -800,6 +825,14 @@ class queue(object):
                 p1, p2 = repo.dirstate.parents()
                 repo.setparents(p1, merge)
 
+            if all_files and '.hgsubstate' in all_files:
+                wctx = repo['.']
+                mctx = actx = repo[None]
+                overwrite = False
+                mergedsubstate = subrepo.submerge(repo, wctx, mctx, actx,
+                    overwrite)
+                files += mergedsubstate.keys()
+
             match = scmutil.matchfiles(repo, files or [])
             oldtip = repo['tip']
             n = newcommit(repo, None, message, ph.user, ph.date, match=match,
@@ -940,23 +973,6 @@ class queue(object):
             return top, patch
         return None, None
 
-    def checksubstate(self, repo, baserev=None):
-        '''return list of subrepos at a different revision than substate.
-        Abort if any subrepos have uncommitted changes.'''
-        inclsubs = []
-        wctx = repo[None]
-        if baserev:
-            bctx = repo[baserev]
-        else:
-            bctx = wctx.parents()[0]
-        for s in sorted(wctx.substate):
-            if wctx.sub(s).dirty(True):
-                raise util.Abort(
-                    _("uncommitted changes in subrepository %s") % s)
-            elif s not in bctx.substate or bctx.sub(s).dirty():
-                inclsubs.append(s)
-        return inclsubs
-
     def putsubstate2changes(self, substatestate, changes):
         for files in changes[:3]:
             if '.hgsubstate' in files:
@@ -969,18 +985,14 @@ class queue(object):
         else: # modified
             changes[0].append('.hgsubstate')
 
-    def localchangesfound(self, refresh=True):
-        if refresh:
-            raise util.Abort(_("local changes found, refresh first"))
-        else:
-            raise util.Abort(_("local changes found"))
-
     def checklocalchanges(self, repo, force=False, refresh=True):
-        cmdutil.checkunfinished(repo)
-        m, a, r, d = repo.status()[:4]
-        if (m or a or r or d) and not force:
-            self.localchangesfound(refresh)
-        return m, a, r, d
+        excsuffix = ''
+        if refresh:
+            excsuffix = ', refresh first'
+            # plain versions for i18n tool to detect them
+            _("local changes found, refresh first")
+            _("local changed subrepos found, refresh first")
+        return checklocalchanges(repo, force, excsuffix)
 
     _reserved = ('series', 'status', 'guards', '.', '..')
     def checkreservedname(self, name):
@@ -1021,7 +1033,7 @@ class queue(object):
         diffopts = self.diffopts({'git': opts.get('git')})
         if opts.get('checkname', True):
             self.checkpatchname(patchfn)
-        inclsubs = self.checksubstate(repo)
+        inclsubs = checksubstate(repo)
         if inclsubs:
             inclsubs.append('.hgsubstate')
             substatestate = repo.dirstate['.hgsubstate']
@@ -1111,22 +1123,6 @@ class queue(object):
         finally:
             release(wlock)
 
-    def strip(self, repo, revs, update=True, backup="all", force=None):
-        wlock = lock = None
-        try:
-            wlock = repo.wlock()
-            lock = repo.lock()
-
-            if update:
-                self.checklocalchanges(repo, force=force, refresh=False)
-                urev = self.qparents(repo, revs[0])
-                hg.clean(repo, urev)
-                repo.dirstate.write()
-
-            repair.strip(self.ui, repo, revs, backup)
-        finally:
-            release(lock, wlock)
-
     def isapplied(self, patch):
         """returns (index, rev, patch)"""
         for i, a in enumerate(self.applied):
@@ -1208,9 +1204,7 @@ class queue(object):
         diffopts = self.diffopts()
         wlock = repo.wlock()
         try:
-            heads = []
-            for b, ls in repo.branchmap().iteritems():
-                heads += ls
+            heads = [h for hs in repo.branchmap().itervalues() for h in hs]
             if not heads:
                 heads = [nullid]
             if repo.dirstate.p1() not in heads and not exact:
@@ -1435,7 +1429,7 @@ class queue(object):
 
                 tobackup = set(a + m + r) & tobackup
                 if keepchanges and tobackup:
-                    self.localchangesfound()
+                    raise util.Abort(_("local changes found, refresh first"))
                 self.backup(repo, tobackup)
 
                 for f in a:
@@ -1449,7 +1443,9 @@ class queue(object):
             for patch in reversed(self.applied[start:end]):
                 self.ui.status(_("popping %s\n") % patch.name)
             del self.applied[start:end]
-            self.strip(repo, [rev], update=False, backup='strip')
+            strip(self.ui, repo, [rev], update=False, backup='strip')
+            for s, state in repo['.'].substate.items():
+                repo['.'].sub(s).get(state)
             if self.applied:
                 self.ui.write(_("now at: %s\n") % self.applied[-1].name)
             else:
@@ -1493,7 +1489,7 @@ class queue(object):
             cparents = repo.changelog.parents(top)
             patchparent = self.qparents(repo, top)
 
-            inclsubs = self.checksubstate(repo, hex(patchparent))
+            inclsubs = checksubstate(repo, hex(patchparent))
             if inclsubs:
                 inclsubs.append('.hgsubstate')
                 substatestate = repo.dirstate['.hgsubstate']
@@ -1650,8 +1646,7 @@ class queue(object):
                 repo.setparents(*cparents)
                 self.applied.pop()
                 self.applieddirty = True
-                self.strip(repo, [top], update=False,
-                           backup='strip')
+                strip(self.ui, repo, [top], update=False, backup='strip')
             except: # re-raises
                 repo.dirstate.invalidate()
                 raise
@@ -1823,7 +1818,7 @@ class queue(object):
                     update = True
                 else:
                     update = False
-                self.strip(repo, [rev], update=update, backup='strip')
+                strip(self.ui, repo, [rev], update=update, backup='strip')
         if qpp:
             self.ui.warn(_("saved queue repository parents: %s %s\n") %
                          (short(qpp[0]), short(qpp[1])))
@@ -2304,7 +2299,7 @@ def clone(ui, source, dest=None, **opts):
         if qbase:
             ui.note(_('stripping applied patches from destination '
                       'repository\n'))
-            repo.mq.strip(repo, [qbase], update=False, backup=None)
+            strip(ui, repo, [qbase], update=False, backup=None)
         if not opts.get('noupdate'):
             ui.note(_('updating destination repository\n'))
             hg.update(repo, repo.changelog.tip())
@@ -2919,158 +2914,6 @@ def save(ui, repo, **opts):
         q.savedirty()
     return 0
 
-@command("strip",
-         [
-          ('r', 'rev', [], _('strip specified revision (optional, '
-                               'can specify revisions without this '
-                               'option)'), _('REV')),
-          ('f', 'force', None, _('force removal of changesets, discard '
-                                 'uncommitted changes (no backup)')),
-          ('b', 'backup', None, _('bundle only changesets with local revision'
-                                  ' number greater than REV which are not'
-                                  ' descendants of REV (DEPRECATED)')),
-          ('', 'no-backup', None, _('no backups')),
-          ('', 'nobackup', None, _('no backups (DEPRECATED)')),
-          ('n', '', None, _('ignored  (DEPRECATED)')),
-          ('k', 'keep', None, _("do not modify working copy during strip")),
-          ('B', 'bookmark', '', _("remove revs only reachable from given"
-                                  " bookmark"))],
-          _('hg strip [-k] [-f] [-n] [-B bookmark] [-r] REV...'))
-def strip(ui, repo, *revs, **opts):
-    """strip changesets and all their descendants from the repository
-
-    The strip command removes the specified changesets and all their
-    descendants. If the working directory has uncommitted changes, the
-    operation is aborted unless the --force flag is supplied, in which
-    case changes will be discarded.
-
-    If a parent of the working directory is stripped, then the working
-    directory will automatically be updated to the most recent
-    available ancestor of the stripped parent after the operation
-    completes.
-
-    Any stripped changesets are stored in ``.hg/strip-backup`` as a
-    bundle (see :hg:`help bundle` and :hg:`help unbundle`). They can
-    be restored by running :hg:`unbundle .hg/strip-backup/BUNDLE`,
-    where BUNDLE is the bundle file created by the strip. Note that
-    the local revision numbers will in general be different after the
-    restore.
-
-    Use the --no-backup option to discard the backup bundle once the
-    operation completes.
-
-    Strip is not a history-rewriting operation and can be used on
-    changesets in the public phase. But if the stripped changesets have
-    been pushed to a remote repository you will likely pull them again.
-
-    Return 0 on success.
-    """
-    backup = 'all'
-    if opts.get('backup'):
-        backup = 'strip'
-    elif opts.get('no_backup') or opts.get('nobackup'):
-        backup = 'none'
-
-    cl = repo.changelog
-    revs = list(revs) + opts.get('rev')
-    revs = set(scmutil.revrange(repo, revs))
-
-    if opts.get('bookmark'):
-        mark = opts.get('bookmark')
-        marks = repo._bookmarks
-        if mark not in marks:
-            raise util.Abort(_("bookmark '%s' not found") % mark)
-
-        # If the requested bookmark is not the only one pointing to a
-        # a revision we have to only delete the bookmark and not strip
-        # anything. revsets cannot detect that case.
-        uniquebm = True
-        for m, n in marks.iteritems():
-            if m != mark and n == repo[mark].node():
-                uniquebm = False
-                break
-        if uniquebm:
-            rsrevs = repo.revs("ancestors(bookmark(%s)) - "
-                               "ancestors(head() and not bookmark(%s)) - "
-                               "ancestors(bookmark() and not bookmark(%s))",
-                               mark, mark, mark)
-            revs.update(set(rsrevs))
-        if not revs:
-            del marks[mark]
-            marks.write()
-            ui.write(_("bookmark '%s' deleted\n") % mark)
-
-    if not revs:
-        raise util.Abort(_('empty revision set'))
-
-    descendants = set(cl.descendants(revs))
-    strippedrevs = revs.union(descendants)
-    roots = revs.difference(descendants)
-
-    update = False
-    # if one of the wdir parent is stripped we'll need
-    # to update away to an earlier revision
-    for p in repo.dirstate.parents():
-        if p != nullid and cl.rev(p) in strippedrevs:
-            update = True
-            break
-
-    rootnodes = set(cl.node(r) for r in roots)
-
-    q = repo.mq
-    if q.applied:
-        # refresh queue state if we're about to strip
-        # applied patches
-        if cl.rev(repo.lookup('qtip')) in strippedrevs:
-            q.applieddirty = True
-            start = 0
-            end = len(q.applied)
-            for i, statusentry in enumerate(q.applied):
-                if statusentry.node in rootnodes:
-                    # if one of the stripped roots is an applied
-                    # patch, only part of the queue is stripped
-                    start = i
-                    break
-            del q.applied[start:end]
-            q.savedirty()
-
-    revs = sorted(rootnodes)
-    if update and opts.get('keep'):
-        wlock = repo.wlock()
-        try:
-            urev = repo.mq.qparents(repo, revs[0])
-            uctx = repo[urev]
-
-            # only reset the dirstate for files that would actually change
-            # between the working context and uctx
-            descendantrevs = repo.revs("%s::." % uctx.rev())
-            changedfiles = []
-            for rev in descendantrevs:
-                # blindly reset the files, regardless of what actually changed
-                changedfiles.extend(repo[rev].files())
-
-            # reset files that only changed in the dirstate too
-            dirstate = repo.dirstate
-            dirchanges = [f for f in dirstate if dirstate[f] != 'n']
-            changedfiles.extend(dirchanges)
-
-            repo.dirstate.rebuild(urev, uctx.manifest(), changedfiles)
-            repo.dirstate.write()
-            update = False
-        finally:
-            wlock.release()
-
-    if opts.get('bookmark'):
-        if mark == repo._bookmarkcurrent:
-            bookmarks.setcurrent(repo, None)
-        del marks[mark]
-        marks.write()
-        ui.write(_("bookmark '%s' deleted\n") % mark)
-
-    repo.mq.strip(repo, revs, backup=backup, update=update,
-                  force=opts.get('force'))
-
-    return 0
 
 @command("qselect",
          [('n', 'none', None, _('disable all guards')),
@@ -3420,7 +3263,7 @@ def reposetup(ui, repo):
             return queue(self.ui, self.baseui, self.path)
 
         def abortifwdirpatched(self, errmsg, force=False):
-            if self.mq.applied and not force:
+            if self.mq.applied and self.mq.checkapplied and not force:
                 parents = self.dirstate.parents()
                 patches = [s.node for s in self.mq.applied]
                 if parents[0] in patches or parents[1] in patches:
@@ -3436,7 +3279,7 @@ def reposetup(ui, repo):
                                               editor, extra)
 
         def checkpush(self, force, revs):
-            if self.mq.applied and not force:
+            if self.mq.applied and self.mq.checkapplied and not force:
                 outapplied = [e.node for e in self.mq.applied]
                 if revs:
                     # Assume applied patches have no non-patch descendants and

@@ -38,24 +38,40 @@ except TypeError: # no level argument
 else:
     _import = _origimport
 
+def _hgextimport(importfunc, name, globals, *args):
+    try:
+        return importfunc(name, globals, *args)
+    except ImportError:
+        if not globals:
+            raise
+        # extensions are loaded with "hgext_" prefix
+        hgextname = 'hgext_%s' % name
+        nameroot = hgextname.split('.', 1)[0]
+        contextroot = globals.get('__name__', '').split('.', 1)[0]
+        if nameroot != contextroot:
+            raise
+        # retry to import with "hgext_" prefix
+        return importfunc(hgextname, globals, *args)
+
 class _demandmod(object):
     """module demand-loader and proxy"""
-    def __init__(self, name, globals, locals):
+    def __init__(self, name, globals, locals, level=-1):
         if '.' in name:
             head, rest = name.split('.', 1)
             after = [rest]
         else:
             head = name
             after = []
-        object.__setattr__(self, "_data", (head, globals, locals, after))
+        object.__setattr__(self, "_data",
+                           (head, globals, locals, after, level))
         object.__setattr__(self, "_module", None)
     def _extend(self, name):
         """add to the list of submodules to load"""
         self._data[3].append(name)
     def _load(self):
         if not self._module:
-            head, globals, locals, after = self._data
-            mod = _origimport(head, globals, locals)
+            head, globals, locals, after, level = self._data
+            mod = _hgextimport(_import, head, globals, locals, None, level)
             # load submodules
             def subload(mod, p):
                 h, t = p, None
@@ -92,7 +108,7 @@ class _demandmod(object):
 def _demandimport(name, globals=None, locals=None, fromlist=None, level=-1):
     if not locals or name in ignore or fromlist == ('*',):
         # these cases we can't really delay
-        return _import(name, globals, locals, fromlist, level)
+        return _hgextimport(_import, name, globals, locals, fromlist, level)
     elif not fromlist:
         # import a [as b]
         if '.' in name: # a.b
@@ -105,13 +121,13 @@ def _demandimport(name, globals=None, locals=None, fromlist=None, level=-1):
                 if isinstance(locals[base], _demandmod):
                     locals[base]._extend(rest)
                 return locals[base]
-        return _demandmod(name, globals, locals)
+        return _demandmod(name, globals, locals, level)
     else:
         if level != -1:
             # from . import b,c,d or from .a import b,c,d
             return _origimport(name, globals, locals, fromlist, level)
         # from a import b,c,d
-        mod = _origimport(name, globals, locals)
+        mod = _hgextimport(_origimport, name, globals, locals)
         # recurse down the module chain
         for comp in name.split('.')[1:]:
             if getattr(mod, comp, nothing) is nothing:
