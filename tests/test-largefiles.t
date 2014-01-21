@@ -977,7 +977,7 @@ rebased or not.
   M sub2/large6
   saved backup bundle to $TESTTMP/d/.hg/strip-backup/f574fb32bb45-backup.hg (glob)
   0 largefiles cached
-  nothing to rebase
+  nothing to rebase - working directory parent is also destination
   $ [ -f .hg/largefiles/e166e74c7303192238d60af5a9c4ce9bef0b7928 ]
   $ hg log --template '{rev}:{node|short}  {desc|firstline}\n'
   9:598410d3eb9a  modify normal file largefile in repo d
@@ -1374,9 +1374,10 @@ correctly.
   (run 'hg heads' to see heads, 'hg merge' to merge)
   2 largefiles cached
   $ hg merge
-  merging sub/large4
   largefile sub/large4 has a merge conflict
-  keep (l)ocal or take (o)ther? l
+  ancestor was 971fb41e78fea4f8e0ba5244784239371cb00591
+  keep (l)ocal d846f26643bfa8ec210be40cc93cc6b7ff1128ea or
+  take (o)ther e166e74c7303192238d60af5a9c4ce9bef0b7928? l
   3 files updated, 1 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
   getting changed largefiles
@@ -2256,7 +2257,7 @@ enabling largefiles extension.
   > largefiles=
   > EOF
   $ hg -R enabledlocally root
-  $TESTTMP/individualenabling/enabledlocally
+  $TESTTMP/individualenabling/enabledlocally (glob)
   $ hg -R notenabledlocally root
   abort: unknown repository format: requires features 'largefiles' (upgrade Mercurial)!
   [255]

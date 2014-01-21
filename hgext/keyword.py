@@ -84,7 +84,7 @@ like CVS' $Log$, are not supported. A keyword template map "Log =
 
 from mercurial import commands, context, cmdutil, dispatch, filelog, extensions
 from mercurial import localrepo, match, patch, templatefilters, templater, util
-from mercurial import scmutil
+from mercurial import scmutil, pathutil
 from mercurial.hgweb import webcommands
 from mercurial.i18n import _
 import os, re, shutil, tempfile
@@ -439,12 +439,16 @@ def demo(ui, repo, *args, **opts):
     repo[None].add([fn])
     ui.note(_('\nkeywords written to %s:\n') % fn)
     ui.note(keywords)
-    repo.dirstate.setbranch('demobranch')
+    wlock = repo.wlock()
+    try:
+        repo.dirstate.setbranch('demobranch')
+    finally:
+        wlock.release()
     for name, cmd in ui.configitems('hooks'):
         if name.split('.', 1)[0].find('commit') > -1:
             repo.ui.setconfig('hooks', name, '')
     msg = _('hg keyword configuration and expansion example')
-    ui.note("hg ci -m '%s'\n" % msg) # check-code-ignore
+    ui.note(("hg ci -m '%s'\n" % msg))
     repo.commit(text=msg)
     ui.status(_('\n\tkeywords expanded\n'))
     ui.write(repo.wread(fn))
@@ -673,7 +677,7 @@ def reposetup(ui, repo):
                 expansion. '''
                 source = repo.dirstate.copied(dest)
                 if 'l' in wctx.flags(source):
-                    source = scmutil.canonpath(repo.root, cwd,
+                    source = pathutil.canonpath(repo.root, cwd,
                                                os.path.realpath(source))
                 return kwt.match(source)
 

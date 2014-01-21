@@ -34,8 +34,7 @@
 
 Initial repo state:
 
-  $ hg --config 'extensions.graphlog=' \
-  >    glog --template '{rev}:{node|short} {parents} {branches}\n'
+  $ hg log -G --template '{rev}:{node|short} {parents} {branches}\n'
   @  5:ff252e8273df  b1
   |
   o  4:d047485b3896 0:60829823a42a  b1
@@ -230,6 +229,17 @@ the bookmark (issue4015)
   $ hg bookmarks
    * bm                        5:ff252e8273df
 
+Test that 4 is detected as the no-argument destination from 3 and also moves
+the bookmark with it
+  $ hg up --quiet 0          # we should be able to update to 3 directly
+  $ hg up --quiet --hidden 3 # but not implemented yet.
+  $ hg book -f bm
+  $ hg up
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  updating bookmark bm
+  $ hg book
+   * bm                        4:d047485b3896
+
 Test that 5 is detected as a valid destination from 1
   $ hg up --quiet 0          # we should be able to update to 3 directly
   $ hg up --quiet --hidden 3 # but not implemented yet.
@@ -243,3 +253,14 @@ Test that 5 is not detected as a valid destination from 2
   abort: uncommitted changes
   (commit or update --clean to discard changes)
   [255]
+
+Test that we don't crash when updating from a pruned changeset (i.e. has no
+successors). Behavior should probably be that we update to the first
+non-obsolete parent but that will be decided later.
+  $ hg id --debug -r 2
+  bd10386d478cd5a9faf2e604114c8e6da62d3889
+  $ hg up --quiet 0
+  $ hg up --quiet 2
+  $ hg debugobsolete bd10386d478cd5a9faf2e604114c8e6da62d3889
+  $ hg up
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved

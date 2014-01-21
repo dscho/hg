@@ -18,9 +18,10 @@ class fakerepo(object):
     def sjoin(self, p):
         return p
 
-    @filecache('x')
+    @filecache('x', 'y')
     def cached(self):
         print 'creating'
+        return 'string from function'
 
     def invalidate(self):
         for k in self._filecache:
@@ -30,17 +31,20 @@ class fakerepo(object):
                 pass
 
 def basic(repo):
-    # file doesn't exist, calls function
+    print "* neither file exists"
+    # calls function
     repo.cached
 
     repo.invalidate()
-    # file still doesn't exist, uses cache
+    print "* neither file still exists"
+    # uses cache
     repo.cached
 
     # create empty file
     f = open('x', 'w')
     f.close()
     repo.invalidate()
+    print "* empty file x created"
     # should recreate the object
     repo.cached
 
@@ -48,11 +52,13 @@ def basic(repo):
     f.write('a')
     f.close()
     repo.invalidate()
+    print "* file x changed size"
     # should recreate the object
     repo.cached
 
     repo.invalidate()
-    # stats file again, nothing changed, reuses object
+    print "* nothing changed with either file"
+    # stats file again, reuses object
     repo.cached
 
     # atomic replace file, size doesn't change
@@ -63,6 +69,42 @@ def basic(repo):
     f.close()
 
     repo.invalidate()
+    print "* file x changed inode"
+    repo.cached
+
+    # create empty file y
+    f = open('y', 'w')
+    f.close()
+    repo.invalidate()
+    print "* empty file y created"
+    # should recreate the object
+    repo.cached
+
+    f = open('y', 'w')
+    f.write('A')
+    f.close()
+    repo.invalidate()
+    print "* file y changed size"
+    # should recreate the object
+    repo.cached
+
+    f = scmutil.opener('.')('y', 'w', atomictemp=True)
+    f.write('B')
+    f.close()
+
+    repo.invalidate()
+    print "* file y changed inode"
+    repo.cached
+
+    f = scmutil.opener('.')('x', 'w', atomictemp=True)
+    f.write('c')
+    f.close()
+    f = scmutil.opener('.')('y', 'w', atomictemp=True)
+    f.write('C')
+    f.close()
+
+    repo.invalidate()
+    print "* both files changed inode"
     repo.cached
 
 def fakeuncacheable():
@@ -76,10 +118,11 @@ def fakeuncacheable():
     origcacheable = extensions.wrapfunction(util.cachestat, 'cacheable',
                                             wrapcacheable)
 
-    try:
-        os.remove('x')
-    except OSError:
-        pass
+    for fn in ['x', 'y']:
+        try:
+            os.remove(fn)
+        except OSError:
+            pass
 
     basic(fakerepo())
 
@@ -103,13 +146,28 @@ def test_filecache_synced():
 
 def setbeforeget(repo):
     os.remove('x')
-    repo.cached = 0
+    os.remove('y')
+    repo.cached = 'string set externally'
     repo.invalidate()
+    print "* neither file exists"
     print repo.cached
     repo.invalidate()
     f = open('x', 'w')
     f.write('a')
     f.close()
+    print "* file x created"
+    print repo.cached
+
+    repo.cached = 'string 2 set externally'
+    repo.invalidate()
+    print "* string set externally again"
+    print repo.cached
+
+    repo.invalidate()
+    f = open('y', 'w')
+    f.write('b')
+    f.close()
+    print "* file y created"
     print repo.cached
 
 print 'basic:'

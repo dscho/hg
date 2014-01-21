@@ -17,7 +17,8 @@ from hgweb import server as hgweb_server
 import merge as mergemod
 import minirst, revset, fileset
 import dagparser, context, simplemerge, graphmod
-import random, setdiscovery, treediscovery, dagutil, pvec, localrepo
+import random
+import setdiscovery, treediscovery, dagutil, pvec, localrepo
 import phases, obsolete
 
 table = {}
@@ -460,16 +461,29 @@ def backout(ui, repo, node=None, rev=None, **opts):
     try:
         branch = repo.dirstate.branch()
         bheads = repo.branchheads(branch)
-        hg.clean(repo, node, show_stats=False)
-        repo.dirstate.setbranch(branch)
         rctx = scmutil.revsingle(repo, hex(parent))
-        cmdutil.revert(ui, repo, rctx, repo.dirstate.parents())
         if not opts.get('merge') and op1 != node:
             try:
                 ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
-                return hg.update(repo, op1)
+                stats = mergemod.update(repo, parent, True, True, False,
+                                        node, False)
+                repo.setparents(op1, op2)
+                hg._showstats(repo, stats)
+                if stats[3]:
+                    repo.ui.status(_("use 'hg resolve' to retry unresolved "
+                                     "file merges\n"))
+                else:
+                    msg = _("changeset %s backed out, "
+                            "don't forget to commit.\n")
+                    ui.status(msg % short(node))
+                return stats[3] > 0
             finally:
                 ui.setconfig('ui', 'forcemerge', '')
+        else:
+            hg.clean(repo, node, show_stats=False)
+            repo.dirstate.setbranch(branch)
+            cmdutil.revert(ui, repo, rctx, repo.dirstate.parents())
+
 
         e = cmdutil.commiteditor
         if not opts['message'] and not opts['logfile']:
@@ -666,12 +680,13 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
 
     if command:
         changesets = 1
-        try:
-            node = state['current'][0]
-        except LookupError:
-            if noupdate:
+        if noupdate:
+            try:
+                node = state['current'][0]
+            except LookupError:
                 raise util.Abort(_('current bisect revision is unknown - '
                                    'start a new bisect to fix'))
+        else:
             node, p2 = repo.dirstate.parents()
             if p2 != nullid:
                 raise util.Abort(_('current bisect revision is a merge'))
@@ -700,7 +715,7 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
                 ui.status(_('changeset %d:%s: %s\n') % (ctx, ctx, transition))
                 check_state(state, interactive=False)
                 # bisect
-                nodes, changesets, good = hbisect.bisect(repo.changelog, state)
+                nodes, changesets, bgood = hbisect.bisect(repo.changelog, state)
                 # update to next check
                 node = nodes[0]
                 if not noupdate:
@@ -709,7 +724,7 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
         finally:
             state['current'] = [node]
             hbisect.save_state(repo, state)
-        print_result(nodes, good)
+        print_result(nodes, bgood)
         return
 
     # update state
@@ -806,10 +821,6 @@ def bookmark(ui, repo, *names, **opts):
     rename = opts.get('rename')
     inactive = opts.get('inactive')
 
-    hexfn = ui.debugflag and hex or short
-    marks = repo._bookmarks
-    cur   = repo.changectx('.').node()
-
     def checkformat(mark):
         mark = mark.strip()
         if not mark:
@@ -818,7 +829,7 @@ def bookmark(ui, repo, *names, **opts):
         scmutil.checknewlabel(repo, mark, 'bookmark')
         return mark
 
-    def checkconflict(repo, mark, force=False, target=None):
+    def checkconflict(repo, mark, cur, force=False, target=None):
         if mark in marks and not force:
             if target:
                 if marks[mark] == target and target == cur:
@@ -836,12 +847,10 @@ def bookmark(ui, repo, *names, **opts):
                     bookmarks.deletedivergent(repo, [target], mark)
                     return
 
-                # consider successor changesets as well
-                foreground = obsolete.foreground(repo, [marks[mark]])
                 deletefrom = [b for b in divs
                               if repo[b].rev() in anc or b == target]
                 bookmarks.deletedivergent(repo, deletefrom, mark)
-                if bmctx.rev() in anc or target in foreground:
+                if bookmarks.validdest(repo, bmctx, repo[target]):
                     ui.status(_("moving bookmark '%s' forward from %s\n") %
                               (mark, short(bmctx.node())))
                     return
@@ -861,75 +870,84 @@ def bookmark(ui, repo, *names, **opts):
     if not names and (delete or rev):
         raise util.Abort(_("bookmark name required"))
 
-    if delete:
-        for mark in names:
-            if mark not in marks:
-                raise util.Abort(_("bookmark '%s' does not exist") % mark)
-            if mark == repo._bookmarkcurrent:
-                bookmarks.setcurrent(repo, None)
-            del marks[mark]
-        marks.write()
+    if delete or rename or names or inactive:
+        wlock = repo.wlock()
+        try:
+            cur = repo.changectx('.').node()
+            marks = repo._bookmarks
+            if delete:
+                for mark in names:
+                    if mark not in marks:
+                        raise util.Abort(_("bookmark '%s' does not exist") %
+                                         mark)
+                    if mark == repo._bookmarkcurrent:
+                        bookmarks.unsetcurrent(repo)
+                    del marks[mark]
+                marks.write()
 
-    elif rename:
-        if not names:
-            raise util.Abort(_("new bookmark name required"))
-        elif len(names) > 1:
-            raise util.Abort(_("only one new bookmark name allowed"))
-        mark = checkformat(names[0])
-        if rename not in marks:
-            raise util.Abort(_("bookmark '%s' does not exist") % rename)
-        checkconflict(repo, mark, force)
-        marks[mark] = marks[rename]
-        if repo._bookmarkcurrent == rename and not inactive:
-            bookmarks.setcurrent(repo, mark)
-        del marks[rename]
-        marks.write()
+            elif rename:
+                if not names:
+                    raise util.Abort(_("new bookmark name required"))
+                elif len(names) > 1:
+                    raise util.Abort(_("only one new bookmark name allowed"))
+                mark = checkformat(names[0])
+                if rename not in marks:
+                    raise util.Abort(_("bookmark '%s' does not exist") % rename)
+                checkconflict(repo, mark, cur, force)
+                marks[mark] = marks[rename]
+                if repo._bookmarkcurrent == rename and not inactive:
+                    bookmarks.setcurrent(repo, mark)
+                del marks[rename]
+                marks.write()
 
-    elif names:
-        newact = None
-        for mark in names:
-            mark = checkformat(mark)
-            if newact is None:
-                newact = mark
-            if inactive and mark == repo._bookmarkcurrent:
-                bookmarks.setcurrent(repo, None)
-                return
-            tgt = cur
-            if rev:
-                tgt = scmutil.revsingle(repo, rev).node()
-            checkconflict(repo, mark, force, tgt)
-            marks[mark] = tgt
-        if not inactive and cur == marks[newact] and not rev:
-            bookmarks.setcurrent(repo, newact)
-        elif cur != tgt and newact == repo._bookmarkcurrent:
-            bookmarks.setcurrent(repo, None)
-        marks.write()
+            elif names:
+                newact = None
+                for mark in names:
+                    mark = checkformat(mark)
+                    if newact is None:
+                        newact = mark
+                    if inactive and mark == repo._bookmarkcurrent:
+                        bookmarks.unsetcurrent(repo)
+                        return
+                    tgt = cur
+                    if rev:
+                        tgt = scmutil.revsingle(repo, rev).node()
+                    checkconflict(repo, mark, cur, force, tgt)
+                    marks[mark] = tgt
+                if not inactive and cur == marks[newact] and not rev:
+                    bookmarks.setcurrent(repo, newact)
+                elif cur != tgt and newact == repo._bookmarkcurrent:
+                    bookmarks.unsetcurrent(repo)
+                marks.write()
 
-    # Same message whether trying to deactivate the current bookmark (-i
-    # with no NAME) or listing bookmarks
-    elif len(marks) == 0:
-        ui.status(_("no bookmarks set\n"))
-
-    elif inactive:
-        if not repo._bookmarkcurrent:
-            ui.status(_("no active bookmark\n"))
-        else:
-            bookmarks.setcurrent(repo, None)
-
+            elif inactive:
+                if len(marks) == 0:
+                    ui.status(_("no bookmarks set\n"))
+                elif not repo._bookmarkcurrent:
+                    ui.status(_("no active bookmark\n"))
+                else:
+                    bookmarks.unsetcurrent(repo)
+        finally:
+            wlock.release()
     else: # show bookmarks
-        for bmark, n in sorted(marks.iteritems()):
-            current = repo._bookmarkcurrent
-            if bmark == current:
-                prefix, label = '*', 'bookmarks.current'
-            else:
-                prefix, label = ' ', ''
+        hexfn = ui.debugflag and hex or short
+        marks = repo._bookmarks
+        if len(marks) == 0:
+            ui.status(_("no bookmarks set\n"))
+        else:
+            for bmark, n in sorted(marks.iteritems()):
+                current = repo._bookmarkcurrent
+                if bmark == current:
+                    prefix, label = '*', 'bookmarks.current'
+                else:
+                    prefix, label = ' ', ''
 
-            if ui.quiet:
-                ui.write("%s\n" % bmark, label=label)
-            else:
-                ui.write(" %s %-25s %d:%s\n" % (
-                    prefix, bmark, repo.changelog.rev(n), hexfn(n)),
-                    label=label)
+                if ui.quiet:
+                    ui.write("%s\n" % bmark, label=label)
+                else:
+                    ui.write(" %s %-25s %d:%s\n" % (
+                        prefix, bmark, repo.changelog.rev(n), hexfn(n)),
+                        label=label)
 
 @command('branch',
     [('f', 'force', None,
@@ -1012,23 +1030,15 @@ def branches(ui, repo, active=False, closed=False):
 
     hexfunc = ui.debugflag and hex or short
 
-    activebranches = set([repo[n].branch() for n in repo.heads()])
+    allheads = set(repo.heads())
     branches = []
-    for tag, heads in repo.branchmap().iteritems():
-        for h in reversed(heads):
-            ctx = repo[h]
-            isopen = not ctx.closesbranch()
-            if isopen:
-                tip = ctx
-                break
-        else:
-            tip = repo[heads[-1]]
-        isactive = tag in activebranches and isopen
-        branches.append((tip, isactive, isopen))
-    branches.sort(key=lambda i: (i[1], i[0].rev(), i[0].branch(), i[2]),
+    for tag, heads, tip, isclosed in repo.branchmap().iterbranches():
+        isactive = not isclosed and bool(set(heads) & allheads)
+        branches.append((tag, repo[tip], isactive, not isclosed))
+    branches.sort(key=lambda i: (i[2], i[1].rev(), i[0], i[3]),
                   reverse=True)
 
-    for ctx, isactive, isopen in branches:
+    for tag, ctx, isactive, isopen in branches:
         if (not active) or isactive:
             if isactive:
                 label = 'branches.active'
@@ -1041,16 +1051,16 @@ def branches(ui, repo, active=False, closed=False):
             else:
                 label = 'branches.inactive'
                 notice = _(' (inactive)')
-            if ctx.branch() == repo.dirstate.branch():
+            if tag == repo.dirstate.branch():
                 label = 'branches.current'
-            rev = str(ctx.rev()).rjust(31 - encoding.colwidth(ctx.branch()))
+            rev = str(ctx.rev()).rjust(31 - encoding.colwidth(tag))
             rev = ui.label('%s:%s' % (rev, hexfunc(ctx.node())),
                            'log.changeset changeset.%s' % ctx.phasestr())
-            tag = ui.label(ctx.branch(), label)
+            labeledtag = ui.label(tag, label)
             if ui.quiet:
-                ui.write("%s\n" % tag)
+                ui.write("%s\n" % labeledtag)
             else:
-                ui.write("%s %s%s\n" % (tag, rev, notice))
+                ui.write("%s %s%s\n" % (labeledtag, rev, notice))
 
 @command('bundle',
     [('f', 'force', None, _('run even when the destination is unrelated')),
@@ -1158,14 +1168,28 @@ def cat(ui, repo, file1, *pats, **opts):
     ctx = scmutil.revsingle(repo, opts.get('rev'))
     err = 1
     m = scmutil.match(ctx, (file1,) + pats, opts)
-    for abs in ctx.walk(m):
+
+    def write(path):
         fp = cmdutil.makefileobj(repo, opts.get('output'), ctx.node(),
-                                 pathname=abs)
-        data = ctx[abs].data()
+                                 pathname=path)
+        data = ctx[path].data()
         if opts.get('decode'):
-            data = repo.wwritedata(abs, data)
+            data = repo.wwritedata(path, data)
         fp.write(data)
         fp.close()
+
+    # Automation often uses hg cat on single files, so special case it
+    # for performance to avoid the cost of parsing the manifest.
+    if len(m.files()) == 1 and not m.anypats():
+        file = m.files()[0]
+        mf = repo.manifest
+        mfnode = ctx._changeset[0]
+        if mf.find(mfnode, file)[0]:
+            write(file)
+            return 0
+
+    for abs in ctx.walk(m):
+        write(abs)
         err = 0
     return err
 
@@ -2142,11 +2166,8 @@ def debuglabelcomplete(ui, repo, *args):
     labels = set()
     labels.update(t[0] for t in repo.tagslist())
     labels.update(repo._bookmarks.keys())
-    for heads in repo.branchmap().itervalues():
-        for h in heads:
-            ctx = repo[h]
-            if not ctx.closesbranch():
-                labels.add(ctx.branch())
+    labels.update(tag for (tag, heads, tip, closed)
+                  in repo.branchmap().iterbranches() if not closed)
     completions = set()
     if not args:
         args = ['']
@@ -2244,7 +2265,7 @@ def debugpathcomplete(ui, repo, *specs, **opts):
                     continue
                 s = f.find(os.sep, speclen)
                 if s >= 0:
-                    adddir(f[:s + 1])
+                    adddir(f[:s])
                 else:
                     addfile(f)
         return files, dirs
@@ -2265,10 +2286,6 @@ def debugpathcomplete(ui, repo, *specs, **opts):
         f, d = complete(spec, acceptable or 'nmar')
         files.update(f)
         dirs.update(d)
-    if not files and len(dirs) == 1:
-        # force the shell to consider a completion that matches one
-        # directory and zero files to be ambiguous
-        dirs.add(iter(dirs).next() + '.')
     files.update(dirs)
     ui.write('\n'.join(repo.pathto(p, cwd) for p in sorted(files)))
     ui.write('\n')
@@ -3762,12 +3779,12 @@ def import_(ui, repo, patch1=None, *patches, **opts):
                                         files, eolmode=None)
                     except patch.PatchError, e:
                         raise util.Abort(str(e))
-                    memctx = patch.makememctx(repo, (p1.node(), p2.node()),
-                                              message,
-                                              opts.get('user') or user,
-                                              opts.get('date') or date,
-                                              branch, files, store,
-                                              editor=cmdutil.commiteditor)
+                    memctx = context.makememctx(repo, (p1.node(), p2.node()),
+                                                message,
+                                                opts.get('user') or user,
+                                                opts.get('date') or date,
+                                                branch, files, store,
+                                                editor=cmdutil.commiteditor)
                     repo.savecommitmessage(memctx.description())
                     n = memctx.commit()
                 finally:
@@ -4680,6 +4697,7 @@ def push(ui, repo, dest=None, **opts):
     """
 
     if opts.get('bookmark'):
+        ui.setconfig('bookmarks', 'pushing', opts['bookmark'])
         for b in opts['bookmark']:
             # translate -B options to -r so changesets get pushed
             if b in repo._bookmarks:
@@ -4713,25 +4731,11 @@ def push(ui, repo, dest=None, **opts):
     result = not result
 
     if opts.get('bookmark'):
-        rb = other.listkeys('bookmarks')
-        for b in opts['bookmark']:
-            # explicit push overrides remote bookmark if any
-            if b in repo._bookmarks:
-                ui.status(_("exporting bookmark %s\n") % b)
-                new = repo[b].hex()
-            elif b in rb:
-                ui.status(_("deleting remote bookmark %s\n") % b)
-                new = '' # delete
-            else:
-                ui.warn(_('bookmark %s does not exist on the local '
-                          'or remote repository!\n') % b)
-                return 2
-            old = rb.get(b, '')
-            r = other.pushkey('bookmarks', b, old, new)
-            if not r:
-                ui.warn(_('updating bookmark %s failed!\n') % b)
-                if not result:
-                    result = 2
+        bresult = bookmarks.pushtoremote(ui, repo, other, opts['bookmark'])
+        if bresult == 2:
+            return 2
+        if not result and bresult:
+            result = 2
 
     return result
 
@@ -5915,7 +5919,7 @@ def version_(ui):
              % util.version())
     ui.status(_(
         "(see http://mercurial.selenic.com for more information)\n"
-        "\nCopyright (C) 2005-2013 Matt Mackall and others\n"
+        "\nCopyright (C) 2005-2014 Matt Mackall and others\n"
         "This is free software; see the source for copying conditions. "
         "There is NO\nwarranty; "
         "not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"

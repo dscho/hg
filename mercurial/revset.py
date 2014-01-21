@@ -12,6 +12,7 @@ import match as matchmod
 from i18n import _
 import encoding
 import obsolete as obsmod
+import pathutil
 import repoview
 
 def _revancestors(repo, revs, followfirst):
@@ -269,6 +270,10 @@ def func(repo, subset, a, b):
 def adds(repo, subset, x):
     """``adds(pattern)``
     Changesets that add a file matching pattern.
+
+    The pattern without explicit kind like ``glob:`` is expected to be
+    relative to the current directory and match against a file or a
+    directory.
     """
     # i18n: "adds" is a keyword
     pat = getstring(x, _("adds requires a pattern"))
@@ -525,16 +530,21 @@ def contains(repo, subset, x):
     """``contains(pattern)``
     Revision contains a file matching pattern. See :hg:`help patterns`
     for information about file patterns.
+
+    The pattern without explicit kind like ``glob:`` is expected to be
+    relative to the current directory and match against a file exactly
+    for efficiency.
     """
     # i18n: "contains" is a keyword
     pat = getstring(x, _("contains requires a pattern"))
-    m = None
     s = []
     if not matchmod.patkind(pat):
+        pat = pathutil.canonpath(repo.root, repo.getcwd(), pat)
         for r in subset:
             if pat in repo[r]:
                 s.append(r)
     else:
+        m = None
         for r in subset:
             c = repo[r]
             if not m or matchmod.patkind(pat) == 'set':
@@ -711,20 +721,23 @@ def filelog(repo, subset, x):
     For performance reasons, ``filelog()`` does not show every changeset
     that affects the requested file(s). See :hg:`help log` for details. For
     a slower, more accurate result, use ``file()``.
+
+    The pattern without explicit kind like ``glob:`` is expected to be
+    relative to the current directory and match against a file exactly
+    for efficiency.
     """
 
     # i18n: "filelog" is a keyword
     pat = getstring(x, _("filelog requires a pattern"))
-    m = matchmod.match(repo.root, repo.getcwd(), [pat], default='relpath',
-                       ctx=repo[None])
     s = set()
 
     if not matchmod.patkind(pat):
-        for f in m.files():
-            fl = repo.file(f)
-            for fr in fl:
-                s.add(fl.linkrev(fr))
+        f = pathutil.canonpath(repo.root, repo.getcwd(), pat)
+        fl = repo.file(f)
+        for fr in fl:
+            s.add(fl.linkrev(fr))
     else:
+        m = matchmod.match(repo.root, repo.getcwd(), [pat], ctx=repo[None])
         for f in repo[None]:
             if m(f):
                 fl = repo.file(f)
@@ -867,6 +880,8 @@ def hasfile(repo, subset, x):
 
     For a faster but less accurate result, consider using ``filelog()``
     instead.
+
+    This predicate uses ``glob:`` as the default kind of pattern.
     """
     # i18n: "file" is a keyword
     pat = getstring(x, _("file requires a pattern"))
@@ -1002,6 +1017,10 @@ def minrev(repo, subset, x):
 def modifies(repo, subset, x):
     """``modifies(pattern)``
     Changesets modifying files matched by pattern.
+
+    The pattern without explicit kind like ``glob:`` is expected to be
+    relative to the current directory and match against a file or a
+    directory.
     """
     # i18n: "modifies" is a keyword
     pat = getstring(x, _("modifies requires a pattern"))
@@ -1215,6 +1234,10 @@ def remote(repo, subset, x):
 def removes(repo, subset, x):
     """``removes(pattern)``
     Changesets which remove files matching pattern.
+
+    The pattern without explicit kind like ``glob:`` is expected to be
+    relative to the current directory and match against a file or a
+    directory.
     """
     # i18n: "removes" is a keyword
     pat = getstring(x, _("removes requires a pattern"))

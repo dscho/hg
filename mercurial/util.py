@@ -14,9 +14,9 @@ hide platform-specific details from the core.
 """
 
 from i18n import _
-import error, osutil, encoding, collections
+import error, osutil, encoding
 import errno, re, shutil, sys, tempfile, traceback
-import os, time, datetime, calendar, textwrap, signal
+import os, time, datetime, calendar, textwrap, signal, collections
 import imp, socket, urllib
 
 if os.name == 'nt':
@@ -52,7 +52,6 @@ pconvert = platform.pconvert
 popen = platform.popen
 posixfile = platform.posixfile
 quotecommand = platform.quotecommand
-realpath = platform.realpath
 rename = platform.rename
 samedevice = platform.samedevice
 samefile = platform.samefile
@@ -1033,9 +1032,10 @@ def datestr(date=None, format='%a %b %d %H:%M:%S %Y %1%2'):
     if t < 0:
         t = 0   # time.gmtime(lt) fails on Windows for lt < -43200
         tz = 0
-    if "%1" in format or "%2" in format:
+    if "%1" in format or "%2" in format or "%z" in format:
         sign = (tz > 0) and "-" or "+"
         minutes = abs(tz) // 60
+        format = format.replace("%z", "%1%2")
         format = format.replace("%1", "%c%02d" % (sign, minutes // 60))
         format = format.replace("%2", "%02d" % (minutes % 60))
     try:
@@ -1983,3 +1983,20 @@ class hooks(object):
         self._hooks.sort(key=lambda x: x[0])
         for source, hook in self._hooks:
             hook(*args)
+
+def debugstacktrace(msg='stacktrace', skip=0, f=sys.stderr):
+    '''Writes a message to f (stderr) with a nicely formatted stacktrace.
+    Skips the 'skip' last entries.
+    It can be used everywhere and do intentionally not require an ui object.
+    Not be used in production code but very convenient while developing.
+    '''
+    f.write('%s at:\n' % msg)
+    entries = [('%s:%s' % (fn, ln), func)
+        for fn, ln, func, _text in traceback.extract_stack()[:-skip - 1]]
+    if entries:
+        fnmax = max(len(entry[0]) for entry in entries)
+        for fnln, func in entries:
+            f.write(' %-*s in %s\n' % (fnmax, fnln, func))
+
+# convenient shortcut
+dst = debugstacktrace

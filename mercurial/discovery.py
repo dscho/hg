@@ -34,9 +34,9 @@ def findcommonincoming(repo, remote, heads=None, force=False):
 
     if heads:
         allknown = True
-        nm = repo.changelog.nodemap
+        knownnode = repo.changelog.hasnode # no nodemap until it is filtered
         for h in heads:
-            if nm.get(h) is None:
+            if not knownnode(h):
                 allknown = False
                 break
         if allknown:
@@ -172,8 +172,9 @@ def _headssummary(repo, remote, outgoing):
         remotebranches.add(branch)
         known = []
         unsynced = []
+        knownnode = cl.hasnode # do not use nodemap until it is filtered
         for h in heads:
-            if h in cl.nodemap:
+            if knownnode(h):
                 known.append(h)
             else:
                 unsynced.append(h)
@@ -204,11 +205,11 @@ def _headssummary(repo, remote, outgoing):
 def _oldheadssummary(repo, remoteheads, outgoing, inc=False):
     """Compute branchmapsummary for repo without branchmap support"""
 
-    cl = repo.changelog
     # 1-4b. old servers: Check for new topological heads.
     # Construct {old,new}map with branch = None (topological branch).
     # (code based on update)
-    oldheads = set(h for h in remoteheads if h in cl.nodemap)
+    knownnode = repo.changelog.hasnode # no nodemap until it is filtered
+    oldheads = set(h for h in remoteheads if knownnode(h))
     # all nodes in outgoing.missing are children of either:
     # - an element of oldheads
     # - another element of outgoing.missing
@@ -219,7 +220,8 @@ def _oldheadssummary(repo, remoteheads, outgoing, inc=False):
     unsynced = inc and set([None]) or set()
     return {None: (oldheads, newheads, unsynced)}
 
-def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False):
+def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False,
+               newbookmarks=[]):
     """Check that a push won't add any outgoing head
 
     raise Abort error and display ui message as needed.
@@ -259,6 +261,9 @@ def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False):
             lctx, rctx = repo[bm], repo[rnode]
             if bookmarks.validdest(repo, rctx, lctx):
                 bookmarkedheads.add(lctx.node())
+        else:
+            if bm in newbookmarks:
+                bookmarkedheads.add(repo[bm].node())
 
     # 3. Check for new heads.
     # If there are more heads after the push than before, a suitable
@@ -313,8 +318,8 @@ def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False):
             if 1 < len(newhs):
                 dhs = list(newhs)
                 if error is None:
-                    error = (_("push creates multiple headed new branch '%s'")
-                             % (branch))
+                    error = (_("push creates new branch '%s' "
+                               "with multiple heads") % (branch))
                     hint = _("merge or"
                              " see \"hg help push\" for details about"
                              " pushing new heads")
@@ -337,10 +342,12 @@ def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False):
                     hint = _("merge or"
                              " see \"hg help push\" for details about"
                              " pushing new heads")
-            if branch is not None:
-                repo.ui.note(_("new remote heads on branch '%s'\n") % branch)
+            if branch is None:
+                repo.ui.note(_("new remote heads:\n"))
+            else:
+                repo.ui.note(_("new remote heads on branch '%s':\n") % branch)
             for h in dhs:
-                repo.ui.note(_("new remote head %s\n") % short(h))
+                repo.ui.note((" %s\n") % short(h))
     if error:
         raise util.Abort(error, hint=hint)
 

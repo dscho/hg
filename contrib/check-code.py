@@ -7,6 +7,18 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+"""style and portability checker for Mercurial
+
+when a rule triggers wrong, do one of the following (prefer one from top):
+ * do the work-around the rule suggests
+ * doublecheck that it is a false match
+ * improve the rule pattern
+ * add an ignore pattern to the rule (3rd arg) which matches your good line
+   (you can append a short comment and match this, like: #re-raises, # no-py24)
+ * change the pattern to a warning and list the exception in test-check-code-hg
+ * ONLY use no--check-code for skipping entire files from external sources
+"""
+
 import re, glob, os, sys
 import keyword
 import optparse
@@ -141,17 +153,15 @@ utestpats = [
     (r'^  saved backup bundle to \$TESTTMP.*\.hg$', winglobmsg),
     (r'^  changeset .* references (corrupted|missing) \$TESTTMP/.*[^)]$',
      winglobmsg),
-    (r'^  pulling from \$TESTTMP/.*[^)]$', winglobmsg, '\$TESTTMP/unix-repo$'),
-    (r'^  reverting .*/.*[^)]$', winglobmsg, '\$TESTTMP/unix-repo$'),
-    (r'^  cloning subrepo \S+/.*[^)]$', winglobmsg, '\$TESTTMP/unix-repo$'),
-    (r'^  pushing to \$TESTTMP/.*[^)]$', winglobmsg, '\$TESTTMP/unix-repo$'),
-    (r'^  pushing subrepo \S+/\S+ to.*[^)]$', winglobmsg,
-     '\$TESTTMP/unix-repo$'),
+    (r'^  pulling from \$TESTTMP/.*[^)]$', winglobmsg,
+     '\$TESTTMP/unix-repo$'), # in test-issue1802.t which skipped on windows
+    (r'^  reverting .*/.*[^)]$', winglobmsg),
+    (r'^  cloning subrepo \S+/.*[^)]$', winglobmsg),
+    (r'^  pushing to \$TESTTMP/.*[^)]$', winglobmsg),
+    (r'^  pushing subrepo \S+/\S+ to.*[^)]$', winglobmsg),
     (r'^  moving \S+/.*[^)]$', winglobmsg),
-    (r'^  no changes made to subrepo since.*/.*[^)]$',
-     winglobmsg, '\$TESTTMP/unix-repo$'),
-    (r'^  .*: largefile \S+ not available from file:.*/.*[^)]$',
-     winglobmsg, '\$TESTTMP/unix-repo$'),
+    (r'^  no changes made to subrepo since.*/.*[^)]$', winglobmsg),
+    (r'^  .*: largefile \S+ not available from file:.*/.*[^)]$', winglobmsg),
   ],
   # warnings
   [
@@ -227,7 +237,7 @@ pypats = [
     (r'^\s*except.* as .*:', "except as not available in Python 2.4"),
     (r'^\s*os\.path\.relpath', "relpath not available in Python 2.4"),
     (r'(?<!def)\s+(any|all|format)\(',
-     "any/all/format not available in Python 2.4"),
+     "any/all/format not available in Python 2.4", 'no-py24'),
     (r'(?<!def)\s+(callable)\(',
      "callable not available in Python 3, use getattr(f, '__call__', None)"),
     (r'if\s.*\selse', "if ... else form not available in Python 2.4"),
@@ -264,7 +274,7 @@ pypats = [
     (r'[\s\(](open|file)\([^)]*\)\.read\(',
      "use util.readfile() instead"),
     (r'[\s\(](open|file)\([^)]*\)\.write\(',
-     "use util.readfile() instead"),
+     "use util.writefile() instead"),
     (r'^[\s\(]*(open(er)?|file)\([^)]*\)',
      "always assign an opened file to a variable, and close it afterwards"),
     (r'[\s\(](open|file)\([^)]*\)\.',
@@ -443,10 +453,8 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
         pre = post = fp.read()
         fp.close()
         if "no-" "check-code" in pre:
-            if debug:
-                print "Skipping %s for %s it has no-" "check-code" % (
-                       name, f)
-            break
+            print "Skipping %s it has no-" "check-code" % f
+            return "Skip" # skip checking this file
         for p, r in filters:
             post = re.sub(p, r, post)
         nerrs = len(pats[0]) # nerr elements are errors
@@ -486,12 +494,10 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
                     n += 1
                 l = prelines[n]
 
-                if "check-code" "-ignore" in l:
+                if ignore and re.search(ignore, l, re.MULTILINE):
                     if debug:
-                        print "Skipping %s for %s:%s (check-code" "-ignore)" % (
+                        print "Skipping %s for %s:%s (ignore pattern)" % (
                             name, f, n)
-                    continue
-                elif ignore and re.search(ignore, l, re.MULTILINE):
                     continue
                 bd = ""
                 if blame:

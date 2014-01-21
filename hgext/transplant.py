@@ -154,7 +154,7 @@ class transplanter(object):
                     # transplants before them fail.
                     domerge = True
                     if not hasnode(repo, node):
-                        repo.pull(source, heads=[node])
+                        repo.pull(source.peer(), heads=[node])
 
                 skipmerge = False
                 if parents[1] != revlog.nullid:
@@ -451,33 +451,30 @@ def hasnode(repo, node):
 
 def browserevs(ui, repo, nodes, opts):
     '''interactively transplant changesets'''
-    def browsehelp(ui):
-        ui.write(_('y: transplant this changeset\n'
-                   'n: skip this changeset\n'
-                   'm: merge at this changeset\n'
-                   'p: show patch\n'
-                   'c: commit selected changesets\n'
-                   'q: cancel transplant\n'
-                   '?: show this help\n'))
-
     displayer = cmdutil.show_changeset(ui, repo, opts)
     transplants = []
     merges = []
+    prompt = _('apply changeset? [ynmpcq?]:'
+               '$$ &yes, transplant this changeset'
+               '$$ &no, skip this changeset'
+               '$$ &merge at this changeset'
+               '$$ show &patch'
+               '$$ &commit selected changesets'
+               '$$ &quit and cancel transplant'
+               '$$ &? (show this help)')
     for node in nodes:
         displayer.show(repo[node])
         action = None
         while not action:
-            action = ui.prompt(_('apply changeset? [ynmpcq?]:'))
+            action = 'ynmpcq?'[ui.promptchoice(prompt)]
             if action == '?':
-                browsehelp(ui)
+                for c, t in ui.extractchoices(prompt)[1]:
+                    ui.write('%s: %s\n' % (c, t))
                 action = None
             elif action == 'p':
                 parent = repo.changelog.parents(node)[0]
                 for chunk in patch.diff(repo, parent, node):
                     ui.write(chunk)
-                action = None
-            elif action not in ('y', 'n', 'm', 'c', 'q'):
-                ui.write(_('no such option\n'))
                 action = None
         if action == 'y':
             transplants.append(node)

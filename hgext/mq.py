@@ -1204,7 +1204,9 @@ class queue(object):
         diffopts = self.diffopts()
         wlock = repo.wlock()
         try:
-            heads = [h for hs in repo.branchmap().itervalues() for h in hs]
+            heads = []
+            for hs in repo.branchmap().itervalues():
+                heads.extend(hs)
             if not heads:
                 heads = [nullid]
             if repo.dirstate.p1() not in heads and not exact:
@@ -2565,8 +2567,10 @@ def fold(ui, repo, *files, **opts):
         ph = patchheader(q.join(parent), q.plainmode)
         message, user = ph.message, ph.user
         for msg in messages:
-            message.append('* * *')
-            message.extend(msg)
+            if msg:
+                if message:
+                    message.append('* * *')
+                message.extend(msg)
         message = '\n'.join(message)
 
     if opts.get('edit'):

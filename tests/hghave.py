@@ -233,6 +233,9 @@ def has_unix_permissions():
     finally:
         os.rmdir(d)
 
+def has_root():
+    return getattr(os, 'geteuid', None) and os.geteuid() == 0
+
 def has_pyflakes():
     return matchoutput("sh -c \"echo 'import re' 2>&1 | pyflakes\"",
                        r"<stdin>:1: 're' imported but unused",
@@ -269,7 +272,12 @@ def has_serve():
     return os.name != 'nt' # gross approximation
 
 def has_tic():
-    return matchoutput('test -x "`which tic`"', '')
+    try:
+        import curses
+        curses.COLOR_BLUE
+        return matchoutput('test -x "`which tic`"', '')
+    except ImportError:
+        return False
 
 def has_msys():
     return os.getenv('MSYSTEM')
@@ -312,6 +320,7 @@ checks = {
     "p4": (has_p4, "Perforce server and client"),
     "pyflakes": (has_pyflakes, "Pyflakes python linter"),
     "pygments": (has_pygments, "Pygments source highlighting library"),
+    "root": (has_root, "root permissions"),
     "serve": (has_serve, "platform and python can manage 'hg serve -d'"),
     "ssl": (has_ssl, "python >= 2.6 ssl module and python OpenSSL"),
     "svn": (has_svn, "subversion client and admin tools"),
@@ -320,7 +329,7 @@ checks = {
     "svn-bindings": (has_svn_bindings, "subversion python bindings"),
     "symlink": (has_symlink, "symbolic links"),
     "system-sh": (has_system_sh, "system() uses sh"),
-    "tic": (has_tic, "terminfo compiler"),
+    "tic": (has_tic, "terminfo compiler and curses module"),
     "tla": (has_tla, "GNU Arch tla client"),
     "unix-permissions": (has_unix_permissions, "unix-style permissions"),
     "windows": (has_windows, "Windows"),

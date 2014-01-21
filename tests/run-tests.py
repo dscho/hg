@@ -63,7 +63,7 @@ processlock = threading.Lock()
 # subprocess._cleanup can race with any Popen.wait or Popen.poll on py24
 # http://bugs.python.org/issue1731717 for details. We shouldn't be producing
 # zombies but it's pretty harmless even if we do.
-if sys.version_info[1] < 5:
+if sys.version_info < (2, 5):
     subprocess._cleanup = lambda: None
 
 closefds = os.name == 'posix'
@@ -103,6 +103,7 @@ if 'java' in sys.platform:
 
 requiredtools = [os.path.basename(sys.executable), "diff", "grep", "unzip",
                  "gunzip", "bunzip2", "sed"]
+createdfiles = []
 
 defaults = {
     'jobs': ('HGTEST_JOBS', 1),
@@ -420,6 +421,11 @@ def cleanup(options):
     if not options.keep_tmpdir:
         vlog("# Cleaning up HGTMP", HGTMP)
         shutil.rmtree(HGTMP, True)
+        for f in createdfiles:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
 
 def usecorrectpython():
     # some tests run python interpreter. they must use same
@@ -439,6 +445,7 @@ def usecorrectpython():
         if findprogram(pyexename) != sys.executable:
             try:
                 os.symlink(sys.executable, mypython)
+                createdfiles.append(mypython)
             except OSError, err:
                 # child processes may race, which is harmless
                 if err.errno != errno.EEXIST:
@@ -497,18 +504,6 @@ def installhg(options):
     os.chdir(TESTDIR)
 
     usecorrectpython()
-
-    vlog("# Installing dummy diffstat")
-    f = open(os.path.join(BINDIR, 'diffstat'), 'w')
-    f.write('#!' + sys.executable + '\n'
-            'import sys\n'
-            'files = 0\n'
-            'for line in sys.stdin:\n'
-            '    if line.startswith("diff "):\n'
-            '        files += 1\n'
-            'sys.stdout.write("files patched: %d\\n" % files)\n')
-    f.close()
-    os.chmod(os.path.join(BINDIR, 'diffstat'), 0700)
 
     if options.py3k_warnings and not options.anycoverage:
         vlog("# Updating hg command to enable Py3k Warnings switch")
@@ -611,7 +606,7 @@ def globmatch(el, l):
     if el + '\n' == l:
         if os.altsep:
             # matching on "/" is not needed for this line
-            log("\nInfo, unnecessary glob: %s (glob)" % el)
+            return '-glob'
         return True
     i, n = 0, len(el)
     res = ''
@@ -639,9 +634,12 @@ def linematch(el, l):
             el = el[:-7].decode('string-escape') + '\n'
         if el == l or os.name == 'nt' and el[:-1] + '\r\n' == l:
             return True
-        if (el.endswith(" (re)\n") and rematch(el[:-6], l) or
-            el.endswith(" (glob)\n") and globmatch(el[:-8], l)):
-            return True
+        if el.endswith(" (re)\n"):
+            return rematch(el[:-6], l)
+        if el.endswith(" (glob)\n"):
+            return globmatch(el[:-8], l)
+        if os.altsep and l.replace('\\', '/') == el:
+            return '+glob'
     return False
 
 def tsttest(test, wd, options, replacements, env):
@@ -795,7 +793,19 @@ def tsttest(test, wd, options, replacements, env):
             if pos in expected and expected[pos]:
                 el = expected[pos].pop(0)
 
-            if linematch(el, lout):
+            r = linematch(el, lout)
+            if isinstance(r, str):
+                if r == '+glob':
+                    lout = el[:-1] + ' (glob)\n'
+                    r = False
+                elif r == '-glob':
+                    log('\ninfo, unnecessary glob in %s (after line %d):'
+                        ' %s (glob)\n' % (test, pos, el[-1]))
+                    r = True # pass on unnecessary glob
+                else:
+                    log('\ninfo, unknown linematch result: %r\n' % r)
+                    r = False
+            if r:
                 postout.append("  " + el)
             else:
                 if needescape(lout):
@@ -1082,6 +1092,9 @@ def scheduletests(options, tests):
             done.put(runone(options, test, count))
         except KeyboardInterrupt:
             pass
+        except: # re-raises
+            done.put(('!', test, 'run-test raised an error, see traceback'))
+            raise
 
     try:
         while tests or running:
@@ -1098,7 +1111,7 @@ def scheduletests(options, tests):
                 test = tests.pop(0)
                 if options.loop:
                     tests.append(test)
-                t = threading.Thread(target=job, args=(test, count))
+                t = threading.Thread(target=job, name=test, args=(test, count))
                 t.start()
                 running += 1
                 count += 1
@@ -1139,6 +1152,8 @@ def runtests(options, tests):
         _checkhglib("Tested")
         print "# Ran %d tests, %d skipped, %d failed." % (
             tested, skipped + ignored, failed)
+        if results['!']:
+            print 'python hash seed:', os.environ['PYTHONHASHSEED']
         if options.time:
             outputtimes(options)
 
@@ -1190,7 +1205,6 @@ def main():
         # use a random python hash seed all the time
         # we do the randomness ourself to know what seed is used
         os.environ['PYTHONHASHSEED'] = str(random.getrandbits(32))
-        print 'python hash seed:', os.environ['PYTHONHASHSEED']
 
     global TESTDIR, HGTMP, INST, BINDIR, PYTHONDIR, COVERAGE_FILE
     TESTDIR = os.environ["TESTDIR"] = os.getcwd()

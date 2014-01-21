@@ -221,46 +221,73 @@ def rebase(ui, repo, **opts):
 
             if revf:
                 rebaseset = scmutil.revrange(repo, revf)
+                if not rebaseset:
+                    raise util.Abort(_('empty "rev" revision set - '
+                                       'nothing to rebase'))
             elif srcf:
                 src = scmutil.revrange(repo, [srcf])
+                if not src:
+                    raise util.Abort(_('empty "source" revision set - '
+                                       'nothing to rebase'))
                 rebaseset = repo.revs('(%ld)::', src)
+                assert rebaseset
             else:
                 base = scmutil.revrange(repo, [basef or '.'])
+                if not base:
+                    raise util.Abort(_('empty "base" revision set - '
+                                       "can't compute rebase set"))
                 rebaseset = repo.revs(
                     '(children(ancestor(%ld, %d)) and ::(%ld))::',
                     base, dest, base)
-            if rebaseset:
-                root = min(rebaseset)
-            else:
-                root = None
+                if not rebaseset:
+                    if base == [dest.rev()]:
+                        if basef:
+                            ui.status(_('nothing to rebase - %s is both "base"'
+                                        ' and destination\n') % dest)
+                        else:
+                            ui.status(_('nothing to rebase - working directory '
+                                        'parent is also destination\n'))
+                    elif not repo.revs('%ld - ::%d', base, dest):
+                        if basef:
+                            ui.status(_('nothing to rebase - "base" %s is '
+                                        'already an ancestor of destination '
+                                        '%s\n') %
+                                      ('+'.join(str(repo[r]) for r in base),
+                                       dest))
+                        else:
+                            ui.status(_('nothing to rebase - working '
+                                        'directory parent is already an '
+                                        'ancestor of destination %s\n') % dest)
+                    else: # can it happen?
+                        ui.status(_('nothing to rebase from %s to %s\n') %
+                                  ('+'.join(str(repo[r]) for r in base), dest))
+                    return 1
 
-            if not rebaseset:
-                repo.ui.debug('base is ancestor of destination\n')
-                result = None
-            elif (not (keepf or obsolete._enabled)
+            if (not (keepf or obsolete._enabled)
                   and repo.revs('first(children(%ld) - %ld)',
                                 rebaseset, rebaseset)):
                 raise util.Abort(
                     _("can't remove original changesets with"
                       " unrebased descendants"),
                     hint=_('use --keep to keep original changesets'))
-            else:
-                result = buildstate(repo, dest, rebaseset, collapsef)
 
+            result = buildstate(repo, dest, rebaseset, collapsef)
             if not result:
                 # Empty state built, nothing to rebase
                 ui.status(_('nothing to rebase\n'))
                 return 1
-            elif not keepf and not repo[root].mutable():
+
+            root = min(rebaseset)
+            if not keepf and not repo[root].mutable():
                 raise util.Abort(_("can't rebase immutable changeset %s")
                                  % repo[root],
                                  hint=_('see hg help phases for details'))
-            else:
-                originalwd, target, state = result
-                if collapsef:
-                    targetancestors = repo.changelog.ancestors([target],
-                                                               inclusive=True)
-                    external = externalparent(repo, state, targetancestors)
+
+            originalwd, target, state = result
+            if collapsef:
+                targetancestors = repo.changelog.ancestors([target],
+                                                           inclusive=True)
+                external = externalparent(repo, state, targetancestors)
 
         if keepbranchesf:
             # insert _savebranch at the start of extrafns so if
@@ -274,7 +301,6 @@ def rebase(ui, repo, **opts):
                     if len(branches) > 1:
                         raise util.Abort(_('cannot collapse multiple named '
                             'branches'))
-
 
         # Rebase
         if not targetancestors:

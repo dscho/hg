@@ -94,20 +94,15 @@ def computeimpactable(repo):
     return frozenset(xrange(firstmutable, len(cl)))
 
 # function to compute filtered set
+#
+# When addding a new filter you MUST update the table at:
+#     mercurial.branchmap.subsettable
+# Otherwise your filter will have to recompute all its branches cache
+# from scratch (very slow).
 filtertable = {'visible': computehidden,
                'served': computeunserved,
                'immutable':  computemutable,
                'base':  computeimpactable}
-### Nearest subset relation
-# Nearest subset of filter X is a filter Y so that:
-# * Y is included in X,
-# * X - Y is as small as possible.
-# This create and ordering used for branchmap purpose.
-# the ordering may be partial
-subsettable = {None: 'visible',
-               'visible': 'served',
-               'served': 'immutable',
-               'immutable': 'base'}
 
 def filterrevs(repo, filtername):
     """returns set of filtered revision for this filter name"""
@@ -215,4 +210,3 @@ class repoview(object):
     @property
     def requirements(self):
         return self._unfilteredrepo.requirements
-

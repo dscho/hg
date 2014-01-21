@@ -7,7 +7,7 @@
 
 '''commands to interactively select changes for commit/qrefresh'''
 
-from mercurial.i18n import gettext, _
+from mercurial.i18n import _
 from mercurial import cmdutil, commands, extensions, hg, patch
 from mercurial import util
 import copy, cStringIO, errno, os, re, shutil, tempfile
@@ -17,15 +17,6 @@ command = cmdutil.command(cmdtable)
 testedwith = 'internal'
 
 lines_re = re.compile(r'@@ -(\d+),(\d+) \+(\d+),(\d+) @@\s*(.*)')
-
-diffopts = [
-    ('w', 'ignore-all-space', False,
-     _('ignore white space when comparing lines')),
-    ('b', 'ignore-space-change', None,
-     _('ignore changes in the amount of white space')),
-    ('B', 'ignore-blank-lines', None,
-     _('ignore changes whose lines are all blank')),
-]
 
 def scanpatch(fp):
     """like patch.iterhunks, but yield different events
@@ -286,21 +277,18 @@ def filterpatch(ui, headers):
             resps = _('[Ynesfdaq?]'
                       '$$ &Yes, record this change'
                       '$$ &No, skip this change'
-                      '$$ &Edit the change manually'
+                      '$$ &Edit this change manually'
                       '$$ &Skip remaining changes to this file'
                       '$$ Record remaining changes to this &file'
                       '$$ &Done, skip remaining changes and files'
                       '$$ Record &all changes to all remaining files'
                       '$$ &Quit, recording no changes'
-                      '$$ &?')
+                      '$$ &? (display help)')
             r = ui.promptchoice("%s %s" % (query, resps))
             ui.write("\n")
             if r == 8: # ?
-                doc = gettext(record.__doc__)
-                c = doc.find('::') + 2
-                for l in doc[c:].splitlines():
-                    if l.startswith('      '):
-                        ui.write(l.strip(), '\n')
+                for c, t in ui.extractchoices(resps)[1]:
+                    ui.write('%s - %s\n' % (c, t.lower()))
                 continue
             elif r == 0: # yes
                 ret = True
@@ -423,7 +411,7 @@ the hunk is left unchanged.
 
 @command("record",
          # same options as commit + white space diff options
-         commands.table['^commit|ci'][1][:] + diffopts,
+         commands.table['^commit|ci'][1][:] + commands.diffwsopts,
           _('hg record [OPTION]... [FILE]...'))
 def record(ui, repo, *pats, **opts):
     '''interactively select changes to commit
@@ -502,7 +490,8 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall, *pats, **opts):
                          cmdsuggest)
 
     # make sure username is set before going interactive
-    ui.username()
+    if not opts.get('user'):
+        ui.username() # raise exception, username not provided
 
     def recordfunc(ui, repo, message, match, opts):
         """This is generic record driver.
@@ -526,11 +515,10 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall, *pats, **opts):
                                '(use "hg commit" instead)'))
 
         changes = repo.status(match=match)[:3]
-        diffopts = patch.diffopts(ui, opts=dict(
-            git=True, nodates=True,
-            ignorews=opts.get('ignore_all_space'),
-            ignorewsamount=opts.get('ignore_space_change'),
-            ignoreblanklines=opts.get('ignore_blank_lines')))
+        diffopts = opts.copy()
+        diffopts['nodates'] = True
+        diffopts['git'] = True
+        diffopts = patch.diffopts(ui, opts=diffopts)
         chunks = patch.diff(repo, changes=changes, opts=diffopts)
         fp = cStringIO.StringIO()
         fp.write(''.join(chunks))
@@ -667,7 +655,7 @@ def uisetup(ui):
         (qrecord,
          # same options as qnew, but copy them so we don't get
          # -i/--interactive for qrecord and add white space diff options
-         mq.cmdtable['^qnew'][1][:] + diffopts,
+         mq.cmdtable['^qnew'][1][:] + commands.diffwsopts,
          _('hg qrecord [OPTION]... PATCH [FILE]...'))
 
     _wrapcmd('qnew', mq.cmdtable, qnew, _("interactively record a new patch"))

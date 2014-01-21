@@ -447,7 +447,7 @@ Test xml styles:
 
 Error if style not readable:
 
-#if unix-permissions
+#if unix-permissions no-root
   $ touch q
   $ chmod 0 q
   $ hg log --style ./q
@@ -479,7 +479,7 @@ Error if style missing value:
 Error if include fails:
 
   $ echo 'changeset = q' >> t
-#if unix-permissions
+#if unix-permissions no-root
   $ hg log --style ./t
   abort: template file ./q: Permission denied
   [255]
@@ -1445,7 +1445,7 @@ latesttag:
   $ hg ci -m h2e -d '4 0'
 
   $ hg merge -q
-  $ hg ci -m merge -d '5 0'
+  $ hg ci -m merge -d '5 -3600'
 
 No tag set:
 
@@ -1533,7 +1533,7 @@ if it is a relative path
   > EOF
 
   $ hg -R latesttag tip
-  test 10:dee8f28249af
+  test 10:9b4a630e5f5f
 
 Test recursive showlist template (issue1989):
 
@@ -1586,6 +1586,21 @@ Test the strip function with chars specified:
   h1c
   b
   a
+
+Test date format:
+
+  $ hg log -R latesttag --template 'date: {date(date, "%y %m %d %S %z")}\n'
+  date: 70 01 01 10 +0000
+  date: 70 01 01 09 +0000
+  date: 70 01 01 08 +0000
+  date: 70 01 01 07 +0000
+  date: 70 01 01 06 +0000
+  date: 70 01 01 05 +0100
+  date: 70 01 01 04 +0000
+  date: 70 01 01 03 +0000
+  date: 70 01 01 02 +0000
+  date: 70 01 01 01 +0000
+  date: 70 01 01 00 +0000
 
 Test string escaping:
 

@@ -8,7 +8,6 @@
 from node import nullid, nullrev, short, hex, bin
 from i18n import _
 import ancestor, mdiff, error, util, scmutil, subrepo, patch, encoding, phases
-import copies
 import match as matchmod
 import os, errno, stat
 import obsolete as obsmod
@@ -194,6 +193,21 @@ class basectx(object):
 
     def dirty(self):
         return False
+
+def makememctx(repo, parents, text, user, date, branch, files, store,
+               editor=None):
+    def getfilectx(repo, memctx, path):
+        data, (islink, isexec), copied = store.getfile(path)
+        return memfilectx(path, data, islink=islink, isexec=isexec,
+                                  copied=copied)
+    extra = {}
+    if branch:
+        extra['branch'] = encoding.fromlocal(branch)
+    ctx =  memctx(repo, parents, text, files, getfilectx, user,
+                          date, extra)
+    if editor:
+        ctx._text = editor(repo, ctx, [])
+    return ctx
 
 class changectx(basectx):
     """A changecontext object makes access to data related to a particular
@@ -396,6 +410,15 @@ class changectx(basectx):
         # for dirstate.walk, files=['.'] means "walk the whole tree".
         # follow that here, too
         fset.discard('.')
+
+        # avoid the entire walk if we're only looking for specific files
+        if fset and not match.anypats():
+            if util.all([fn in self for fn in fset]):
+                for fn in sorted(fset):
+                    if match(fn):
+                        yield fn
+                raise StopIteration
+
         for fn in self:
             if fn in fset:
                 # specified pattern is the exact name
@@ -721,14 +744,6 @@ class basefilectx(object):
                 break
             c = visit.pop(max(visit))
             yield c
-
-    def copies(self, c2):
-        if not util.safehasattr(self, "_copycache"):
-            self._copycache = {}
-        sc2 = str(c2)
-        if sc2 not in self._copycache:
-            self._copycache[sc2] = copies.pathcopies(c2)
-        return self._copycache[sc2]
 
 class filectx(basefilectx):
     """A filecontext object makes access to data related to a particular

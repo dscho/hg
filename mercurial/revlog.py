@@ -202,6 +202,7 @@ class revlog(object):
         self._cache = None
         self._basecache = None
         self._chunkcache = (0, '')
+        self._chunkcachesize = 65536
         self.index = []
         self._pcache = {}
         self._nodecache = {nullid: nullrev}
@@ -215,6 +216,15 @@ class revlog(object):
                     v |= REVLOGGENERALDELTA
             else:
                 v = 0
+            if 'chunkcachesize' in opts:
+                self._chunkcachesize = opts['chunkcachesize']
+
+        if self._chunkcachesize <= 0:
+            raise RevlogError(_('revlog chunk cache size %r is not greater '
+                                'than 0') % self._chunkcachesize)
+        elif self._chunkcachesize & (self._chunkcachesize - 1):
+            raise RevlogError(_('revlog chunk cache size %r is not a power '
+                                'of 2') % self._chunkcachesize)
 
         i = ''
         self._initempty = True
@@ -401,7 +411,29 @@ class revlog(object):
         heads = [self.rev(n) for n in heads]
 
         # we want the ancestors, but inclusive
-        has = set(self.ancestors(common))
+        class lazyset(object):
+            def __init__(self, lazyvalues):
+                self.addedvalues = set()
+                self.lazyvalues = lazyvalues
+
+            def __contains__(self, value):
+                return value in self.addedvalues or value in self.lazyvalues
+
+            def __iter__(self):
+                added = self.addedvalues
+                for r in added:
+                    yield r
+                for r in self.lazyvalues:
+                    if not r in added:
+                        yield r
+
+            def add(self, value):
+                self.addedvalues.add(value)
+
+            def update(self, values):
+                self.addedvalues.update(values)
+
+        has = lazyset(self.ancestors(common))
         has.add(nullrev)
         has.update(common)
 
@@ -820,13 +852,19 @@ class revlog(object):
         else:
             df = self.opener(self.datafile)
 
-        readahead = max(65536, length)
-        df.seek(offset)
-        d = df.read(readahead)
+        # Cache data both forward and backward around the requested
+        # data, in a fixed size window. This helps speed up operations
+        # involving reading the revlog backwards.
+        cachesize = self._chunkcachesize
+        realoffset = offset & ~(cachesize - 1)
+        reallength = (((offset + length + cachesize) & ~(cachesize - 1))
+                      - realoffset)
+        df.seek(realoffset)
+        d = df.read(reallength)
         df.close()
-        self._addchunk(offset, d)
-        if readahead > length:
-            return util.buffer(d, 0, length)
+        self._addchunk(realoffset, d)
+        if offset != realoffset or reallength != length:
+            return util.buffer(d, offset - realoffset, length)
         return d
 
     def _getchunk(self, offset, length):
@@ -1168,6 +1206,15 @@ class revlog(object):
         self.nodemap[node] = curr
 
         entry = self._io.packentry(e, self.node, self.version, curr)
+        self._writeentry(transaction, ifh, dfh, entry, data, link, offset)
+
+        if type(text) == str: # only accept immutable objects
+            self._cache = (node, curr, text)
+        self._basecache = (curr, chainbase)
+        return node
+
+    def _writeentry(self, transaction, ifh, dfh, entry, data, link, offset):
+        curr = len(self) - 1
         if not self._inline:
             transaction.add(self.datafile, offset)
             transaction.add(self.indexfile, curr * len(entry))
@@ -1183,11 +1230,6 @@ class revlog(object):
             ifh.write(data[0])
             ifh.write(data[1])
             self.checkinlinesize(transaction, ifh)
-
-        if type(text) == str: # only accept immutable objects
-            self._cache = (node, curr, text)
-        self._basecache = (curr, chainbase)
-        return node
 
     def addgroup(self, bundle, linkmapper, transaction):
         """
@@ -1263,6 +1305,46 @@ class revlog(object):
 
         return content
 
+    def getstrippoint(self, minlink):
+        """find the minimum rev that must be stripped to strip the linkrev
+
+        Returns a tuple containing the minimum rev and a set of all revs that
+        have linkrevs that will be broken by this strip.
+        """
+        brokenrevs = set()
+        strippoint = len(self)
+
+        heads = {}
+        futurelargelinkrevs = set()
+        for head in self.headrevs():
+            headlinkrev = self.linkrev(head)
+            heads[head] = headlinkrev
+            if headlinkrev >= minlink:
+                futurelargelinkrevs.add(headlinkrev)
+
+        # This algorithm involves walking down the rev graph, starting at the
+        # heads. Since the revs are topologically sorted according to linkrev,
+        # once all head linkrevs are below the minlink, we know there are
+        # no more revs that could have a linkrev greater than minlink.
+        # So we can stop walking.
+        while futurelargelinkrevs:
+            strippoint -= 1
+            linkrev = heads.pop(strippoint)
+
+            if linkrev < minlink:
+                brokenrevs.add(strippoint)
+            else:
+                futurelargelinkrevs.remove(linkrev)
+
+            for p in self.parentrevs(strippoint):
+                if p != nullrev:
+                    plinkrev = self.linkrev(p)
+                    heads[p] = plinkrev
+                    if plinkrev >= minlink:
+                        futurelargelinkrevs.add(plinkrev)
+
+        return strippoint, brokenrevs
+
     def strip(self, minlink, transaction):
         """truncate the revlog on the first revision with a linkrev >= minlink
 
@@ -1280,10 +1362,8 @@ class revlog(object):
         if len(self) == 0:
             return
 
-        for rev in self:
-            if self.index[rev][4] >= minlink:
-                break
-        else:
+        rev, _ = self.getstrippoint(minlink)
+        if rev == len(self):
             return
 
         # first truncate the files on disk

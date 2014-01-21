@@ -537,18 +537,18 @@ def branches(web, req, tmpl):
     tips = []
     heads = web.repo.heads()
     parity = paritygen(web.stripecount)
-    sortkey = lambda ctx: (not ctx.closesbranch(), ctx.rev())
+    sortkey = lambda item: (not item[1], item[0].rev())
 
     def entries(limit, **map):
         count = 0
         if not tips:
-            for t, n in web.repo.branchtags().iteritems():
-                tips.append(web.repo[n])
-        for ctx in sorted(tips, key=sortkey, reverse=True):
+            for tag, hs, tip, closed in web.repo.branchmap().iterbranches():
+                tips.append((web.repo[tip], closed))
+        for ctx, closed in sorted(tips, key=sortkey, reverse=True):
             if limit > 0 and count >= limit:
                 return
             count += 1
-            if not web.repo.branchheads(ctx.branch()):
+            if closed:
                 status = 'closed'
             elif ctx.node() not in heads:
                 status = 'inactive'
@@ -596,8 +596,9 @@ def summary(web, req, tmpl):
     def branches(**map):
         parity = paritygen(web.stripecount)
 
-        b = web.repo.branchtags()
-        l = [(-web.repo.changelog.rev(n), n, t) for t, n in b.iteritems()]
+        b = web.repo.branchmap()
+        l = [(-web.repo.changelog.rev(tip), tip, tag)
+             for tag, heads, tip, closed in b.iterbranches()]
         for r, n, t in sorted(l):
             yield {'parity': parity.next(),
                    'branch': t,
@@ -845,15 +846,11 @@ def filelog(web, req, tmpl):
     end = min(count, start + revcount) # last rev on this page
     parity = paritygen(web.stripecount, offset=start - end)
 
-    def entries(latestonly, **map):
+    def entries():
         l = []
 
         repo = web.repo
-        revs = repo.changelog.revs(start, end - 1)
-        if latestonly:
-            for r in revs:
-                pass
-            revs = (r,)
+        revs = fctx.filelog().revs(start, end - 1)
         for i in revs:
             iterfctx = fctx.filectx(i)
 
@@ -877,11 +874,14 @@ def filelog(web, req, tmpl):
         for e in reversed(l):
             yield e
 
+    entries = list(entries())
+    latestentry = entries[:1]
+
     revnav = webutil.filerevnav(web.repo, fctx.path())
     nav = revnav.gen(end - 1, revcount, count)
     return tmpl("filelog", file=f, node=fctx.hex(), nav=nav,
-                entries=lambda **x: entries(latestonly=False, **x),
-                latestentry=lambda **x: entries(latestonly=True, **x),
+                entries=entries,
+                latestentry=latestentry,
                 revcount=revcount, morevars=morevars, lessvars=lessvars)
 
 def archive(web, req, tmpl):

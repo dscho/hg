@@ -1,6 +1,5 @@
   $ cat >> $HGRCPATH <<EOF
   > [extensions]
-  > graphlog=
   > rebase=
   > 
   > [alias]
@@ -85,7 +84,7 @@ Invoke pull --rebase and nothing to rebase:
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files
-  nothing to rebase
+  nothing to rebase - working directory parent is already an ancestor of destination 77ae9631bcca
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   updating bookmark norebase
 

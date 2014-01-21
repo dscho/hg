@@ -8,14 +8,15 @@ from node import hex, nullid, short
 from i18n import _
 import peer, changegroup, subrepo, discovery, pushkey, obsolete, repoview
 import changelog, dirstate, filelog, manifest, context, bookmarks, phases
-import lock, transaction, store, encoding
+import lock as lockmod
+import transaction, store, encoding
 import scmutil, util, extensions, hook, error, revset
 import match as matchmod
 import merge as mergemod
 import tags as tagsmod
 from lock import release
 import weakref, errno, os, time, inspect
-import branchmap
+import branchmap, pathutil
 propertycache = util.propertycache
 filecache = scmutil.filecache
 
@@ -166,11 +167,12 @@ class localrepository(object):
         self.root = self.wvfs.base
         self.path = self.wvfs.join(".hg")
         self.origroot = path
-        self.auditor = scmutil.pathauditor(self.root, self._checknested)
+        self.auditor = pathutil.pathauditor(self.root, self._checknested)
         self.vfs = scmutil.vfs(self.path)
         self.opener = self.vfs
         self.baseui = baseui
         self.ui = baseui.copy()
+        self.ui.copy = baseui.copy # prevent copying repo configuration
         # A list of callback to shape the phase if no data were found.
         # Callback are in the form: func(repo, roots) --> processed root.
         # This list it to be filled by extension during repo setup
@@ -279,6 +281,9 @@ class localrepository(object):
         self.requirements = requirements
         self.sopener.options = dict((r, 1) for r in requirements
                                            if r in self.openerreqs)
+        chunkcachesize = self.ui.configint('format', 'chunkcachesize')
+        if chunkcachesize is not None:
+            self.sopener.options['chunkcachesize'] = chunkcachesize
 
     def _writerequirements(self):
         reqfile = self.opener("requires", "w")
@@ -650,33 +655,17 @@ class localrepository(object):
         return sorted(marks)
 
     def branchmap(self):
-        '''returns a dictionary {branch: [branchheads]}'''
+        '''returns a dictionary {branch: [branchheads]} with branchheads
+        ordered by increasing revision number'''
         branchmap.updatecache(self)
         return self._branchcaches[self.filtername]
 
-
-    def _branchtip(self, heads):
-        '''return the tipmost branch head in heads'''
-        tip = heads[-1]
-        for h in reversed(heads):
-            if not self[h].closesbranch():
-                tip = h
-                break
-        return tip
-
     def branchtip(self, branch):
         '''return the tip node for a given branch'''
-        if branch not in self.branchmap():
+        try:
+            return self.branchmap().branchtip(branch)
+        except KeyError:
             raise error.RepoLookupError(_("unknown branch '%s'") % branch)
-        return self._branchtip(self.branchmap()[branch])
-
-    def branchtags(self):
-        '''return a dict where branch names map to the tipmost head of
-        the branch, open heads come before closed'''
-        bt = {}
-        for bn, heads in self.branchmap().iteritems():
-            bt[bn] = self._branchtip(heads)
-        return bt
 
     def lookup(self, key):
         return self[key].node()
@@ -832,7 +821,7 @@ class localrepository(object):
         renames = [(vfs, x, undoname(x)) for vfs, x in self._journalfiles()]
         rp = report and report or self.ui.warn
         tr = transaction.transaction(rp, self.sopener,
-                                     self.sjoin("journal"),
+                                     "journal",
                                      aftertrans(renames),
                                      self.store.createmode)
         self._transref = weakref.ref(tr)
@@ -866,7 +855,7 @@ class localrepository(object):
         try:
             if self.svfs.exists("journal"):
                 self.ui.status(_("rolling back interrupted transaction\n"))
-                transaction.rollback(self.sopener, self.sjoin("journal"),
+                transaction.rollback(self.sopener, "journal",
                                      self.ui.warn)
                 self.invalidate()
                 return True
@@ -922,7 +911,7 @@ class localrepository(object):
 
         parents = self.dirstate.parents()
         self.destroying()
-        transaction.rollback(self.sopener, self.sjoin('undo'), ui.warn)
+        transaction.rollback(self.sopener, 'undo', ui.warn)
         if self.vfs.exists('undo.bookmarks'):
             self.vfs.rename('undo.bookmarks', 'bookmarks')
         if self.svfs.exists('undo.phaseroots'):
@@ -998,17 +987,18 @@ class localrepository(object):
                 pass
         self.invalidatecaches()
 
-    def _lock(self, lockname, wait, releasefn, acquirefn, desc):
+    def _lock(self, vfs, lockname, wait, releasefn, acquirefn, desc):
         try:
-            l = lock.lock(lockname, 0, releasefn, desc=desc)
+            l = lockmod.lock(vfs, lockname, 0, releasefn, desc=desc)
         except error.LockHeld, inst:
             if not wait:
                 raise
             self.ui.warn(_("waiting for lock on %s held by %r\n") %
                          (desc, inst.locker))
             # default to 600 seconds timeout
-            l = lock.lock(lockname, int(self.ui.config("ui", "timeout", "600")),
-                          releasefn, desc=desc)
+            l = lockmod.lock(vfs, lockname,
+                             int(self.ui.config("ui", "timeout", "600")),
+                             releasefn, desc=desc)
         if acquirefn:
             acquirefn()
         return l
@@ -1041,7 +1031,7 @@ class localrepository(object):
                     continue
                 ce.refresh()
 
-        l = self._lock(self.sjoin("lock"), wait, unlock,
+        l = self._lock(self.svfs, "lock", wait, unlock,
                        self.invalidate, _('repository %s') % self.origroot)
         self._lockref = weakref.ref(l)
         return l
@@ -1059,7 +1049,7 @@ class localrepository(object):
             self.dirstate.write()
             self._filecache['dirstate'].refresh()
 
-        l = self._lock(self.join("wlock"), wait, unlock,
+        l = self._lock(self.vfs, "wlock", wait, unlock,
                        self.invalidatedirstate, _('working directory of %s') %
                        self.origroot)
         self._wlockref = weakref.ref(l)
@@ -1379,7 +1369,7 @@ class localrepository(object):
                       parent2=xp2, pending=p)
             self.changelog.finalize(trp)
             # set the new commit is proper phase
-            targetphase = phases.newcommitphase(self.ui)
+            targetphase = subrepo.newcommitphase(self.ui, ctx)
             if targetphase:
                 # retract boundary do not alter parent changeset.
                 # if a parent have higher the resulting phase will
@@ -1621,13 +1611,11 @@ class localrepository(object):
         if branch not in branches:
             return []
         # the cache returns heads ordered lowest to highest
-        bheads = list(reversed(branches[branch]))
+        bheads = list(reversed(branches.branchheads(branch, closed=closed)))
         if start is not None:
             # filter out the heads that cannot be reached from startrev
             fbheads = set(self.changelog.nodesbetween([start], bheads)[2])
             bheads = [h for h in bheads if h in fbheads]
-        if not closed:
-            bheads = [h for h in bheads if not self[h].closesbranch()]
         return bheads
 
     def branches(self, nodes):
@@ -1678,12 +1666,11 @@ class localrepository(object):
         trname = 'pull\n' + util.hidepassword(remote.url())
         lock = self.lock()
         try:
-            tmp = discovery.findcommonincoming(self, remote, heads=heads,
-                                               force=force)
+            tmp = discovery.findcommonincoming(self.unfiltered(), remote,
+                                               heads=heads, force=force)
             common, fetch, rheads = tmp
             if not fetch:
                 self.ui.status(_("no changes found\n"))
-                added = []
                 result = 0
             else:
                 tr = self.transaction(trname)
@@ -1705,20 +1692,13 @@ class localrepository(object):
                                            "changegroupsubset."))
                 else:
                     cg = remote.changegroupsubset(fetch, heads, 'pull')
-                # we use unfiltered changelog here because hidden revision must
-                # be taken in account for phase synchronization. They may
-                # becomes public and becomes visible again.
-                cl = self.unfiltered().changelog
-                clstart = len(cl)
                 result = self.addchangegroup(cg, 'pull', remote.url())
-                clend = len(cl)
-                added = [cl.node(r) for r in xrange(clstart, clend)]
 
             # compute target subset
             if heads is None:
                 # We pulled every thing possible
                 # sync on everything common
-                subset = common + added
+                subset = common + rheads
             else:
                 # We pulled a specific subset
                 # sync on this subset
@@ -1861,14 +1841,16 @@ class localrepository(object):
                                     raise util.Abort(_(mst)
                                                      % (ctx.troubles()[0],
                                                         ctx))
+                        newbm = self.ui.configlist('bookmarks', 'pushing')
                         discovery.checkheads(unfi, remote, outgoing,
                                              remoteheads, newbranch,
-                                             bool(inc))
+                                             bool(inc), newbm)
 
                     # TODO: get bundlecaps from remote
                     bundlecaps = None
                     # create a changegroup from local
-                    if revs is None and not outgoing.excluded:
+                    if revs is None and not (outgoing.excluded
+                                             or self.changelog.filteredrevs):
                         # push everything,
                         # use the fast path, no race possible on push
                         bundler = changegroup.bundle10(self, bundlecaps)
@@ -1976,27 +1958,7 @@ class localrepository(object):
             if locallock is not None:
                 locallock.release()
 
-        self.ui.debug("checking for updated bookmarks\n")
-        rb = remote.listkeys('bookmarks')
-        revnums = map(unfi.changelog.rev, revs or [])
-        ancestors = [
-            a for a in unfi.changelog.ancestors(revnums, inclusive=True)]
-        for k in rb.keys():
-            if k in unfi._bookmarks:
-                nr, nl = rb[k], hex(self._bookmarks[k])
-                if nr in unfi:
-                    cr = unfi[nr]
-                    cl = unfi[nl]
-                    if bookmarks.validdest(unfi, cr, cl):
-                        if ancestors and cl.rev() not in ancestors:
-                            continue
-                        r = remote.pushkey('bookmarks', k, nr, nl)
-                        if r:
-                            self.ui.status(_("updating bookmark %s\n") % k)
-                        else:
-                            self.ui.warn(_('updating bookmark %s'
-                                           ' failed!\n') % k)
-
+        bookmarks.updateremote(self.ui, unfi, remote, revs)
         return ret
 
     def changegroupinfo(self, nodes, source):
@@ -2025,8 +1987,10 @@ class localrepository(object):
             bases = [nullid]
         # TODO: remove call to nodesbetween.
         csets, bases, heads = cl.nodesbetween(bases, heads)
-        bases = [p for n in bases for p in cl.parents(n) if p != nullid]
-        outgoing = discovery.outgoing(cl, bases, heads)
+        discbases = []
+        for n in bases:
+            discbases.extend([p for p in cl.parents(n) if p != nullid])
+        outgoing = discovery.outgoing(cl, discbases, heads)
         bundler = changegroup.bundle10(self)
         return self._changegroupsubset(outgoing, bundler, source)
 

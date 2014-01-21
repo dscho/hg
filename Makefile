@@ -53,7 +53,8 @@ doc:
 
 clean:
 	-$(PYTHON) setup.py clean --all # ignore errors from this command
-	find . \( -name '*.py[cdo]' -o -name '*.so' \) -exec rm -f '{}' ';'
+	find contrib doc hgext i18n mercurial tests \
+		\( -name '*.py[cdo]' -o -name '*.so' \) -exec rm -f '{}' ';'
 	rm -f $(addprefix mercurial/,$(notdir $(wildcard mercurial/pure/[a-z]*.py)))
 	rm -f MANIFEST MANIFEST.in mercurial/__version__.py tests/*.err
 	rm -rf build mercurial/locale
@@ -107,7 +108,7 @@ i18n/hg.pot: $(PYFILES) $(DOCFILES)
 	  mercurial/fileset.py mercurial/revset.py \
 	  mercurial/templatefilters.py mercurial/templatekw.py \
 	  mercurial/filemerge.py \
-	  $(DOCFILES) > i18n/hg.pot
+	  $(DOCFILES) > i18n/hg.pot.tmp
         # All strings marked for translation in Mercurial contain
         # ASCII characters only. But some files contain string
         # literals like this '\037\213'. xgettext thinks it has to
@@ -119,11 +120,17 @@ i18n/hg.pot: $(PYFILES) $(DOCFILES)
 	  --msgid-bugs-address "<mercurial-devel@selenic.com>" \
 	  --copyright-holder "Matt Mackall <mpm@selenic.com> and others" \
 	  --from-code ISO-8859-1 --join --sort-by-file --add-comments=i18n: \
-	  -d hg -p i18n -o hg.pot
-	$(PYTHON) i18n/posplit i18n/hg.pot
+	  -d hg -p i18n -o hg.pot.tmp
+	$(PYTHON) i18n/posplit i18n/hg.pot.tmp
+        # The target file is not created before the last step. So it never is in
+        # an intermediate state.
+	mv -f i18n/hg.pot.tmp i18n/hg.pot
 
 %.po: i18n/hg.pot
-	msgmerge --no-location --update $@ $^
+        # work on a temporary copy for never having a half completed target
+	cp $@ $@.tmp
+	msgmerge --no-location --update $@.tmp $^
+	mv -f $@.tmp $@
 
 .PHONY: help all local build doc clean install install-bin install-doc \
 	install-home install-home-bin install-home-doc dist dist-notests tests \

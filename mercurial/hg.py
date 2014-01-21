@@ -202,19 +202,20 @@ def copystore(ui, srcrepo, destpath):
         hardlink = None
         num = 0
         srcpublishing = srcrepo.ui.configbool('phases', 'publish', True)
+        srcvfs = scmutil.vfs(srcrepo.sharedpath)
+        dstvfs = scmutil.vfs(destpath)
         for f in srcrepo.store.copylist():
             if srcpublishing and f.endswith('phaseroots'):
                 continue
-            src = os.path.join(srcrepo.sharedpath, f)
-            dst = os.path.join(destpath, f)
-            dstbase = os.path.dirname(dst)
-            if dstbase and not os.path.exists(dstbase):
-                os.mkdir(dstbase)
-            if os.path.exists(src):
-                if dst.endswith('data'):
+            dstbase = os.path.dirname(f)
+            if dstbase and not dstvfs.exists(dstbase):
+                dstvfs.mkdir(dstbase)
+            if srcvfs.exists(f):
+                if f.endswith('data'):
                     # lock to avoid premature writing to the target
-                    destlock = lock.lock(os.path.join(dstbase, "lock"))
-                hardlink, n = util.copyfiles(src, dst, hardlink)
+                    destlock = lock.lock(dstvfs, dstbase + "/lock")
+                hardlink, n = util.copyfiles(srcvfs.join(f), dstvfs.join(f),
+                                             hardlink)
                 num += n
         if hardlink:
             ui.debug("linked %d files\n" % num)
@@ -337,8 +338,8 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
             # Recomputing branch cache might be slow on big repos,
             # so just copy it
             dstcachedir = os.path.join(destpath, 'cache')
-            srcbranchcache = srcrepo.sjoin('cache/branchheads')
-            dstbranchcache = os.path.join(dstcachedir, 'branchheads')
+            srcbranchcache = srcrepo.sjoin('cache/branch2')
+            dstbranchcache = os.path.join(dstcachedir, 'branch2')
             if os.path.exists(srcbranchcache):
                 if not os.path.exists(dstcachedir):
                     os.mkdir(dstcachedir)
@@ -511,11 +512,7 @@ def _incoming(displaychlist, subreporecurse, ui, repo, source,
             return subreporecurse()
 
         displayer = cmdutil.show_changeset(ui, other, opts, buffered)
-
-        # XXX once graphlog extension makes it into core,
-        # should be replaced by a if graph/else
         displaychlist(other, chlist, displayer)
-
         displayer.close()
     finally:
         cleanupfn()

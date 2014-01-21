@@ -430,6 +430,81 @@ test transplant into empty repository
   adding manifests
   adding file changes
   added 4 changesets with 4 changes to 4 files
+
+test "--merge" causing pull from source repository on local host
+
+  $ hg --config extensions.mq= -q strip 2
+  $ hg transplant -s ../t --merge tip
+  searching for changes
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 2 changesets with 2 changes to 2 files
+  applying a53251cdf717
+  4:a53251cdf717 merged at 4831f4dc831a
+
+test interactive transplant
+
+  $ hg --config extensions.strip= -q strip 0
+  $ hg -R ../t log -G --template "{rev}:{node|short}"
+  @  4:a53251cdf717
+  |
+  o  3:722f4667af76
+  |
+  o  2:37a1297eb21b
+  |
+  | o  1:d11e3596cc1a
+  |/
+  o  0:17ab29e464c6
+  
+  $ hg transplant -q --config ui.interactive=true -s ../t <<EOF
+  > p
+  > y
+  > n
+  > n
+  > m
+  > c
+  > EOF
+  0:17ab29e464c6
+  apply changeset? [ynmpcq?]: --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  +++ b/r1	Thu Jan 01 00:00:00 1970 +0000
+  @@ -0,0 +1,1 @@
+  +r1
+  apply changeset? [ynmpcq?]: 1:d11e3596cc1a
+  apply changeset? [ynmpcq?]: 2:37a1297eb21b
+  apply changeset? [ynmpcq?]: 3:722f4667af76
+  apply changeset? [ynmpcq?]: 4:a53251cdf717
+  apply changeset? [ynmpcq?]:  (no-eol)
+  $ hg log -G --template "{node|short}"
+  @    88be5dde5260
+  |\
+  | o  722f4667af76
+  | |
+  | o  37a1297eb21b
+  |/
+  o  17ab29e464c6
+  
+  $ hg transplant -q --config ui.interactive=true -s ../t <<EOF
+  > x
+  > ?
+  > y
+  > q
+  > EOF
+  1:d11e3596cc1a
+  apply changeset? [ynmpcq?]: unrecognized response
+  apply changeset? [ynmpcq?]: y: yes, transplant this changeset
+  n: no, skip this changeset
+  m: merge at this changeset
+  p: show patch
+  c: commit selected changesets
+  q: quit and cancel transplant
+  ?: ? (show this help)
+  apply changeset? [ynmpcq?]: 4:a53251cdf717
+  apply changeset? [ynmpcq?]:  (no-eol)
+  $ hg heads --template "{node|short}\n"
+  88be5dde5260
+
   $ cd ..
 
 
