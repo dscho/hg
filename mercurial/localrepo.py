@@ -692,7 +692,13 @@ class localrepository(object):
         return self
 
     def cancopy(self):
-        return self.local() # so statichttprepo's override of local() works
+        # so statichttprepo's override of local() works
+        if not self.local():
+            return False
+        if not self.ui.configbool('phases', 'publish', True):
+            return True
+        # if publishing we can't copy if there is filtered content
+        return not self.filtered('visible').changelog.filteredrevs
 
     def join(self, f):
         return os.path.join(self.path, f)
@@ -1899,7 +1905,8 @@ class localrepository(object):
                     # We can pick:
                     # * missingheads part of common (::commonheads)
                     common = set(outgoing.common)
-                    cheads = [node for node in revs if node in common]
+                    nm = self.changelog.nodemap
+                    cheads = [node for node in revs if nm[node] in common]
                     # and
                     # * commonheads parents on missing
                     revset = unfi.set('%ln and parents(roots(%ln))',

@@ -635,8 +635,7 @@ def _checkshellalias(lui, ui, args):
 
     cmd = args[0]
     try:
-        aliases, entry = cmdutil.findcmd(cmd, cmdtable,
-                                         lui.configbool("ui", "strict"))
+        aliases, entry = cmdutil.findcmd(cmd, cmdtable)
     except (error.AmbiguousCommand, error.UnknownCommand):
         restorecommands()
         return
@@ -774,8 +773,6 @@ def _dispatch(req):
                 repo = hg.repository(ui, path=path)
                 if not repo.local():
                     raise util.Abort(_("repository '%s' is not local") % path)
-                if options['hidden']:
-                    repo = repo.unfiltered()
                 repo.ui.setconfig("bundle", "mainreporoot", repo.root)
             except error.RequirementError:
                 raise
@@ -795,6 +792,8 @@ def _dispatch(req):
                     raise
         if repo:
             ui = repo.ui
+            if options['hidden']:
+                repo = repo.unfiltered()
         args.insert(0, repo)
     elif rpath:
         ui.warn(_("warning: --repository ignored\n"))

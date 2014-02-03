@@ -13,6 +13,16 @@
   $ hg init a
   $ cd a
 
+  $ touch .hg/rebasestate
+  $ hg sum
+  parent: -1:000000000000 tip (empty repository)
+  branch: default
+  commit: (clean)
+  update: (current)
+  abort: .hg/rebasestate is incomplete
+  [255]
+  $ rm .hg/rebasestate
+
   $ echo c1 > common
   $ hg add common
   $ hg ci -m C1
@@ -92,7 +102,7 @@ earlier than 2.7 by renaming ".hg/rebasestate" temporarily.
 
   $ hg rebase --continue
   abort: cannot continue inconsistent rebase
-  (use "hg rebase --abort" to clear borken state)
+  (use "hg rebase --abort" to clear broken state)
   [255]
   $ hg summary | grep '^rebase: '
   rebase: (use "hg rebase --abort" to clear broken state)

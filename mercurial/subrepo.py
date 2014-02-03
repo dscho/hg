@@ -701,39 +701,50 @@ class hgsubrepo(abstractsubrepo):
 
     def _get(self, state):
         source, revision, kind = state
-        if revision not in self._repo:
-            self._repo._subsource = source
-            srcurl = _abssource(self._repo)
-            other = hg.peer(self._repo, {}, srcurl)
-            if len(self._repo) == 0:
-                self._repo.ui.status(_('cloning subrepo %s from %s\n')
-                                     % (subrelpath(self), srcurl))
-                parentrepo = self._repo._subparent
-                shutil.rmtree(self._repo.path)
-                other, cloned = hg.clone(self._repo._subparent.baseui, {},
-                                         other, self._repo.root,
-                                         update=False)
-                self._repo = cloned.local()
-                self._initrepo(parentrepo, source, create=True)
+        if revision in self._repo.unfiltered():
+            return True
+        self._repo._subsource = source
+        srcurl = _abssource(self._repo)
+        other = hg.peer(self._repo, {}, srcurl)
+        if len(self._repo) == 0:
+            self._repo.ui.status(_('cloning subrepo %s from %s\n')
+                                 % (subrelpath(self), srcurl))
+            parentrepo = self._repo._subparent
+            shutil.rmtree(self._repo.path)
+            other, cloned = hg.clone(self._repo._subparent.baseui, {},
+                                     other, self._repo.root,
+                                     update=False)
+            self._repo = cloned.local()
+            self._initrepo(parentrepo, source, create=True)
+            self._cachestorehash(srcurl)
+        else:
+            self._repo.ui.status(_('pulling subrepo %s from %s\n')
+                                 % (subrelpath(self), srcurl))
+            cleansub = self.storeclean(srcurl)
+            remotebookmarks = other.listkeys('bookmarks')
+            self._repo.pull(other)
+            bookmarks.updatefromremote(self._repo.ui, self._repo,
+                                       remotebookmarks, srcurl)
+            if cleansub:
+                # keep the repo clean after pull
                 self._cachestorehash(srcurl)
-            else:
-                self._repo.ui.status(_('pulling subrepo %s from %s\n')
-                                     % (subrelpath(self), srcurl))
-                cleansub = self.storeclean(srcurl)
-                remotebookmarks = other.listkeys('bookmarks')
-                self._repo.pull(other)
-                bookmarks.updatefromremote(self._repo.ui, self._repo,
-                                           remotebookmarks, srcurl)
-                if cleansub:
-                    # keep the repo clean after pull
-                    self._cachestorehash(srcurl)
+        return False
 
     @annotatesubrepoerror
     def get(self, state, overwrite=False):
-        self._get(state)
+        inrepo = self._get(state)
         source, revision, kind = state
-        self._repo.ui.debug("getting subrepo %s\n" % self._path)
-        hg.updaterepo(self._repo, revision, overwrite)
+        repo = self._repo
+        repo.ui.debug("getting subrepo %s\n" % self._path)
+        if inrepo:
+            urepo = repo.unfiltered()
+            ctx = urepo[revision]
+            if ctx.hidden():
+                urepo.ui.warn(
+                    _('revision %s in subrepo %s is hidden\n') \
+                    % (revision[0:12], self._path))
+                repo = urepo
+        hg.updaterepo(repo, revision, overwrite)
 
     @annotatesubrepoerror
     def merge(self, state):
