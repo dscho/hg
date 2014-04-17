@@ -311,6 +311,15 @@ def extstyles():
     for name, ext in extensions.extensions():
         _styles.update(getattr(ext, 'colortable', {}))
 
+def valideffect(effect):
+    'Determine if the effect is valid or not.'
+    good = False
+    if not _terminfo_params and effect in _effects:
+        good = True
+    elif effect in _terminfo_params or effect[:-11] in _terminfo_params:
+        good = True
+    return good
+
 def configstyles(ui):
     for status, cfgeffects in ui.configitems('color'):
         if '.' not in status or status.startswith('color.'):
@@ -319,9 +328,7 @@ def configstyles(ui):
         if cfgeffects:
             good = []
             for e in cfgeffects:
-                if not _terminfo_params and e in _effects:
-                    good.append(e)
-                elif e in _terminfo_params or e[:-11] in _terminfo_params:
+                if valideffect(e):
                     good.append(e)
                 else:
                     ui.warn(_("ignoring unknown color/effect %r "
@@ -375,6 +382,8 @@ class colorui(uimod.ui):
             s = _styles.get(l, '')
             if s:
                 effects.append(s)
+            elif valideffect(l):
+                effects.append(l)
         effects = ' '.join(effects)
         if effects:
             return '\n'.join([render_effects(s, effects)
@@ -385,6 +394,10 @@ def templatelabel(context, mapping, args):
     if len(args) != 2:
         # i18n: "label" is a keyword
         raise error.ParseError(_("label expects two arguments"))
+
+    # add known effects to the mapping so symbols like 'red', 'bold',
+    # etc. don't need to be quoted
+    mapping.update(dict([(k, k) for k in _effects]))
 
     thing = templater._evalifliteral(args[1], context, mapping)
 
@@ -423,6 +436,16 @@ def extsetup(ui):
          # not be translated
          _("when to colorize (boolean, always, auto, or never)"),
          _('TYPE')))
+
+def debugcolor(ui, repo, **opts):
+    global _styles
+    _styles = {}
+    for effect in _effects.keys():
+        _styles[effect] = effect
+    ui.write(('color mode: %s\n') % ui._colormode)
+    ui.write(_('available colors:\n'))
+    for label, colors in _styles.items():
+        ui.write(('%s\n') % colors, label=label)
 
 if os.name != 'nt':
     w32effects = None
@@ -553,3 +576,8 @@ else:
         finally:
             # Explicitly reset original attributes
             _kernel32.SetConsoleTextAttribute(stdout, origattr)
+
+cmdtable = {
+    'debugcolor':
+        (debugcolor, [], ('hg debugcolor'))
+}

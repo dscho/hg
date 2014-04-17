@@ -63,13 +63,13 @@ class converter_source(object):
 
         self.encoding = 'utf-8'
 
-    def checkhexformat(self, revstr):
+    def checkhexformat(self, revstr, mapname='splicemap'):
         """ fails if revstr is not a 40 byte hex. mercurial and git both uses
             such format for their revision numbering
         """
         if not re.match(r'[0-9a-fA-F]{40,40}$', revstr):
-            raise util.Abort(_('splicemap entry %s is not a valid revision'
-                               ' identifier') % revstr)
+            raise util.Abort(_('%s entry %s is not a valid revision'
+                               ' identifier') % (mapname, revstr))
 
     def before(self):
         pass
@@ -172,7 +172,7 @@ class converter_source(object):
         """
         return {}
 
-    def checkrevformat(self, revstr):
+    def checkrevformat(self, revstr, mapname='splicemap'):
         """revstr is a string that describes a revision in the given
            source control system.  Return true if revstr has correct
            format.
@@ -191,10 +191,6 @@ class converter_sink(object):
         self.ui = ui
         self.path = path
         self.created = []
-
-    def getheads(self):
-        """Return a list of this repository's heads"""
-        raise NotImplementedError
 
     def revmapfile(self):
         """Path to a file that will contain lines

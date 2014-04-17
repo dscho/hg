@@ -289,6 +289,9 @@ def rebase(ui, repo, **opts):
                                                            inclusive=True)
                 external = externalparent(repo, state, targetancestors)
 
+            if dest.closesbranch() and not keepbranchesf:
+                ui.status(_('reopening closed branch head %s\n') % dest)
+
         if keepbranchesf:
             # insert _savebranch at the start of extrafns so if
             # there's a user-provided extrafn it can clobber branch if
@@ -330,14 +333,15 @@ def rebase(ui, repo, **opts):
                     repo.ui.debug('resuming interrupted rebase\n')
                 else:
                     try:
-                        ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
+                        ui.setconfig('ui', 'forcemerge', opts.get('tool', ''),
+                                     'rebase')
                         stats = rebasenode(repo, rev, p1, state, collapsef)
                         if stats and stats[3] > 0:
                             raise error.InterventionRequired(
                                 _('unresolved conflicts (see hg '
                                   'resolve, then hg rebase --continue)'))
                     finally:
-                        ui.setconfig('ui', 'forcemerge', '')
+                        ui.setconfig('ui', 'forcemerge', '', 'rebase')
                 cmdutil.duplicatecopies(repo, rev, target)
                 if not collapsef:
                     newrev = concludenode(repo, rev, p1, p2, extrafn=extrafn,
@@ -516,6 +520,12 @@ def rebasenode(repo, rev, p1, state, collapse):
             if state.get(p.rev()) == repo[p1].rev():
                 base = p.node()
                 break
+        else: # fallback when base not found
+            base = None
+
+            # Raise because this function is called wrong (see issue 4106)
+            raise AssertionError('no base found to rebase on '
+                                 '(rebasenode called wrong)')
     if base is not None:
         repo.ui.debug("   detach base %d:%s\n" % (repo[base].rev(), repo[base]))
     # When collapsing in-place, the parent is the common ancestor, we
@@ -703,7 +713,8 @@ def restorestatus(repo):
                 if new != nullrev and new in seen:
                     skipped.add(old)
                 seen.add(new)
-        repo.ui.debug('computed skipped revs: %s\n' % skipped)
+        repo.ui.debug('computed skipped revs: %s\n' %
+                      (' '.join(str(r) for r in sorted(skipped)) or None))
         repo.ui.debug('rebase status resumed\n')
         return (originalwd, target, state, skipped,
                 collapse, keep, keepbranches, external, activebookmark)
@@ -790,7 +801,7 @@ def buildstate(repo, dest, rebaseset, collapse):
                 repo.ui.debug('source is a child of destination\n')
                 return None
 
-        repo.ui.debug('rebase onto %d starting from %s\n' % (dest, roots))
+        repo.ui.debug('rebase onto %d starting from %s\n' % (dest, root))
         state.update(dict.fromkeys(rebaseset, nullrev))
         # Rebase tries to turn <dest> into a parent of <root> while
         # preserving the number of parents of rebased changesets:

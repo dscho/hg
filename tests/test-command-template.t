@@ -45,7 +45,7 @@ Second branch starting at nullrev:
 
   $ hg log --template '{join(file_copies, ",\n")}\n' -r .
   fourth (second)
-  $ hg log --template '{file_copies % "{source} -> {name}\n"}' -r .
+  $ hg log -T '{file_copies % "{source} -> {name}\n"}' -r .
   second -> fourth
 
 Quoting for ui.logtemplate
@@ -62,6 +62,29 @@ Make sure user/global hgrc does not affect tests
   $ echo '[ui]' > .hg/hgrc
   $ echo 'logtemplate =' >> .hg/hgrc
   $ echo 'style =' >> .hg/hgrc
+
+Add some simple styles to settings
+
+  $ echo '[templates]' >> .hg/hgrc
+  $ printf 'simple = "{rev}\\n"\n' >> .hg/hgrc
+  $ printf 'simple2 = {rev}\\n\n' >> .hg/hgrc
+
+  $ hg log -l1 -Tsimple
+  8
+  $ hg log -l1 -Tsimple2
+  8
+
+Test templates and style maps in files:
+
+  $ echo "{rev}" > tmpl
+  $ hg log -l1 -T./tmpl
+  8
+  $ hg log -l1 -Tblah/blah
+  blah/blah (no-eol)
+
+  $ printf 'changeset = "{rev}\\n"\n' > map-simple
+  $ hg log -l1 -T./map-simple
+  8
 
 Default style is like normal output:
 
@@ -84,7 +107,7 @@ Revision with no copies (used to print a traceback):
 
 Compact style works:
 
-  $ hg log --style compact
+  $ hg log -Tcompact
   8[tip]   95c24699272e   2020-01-01 10:01 +0000   test
     third
   
@@ -1463,7 +1486,7 @@ No tag set:
   1: null+2
   0: null+1
 
-One common tag: longuest path wins:
+One common tag: longest path wins:
 
   $ hg tag -r 1 -m t1 -d '6 0' t1
   $ hg log --template '{rev}: {latesttag}+{latesttagdistance}\n'
@@ -1686,7 +1709,7 @@ Test string escaping:
   $ hg log -R a -r 8 --template '{files % r"{file}\n"}\n'
   fourth\nsecond\nthird\n
 
-Test string escapeing in nested expression:
+Test string escaping in nested expression:
 
   $ hg log -R a -r 8 --template '{ifeq(r"\x6e", if("1", "\x5c\x786e"), join(files, "\x5c\x786e"))}\n'
   fourth\x6esecond\x6ethird
@@ -1718,20 +1741,20 @@ Test recursive evaluation:
   $ echo aa >> aa
   $ hg ci -u '{node|short}' -m 'desc to be wrapped desc to be wrapped'
 
-  $ hg log -r 1 --template '{fill(desc, "20", author, branch)}'
+  $ hg log -l1 --template '{fill(desc, "20", author, branch)}'
   {node|short}desc to
   text.{rev}be wrapped
   text.{rev}desc to be
   text.{rev}wrapped (no-eol)
-  $ hg log -r 1 --template '{fill(desc, "20", "{node|short}:", "text.{rev}:")}'
+  $ hg log -l1 --template '{fill(desc, "20", "{node|short}:", "text.{rev}:")}'
   bcc7ff960b8e:desc to
   text.1:be wrapped
   text.1:desc to be
   text.1:wrapped (no-eol)
 
-  $ hg log -r 1 --template '{sub(r"[0-9]", "-", author)}'
+  $ hg log -l 1 --template '{sub(r"[0-9]", "-", author)}'
   {node|short} (no-eol)
-  $ hg log -r 1 --template '{sub(r"[0-9]", "-", "{node|short}")}'
+  $ hg log -l 1 --template '{sub(r"[0-9]", "-", "{node|short}")}'
   bcc-ff---b-e (no-eol)
 
   $ cat >> .hg/hgrc <<EOF
@@ -1742,9 +1765,9 @@ Test recursive evaluation:
   > text.{rev} = red
   > text.1 = green
   > EOF
-  $ hg log --color=always -r 1 --template '{label(branch, "text\n")}'
+  $ hg log --color=always -l 1 --template '{label(branch, "text\n")}'
   \x1b[0;31mtext\x1b[0m (esc)
-  $ hg log --color=always -r 1 --template '{label("text.{rev}", "text\n")}'
+  $ hg log --color=always -l 1 --template '{label("text.{rev}", "text\n")}'
   \x1b[0;32mtext\x1b[0m (esc)
 
 Test branches inside if statement:
@@ -1752,11 +1775,82 @@ Test branches inside if statement:
   $ hg log -r 0 --template '{if(branches, "yes", "no")}\n'
   no
 
-  $ cd ..
+Test shortest(node) function:
+
+  $ echo b > b
+  $ hg ci -qAm b
+  $ hg log --template '{shortest(node)}\n'
+  e777
+  bcc7
+  f776
+  $ hg log --template '{shortest(node, 10)}\n'
+  e777603221
+  bcc7ff960b
+  f7769ec2ab
+
+Test pad function
+
+  $ hg log --template '{pad(rev, 20)} {author|user}\n'
+  2                    test
+  1                    {node|short}
+  0                    test
+
+  $ hg log --template '{pad(rev, 20, " ", True)} {author|user}\n'
+                     2 test
+                     1 {node|short}
+                     0 test
+
+  $ hg log --template '{pad(rev, 20, "-", False)} {author|user}\n'
+  2------------------- test
+  1------------------- {node|short}
+  0------------------- test
+
+Test ifcontains function
+
+  $ hg log --template '{rev} {ifcontains("a", file_adds, "added a", "did not add a")}\n'
+  2 did not add a
+  1 did not add a
+  0 added a
+
+Test revset function
+
+  $ hg log --template '{rev} {ifcontains(rev, revset("."), "current rev", "not current rev")}\n'
+  2 current rev
+  1 not current rev
+  0 not current rev
+
+  $ hg log --template '{rev} Parents: {revset("parents(%s)", rev)}\n'
+  2 Parents: 1
+  1 Parents: 0
+  0 Parents: 
+
+  $ hg log --template 'Rev: {rev}\n{revset("::%s", rev) % "Ancestor: {revision}\n"}\n'
+  Rev: 2
+  Ancestor: 0
+  Ancestor: 1
+  Ancestor: 2
+  
+  Rev: 1
+  Ancestor: 0
+  Ancestor: 1
+  
+  Rev: 0
+  Ancestor: 0
+  
+Test current bookmark templating
+
+  $ hg book foo
+  $ hg book bar
+  $ hg log --template "{rev} {bookmarks % '{bookmark}{ifeq(bookmark, current, \"*\")} '}\n"
+  2 bar* foo 
+  1 
+  0 
 
 Test stringify on sub expressions
 
+  $ cd ..
   $ hg log -R a -r 8 --template '{join(files, if("1", if("1", ", ")))}\n'
   fourth, second, third
   $ hg log -R a -r 8 --template '{strip(if("1", if("1", "-abc-")), if("1", if("1", "-")))}\n'
   abc
+

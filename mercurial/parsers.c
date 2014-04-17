@@ -14,6 +14,8 @@
 
 #include "util.h"
 
+static char *versionerrortext = "Python minor version mismatch";
+
 static int8_t hextable[256] = {
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -1208,7 +1210,7 @@ static PyObject *find_gca_candidates(indexObject *self, const int *revs,
 	const bitmask allseen = (1ull << revcount) - 1;
 	const bitmask poison = 1ull << revcount;
 	PyObject *gca = PyList_New(0);
-	int i, v, interesting, left;
+	int i, v, interesting;
 	int maxrev = -1;
 	long sp;
 	bitmask *seen;
@@ -1230,7 +1232,7 @@ static PyObject *find_gca_candidates(indexObject *self, const int *revs,
 	for (i = 0; i < revcount; i++)
 		seen[revs[i]] = 1ull << i;
 
-	interesting = left = revcount;
+	interesting = revcount;
 
 	for (v = maxrev; v >= 0 && interesting; v--) {
 		long sv = seen[v];
@@ -1251,11 +1253,8 @@ static PyObject *find_gca_candidates(indexObject *self, const int *revs,
 				}
 				sv |= poison;
 				for (i = 0; i < revcount; i++) {
-					if (revs[i] == v) {
-						if (--left <= 1)
-							goto done;
-						break;
-					}
+					if (revs[i] == v)
+						goto done;
 				}
 			}
 		}
@@ -1529,10 +1528,6 @@ static PyObject *index_ancestors(indexObject *self, PyObject *args)
 		ret = gca;
 		Py_INCREF(gca);
 	}
-	else if (PyList_GET_SIZE(gca) == 1) {
-		ret = PyList_GET_ITEM(gca, 0);
-		Py_INCREF(ret);
-	}
 	else ret = find_deepest(self, gca);
 
 done:
@@ -1544,6 +1539,97 @@ done:
 bail:
 	free(revs);
 	Py_XDECREF(gca);
+	Py_XDECREF(ret);
+	return NULL;
+}
+
+/*
+ * Given a (possibly overlapping) set of revs, return all the
+ * common ancestors heads: heads(::args[0] and ::a[1] and ...)
+ */
+static PyObject *index_commonancestorsheads(indexObject *self, PyObject *args)
+{
+	PyObject *ret = NULL;
+	Py_ssize_t argcount, i, len;
+	bitmask repeat = 0;
+	int revcount = 0;
+	int *revs;
+
+	argcount = PySequence_Length(args);
+	revs = malloc(argcount * sizeof(*revs));
+	if (argcount > 0 && revs == NULL)
+		return PyErr_NoMemory();
+	len = index_length(self) - 1;
+
+	for (i = 0; i < argcount; i++) {
+		static const int capacity = 24;
+		PyObject *obj = PySequence_GetItem(args, i);
+		bitmask x;
+		long val;
+
+		if (!PyInt_Check(obj)) {
+			PyErr_SetString(PyExc_TypeError,
+					"arguments must all be ints");
+			goto bail;
+		}
+		val = PyInt_AsLong(obj);
+		if (val == -1) {
+			ret = PyList_New(0);
+			goto done;
+		}
+		if (val < 0 || val >= len) {
+			PyErr_SetString(PyExc_IndexError,
+					"index out of range");
+			goto bail;
+		}
+		/* this cheesy bloom filter lets us avoid some more
+		 * expensive duplicate checks in the common set-is-disjoint
+		 * case */
+		x = 1ull << (val & 0x3f);
+		if (repeat & x) {
+			int k;
+			for (k = 0; k < revcount; k++) {
+				if (val == revs[k])
+					goto duplicate;
+			}
+		}
+		else repeat |= x;
+		if (revcount >= capacity) {
+			PyErr_Format(PyExc_OverflowError,
+				     "bitset size (%d) > capacity (%d)",
+				     revcount, capacity);
+			goto bail;
+		}
+		revs[revcount++] = (int)val;
+	duplicate:;
+	}
+
+	if (revcount == 0) {
+		ret = PyList_New(0);
+		goto done;
+	}
+	if (revcount == 1) {
+		PyObject *obj;
+		ret = PyList_New(1);
+		if (ret == NULL)
+			goto bail;
+		obj = PyInt_FromLong(revs[0]);
+		if (obj == NULL)
+			goto bail;
+		PyList_SET_ITEM(ret, 0, obj);
+		goto done;
+	}
+
+	ret = find_gca_candidates(self, revs, revcount);
+	if (ret == NULL)
+		goto bail;
+
+done:
+	free(revs);
+	return ret;
+
+bail:
+	free(revs);
 	Py_XDECREF(ret);
 	return NULL;
 }
@@ -1792,6 +1878,9 @@ static PyMappingMethods index_mapping_methods = {
 static PyMethodDef index_methods[] = {
 	{"ancestors", (PyCFunction)index_ancestors, METH_VARARGS,
 	 "return the gca set of the given revs"},
+	{"commonancestorsheads", (PyCFunction)index_commonancestorsheads,
+	  METH_VARARGS,
+	  "return the heads of the common ancestors of the given revs"},
 	{"clearcaches", (PyCFunction)index_clearcaches, METH_NOARGS,
 	 "clear the index caches"},
 	{"get", (PyCFunction)index_m_get, METH_VARARGS,
@@ -1918,6 +2007,16 @@ void dirs_module_init(PyObject *mod);
 
 static void module_init(PyObject *mod)
 {
+	/* This module constant has two purposes.  First, it lets us unit test
+	 * the ImportError raised without hard-coding any error text.  This
+	 * means we can change the text in the future without breaking tests,
+	 * even across changesets without a recompile.  Second, its presence
+	 * can be used to determine whether the version-checking logic is
+	 * present, which also helps in testing across changesets without a
+	 * recompile.  Note that this means the pure-Python version of parsers
+	 * should not have this module constant. */
+	PyModule_AddStringConstant(mod, "versionerrortext", versionerrortext);
+
 	dirs_module_init(mod);
 
 	indexType.tp_new = PyType_GenericNew;
@@ -1935,6 +2034,24 @@ static void module_init(PyObject *mod)
 	dirstate_unset = Py_BuildValue("ciii", 'n', 0, -1, -1);
 }
 
+static int check_python_version(void)
+{
+	PyObject *sys = PyImport_ImportModule("sys");
+	long hexversion = PyInt_AsLong(PyObject_GetAttrString(sys, "hexversion"));
+	/* sys.hexversion is a 32-bit number by default, so the -1 case
+	 * should only occur in unusual circumstances (e.g. if sys.hexversion
+	 * is manually set to an invalid value). */
+	if ((hexversion == -1) || (hexversion >> 16 != PY_VERSION_HEX >> 16)) {
+		PyErr_Format(PyExc_ImportError, "%s: The Mercurial extension "
+			"modules were compiled with Python " PY_VERSION ", but "
+			"Mercurial is currently using Python with sys.hexversion=%ld: "
+			"Python %s\n at: %s", versionerrortext, hexversion,
+			Py_GetVersion(), Py_GetProgramFullPath());
+		return -1;
+	}
+	return 0;
+}
+
 #ifdef IS_PY3K
 static struct PyModuleDef parsers_module = {
 	PyModuleDef_HEAD_INIT,
@@ -1946,14 +2063,22 @@ static struct PyModuleDef parsers_module = {
 
 PyMODINIT_FUNC PyInit_parsers(void)
 {
-	PyObject *mod = PyModule_Create(&parsers_module);
+	PyObject *mod;
+
+	if (check_python_version() == -1)
+		return;
+	mod = PyModule_Create(&parsers_module);
 	module_init(mod);
 	return mod;
 }
 #else
 PyMODINIT_FUNC initparsers(void)
 {
-	PyObject *mod = Py_InitModule3("parsers", methods, parsers_doc);
+	PyObject *mod;
+
+	if (check_python_version() == -1)
+		return;
+	mod = Py_InitModule3("parsers", methods, parsers_doc);
 	module_init(mod);
 }
 #endif

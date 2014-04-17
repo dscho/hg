@@ -176,7 +176,7 @@ def encodemeta(meta):
         if ':' in key or '\0' in key:
             raise ValueError("':' and '\0' are forbidden in metadata key'")
         if '\0' in value:
-            raise ValueError("':' are forbidden in metadata value'")
+            raise ValueError("':' is forbidden in metadata value'")
     return '\0'.join(['%s:%s' % (k, meta[k]) for k in sorted(meta)])
 
 def decodemeta(data):
@@ -247,6 +247,9 @@ class obsstore(object):
     def __iter__(self):
         return iter(self._all)
 
+    def __len__(self):
+        return len(self._all)
+
     def __nonzero__(self):
         return bool(self._all)
 
@@ -256,6 +259,12 @@ class obsstore(object):
         * ensuring it is hashable
         * check mandatory metadata
         * encode metadata
+
+        If you are a human writing code creating marker you want to use the
+        `createmarkers` function in this module instead.
+
+        return True if a new marker have been added, False if the markers
+        already existed (no op).
         """
         if metadata is None:
             metadata = {}
@@ -267,7 +276,7 @@ class obsstore(object):
             if len(succ) != 20:
                 raise ValueError(succ)
         marker = (str(prec), tuple(succs), int(flag), encodemeta(metadata))
-        self.add(transaction, [marker])
+        return bool(self.add(transaction, [marker]))
 
     def add(self, transaction, markers):
         """Add new markers to the store
@@ -343,14 +352,15 @@ def _encodeonemarker(marker):
 # - the base85 encoding
 _maxpayload = 5300
 
-def listmarkers(repo):
-    """List markers over pushkey"""
-    if not repo.obsstore:
-        return {}
+def _pushkeyescape(markers):
+    """encode markers into a dict suitable for pushkey exchange
+
+    - binary data is base85 encoded
+    - split in chunks smaller than 5300 bytes"""
     keys = {}
     parts = []
     currentlen = _maxpayload * 2  # ensure we create a new part
-    for marker in  repo.obsstore:
+    for marker in markers:
         nextdata = _encodeonemarker(marker)
         if (len(nextdata) + currentlen > _maxpayload):
             currentpart = []
@@ -363,13 +373,19 @@ def listmarkers(repo):
         keys['dump%i' % idx] = base85.b85encode(data)
     return keys
 
+def listmarkers(repo):
+    """List markers over pushkey"""
+    if not repo.obsstore:
+        return {}
+    return _pushkeyescape(repo.obsstore)
+
 def pushmarker(repo, key, old, new):
     """Push markers over pushkey"""
     if not key.startswith('dump'):
         repo.ui.warn(_('unknown key: %r') % key)
         return 0
     if old:
-        repo.ui.warn(_('unexpected old value') % key)
+        repo.ui.warn(_('unexpected old value for %r') % key)
         return 0
     data = base85.b85decode(new)
     lock = repo.lock()
@@ -383,43 +399,6 @@ def pushmarker(repo, key, old, new):
             tr.release()
     finally:
         lock.release()
-
-def syncpush(repo, remote):
-    """utility function to push obsolete markers to a remote
-
-    Exist mostly to allow overriding for experimentation purpose"""
-    if (_enabled and repo.obsstore and
-        'obsolete' in remote.listkeys('namespaces')):
-        rslts = []
-        remotedata = repo.listkeys('obsolete')
-        for key in sorted(remotedata, reverse=True):
-            # reverse sort to ensure we end with dump0
-            data = remotedata[key]
-            rslts.append(remote.pushkey('obsolete', key, '', data))
-        if [r for r in rslts if not r]:
-            msg = _('failed to push some obsolete markers!\n')
-            repo.ui.warn(msg)
-
-def syncpull(repo, remote, gettransaction):
-    """utility function to pull obsolete markers from a remote
-
-    The `gettransaction` is function that return the pull transaction, creating
-    one if necessary. We return the transaction to inform the calling code that
-    a new transaction have been created (when applicable).
-
-    Exists mostly to allow overriding for experimentation purpose"""
-    tr = None
-    if _enabled:
-        repo.ui.debug('fetching remote obsolete markers\n')
-        remoteobs = remote.listkeys('obsolete')
-        if 'dump0' in remoteobs:
-            tr = gettransaction()
-            for key in sorted(remoteobs, reverse=True):
-                if key.startswith('dump'):
-                    data = base85.b85decode(remoteobs[key])
-                    repo.obsstore.mergemarkers(tr, data)
-            repo.invalidatevolatilesets()
-    return tr
 
 def allmarkers(repo):
     """all obsolete markers known in a repository"""
@@ -673,7 +652,7 @@ def successorssets(repo, initialnode, cache=None):
                 # Within a marker, a successor may have divergent successors
                 # sets. In such a case, the marker will contribute multiple
                 # divergent successors sets. If multiple successors have
-                # divergent successors sets, a cartesian product is used.
+                # divergent successors sets, a Cartesian product is used.
                 #
                 # At the end we post-process successors sets to remove
                 # duplicated entry and successors set that are strict subset of
@@ -800,7 +779,7 @@ def _computeextinctset(repo):
 def _computebumpedset(repo):
     """the set of revs trying to obsolete public revisions"""
     bumped = set()
-    # utils function (avoid attribut lookup in the loop)
+    # util function (avoid attribute lookup in the loop)
     phase = repo._phasecache.phase # would be faster to grab the full list
     public = phases.public
     cl = repo.changelog
@@ -845,8 +824,10 @@ def _computedivergentset(repo):
 def createmarkers(repo, relations, flag=0, metadata=None):
     """Add obsolete markers between changesets in a repo
 
-    <relations> must be an iterable of (<old>, (<new>, ...)) tuple.
-    `old` and `news` are changectx.
+    <relations> must be an iterable of (<old>, (<new>, ...)[,{metadata}])
+    tuple. `old` and `news` are changectx. metadata is an optional dictionary
+    containing metadata for this marker only. It is merged with the global
+    metadata specified through the `metadata` argument of this function,
 
     Trying to obsolete a public changeset will raise an exception.
 
@@ -865,7 +846,13 @@ def createmarkers(repo, relations, flag=0, metadata=None):
         metadata['user'] = repo.ui.username()
     tr = repo.transaction('add-obsolescence-marker')
     try:
-        for prec, sucs in relations:
+        for rel in relations:
+            prec = rel[0]
+            sucs = rel[1]
+            localmetadata = metadata.copy()
+            if 2 < len(rel):
+                localmetadata.update(rel[2])
+
             if not prec.mutable():
                 raise util.Abort("cannot obsolete immutable changeset: %s"
                                  % prec)
@@ -873,7 +860,7 @@ def createmarkers(repo, relations, flag=0, metadata=None):
             nsucs = tuple(s.node() for s in sucs)
             if nprec in nsucs:
                 raise util.Abort("changeset %s cannot obsolete itself" % prec)
-            repo.obsstore.create(tr, nprec, nsucs, flag, metadata)
+            repo.obsstore.create(tr, nprec, nsucs, flag, localmetadata)
             repo.filteredrevcache.clear()
         tr.close()
     finally:

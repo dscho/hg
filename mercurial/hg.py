@@ -129,8 +129,25 @@ def peer(uiorrepo, opts, path, create=False):
     return _peerorrepo(rui, path, create).peer()
 
 def defaultdest(source):
-    '''return default destination of clone if none is given'''
-    return os.path.basename(os.path.normpath(util.url(source).path or ''))
+    '''return default destination of clone if none is given
+
+    >>> defaultdest('foo')
+    'foo'
+    >>> defaultdest('/foo/bar')
+    'bar'
+    >>> defaultdest('/')
+    ''
+    >>> defaultdest('')
+    ''
+    >>> defaultdest('http://example.org/')
+    ''
+    >>> defaultdest('http://example.org/foo/')
+    'foo'
+    '''
+    path = util.url(source).path
+    if not path:
+        return ''
+    return os.path.basename(os.path.normpath(path))
 
 def share(ui, source, dest=None, update=True):
     '''create a shared repository'''
@@ -284,7 +301,8 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
 
     if dest is None:
         dest = defaultdest(source)
-        ui.status(_("destination directory: %s\n") % dest)
+        if dest:
+            ui.status(_("destination directory: %s\n") % dest)
     else:
         dest = ui.expandpath(dest)
 
@@ -413,7 +431,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
             fp.write("default = %s\n" % defaulturl)
             fp.close()
 
-            destrepo.ui.setconfig('paths', 'default', defaulturl)
+            destrepo.ui.setconfig('paths', 'default', defaulturl, 'clone')
 
             if update:
                 if update is not True:
@@ -567,8 +585,7 @@ def _outgoing(ui, repo, dest, opts):
     o = outgoing.missing
     if not o:
         scmutil.nochangesfound(repo.ui, repo, outgoing.excluded)
-        return None
-    return o
+    return o, other
 
 def outgoing(ui, repo, dest, opts):
     def recurse():
@@ -581,8 +598,9 @@ def outgoing(ui, repo, dest, opts):
         return ret
 
     limit = cmdutil.loglimit(opts)
-    o = _outgoing(ui, repo, dest, opts)
-    if o is None:
+    o, other = _outgoing(ui, repo, dest, opts)
+    if not o:
+        cmdutil.outgoinghooks(ui, repo, other, opts, o)
         return recurse()
 
     if opts.get('newest_first'):
@@ -598,6 +616,7 @@ def outgoing(ui, repo, dest, opts):
         count += 1
         displayer.show(repo[n])
     displayer.close()
+    cmdutil.outgoinghooks(ui, repo, other, opts, o)
     recurse()
     return 0 # exit code is zero since we found outgoing changes
 
@@ -621,19 +640,19 @@ def remoteui(src, opts):
     for o in 'ssh', 'remotecmd':
         v = opts.get(o) or src.config('ui', o)
         if v:
-            dst.setconfig("ui", o, v)
+            dst.setconfig("ui", o, v, 'copied')
 
     # copy bundle-specific options
     r = src.config('bundle', 'mainreporoot')
     if r:
-        dst.setconfig('bundle', 'mainreporoot', r)
+        dst.setconfig('bundle', 'mainreporoot', r, 'copied')
 
     # copy selected local settings to the remote ui
     for sect in ('auth', 'hostfingerprints', 'http_proxy'):
         for key, val in src.configitems(sect):
-            dst.setconfig(sect, key, val)
+            dst.setconfig(sect, key, val, 'copied')
     v = src.config('web', 'cacerts')
     if v:
-        dst.setconfig('web', 'cacerts', util.expandpath(v))
+        dst.setconfig('web', 'cacerts', util.expandpath(v), 'copied')
 
     return dst

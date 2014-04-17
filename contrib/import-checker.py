@@ -11,12 +11,15 @@ import zlib
 def dotted_name_of_path(path):
     """Given a relative path to a source file, return its dotted module name.
 
-
     >>> dotted_name_of_path('mercurial/error.py')
     'mercurial.error'
+    >>> dotted_name_of_path('zlibmodule.so')
+    'zlib'
     """
     parts = path.split('/')
-    parts[-1] = parts[-1][:-3] # remove .py
+    parts[-1] = parts[-1].split('.', 1)[0] # remove .py and .so and .ARCH.so
+    if parts[-1].endswith('module'):
+        parts[-1] = parts[-1][:-6]
     return '.'.join(parts)
 
 
@@ -136,7 +139,7 @@ def verify_stdlib_on_own_line(source):
     http://bugs.python.org/issue19510.
 
     >>> list(verify_stdlib_on_own_line('import sys, foo'))
-    ['mixed stdlib and relative imports:\\n   foo, sys']
+    ['mixed imports\\n   stdlib:    sys\\n   relative:  foo']
     >>> list(verify_stdlib_on_own_line('import sys, os'))
     []
     >>> list(verify_stdlib_on_own_line('import foo, bar'))
@@ -144,13 +147,13 @@ def verify_stdlib_on_own_line(source):
     """
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
-            from_stdlib = {}
+            from_stdlib = {False: [], True: []}
             for n in node.names:
-                from_stdlib[n.name] = n.name in stdlib_modules
-            num_std = len([x for x in from_stdlib.values() if x])
-            if num_std not in (len(from_stdlib.values()), 0):
-                yield ('mixed stdlib and relative imports:\n   %s' %
-                       ', '.join(sorted(from_stdlib.iterkeys())))
+                from_stdlib[n.name in stdlib_modules].append(n.name)
+            if from_stdlib[True] and from_stdlib[False]:
+                yield ('mixed imports\n   stdlib:    %s\n   relative:  %s' %
+                       (', '.join(sorted(from_stdlib[True])),
+                        ', '.join(sorted(from_stdlib[False]))))
 
 class CircularImport(Exception):
     pass

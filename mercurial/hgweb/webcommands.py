@@ -8,7 +8,7 @@
 import os, mimetypes, re, cgi, copy
 import webutil
 from mercurial import error, encoding, archival, templater, templatefilters
-from mercurial.node import short, hex, nullid
+from mercurial.node import short, hex
 from mercurial import util
 from common import paritygen, staticfile, get_contact, ErrorResponse
 from common import HTTP_OK, HTTP_FORBIDDEN, HTTP_NOT_FOUND
@@ -187,7 +187,7 @@ def _search(web, req, tmpl):
 
         mfunc = revset.match(web.repo.ui, revdef)
         try:
-            revs = mfunc(web.repo, list(web.repo))
+            revs = mfunc(web.repo, revset.baseset(web.repo))
             return MODE_REVSET, revs
             # ParseError: wrongly placed tokens, wrongs arguments, etc
             # RepoLookupError: no such revision, e.g. in 'revision:'
@@ -712,28 +712,22 @@ def comparison(web, req, tmpl):
             return [_('(binary file %s, hash: %s)') % (mt, hex(f.filenode()))]
         return f.data().splitlines()
 
+    parent = ctx.p1()
+    leftrev = parent.rev()
+    leftnode = parent.node()
+    rightrev = ctx.rev()
+    rightnode = ctx.node()
     if path in ctx:
         fctx = ctx[path]
-        rightrev = fctx.filerev()
-        rightnode = fctx.filenode()
         rightlines = filelines(fctx)
-        parents = fctx.parents()
-        if not parents:
-            leftrev = -1
-            leftnode = nullid
+        if path not in parent:
             leftlines = ()
         else:
-            pfctx = parents[0]
-            leftrev = pfctx.filerev()
-            leftnode = pfctx.filenode()
+            pfctx = parent[path]
             leftlines = filelines(pfctx)
     else:
-        rightrev = -1
-        rightnode = nullid
         rightlines = ()
         fctx = ctx.parents()[0][path]
-        leftrev = fctx.filerev()
-        leftnode = fctx.filenode()
         leftlines = filelines(fctx)
 
     comparison = webutil.compare(tmpl, context, leftlines, rightlines)
@@ -982,7 +976,11 @@ def graph(web, req, tmpl):
             if len(revs) >= revcount:
                 break
 
-        dag = graphmod.dagwalker(web.repo, revs)
+        # We have to feed a baseset to dagwalker as it is expecting smartset
+        # object. This does not have a big impact on hgweb performance itself
+        # since hgweb graphing code is not itself lazy yet.
+        dag = graphmod.dagwalker(web.repo, revset.baseset(revs))
+        # As we said one line above... not lazy.
         tree = list(graphmod.colored(dag, web.repo))
 
     def getcolumns(tree):
@@ -1018,26 +1016,26 @@ def graph(web, req, tmpl):
                              [cgi.escape(x) for x in ctx.tags()],
                              [cgi.escape(x) for x in ctx.bookmarks()]))
             else:
-                edgedata = [dict(col=edge[0], nextcol=edge[1],
-                                 color=(edge[2] - 1) % 6 + 1,
-                                 width=edge[3], bcolor=edge[4])
+                edgedata = [{'col': edge[0], 'nextcol': edge[1],
+                             'color': (edge[2] - 1) % 6 + 1,
+                             'width': edge[3], 'bcolor': edge[4]}
                             for edge in edges]
 
                 data.append(
-                    dict(node=node,
-                         col=vtx[0],
-                         color=(vtx[1] - 1) % 6 + 1,
-                         edges=edgedata,
-                         row=row,
-                         nextrow=row + 1,
-                         desc=desc,
-                         user=user,
-                         age=age,
-                         bookmarks=webutil.nodebookmarksdict(
-                            web.repo, ctx.node()),
-                         branches=webutil.nodebranchdict(web.repo, ctx),
-                         inbranch=webutil.nodeinbranch(web.repo, ctx),
-                         tags=webutil.nodetagsdict(web.repo, ctx.node())))
+                    {'node': node,
+                     'col': vtx[0],
+                     'color': (vtx[1] - 1) % 6 + 1,
+                     'edges': edgedata,
+                     'row': row,
+                     'nextrow': row + 1,
+                     'desc': desc,
+                     'user': user,
+                     'age': age,
+                     'bookmarks': webutil.nodebookmarksdict(
+                         web.repo, ctx.node()),
+                     'branches': webutil.nodebranchdict(web.repo, ctx),
+                     'inbranch': webutil.nodeinbranch(web.repo, ctx),
+                     'tags': webutil.nodetagsdict(web.repo, ctx.node())})
 
             row += 1
 

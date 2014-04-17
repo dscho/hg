@@ -375,13 +375,6 @@ def verifylfiles(ui, repo, all=False, contents=False):
     store = basestore._openstore(repo)
     return store.verify(revs, contents=contents)
 
-def debugdirstate(ui, repo):
-    '''Show basic information for the largefiles dirstate'''
-    lfdirstate = lfutil.openlfdirstate(ui, repo)
-    for file_, ent in sorted(lfdirstate._map.iteritems()):
-        mode = '%3o' % (ent[1] & 0777 & ~util.umask)
-        ui.write("%c %s %10d %s\n" % (ent[0], mode, ent[2], file_))
-
 def cachelfiles(ui, repo, node, filelist=None):
     '''cachelfiles ensures that all largefiles needed by the specified revision
     are present in the repository's largefile cache.
@@ -447,6 +440,7 @@ def updatelfiles(ui, repo, filelist=None, printmessage=True):
                 if (os.path.exists(absstandin + '.orig') and
                     os.path.exists(abslfile)):
                     shutil.copyfile(abslfile, abslfile + '.orig')
+                    util.unlinkpath(absstandin + '.orig')
                 expecthash = lfutil.readstandin(repo, lfile)
                 if (expecthash != '' and
                     (not os.path.exists(abslfile) or

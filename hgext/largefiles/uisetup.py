@@ -9,10 +9,9 @@
 '''setup for largefiles extension: uisetup'''
 
 from mercurial import archival, cmdutil, commands, extensions, filemerge, hg, \
-    httppeer, merge, scmutil, sshpeer, wireproto, revset
+    httppeer, merge, scmutil, sshpeer, wireproto, revset, subrepo
 from mercurial.i18n import _
 from mercurial.hgweb import hgweb_mod, webcommands
-from mercurial.subrepo import hgsubrepo
 
 import overrides
 import proto
@@ -42,7 +41,7 @@ def uisetup(ui):
     # Subrepos call status function
     entry = extensions.wrapcommand(commands.table, 'status',
                                    overrides.overridestatus)
-    entry = extensions.wrapfunction(hgsubrepo, 'status',
+    entry = extensions.wrapfunction(subrepo.hgsubrepo, 'status',
                                     overrides.overridestatusfn)
 
     entry = extensions.wrapcommand(commands.table, 'log',
@@ -65,14 +64,16 @@ def uisetup(ui):
     debugstateopt = [('', 'large', None, _('display largefiles dirstate'))]
     entry[1].extend(debugstateopt)
 
-    entry = extensions.wrapcommand(commands.table, 'outgoing',
-        overrides.overrideoutgoing)
+    outgoing = lambda orgfunc, *arg, **kwargs: orgfunc(*arg, **kwargs)
+    entry = extensions.wrapcommand(commands.table, 'outgoing', outgoing)
     outgoingopt = [('', 'large', None, _('display outgoing largefiles'))]
     entry[1].extend(outgoingopt)
+    cmdutil.outgoinghooks.add('largefiles', overrides.outgoinghook)
     entry = extensions.wrapcommand(commands.table, 'summary',
                                    overrides.overridesummary)
     summaryopt = [('', 'large', None, _('display outgoing largefiles'))]
     entry[1].extend(summaryopt)
+    cmdutil.summaryremotehooks.add('largefiles', overrides.summaryremotehook)
 
     entry = extensions.wrapcommand(commands.table, 'update',
                                    overrides.overrideupdate)
@@ -96,15 +97,15 @@ def uisetup(ui):
                                    overrides.overridecat)
     entry = extensions.wrapfunction(merge, '_checkunknownfile',
                                     overrides.overridecheckunknownfile)
-    entry = extensions.wrapfunction(merge, 'manifestmerge',
-                                    overrides.overridemanifestmerge)
+    entry = extensions.wrapfunction(merge, 'calculateupdates',
+                                    overrides.overridecalculateupdates)
     entry = extensions.wrapfunction(filemerge, 'filemerge',
                                     overrides.overridefilemerge)
     entry = extensions.wrapfunction(cmdutil, 'copy',
                                     overrides.overridecopy)
 
     # Summary calls dirty on the subrepos
-    entry = extensions.wrapfunction(hgsubrepo, 'dirty',
+    entry = extensions.wrapfunction(subrepo.hgsubrepo, 'dirty',
                                     overrides.overridedirty)
 
     # Backout calls revert so we need to override both the command and the
@@ -118,7 +119,8 @@ def uisetup(ui):
     extensions.wrapfunction(hg, 'merge', overrides.hgmerge)
 
     extensions.wrapfunction(archival, 'archive', overrides.overridearchive)
-    extensions.wrapfunction(hgsubrepo, 'archive', overrides.hgsubrepoarchive)
+    extensions.wrapfunction(subrepo.hgsubrepo, 'archive',
+                            overrides.hgsubrepoarchive)
     extensions.wrapfunction(cmdutil, 'bailifchanged',
                             overrides.overridebailifchanged)
 

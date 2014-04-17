@@ -218,9 +218,8 @@ class kwtemplater(object):
         '''Replaces keywords in data with expanded template.'''
         def kwsub(mobj):
             kw = mobj.group(1)
-            ct = cmdutil.changeset_templater(self.ui, self.repo,
-                                             False, None, '', False)
-            ct.use_template(self.templates[kw])
+            ct = cmdutil.changeset_templater(self.ui, self.repo, False, None,
+                                             self.templates[kw], '', False)
             self.ui.pushbuffer()
             ct.show(ctx, root=self.repo.root, file=path)
             ekw = templatefilters.firstline(self.ui.popbuffer())
@@ -386,10 +385,10 @@ def demo(ui, repo, *args, **opts):
     tmpdir = tempfile.mkdtemp('', 'kwdemo.')
     ui.note(_('creating temporary repository at %s\n') % tmpdir)
     repo = localrepo.localrepository(repo.baseui, tmpdir, True)
-    ui.setconfig('keyword', fn, '')
+    ui.setconfig('keyword', fn, '', 'keyword')
     svn = ui.configbool('keywordset', 'svn')
     # explicitly set keywordset for demo output
-    ui.setconfig('keywordset', 'svn', svn)
+    ui.setconfig('keywordset', 'svn', svn, 'keyword')
 
     uikwmaps = ui.configitems('keywordmaps')
     if args or opts.get('rcfile'):
@@ -420,7 +419,7 @@ def demo(ui, repo, *args, **opts):
         if uikwmaps:
             ui.status(_('\tdisabling current template maps\n'))
             for k, v in kwmaps.iteritems():
-                ui.setconfig('keywordmaps', k, v)
+                ui.setconfig('keywordmaps', k, v, 'keyword')
     else:
         ui.status(_('\n\tconfiguration using current keyword template maps\n'))
         if uikwmaps:
@@ -446,7 +445,7 @@ def demo(ui, repo, *args, **opts):
         wlock.release()
     for name, cmd in ui.configitems('hooks'):
         if name.split('.', 1)[0].find('commit') > -1:
-            repo.ui.setconfig('hooks', name, '')
+            repo.ui.setconfig('hooks', name, '', 'keyword')
     msg = _('hg keyword configuration and expansion example')
     ui.note(("hg ci -m '%s'\n" % msg))
     repo.commit(text=msg)

@@ -14,7 +14,7 @@ were part of the actual repository.
 from node import nullid
 from i18n import _
 import os, tempfile, shutil
-import changegroup, util, mdiff, discovery, cmdutil, scmutil
+import changegroup, util, mdiff, discovery, cmdutil, scmutil, exchange
 import localrepo, changelog, manifest, filelog, revlog, error
 
 class bundlerevlog(revlog.revlog):
@@ -193,7 +193,7 @@ class bundlerepository(localrepo.localrepository):
             self._tempparent = tempfile.mkdtemp()
             localrepo.instance(ui, self._tempparent, 1)
             localrepo.localrepository.__init__(self, ui, self._tempparent)
-        self.ui.setconfig('phases', 'publish', False)
+        self.ui.setconfig('phases', 'publish', False, 'bundlerepo')
 
         if path:
             self._url = 'bundle:' + util.expandpath(path) + '+' + bundlename
@@ -202,10 +202,10 @@ class bundlerepository(localrepo.localrepository):
 
         self.tempfile = None
         f = util.posixfile(bundlename, "rb")
-        self.bundle = changegroup.readbundle(f, bundlename)
+        self.bundle = exchange.readbundle(ui, f, bundlename)
         if self.bundle.compressed():
-            fdtemp, temp = tempfile.mkstemp(prefix="hg-bundle-",
-                                            suffix=".hg10un", dir=self.path)
+            fdtemp, temp = self.vfs.mkstemp(prefix="hg-bundle-",
+                                            suffix=".hg10un")
             self.tempfile = temp
             fptemp = os.fdopen(fdtemp, 'wb')
 
@@ -219,8 +219,8 @@ class bundlerepository(localrepo.localrepository):
             finally:
                 fptemp.close()
 
-            f = util.posixfile(self.tempfile, "rb")
-            self.bundle = changegroup.readbundle(f, bundlename)
+            f = self.vfs.open(self.tempfile, mode="rb")
+            self.bundle = exchange.readbundle(ui, f, bundlename, self.vfs)
 
         # dict with the mapping 'filename' -> position in the bundle
         self.bundlefilespos = {}
@@ -280,7 +280,7 @@ class bundlerepository(localrepo.localrepository):
         """Close assigned bundle file immediately."""
         self.bundle.close()
         if self.tempfile is not None:
-            os.unlink(self.tempfile)
+            self.vfs.unlink(self.tempfile)
         if self._tempparent:
             shutil.rmtree(self._tempparent, True)
 

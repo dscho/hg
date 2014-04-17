@@ -13,6 +13,7 @@ Show all commands except debug commands
   cat
   clone
   commit
+  config
   copy
   diff
   export
@@ -43,7 +44,6 @@ Show all commands except debug commands
   rollback
   root
   serve
-  showconfig
   status
   summary
   tag
@@ -199,7 +199,7 @@ Show all commands + options
   add: include, exclude, subrepos, dry-run
   annotate: rev, follow, no-follow, text, user, file, date, number, changeset, line-number, ignore-all-space, ignore-space-change, ignore-blank-lines, include, exclude
   clone: noupdate, updaterev, rev, branch, pull, uncompressed, ssh, remotecmd, insecure
-  commit: addremove, close-branch, amend, secret, include, exclude, message, logfile, date, user, subrepos
+  commit: addremove, close-branch, amend, secret, edit, include, exclude, message, logfile, date, user, subrepos
   diff: rev, change, text, git, nodates, show-function, reverse, ignore-all-space, ignore-space-change, ignore-blank-lines, unified, stat, include, exclude, subrepos
   export: output, switch-parent, rev, text, git, nodates
   forget: include, exclude
@@ -222,6 +222,7 @@ Show all commands + options
   branches: active, closed
   bundle: force, rev, branch, base, all, type, ssh, remotecmd, insecure
   cat: output, rev, decode, include, exclude
+  config: untrusted, edit, local, global
   copy: after, force, include, exclude, dry-run
   debugancestor: 
   debugbuilddag: mergeable-file, overwritten-file, new-file
@@ -250,7 +251,7 @@ Show all commands + options
   debugrebuilddirstate: rev
   debugrename: rev
   debugrevlog: changelog, manifest, dump
-  debugrevspec: 
+  debugrevspec: optimize
   debugsetparents: 
   debugsub: rev
   debugsuccessorssets: 
@@ -275,7 +276,6 @@ Show all commands + options
   revert: all, date, rev, no-backup, include, exclude, dry-run
   rollback: dry-run, force
   root: 
-  showconfig: untrusted
   tag: force, local, rev, remove, edit, message, date, user
   tags: 
   tip: patch, git, style, template

@@ -568,8 +568,9 @@ def transplant(ui, repo, *revs, **opts):
         if not heads:
             heads = repo.heads()
         ancestors = []
+        ctx = repo[dest]
         for head in heads:
-            ancestors.append(repo.changelog.ancestor(dest, head))
+            ancestors.append(ctx.ancestor(repo[head]).node())
         for node in repo.changelog.nodesbetween(ancestors, heads)[0]:
             if match(node):
                 yield node
@@ -670,7 +671,8 @@ def revsettransplanted(repo, subset, x):
         s = revset.getset(repo, subset, x)
     else:
         s = subset
-    return [r for r in s if repo[r].extra().get('transplant_source')]
+    return revset.baseset([r for r in s if
+        repo[r].extra().get('transplant_source')])
 
 def kwtransplanted(repo, ctx, **args):
     """:transplanted: String. The node identifier of the transplanted

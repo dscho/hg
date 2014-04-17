@@ -7,7 +7,7 @@
 
 from i18n import _
 import sys, os, re
-import util, config, templatefilters, parser, error
+import util, config, templatefilters, templatekw, parser, error
 import types
 import minirst
 
@@ -245,6 +245,31 @@ def fill(context, mapping, args):
 
     return templatefilters.fill(text, width, initindent, hangindent)
 
+def pad(context, mapping, args):
+    """usage: pad(text, width, fillchar=' ', right=False)
+    """
+    if not (2 <= len(args) <= 4):
+        raise error.ParseError(_("pad() expects two to four arguments"))
+
+    width = int(args[1][1])
+
+    text = stringify(args[0][0](context, mapping, args[0][1]))
+    if args[0][0] == runstring:
+        text = stringify(runtemplate(context, mapping,
+            compiletemplate(text, context)))
+
+    right = False
+    fillchar = ' '
+    if len(args) > 2:
+        fillchar = stringify(args[2][0](context, mapping, args[2][1]))
+    if len(args) > 3:
+        right = util.parsebool(args[3][1])
+
+    if right:
+        return text.rjust(width, fillchar)
+    else:
+        return text.ljust(width, fillchar)
+
 def get(context, mapping, args):
     if len(args) != 2:
         # i18n: "get" is a keyword
@@ -276,6 +301,19 @@ def if_(context, mapping, args):
         yield _evalifliteral(args[1], context, mapping)
     elif len(args) == 3:
         yield _evalifliteral(args[2], context, mapping)
+
+def ifcontains(context, mapping, args):
+    if not (3 <= len(args) <= 4):
+        # i18n: "ifcontains" is a keyword
+        raise error.ParseError(_("ifcontains expects three or four arguments"))
+
+    item = stringify(args[0][0](context, mapping, args[0][1]))
+    items = args[1][0](context, mapping, args[1][1])
+
+    if item in items:
+        yield _evalifliteral(args[2], context, mapping)
+    elif len(args) == 4:
+        yield _evalifliteral(args[3], context, mapping)
 
 def ifeq(context, mapping, args):
     if not (3 <= len(args) <= 4):
@@ -319,6 +357,32 @@ def label(context, mapping, args):
     # ignore args[0] (the label string) since this is supposed to be a a no-op
     yield _evalifliteral(args[1], context, mapping)
 
+def revset(context, mapping, args):
+    """usage: revset(query[, formatargs...])
+    """
+    if not len(args) > 0:
+        # i18n: "revset" is a keyword
+        raise error.ParseError(_("revset expects one or more arguments"))
+
+    raw = args[0][1]
+    ctx = mapping['ctx']
+    repo = ctx._repo
+
+    if len(args) > 1:
+        formatargs = list([a[0](context, mapping, a[1]) for a in args[1:]])
+        revs = repo.revs(raw, *formatargs)
+        revs = list([str(r) for r in revs])
+    else:
+        revsetcache = mapping['cache'].setdefault("revsetcache", {})
+        if raw in revsetcache:
+            revs = revsetcache[raw]
+        else:
+            revs = repo.revs(raw)
+            revs = list([str(r) for r in revs])
+            revsetcache[raw] = revs
+
+    return templatekw.showlist("revision", revs, **mapping)
+
 def rstdoc(context, mapping, args):
     if len(args) != 2:
         # i18n: "rstdoc" is a keyword
@@ -328,6 +392,57 @@ def rstdoc(context, mapping, args):
     style = stringify(args[1][0](context, mapping, args[1][1]))
 
     return minirst.format(text, style=style, keep=['verbose'])
+
+def shortest(context, mapping, args):
+    """usage: shortest(node, minlength=4)
+    """
+    if not (1 <= len(args) <= 2):
+        raise error.ParseError(_("shortest() expects one or two arguments"))
+
+    node = stringify(args[0][0](context, mapping, args[0][1]))
+
+    minlength = 4
+    if len(args) > 1:
+        minlength = int(args[1][1])
+
+    cl = mapping['ctx']._repo.changelog
+    def isvalid(test):
+        try:
+            try:
+                cl.index.partialmatch(test)
+            except AttributeError:
+                # Pure mercurial doesn't support partialmatch on the index.
+                # Fallback to the slow way.
+                if cl._partialmatch(test) is None:
+                    return False
+
+            try:
+                i = int(test)
+                # if we are a pure int, then starting with zero will not be
+                # confused as a rev; or, obviously, if the int is larger than
+                # the value of the tip rev
+                if test[0] == '0' or i > len(cl):
+                    return True
+                return False
+            except ValueError:
+                return True
+        except error.RevlogError:
+            return False
+
+    shortest = node
+    startlength = max(6, minlength)
+    length = startlength
+    while True:
+        test = node[:length]
+        if isvalid(test):
+            shortest = test
+            if length == minlength or length > startlength:
+                return shortest
+            length -= 1
+        else:
+            length += 1
+            if len(shortest) <= length:
+                return shortest
 
 def strip(context, mapping, args):
     if not (1 <= len(args) <= 2):
@@ -365,10 +480,14 @@ funcs = {
     "fill": fill,
     "get": get,
     "if": if_,
+    "ifcontains": ifcontains,
     "ifeq": ifeq,
     "join": join,
     "label": label,
+    "pad": pad,
+    "revset": revset,
     "rstdoc": rstdoc,
+    "shortest": shortest,
     "strip": strip,
     "sub": sub,
 }

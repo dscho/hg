@@ -8,9 +8,8 @@
 
 import urllib2
 
-from mercurial import util
+from mercurial import util, wireproto
 from mercurial.i18n import _
-from mercurial.wireproto import remotebatch
 
 import lfutil
 import basestore
@@ -30,7 +29,8 @@ class remotestore(basestore.basestore):
             % (source, util.hidepassword(self.url)))
 
     def exists(self, hashes):
-        return dict((h, s == 0) for (h, s) in self._stat(hashes).iteritems())
+        return dict((h, s == 0) for (h, s) in # dict-from-generator
+                    self._stat(hashes).iteritems())
 
     def sendfile(self, filename, hash):
         self.ui.debug('remotestore: sendfile(%s, %s)\n' % (filename, hash))
@@ -96,5 +96,4 @@ class remotestore(basestore.basestore):
 
     def batch(self):
         '''Support for remote batching.'''
-        return remotebatch(self)
-
+        return wireproto.remotebatch(self)

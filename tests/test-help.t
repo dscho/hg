@@ -62,6 +62,7 @@ Short help:
    cat           output the current or given revision of files
    clone         make a copy of an existing repository
    commit        commit the specified files or all outstanding changes
+   config        show combined config settings from all hgrc files
    copy          mark files as copied for the next commit
    diff          diff repository (or selected files)
    export        dump the header and diffs for one or more changesets
@@ -91,7 +92,6 @@ Short help:
    revert        restore files to their checkout state
    root          print the root (top) of the current working directory
    serve         start stand-alone webserver
-   showconfig    show combined config settings from all hgrc files
    status        show changed files in the working directory
    summary       summarize working directory state
    tag           add one or more tags for the current or given revision
@@ -138,6 +138,7 @@ Short help:
    cat           output the current or given revision of files
    clone         make a copy of an existing repository
    commit        commit the specified files or all outstanding changes
+   config        show combined config settings from all hgrc files
    copy          mark files as copied for the next commit
    diff          diff repository (or selected files)
    export        dump the header and diffs for one or more changesets
@@ -167,7 +168,6 @@ Short help:
    revert        restore files to their checkout state
    root          print the root (top) of the current working directory
    serve         start stand-alone webserver
-   showconfig    show combined config settings from all hgrc files
    status        show changed files in the working directory
    summary       summarize working directory state
    tag           add one or more tags for the current or given revision
@@ -198,6 +198,86 @@ Short help:
    templating    Template Usage
    urls          URL Paths
 
+Test extension help:
+  $ hg help extensions --config extensions.rebase= --config extensions.children=
+  Using Additional Features
+  """""""""""""""""""""""""
+  
+      Mercurial has the ability to add new features through the use of
+      extensions. Extensions may add new commands, add options to existing
+      commands, change the default behavior of commands, or implement hooks.
+  
+      To enable the "foo" extension, either shipped with Mercurial or in the
+      Python search path, create an entry for it in your configuration file,
+      like this:
+  
+        [extensions]
+        foo =
+  
+      You may also specify the full path to an extension:
+  
+        [extensions]
+        myfeature = ~/.hgext/myfeature.py
+  
+      See "hg help config" for more information on configuration files.
+  
+      Extensions are not loaded by default for a variety of reasons: they can
+      increase startup overhead; they may be meant for advanced usage only; they
+      may provide potentially dangerous abilities (such as letting you destroy
+      or modify history); they might not be ready for prime time; or they may
+      alter some usual behaviors of stock Mercurial. It is thus up to the user
+      to activate extensions as needed.
+  
+      To explicitly disable an extension enabled in a configuration file of
+      broader scope, prepend its path with !:
+  
+        [extensions]
+        # disabling extension bar residing in /path/to/extension/bar.py
+        bar = !/path/to/extension/bar.py
+        # ditto, but no path was supplied for extension baz
+        baz = !
+  
+      enabled extensions:
+  
+       children      command to display child changesets (DEPRECATED)
+       rebase        command to move sets of revisions to a different ancestor
+  
+      disabled extensions:
+  
+       acl           hooks for controlling repository access
+       blackbox      log repository events to a blackbox for debugging
+       bugzilla      hooks for integrating with the Bugzilla bug tracker
+       churn         command to display statistics about repository history
+       color         colorize output from some commands
+       convert       import revisions from foreign VCS repositories into
+                     Mercurial
+       eol           automatically manage newlines in repository files
+       extdiff       command to allow external programs to compare revisions
+       factotum      http authentication with factotum
+       gpg           commands to sign and verify changesets
+       hgcia         hooks for integrating with the CIA.vc notification service
+       hgk           browse the repository in a graphical way
+       highlight     syntax highlighting for hgweb (requires Pygments)
+       histedit      interactive history editing
+       keyword       expand keywords in tracked files
+       largefiles    track large binary files
+       mq            manage a stack of patches
+       notify        hooks for sending email push notifications
+       pager         browse command output with an external pager
+       patchbomb     command to send changesets as (a series of) patch emails
+       progress      show progress bars for some actions
+       purge         command to delete untracked files from the working
+                     directory
+       record        commands to interactively select changes for
+                     commit/qrefresh
+       relink        recreates hardlinks between repository clones
+       schemes       extend schemes with shortcuts to repository swarms
+       share         share a common history between several working directories
+       shelve        save and restore changes to the working directory
+       strip         strip changesets and their descendents from history
+       transplant    command to transplant changesets from another branch
+       win32mbcs     allow the use of MBCS paths with problematic encodings
+       zeroconf      discover and advertise repositories on the local network
 Test short command list with verbose option
 
   $ hg -v help shortlist
@@ -483,7 +563,7 @@ Test command without options
         ! = missing (deleted by non-hg command, but still tracked)
         ? = not tracked
         I = ignored
-          = origin of the previous file listed as A (added)
+          = origin of the previous file (with --copies)
   
       Returns 0 on success.
   
@@ -569,6 +649,7 @@ Test command without options
   use "hg help" for the full list of commands or "hg -v" for details
   [255]
 
+
   $ cat > helpext.py <<EOF
   > import os
   > from mercurial import commands
@@ -577,7 +658,11 @@ Test command without options
   >     pass
   > 
   > cmdtable = {
-  >     "nohelp": (nohelp, [], "hg nohelp"),
+  >     "debugoptDEP": (nohelp, [('', 'dopt', None, 'option is DEPRECATED')],),
+  >     "nohelp": (nohelp, [('', 'longdesc', 3, 'x'*90),
+  >                         ('n', '', None, 'normal desc'),
+  >                         ('', 'newline', '', 'line1\nline2'),
+  >                        ], "hg nohelp"),
   > }
   > 
   > commands.norepo += ' nohelp'
@@ -591,6 +676,13 @@ Test command with no help text
   hg nohelp
   
   (no help text available)
+  
+  options:
+  
+      --longdesc VALUE xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                       xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (default: 3)
+   -n --               normal desc
+      --newline VALUE  line1 line2
   
   use "hg -v help nohelp" to show the global options
 
@@ -623,6 +715,7 @@ Test that default list of commands omits extension commands
    cat           output the current or given revision of files
    clone         make a copy of an existing repository
    commit        commit the specified files or all outstanding changes
+   config        show combined config settings from all hgrc files
    copy          mark files as copied for the next commit
    diff          diff repository (or selected files)
    export        dump the header and diffs for one or more changesets
@@ -652,7 +745,6 @@ Test that default list of commands omits extension commands
    revert        restore files to their checkout state
    root          print the root (top) of the current working directory
    serve         start stand-alone webserver
-   showconfig    show combined config settings from all hgrc files
    status        show changed files in the working directory
    summary       summarize working directory state
    tag           add one or more tags for the current or given revision
@@ -690,6 +782,67 @@ Test that default list of commands omits extension commands
   use "hg -v help" to show builtin aliases and global options
 
 
+Test list of internal help commands
+
+  $ hg help debug
+  debug commands (internal and unsupported):
+  
+   debugancestor
+                 find the ancestor revision of two revisions in a given index
+   debugbuilddag
+                 builds a repo with a given DAG from scratch in the current
+                 empty repo
+   debugbundle   lists the contents of a bundle
+   debugcheckstate
+                 validate the correctness of the current dirstate
+   debugcommands
+                 list all available commands and options
+   debugcomplete
+                 returns the completion list associated with the given command
+   debugdag      format the changelog or an index DAG as a concise textual
+                 description
+   debugdata     dump the contents of a data file revision
+   debugdate     parse and display a date
+   debugdirstate
+                 show the contents of the current dirstate
+   debugdiscovery
+                 runs the changeset discovery protocol in isolation
+   debugfileset  parse and apply a fileset specification
+   debugfsinfo   show information detected about current filesystem
+   debuggetbundle
+                 retrieves a bundle from a repo
+   debugignore   display the combined ignore pattern
+   debugindex    dump the contents of an index file
+   debugindexdot
+                 dump an index DAG as a graphviz dot file
+   debuginstall  test Mercurial installation
+   debugknown    test whether node ids are known to a repo
+   debuglabelcomplete
+                 complete "labels" - tags, open branch names, bookmark names
+   debugobsolete
+                 create arbitrary obsolete marker
+   debugoptDEP   (no help text available)
+   debugpathcomplete
+                 complete part or all of a tracked path
+   debugpushkey  access the pushkey key/value protocol
+   debugpvec     (no help text available)
+   debugrebuilddirstate
+                 rebuild the dirstate as it would look like for the given
+                 revision
+   debugrename   dump rename information
+   debugrevlog   show data and statistics about a revlog
+   debugrevspec  parse and apply a revision specification
+   debugsetparents
+                 manually set the parents of the current working directory
+   debugsub      (no help text available)
+   debugsuccessorssets
+                 show set of successors for revision
+   debugwalk     show how files match on given patterns
+   debugwireargs
+                 (no help text available)
+  
+  use "hg -v help debug" to show builtin aliases and global options
+
 
 Test list of commands with command with no help text
 
@@ -701,6 +854,34 @@ Test list of commands with command with no help text
    nohelp        (no help text available)
   
   use "hg -v help helpext" to show builtin aliases and global options
+
+
+test deprecated option is hidden in command help
+  $ hg help debugoptDEP
+  hg debugoptDEP
+  
+  (no help text available)
+  
+  options:
+  
+  use "hg -v help debugoptDEP" to show the global options
+
+test deprecated option is shown with -v
+  $ hg help -v debugoptDEP | grep dopt
+    --dopt option is DEPRECATED
+
+#if gettext
+test deprecated option is hidden with translation with untranslated description
+(use many globy for not failing on changed transaction)
+  $ LANGUAGE=sv hg help debugoptDEP
+  hg debugoptDEP
+  
+  (*) (glob)
+  
+  flaggor:
+  
+  *"hg -v help debugoptDEP"* (glob)
+#endif
 
 Test a help topic
 
@@ -1259,6 +1440,13 @@ Dish up an empty repo; serve it cold.
   output the current or given revision of files
   </td></tr>
   <tr><td>
+  <a href="/help/config">
+  config
+  </a>
+  </td><td>
+  show combined config settings from all hgrc files
+  </td></tr>
+  <tr><td>
   <a href="/help/copy">
   copy
   </a>
@@ -1397,13 +1585,6 @@ Dish up an empty repo; serve it cold.
   </a>
   </td><td>
   print the root (top) of the current working directory
-  </td></tr>
-  <tr><td>
-  <a href="/help/showconfig">
-  showconfig
-  </a>
-  </td><td>
-  show combined config settings from all hgrc files
   </td></tr>
   <tr><td>
   <a href="/help/tag">

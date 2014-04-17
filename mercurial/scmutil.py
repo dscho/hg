@@ -10,7 +10,7 @@ from mercurial.node import nullrev
 import util, error, osutil, revset, similar, encoding, phases, parsers
 import pathutil
 import match as matchmod
-import os, errno, re, glob
+import os, errno, re, glob, tempfile
 
 if os.name == 'nt':
     import scmwindows as scmplatform
@@ -19,6 +19,16 @@ else:
 
 systemrcpath = scmplatform.systemrcpath
 userrcpath = scmplatform.userrcpath
+
+def itersubrepos(ctx1, ctx2):
+    """find subrepos in ctx1 or ctx2"""
+    # Create a (subpath, ctx) mapping where we prefer subpaths from
+    # ctx1. The subpaths from ctx2 are important when the .hgsub file
+    # has been modified (in ctx2) but not yet committed (in ctx1).
+    subpaths = dict.fromkeys(ctx2.substate, ctx2)
+    subpaths.update(dict.fromkeys(ctx1.substate, ctx1))
+    for subpath, ctx in sorted(subpaths.iteritems()):
+        yield subpath, ctx.sub(subpath)
 
 def nochangesfound(ui, repo, excluded=None):
     '''Report no changes for push/pull, excluded is None or a list of
@@ -182,6 +192,15 @@ class abstractvfs(object):
 
     def mkdir(self, path=None):
         return os.mkdir(self.join(path))
+
+    def mkstemp(self, suffix='', prefix='tmp', dir=None, text=False):
+        fd, name = tempfile.mkstemp(suffix=suffix, prefix=prefix,
+                                    dir=self.join(dir), text=text)
+        dname, fname = util.split(name)
+        if dir:
+            return fd, os.path.join(dir, fname)
+        else:
+            return fd, fname
 
     def readdir(self, path=None, stat=None, skip=None):
         return osutil.listdir(self.join(path), stat, skip)
@@ -460,15 +479,26 @@ def revpair(repo, revs):
 
     l = revrange(repo, revs)
 
-    if len(l) == 0:
-        if revs:
-            raise util.Abort(_('empty revision range'))
-        return repo.dirstate.p1(), None
+    if not l:
+        first = second = None
+    elif l.isascending():
+        first = l.min()
+        second = l.max()
+    elif l.isdescending():
+        first = l.max()
+        second = l.min()
+    else:
+        l = list(l)
+        first = l[0]
+        second = l[-1]
 
-    if len(l) == 1 and len(revs) == 1 and _revrangesep not in revs[0]:
-        return repo.lookup(l[0]), None
+    if first is None:
+        raise util.Abort(_('empty revision range'))
 
-    return repo.lookup(l[0]), repo.lookup(l[-1])
+    if first == second and len(revs) == 1 and _revrangesep not in revs[0]:
+        return repo.lookup(first), None
+
+    return repo.lookup(first), repo.lookup(second)
 
 _revrangesep = ':'
 
@@ -480,7 +510,7 @@ def revrange(repo, revs):
             return defval
         return repo[val].rev()
 
-    seen, l = set(), []
+    seen, l = set(), revset.baseset([])
     for spec in revs:
         if l and not seen:
             seen = set(l)
@@ -489,7 +519,7 @@ def revrange(repo, revs):
         try:
             if isinstance(spec, int):
                 seen.add(spec)
-                l.append(spec)
+                l = l + revset.baseset([spec])
                 continue
 
             if _revrangesep in spec:
@@ -501,7 +531,7 @@ def revrange(repo, revs):
                 rangeiter = repo.changelog.revs(start, end)
                 if not seen and not l:
                     # by far the most common case: revs = ["-1:0"]
-                    l = list(rangeiter)
+                    l = revset.baseset(rangeiter)
                     # defer syncing seen until next iteration
                     continue
                 newrevs = set(rangeiter)
@@ -510,44 +540,51 @@ def revrange(repo, revs):
                     seen.update(newrevs)
                 else:
                     seen = newrevs
-                l.extend(sorted(newrevs, reverse=start > end))
+                l = l + revset.baseset(sorted(newrevs, reverse=start > end))
                 continue
             elif spec and spec in repo: # single unquoted rev
                 rev = revfix(repo, spec, None)
                 if rev in seen:
                     continue
                 seen.add(rev)
-                l.append(rev)
+                l = l + revset.baseset([rev])
                 continue
         except error.RepoLookupError:
             pass
 
         # fall through to new-style queries if old-style fails
-        m = revset.match(repo.ui, spec)
-        dl = [r for r in m(repo, list(repo)) if r not in seen]
-        l.extend(dl)
-        seen.update(dl)
+        m = revset.match(repo.ui, spec, repo)
+        if seen or l:
+            dl = [r for r in m(repo, revset.spanset(repo)) if r not in seen]
+            l = l + revset.baseset(dl)
+            seen.update(dl)
+        else:
+            l = m(repo, revset.spanset(repo))
 
     return l
 
 def expandpats(pats):
+    '''Expand bare globs when running on windows.
+    On posix we assume it already has already been done by sh.'''
     if not util.expandglobs:
         return list(pats)
     ret = []
-    for p in pats:
-        kind, name = matchmod._patsplit(p, None)
+    for kindpat in pats:
+        kind, pat = matchmod._patsplit(kindpat, None)
         if kind is None:
             try:
-                globbed = glob.glob(name)
+                globbed = glob.glob(pat)
             except re.error:
-                globbed = [name]
+                globbed = [pat]
             if globbed:
                 ret.extend(globbed)
                 continue
-        ret.append(p)
+        ret.append(kindpat)
     return ret
 
 def matchandpats(ctx, pats=[], opts={}, globbed=False, default='relpath'):
+    '''Return a matcher and the patterns that were used.
+    The matcher will warn about bad matches.'''
     if pats == ("",):
         pats = []
     if not globbed and default == 'relpath':
@@ -561,12 +598,15 @@ def matchandpats(ctx, pats=[], opts={}, globbed=False, default='relpath'):
     return m, pats
 
 def match(ctx, pats=[], opts={}, globbed=False, default='relpath'):
+    '''Return a matcher that will warn about bad matches.'''
     return matchandpats(ctx, pats, opts, globbed, default)[0]
 
 def matchall(repo):
+    '''Return a matcher that will efficiently match everything.'''
     return matchmod.always(repo.root, repo.getcwd())
 
 def matchfiles(repo, files):
+    '''Return a matcher that will efficiently match exactly these files.'''
     return matchmod.exact(repo.root, repo.getcwd(), files)
 
 def addremove(repo, pats=[], opts={}, dry_run=None, similarity=None):
@@ -721,8 +761,10 @@ def readrequires(opener, supported):
     missings.sort()
     if missings:
         raise error.RequirementError(
-            _("unknown repository format: requires features '%s' (upgrade "
-              "Mercurial)") % "', '".join(missings))
+            _("repository requires features unknown to this Mercurial: %s")
+            % " ".join(missings),
+            hint=_("see http://mercurial.selenic.com/wiki/MissingRequirement"
+                   " for more information"))
     return requirements
 
 class filecachesubentry(object):

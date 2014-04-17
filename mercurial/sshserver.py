@@ -9,7 +9,7 @@
 import util, hook, wireproto, changegroup
 import os, sys
 
-class sshserver(object):
+class sshserver(wireproto.abstractserverproto):
     def __init__(self, ui, repo):
         self.ui = ui
         self.repo = repo
@@ -143,7 +143,7 @@ class sshserver(object):
 
         self.sendresponse("")
         cg = changegroup.unbundle10(self.fin, "UN")
-        r = self.repo.addchangegroup(cg, 'serve', self._client())
+        r = changegroup.addchangegroup(self.repo, cg, 'serve', self._client())
         self.lock.release()
         return str(r)
 

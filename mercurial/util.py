@@ -188,6 +188,13 @@ extendeddateformats = defaultdateformats + (
 def cachefunc(func):
     '''cache the result of function calls'''
     # XXX doesn't handle keywords args
+    if func.func_code.co_argcount == 0:
+        cache = []
+        def f():
+            if len(cache) == 0:
+                cache.append(func())
+            return cache[0]
+        return f
     cache = {}
     if func.func_code.co_argcount == 1:
         # we gain a small amount of time because
@@ -961,13 +968,15 @@ class chunkbuffer(object):
         self.iter = splitbig(in_iter)
         self._queue = deque()
 
-    def read(self, l):
+    def read(self, l=None):
         """Read L bytes of data from the iterator of chunks of data.
-        Returns less than L bytes if the iterator runs dry."""
+        Returns less than L bytes if the iterator runs dry.
+
+        If size parameter is ommited, read everything"""
         left = l
         buf = []
         queue = self._queue
-        while left > 0:
+        while left is None or left > 0:
             # refill the queue
             if not queue:
                 target = 2**18
@@ -980,8 +989,9 @@ class chunkbuffer(object):
                     break
 
             chunk = queue.popleft()
-            left -= len(chunk)
-            if left < 0:
+            if left is not None:
+                left -= len(chunk)
+            if left is not None and left < 0:
                 queue.appendleft(chunk[left:])
                 buf.append(chunk[:left])
             else:
@@ -1198,11 +1208,11 @@ def matchdate(date):
     """
 
     def lower(date):
-        d = dict(mb="1", d="1")
+        d = {'mb': "1", 'd': "1"}
         return parsedate(date, extendeddateformats, d)[0]
 
     def upper(date):
-        d = dict(mb="12", HI="23", M="59", S="59")
+        d = {'mb': "12", 'HI': "23", 'M': "59", 'S': "59"}
         for days in ("31", "30", "29"):
             try:
                 d["d"] = days
@@ -1986,15 +1996,19 @@ class hooks(object):
 
     def __call__(self, *args):
         self._hooks.sort(key=lambda x: x[0])
+        results = []
         for source, hook in self._hooks:
-            hook(*args)
+            results.append(hook(*args))
+        return results
 
-def debugstacktrace(msg='stacktrace', skip=0, f=sys.stderr):
+def debugstacktrace(msg='stacktrace', skip=0, f=sys.stderr, otherf=sys.stdout):
     '''Writes a message to f (stderr) with a nicely formatted stacktrace.
-    Skips the 'skip' last entries.
+    Skips the 'skip' last entries. By default it will flush stdout first.
     It can be used everywhere and do intentionally not require an ui object.
     Not be used in production code but very convenient while developing.
     '''
+    if otherf:
+        otherf.flush()
     f.write('%s at:\n' % msg)
     entries = [('%s:%s' % (fn, ln), func)
         for fn, ln, func, _text in traceback.extract_stack()[:-skip - 1]]
@@ -2002,6 +2016,7 @@ def debugstacktrace(msg='stacktrace', skip=0, f=sys.stderr):
         fnmax = max(len(entry[0]) for entry in entries)
         for fnln, func in entries:
             f.write(' %-*s in %s\n' % (fnmax, fnln, func))
+    f.flush()
 
 # convenient shortcut
 dst = debugstacktrace

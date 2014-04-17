@@ -10,8 +10,7 @@
 import copy
 import os
 
-from mercurial import error, manifest, match as match_, util, discovery
-from mercurial import node as node_
+from mercurial import error, manifest, match as match_, util
 from mercurial.i18n import _
 from mercurial import localrepo
 
@@ -413,37 +412,6 @@ def reposetup(ui, repo):
                             " supported in the destination:"
                             " %s") % (', '.join(sorted(missing)))
                     raise util.Abort(msg)
-
-            outgoing = discovery.findcommonoutgoing(repo, remote.peer(),
-                                                    force=force)
-            if outgoing.missing:
-                toupload = set()
-                o = self.changelog.nodesbetween(outgoing.missing, revs)[0]
-                for n in o:
-                    parents = [p for p in self.changelog.parents(n)
-                               if p != node_.nullid]
-                    ctx = self[n]
-                    files = set(ctx.files())
-                    if len(parents) == 2:
-                        mc = ctx.manifest()
-                        mp1 = ctx.parents()[0].manifest()
-                        mp2 = ctx.parents()[1].manifest()
-                        for f in mp1:
-                            if f not in mc:
-                                files.add(f)
-                        for f in mp2:
-                            if f not in mc:
-                                files.add(f)
-                        for f in mc:
-                            if mc[f] != mp1.get(f, None) or mc[f] != mp2.get(f,
-                                    None):
-                                files.add(f)
-
-                    toupload = toupload.union(
-                        set([ctx[f].data().strip()
-                             for f in files
-                             if lfutil.isstandin(f) and f in ctx]))
-                lfcommands.uploadlfiles(ui, self, remote, toupload)
             return super(lfilesrepo, self).push(remote, force=force, revs=revs,
                 newbranch=newbranch)
 
@@ -503,11 +471,20 @@ def reposetup(ui, repo):
 
     repo.__class__ = lfilesrepo
 
+    def prepushoutgoinghook(local, remote, outgoing):
+        if outgoing.missing:
+            toupload = set()
+            addfunc = lambda fn, lfhash: toupload.add(lfhash)
+            lfutil.getlfilestoupload(local, outgoing.missing, addfunc)
+            lfcommands.uploadlfiles(ui, local, remote, toupload)
+    repo.prepushoutgoinghooks.add("largefiles", prepushoutgoinghook)
+
     def checkrequireslfiles(ui, repo, **kwargs):
         if 'largefiles' not in repo.requirements and util.any(
                 lfutil.shortname+'/' in f[0] for f in repo.store.datafiles()):
             repo.requirements.add('largefiles')
             repo._writerequirements()
 
-    ui.setconfig('hooks', 'changegroup.lfiles', checkrequireslfiles)
-    ui.setconfig('hooks', 'commit.lfiles', checkrequireslfiles)
+    ui.setconfig('hooks', 'changegroup.lfiles', checkrequireslfiles,
+                 'largefiles')
+    ui.setconfig('hooks', 'commit.lfiles', checkrequireslfiles, 'largefiles')

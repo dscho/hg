@@ -228,9 +228,6 @@ def mergecopies(repo, c1, c2, ca):
     fullcopy = {}
     diverge = {}
 
-    def _checkcopies(f, m1, m2):
-        checkcopies(ctx, f, m1, m2, ca, limit, diverge, copy, fullcopy)
-
     repo.ui.debug("  searching for copies back to rev %d\n" % limit)
 
     u1 = _nonoverlap(m1, m2, ma)
@@ -244,9 +241,10 @@ def mergecopies(repo, c1, c2, ca):
                       % "\n   ".join(u2))
 
     for f in u1:
-        _checkcopies(f, m1, m2)
+        checkcopies(ctx, f, m1, m2, ca, limit, diverge, copy, fullcopy)
+
     for f in u2:
-        _checkcopies(f, m2, m1)
+        checkcopies(ctx, f, m2, m1, ca, limit, diverge, copy, fullcopy)
 
     renamedelete = {}
     renamedelete2 = set()
@@ -262,7 +260,19 @@ def mergecopies(repo, c1, c2, ca):
         else:
             diverge2.update(fl) # reverse map for below
 
-    if fullcopy:
+    bothnew = sorted([d for d in m1 if d in m2 and d not in ma])
+    if bothnew:
+        repo.ui.debug("  unmatched files new in both:\n   %s\n"
+                      % "\n   ".join(bothnew))
+    bothdiverge, _copy, _fullcopy = {}, {}, {}
+    for f in bothnew:
+        checkcopies(ctx, f, m1, m2, ca, limit, bothdiverge, _copy, _fullcopy)
+        checkcopies(ctx, f, m2, m1, ca, limit, bothdiverge, _copy, _fullcopy)
+    for of, fl in bothdiverge.items():
+        if len(fl) == 2 and fl[0] == fl[1]:
+            copy[fl[0]] = of # not actually divergent, just matching renames
+
+    if fullcopy and repo.ui.debugflag:
         repo.ui.debug("  all copies found (* = to merge, ! = divergent, "
                       "% = renamed and deleted):\n")
         for f in sorted(fullcopy):

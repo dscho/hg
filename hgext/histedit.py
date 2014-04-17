@@ -30,10 +30,12 @@ file open in your editor::
 
  # Edit history between c561b4e977df and 7c2fd3b9020c
  #
+ # Commits are listed from least to most recent
+ #
  # Commands:
  #  p, pick = use commit
  #  e, edit = use commit, but stop for amending
- #  f, fold = use commit, but fold into previous commit (combines N and N-1)
+ #  f, fold = use commit, but combine it with the one above
  #  d, drop = remove commit from history
  #  m, mess = edit message without changing commit content
  #
@@ -49,10 +51,12 @@ would reorganize the file to look like this::
 
  # Edit history between c561b4e977df and 7c2fd3b9020c
  #
+ # Commits are listed from least to most recent
+ #
  # Commands:
  #  p, pick = use commit
  #  e, edit = use commit, but stop for amending
- #  f, fold = use commit, but fold into previous commit (combines N and N-1)
+ #  f, fold = use commit, but combine it with the one above
  #  d, drop = remove commit from history
  #  m, mess = edit message without changing commit content
  #
@@ -152,10 +156,8 @@ from mercurial import error
 from mercurial import copies
 from mercurial import context
 from mercurial import hg
-from mercurial import lock as lockmod
 from mercurial import node
 from mercurial import repair
-from mercurial import scmutil
 from mercurial import util
 from mercurial import obsolete
 from mercurial import merge as mergemod
@@ -170,10 +172,12 @@ testedwith = 'internal'
 # i18n: command names and abbreviations must remain untranslated
 editcomment = _("""# Edit history between %s and %s
 #
+# Commits are listed from least to most recent
+#
 # Commands:
 #  p, pick = use commit
 #  e, edit = use commit, but stop for amending
-#  f, fold = use commit, but fold into previous commit (combines N and N-1)
+#  f, fold = use commit, but combine it with the one above
 #  d, drop = remove commit from history
 #  m, mess = edit message without changing commit content
 #
@@ -193,7 +197,8 @@ def commitfuncfor(repo, src):
     def commitfunc(**kwargs):
         phasebackup = repo.ui.backupconfig('phases', 'new-commit')
         try:
-            repo.ui.setconfig('phases', 'new-commit', phasemin)
+            repo.ui.setconfig('phases', 'new-commit', phasemin,
+                              'histedit')
             extra = kwargs.get('extra', {}).copy()
             extra['histedit_source'] = src.hex()
             kwargs['extra'] = extra
@@ -215,11 +220,12 @@ def applychanges(ui, repo, ctx, opts):
     else:
         try:
             # ui.forcemerge is an internal variable, do not document
-            repo.ui.setconfig('ui', 'forcemerge', opts.get('tool', ''))
+            repo.ui.setconfig('ui', 'forcemerge', opts.get('tool', ''),
+                              'histedit')
             stats = mergemod.update(repo, ctx.node(), True, True, False,
                                     ctx.p1().node())
         finally:
-            repo.ui.setconfig('ui', 'forcemerge', '')
+            repo.ui.setconfig('ui', 'forcemerge', '', 'histedit')
         repo.setparents(wcpar, node.nullid)
         repo.dirstate.write()
         # fix up dirstate for copies and renames
@@ -370,7 +376,7 @@ def finishfold(ui, repo, ctx, oldctx, newnode, opts, internalchanges):
     phasebackup = repo.ui.backupconfig('phases', 'new-commit')
     try:
         phasemin = max(ctx.phase(), oldctx.phase())
-        repo.ui.setconfig('phases', 'new-commit', phasemin)
+        repo.ui.setconfig('phases', 'new-commit', phasemin, 'histedit')
         n = collapse(repo, ctx, repo[newnode], commitopts)
     finally:
         repo.ui.restoreconfig(phasebackup)
@@ -562,8 +568,11 @@ def _histedit(ui, repo, *freeargs, **opts):
                 remote = None
             root = findoutgoing(ui, repo, remote, force, opts)
         else:
-            root = revs[0]
-            root = scmutil.revsingle(repo, root).node()
+            rootrevs = list(repo.set('roots(%lr)', revs))
+            if len(rootrevs) != 1:
+                raise util.Abort(_('The specified revisions must have ' +
+                    'exactly one common root'))
+            root = rootrevs[0].node()
 
         keep = opts.get('keep', False)
         revs = between(repo, root, topmost, keep)
@@ -643,23 +652,28 @@ def _histedit(ui, repo, *freeargs, **opts):
     if os.path.exists(repo.sjoin('undo')):
         os.unlink(repo.sjoin('undo'))
 
-
-def bootstrapcontinue(ui, repo, parentctx, rules, opts):
-    action, currentnode = rules.pop(0)
-    ctx = repo[currentnode]
+def gatherchildren(repo, ctx):
     # is there any new commit between the expected parent and "."
     #
     # note: does not take non linear new change in account (but previous
     #       implementation didn't used them anyway (issue3655)
-    newchildren = [c.node() for c in repo.set('(%d::.)', parentctx)]
-    if parentctx.node() != node.nullid:
+    newchildren = [c.node() for c in repo.set('(%d::.)', ctx)]
+    if ctx.node() != node.nullid:
         if not newchildren:
-            # `parentctxnode` should match but no result. This means that
-            # currentnode is not a descendant from parentctxnode.
+            # `ctx` should match but no result. This means that
+            # currentnode is not a descendant from ctx.
             msg = _('%s is not an ancestor of working directory')
             hint = _('use "histedit --abort" to clear broken state')
-            raise util.Abort(msg % parentctx, hint=hint)
-        newchildren.pop(0)  # remove parentctxnode
+            raise util.Abort(msg % ctx, hint=hint)
+        newchildren.pop(0)  # remove ctx
+    return newchildren
+
+def bootstrapcontinue(ui, repo, parentctx, rules, opts):
+    action, currentnode = rules.pop(0)
+    ctx = repo[currentnode]
+
+    newchildren = gatherchildren(repo, parentctx)
+
     # Commit dirty working directory if necessary
     new = None
     m, a, r, d = repo.status()[:4]
@@ -897,7 +911,7 @@ def cleanupnode(ui, repo, name, nodes):
             # This would reduce bundle overhead
             repair.strip(ui, repo, c)
     finally:
-        lockmod.release(lock)
+        release(lock)
 
 def summaryhook(ui, repo):
     if not os.path.exists(repo.join('histedit-state')):

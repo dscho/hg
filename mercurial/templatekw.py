@@ -195,8 +195,12 @@ def showbookmarks(**args):
     """:bookmarks: List of strings. Any bookmarks associated with the
     changeset.
     """
+    repo = args['ctx']._repo
     bookmarks = args['ctx'].bookmarks()
-    return showlist('bookmark', bookmarks, **args)
+    hybrid = showlist('bookmark', bookmarks, **args)
+    for value in hybrid.values:
+        value['current'] = repo._bookmarkcurrent
+    return hybrid
 
 def showchildren(**args):
     """:children: List of strings. The children of the changeset."""
@@ -297,8 +301,8 @@ def showlatesttagdistance(repo, ctx, templ, cache, **args):
 def showmanifest(**args):
     repo, ctx, templ = args['repo'], args['ctx'], args['templ']
     args = args.copy()
-    args.update(dict(rev=repo.manifest.rev(ctx.changeset()[0]),
-                     node=hex(ctx.changeset()[0])))
+    args.update({'rev': repo.manifest.rev(ctx.changeset()[0]),
+                 'node': hex(ctx.changeset()[0])})
     return templ('manifest', **args)
 
 def shownode(repo, ctx, templ, **args):

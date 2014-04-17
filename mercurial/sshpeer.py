@@ -51,7 +51,7 @@ class sshpeer(wireproto.wirepeer):
             cmd = '%s %s %s' % (sshcmd, args,
                 util.shellquote("%s init %s" %
                     (_serverquote(remotecmd), _serverquote(self.path))))
-            ui.note(_('running %s\n') % cmd)
+            ui.debug('running %s\n' % cmd)
             res = util.system(cmd)
             if res != 0:
                 self._abort(error.RepoError(_("could not create remote repo")))
@@ -68,7 +68,7 @@ class sshpeer(wireproto.wirepeer):
         cmd = '%s %s %s' % (sshcmd, args,
             util.shellquote("%s -R %s serve --stdio" %
                 (_serverquote(remotecmd), _serverquote(self.path))))
-        self.ui.note(_('running %s\n') % cmd)
+        self.ui.debug('running %s\n' % cmd)
         cmd = util.quotecommand(cmd)
 
         # while self.subprocess isn't used, having it allows the subprocess to
@@ -157,6 +157,9 @@ class sshpeer(wireproto.wirepeer):
 
         return self.pipei
 
+    def _callcompressable(self, cmd, **args):
+        return self._callstream(cmd, **args)
+
     def _call(self, cmd, **args):
         self._callstream(cmd, **args)
         return self._recv()
@@ -176,8 +179,18 @@ class sshpeer(wireproto.wirepeer):
             return '', r
         return self._recv(), ''
 
-    def _decompress(self, stream):
-        return stream
+    def _calltwowaystream(self, cmd, fp, **args):
+        r = self._call(cmd, **args)
+        if r:
+            # XXX needs to be made better
+            raise util.Abort('unexpected remote reply: %s' % r)
+        while True:
+            d = fp.read(4096)
+            if not d:
+                break
+            self._send(d)
+        self._send("", flush=True)
+        return self.pipei
 
     def _recv(self):
         l = self.pipei.readline()

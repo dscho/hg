@@ -24,6 +24,7 @@ _INVALID_HANDLE_VALUE = _HANDLE(-1).value
 
 # GetLastError
 _ERROR_SUCCESS = 0
+_ERROR_SHARING_VIOLATION = 32
 _ERROR_INVALID_PARAMETER = 87
 _ERROR_INSUFFICIENT_BUFFER = 122
 
@@ -59,7 +60,9 @@ _FILE_SHARE_DELETE = 0x00000004
 
 _OPEN_EXISTING = 3
 
+_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
 _FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+_FILE_FLAG_DELETE_ON_CLOSE = 0x04000000
 
 # SetFileAttributes
 _FILE_ATTRIBUTE_NORMAL = 0x80
@@ -118,6 +121,27 @@ class _CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
                 ('dwMaximumWindowSize', _COORD)]
 
 _STD_ERROR_HANDLE = _DWORD(-12).value
+
+# CreateToolhelp32Snapshot, Process32First, Process32Next
+_TH32CS_SNAPPROCESS = 0x00000002
+_MAX_PATH = 260
+
+class _tagPROCESSENTRY32(ctypes.Structure):
+    _fields_ = [('dwsize', _DWORD),
+                ('cntUsage', _DWORD),
+                ('th32ProcessID', _DWORD),
+                ('th32DefaultHeapID', ctypes.c_void_p),
+                ('th32ModuleID', _DWORD),
+                ('cntThreads', _DWORD),
+                ('th32ParentProcessID', _DWORD),
+                ('pcPriClassBase', _LONG),
+                ('dwFlags', _DWORD),
+                ('szExeFile', ctypes.c_char * _MAX_PATH)]
+
+    def __init__(self):
+        super(_tagPROCESSENTRY32, self).__init__()
+        self.dwsize = ctypes.sizeof(self)
+
 
 # types of parameters of C functions used (required by pypy)
 
@@ -185,6 +209,15 @@ _user32.ShowWindow.restype = _BOOL
 _WNDENUMPROC = ctypes.WINFUNCTYPE(_BOOL, _HWND, _LPARAM)
 _user32.EnumWindows.argtypes = [_WNDENUMPROC, _LPARAM]
 _user32.EnumWindows.restype = _BOOL
+
+_kernel32.CreateToolhelp32Snapshot.argtypes = [_DWORD, _DWORD]
+_kernel32.CreateToolhelp32Snapshot.restype = _BOOL
+
+_kernel32.Process32First.argtypes = [_HANDLE, ctypes.c_void_p]
+_kernel32.Process32First.restype = _BOOL
+
+_kernel32.Process32Next.argtypes = [_HANDLE, ctypes.c_void_p]
+_kernel32.Process32Next.restype = _BOOL
 
 def _raiseoserror(name):
     err = ctypes.WinError()
@@ -309,6 +342,51 @@ def termwidth():
     width = csbi.srWindow.Right - csbi.srWindow.Left
     return width
 
+def _1stchild(pid):
+    '''return the 1st found child of the given pid
+
+    None is returned when no child is found'''
+    pe = _tagPROCESSENTRY32()
+
+    # create handle to list all processes
+    ph = _kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
+    if ph == _INVALID_HANDLE_VALUE:
+        raise ctypes.WinError
+    try:
+        r = _kernel32.Process32First(ph, ctypes.byref(pe))
+        # loop over all processes
+        while r:
+            if pe.th32ParentProcessID == pid:
+                # return first child found
+                return pe.th32ProcessID
+            r = _kernel32.Process32Next(ph, ctypes.byref(pe))
+    finally:
+        _kernel32.CloseHandle(ph)
+    if _kernel32.GetLastError() != _ERROR_NO_MORE_FILES:
+        raise ctypes.WinError
+    return None # no child found
+
+class _tochildpid(int): # pid is _DWORD, which always matches in an int
+    '''helper for spawndetached, returns the child pid on conversion to string
+
+    Does not resolve the child pid immediately because the child may not yet be
+    started.
+    '''
+    def childpid(self):
+        '''returns the child pid of the first found child of the process
+        with this pid'''
+        return _1stchild(self)
+    def __str__(self):
+        # run when the pid is written to the file
+        ppid = self.childpid()
+        if ppid is None:
+            # race, child has exited since check
+            # fall back to this pid. Its process will also have disappeared,
+            # raising the same error type later as when the child pid would
+            # be returned.
+            return " %d" % self
+        return str(ppid)
+
 def spawndetached(args):
     # No standard library function really spawns a fully detached
     # process under win32 because they allocate pipes or other objects
@@ -339,16 +417,24 @@ def spawndetached(args):
     if not res:
         raise ctypes.WinError
 
-    return pi.dwProcessId
+    # _tochildpid because the process is the child of COMSPEC
+    return _tochildpid(pi.dwProcessId)
 
 def unlink(f):
     '''try to implement POSIX' unlink semantics on Windows'''
 
-    if os.path.isdir(f):
-        # use EPERM because it is POSIX prescribed value, even though
-        # unlink(2) on directories returns EISDIR on Linux
-        raise IOError(errno.EPERM,
-                      "Unlinking directory not permitted: '%s'" % f)
+    # If we can open f exclusively, no other processes must have open handles
+    # for it and we can expect its name will be deleted immediately when we
+    # close the handle unless we have another in the same process.  We also
+    # expect we shall simply fail to open f if it is a directory.
+    fh = _kernel32.CreateFileA(f, 0, 0, None, _OPEN_EXISTING,
+        _FILE_FLAG_OPEN_REPARSE_POINT | _FILE_FLAG_DELETE_ON_CLOSE, None)
+    if fh != _INVALID_HANDLE_VALUE:
+        _kernel32.CloseHandle(fh)
+        return
+    error = _kernel32.GetLastError()
+    if error != _ERROR_SHARING_VIOLATION:
+        raise ctypes.WinError(error)
 
     # POSIX allows to unlink and rename open files. Windows has serious
     # problems with doing that:

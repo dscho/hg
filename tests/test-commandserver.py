@@ -51,7 +51,10 @@ def runcommand(server, args, output=sys.stdout, error=sys.stderr, input=None,
         elif ch == 'L':
             writeblock(server, input.readline(data))
         elif ch == 'r':
-            return struct.unpack('>i', data)[0]
+            ret, = struct.unpack('>i', data)
+            if ret != 0:
+                print ' [%d]' % ret
+            return ret
         else:
             print "unexpected channel %c: %r" % (ch, data)
             if ch.isupper():
@@ -100,6 +103,9 @@ def checkruncommand(server):
 
     # make sure --config doesn't stick
     runcommand(server, ['id'])
+
+    # negative return code should be masked
+    runcommand(server, ['id', '-runknown'])
 
 def inputeof(server):
     readchannel(server)
@@ -267,12 +273,35 @@ def obsolete(server):
 
     runcommand(server, ['up', 'null'])
     runcommand(server, ['phase', '-df', 'tip'])
-    os.system('hg debugobsolete `hg log -r tip --template {node}`')
+    cmd = 'hg debugobsolete `hg log -r tip --template {node}`'
+    if os.name == 'nt':
+        cmd = 'sh -c "%s"' % cmd # run in sh, not cmd.exe
+    os.system(cmd)
     runcommand(server, ['log', '--hidden'])
     runcommand(server, ['log'])
 
+def mqoutsidechanges(server):
+    readchannel(server)
+
+    # load repo.mq
+    runcommand(server, ['qapplied'])
+    os.system('hg qnew 0.diff')
+    # repo.mq should be invalidated
+    runcommand(server, ['qapplied'])
+
+    runcommand(server, ['qpop', '--all'])
+    os.system('hg qqueue --create foo')
+    # repo.mq should be recreated to point to new queue
+    runcommand(server, ['qqueue', '--active'])
+
+def startwithoutrepo(server):
+    readchannel(server)
+    runcommand(server, ['init', 'repo2'])
+    runcommand(server, ['id', '-R', 'repo2'])
+
 if __name__ == '__main__':
-    os.system('hg init')
+    os.system('hg init repo')
+    os.chdir('repo')
 
     check(hellomessage)
     check(unknowncommand)
@@ -301,3 +330,11 @@ if __name__ == '__main__':
     hgrc.write('[extensions]\nobs=obs.py\n')
     hgrc.close()
     check(obsolete)
+    hgrc = open('.hg/hgrc', 'a')
+    hgrc.write('[extensions]\nmq=\n')
+    hgrc.close()
+    check(mqoutsidechanges)
+
+    os.chdir('..')
+    check(hellomessage)
+    check(startwithoutrepo)

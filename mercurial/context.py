@@ -7,11 +7,12 @@
 
 from node import nullid, nullrev, short, hex, bin
 from i18n import _
-import ancestor, mdiff, error, util, scmutil, subrepo, patch, encoding, phases
+import mdiff, error, util, scmutil, subrepo, patch, encoding, phases
 import match as matchmod
 import os, errno, stat
 import obsolete as obsmod
 import repoview
+import fileset
 
 propertycache = util.propertycache
 
@@ -78,6 +79,9 @@ class basectx(object):
         return phases.phasenames[self.phase()]
     def mutable(self):
         return self.phase() > phases.public
+
+    def getfileset(self, expr):
+        return fileset.getfileset(self, expr)
 
     def obsolete(self):
         """True if the changeset is obsolete"""
@@ -392,14 +396,32 @@ class changectx(basectx):
 
     def ancestor(self, c2):
         """
-        return the ancestor context of self and c2
+        return the "best" ancestor context of self and c2
         """
         # deal with workingctxs
         n2 = c2._node
         if n2 is None:
             n2 = c2._parents[0]._node
-        n = self._repo.changelog.ancestor(self._node, n2)
-        return changectx(self._repo, n)
+        cahs = self._repo.changelog.commonancestorsheads(self._node, n2)
+        if not cahs:
+            anc = nullid
+        elif len(cahs) == 1:
+            anc = cahs[0]
+        else:
+            for r in self._repo.ui.configlist('merge', 'preferancestor'):
+                ctx = changectx(self._repo, r)
+                anc = ctx.node()
+                if anc in cahs:
+                    break
+            else:
+                anc = self._repo.changelog.ancestor(self._node, n2)
+            self._repo.ui.status(
+                (_("note: using %s as ancestor of %s and %s\n") %
+                 (short(anc), short(self._node), short(n2))) +
+                ''.join(_("      alternatively, use --config "
+                          "merge.preferancestor=%s\n") %
+                        short(n) for n in sorted(cahs) if n != anc))
+        return changectx(self._repo, anc)
 
     def descendant(self, other):
         """True if other is descendant of this changeset"""
@@ -429,8 +451,7 @@ class changectx(basectx):
             if fn in self._dirs:
                 # specified pattern is a directory
                 continue
-            if match.bad(fn, _('no such file in rev %s') % self) and match(fn):
-                yield fn
+            match.bad(fn, _('no such file in rev %s') % self)
 
 class basefilectx(object):
     """A filecontext object represents the common logic for its children:
@@ -683,55 +704,6 @@ class basefilectx(object):
                 pcache[f] = []
 
         return zip(hist[base][0], hist[base][1].splitlines(True))
-
-    def ancestor(self, fc2, actx):
-        """
-        find the common ancestor file context, if any, of self, and fc2
-
-        actx must be the changectx of the common ancestor
-        of self's and fc2's respective changesets.
-        """
-
-        # the easy case: no (relevant) renames
-        if fc2.path() == self.path() and self.path() in actx:
-            return actx[self.path()]
-
-        # the next easiest cases: unambiguous predecessor (name trumps
-        # history)
-        if self.path() in actx and fc2.path() not in actx:
-            return actx[self.path()]
-        if fc2.path() in actx and self.path() not in actx:
-            return actx[fc2.path()]
-
-        # prime the ancestor cache for the working directory
-        acache = {}
-        for c in (self, fc2):
-            if c.filenode() is None:
-                pl = [(n.path(), n.filenode()) for n in c.parents()]
-                acache[(c._path, None)] = pl
-
-        flcache = {self._repopath:self._filelog, fc2._repopath:fc2._filelog}
-        def parents(vertex):
-            if vertex in acache:
-                return acache[vertex]
-            f, n = vertex
-            if f not in flcache:
-                flcache[f] = self._repo.file(f)
-            fl = flcache[f]
-            pl = [(f, p) for p in fl.parents(n) if p != nullid]
-            re = fl.renamed(n)
-            if re:
-                pl.append(re)
-            acache[vertex] = pl
-            return pl
-
-        a, b = (self._path, self._filenode), (fc2._path, fc2._filenode)
-        v = ancestor.genericancestor(a, b, parents)
-        if v:
-            f, n = v
-            return filectx(self._repo, f, fileid=n, filelog=flcache[f])
-
-        return None
 
     def ancestors(self, followfirst=False):
         visit = {}

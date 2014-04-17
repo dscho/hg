@@ -337,7 +337,13 @@ class basicstore(object):
     def copylist(self):
         return ['requires'] + _data.split()
 
-    def write(self):
+    def write(self, tr):
+        pass
+
+    def invalidatecaches(self):
+        pass
+
+    def markremoved(self, fn):
         pass
 
     def __contains__(self, path):
@@ -402,20 +408,14 @@ class fncache(object):
                     raise util.Abort(t)
         fp.close()
 
-    def _write(self, files, atomictemp):
-        fp = self.vfs('fncache', mode='wb', atomictemp=atomictemp)
-        if files:
-            fp.write(encodedir('\n'.join(files) + '\n'))
-        fp.close()
-        self._dirty = False
-
-    def rewrite(self, files):
-        self._write(files, False)
-        self.entries = set(files)
-
-    def write(self):
+    def write(self, tr):
         if self._dirty:
-            self._write(self.entries, True)
+            tr.addbackup('fncache')
+            fp = self.vfs('fncache', mode='wb', atomictemp=True)
+            if self.entries:
+                fp.write(encodedir('\n'.join(self.entries) + '\n'))
+            fp.close()
+            self._dirty = False
 
     def add(self, fn):
         if self.entries is None:
@@ -423,6 +423,15 @@ class fncache(object):
         if fn not in self.entries:
             self._dirty = True
             self.entries.add(fn)
+
+    def remove(self, fn):
+        if self.entries is None:
+            self._load()
+        try:
+            self.entries.remove(fn)
+            self._dirty = True
+        except KeyError:
+            pass
 
     def __contains__(self, fn):
         if self.entries is None:
@@ -476,22 +485,13 @@ class fncachestore(basicstore):
         return self.rawvfs.stat(path).st_size
 
     def datafiles(self):
-        rewrite = False
-        existing = []
         for f in sorted(self.fncache):
             ef = self.encode(f)
             try:
                 yield f, ef, self.getsize(ef)
-                existing.append(f)
             except OSError, err:
                 if err.errno != errno.ENOENT:
                     raise
-                # nonexistent entry
-                rewrite = True
-        if rewrite:
-            # rewrite fncache to remove nonexistent entries
-            # (may be caused by rollback / strip)
-            self.fncache.rewrite(existing)
 
     def copylist(self):
         d = ('data dh fncache phaseroots obsstore'
@@ -499,8 +499,14 @@ class fncachestore(basicstore):
         return (['requires', '00changelog.i'] +
                 ['store/' + f for f in d.split()])
 
-    def write(self):
-        self.fncache.write()
+    def write(self, tr):
+        self.fncache.write(tr)
+
+    def invalidatecaches(self):
+        self.fncache.entries = None
+
+    def markremoved(self, fn):
+        self.fncache.remove(fn)
 
     def _exists(self, f):
         ef = self.encode(f)

@@ -82,6 +82,7 @@ hgweb filerevision, html
   <li><a href="/shortlog/853dcd4de2a6">log</a></li>
   <li><a href="/graph/853dcd4de2a6">graph</a></li>
   <li><a href="/tags">tags</a></li>
+  <li><a href="/bookmarks">bookmarks</a></li>
   <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
@@ -522,7 +523,7 @@ hgweb fileannotate, raw
   $ echo "" >> b
   $ echo "" >> b
   $ echo "" >> b
-  $ diff -u b a
+  $ cmp b a || diff -u b a
 
 hgweb filerevision, raw
 
@@ -531,7 +532,7 @@ hgweb filerevision, raw
   $ echo "200 Script output follows" > b
   $ echo "" >> b
   $ hg cat primes.py >> b
-  $ diff -u b a
+  $ cmp b a || diff -u b a
 
 hgweb highlightcss friendly
 

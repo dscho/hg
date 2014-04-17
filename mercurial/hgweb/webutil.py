@@ -7,7 +7,7 @@
 # GNU General Public License version 2 or any later version.
 
 import os, copy
-from mercurial import match, patch, error, ui, util, pathutil
+from mercurial import match, patch, error, ui, util, pathutil, context
 from mercurial.i18n import _
 from mercurial.node import hex, nullid
 from common import ErrorResponse
@@ -138,6 +138,9 @@ def _siblings(siblings=[], hiderev=None):
         yield d
 
 def parents(ctx, hide=None):
+    if (isinstance(ctx, context.basefilectx) and
+        ctx.changectx().rev() != ctx.linkrev()):
+        return _siblings([ctx._repo[ctx.linkrev()]], hide)
     return _siblings(ctx.parents(), hide)
 
 def children(ctx, hide=None):
@@ -146,7 +149,7 @@ def children(ctx, hide=None):
 def renamelink(fctx):
     r = fctx.renamed()
     if r:
-        return [dict(file=r[0], node=hex(r[1]))]
+        return [{'file': r[0], 'node': hex(r[1])}]
     return []
 
 def nodetagsdict(repo, node):

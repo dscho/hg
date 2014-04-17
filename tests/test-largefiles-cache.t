@@ -27,7 +27,7 @@ Discard all cached largefiles in USERCACHE
 
 Create mirror repo, and pull from source without largefile:
 "pull" is used instead of "clone" for suppression of (1) updating to
-tip (= cahcing largefile from source repo), and (2) recording source
+tip (= caching largefile from source repo), and (2) recording source
 repo as "default" path in .hg/hgrc.
 
   $ hg init mirror
@@ -47,7 +47,7 @@ but there is no cache file for it.  So, hg must treat it as
 
   $ hg update -r0
   getting changed largefiles
-  large: largefile 7f7097b041ccf68cc5561e9600da4655d21c6d18 not available from file://$TESTTMP/mirror (glob)
+  large: largefile 7f7097b041ccf68cc5561e9600da4655d21c6d18 not available from file:/*/$TESTTMP/mirror (glob)
   0 largefiles updated, 0 removed
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg status
@@ -64,7 +64,7 @@ Update working directory to tip, again.
 
   $ hg update -r0
   getting changed largefiles
-  large: largefile 7f7097b041ccf68cc5561e9600da4655d21c6d18 not available from file://$TESTTMP/mirror (glob)
+  large: largefile 7f7097b041ccf68cc5561e9600da4655d21c6d18 not available from file:/*/$TESTTMP/mirror (glob)
   0 largefiles updated, 0 removed
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg status

@@ -94,32 +94,32 @@ fn to create dirty subrepo
 handle subrepos safely on qnew
 
   $ mkrepo repo-2499-qnew
-  $ testadd qnew -m0 0.diff
+  $ testadd qnew -X path:no-effect -m0 0.diff
   adding a
   % abort when adding .hgsub w/dirty subrepo
   A .hgsub
   A sub/a
-  % qnew -m0 0.diff
+  % qnew -X path:no-effect -m0 0.diff
   abort: uncommitted changes in subrepository sub
   [255]
   % update substate when adding .hgsub w/clean updated subrepo
   A .hgsub
-  % qnew -m0 0.diff
+  % qnew -X path:no-effect -m0 0.diff
   path sub
    source   sub
    revision b2fdb12cd82b021c3b7053d67802e77b6eeaee31
 
-  $ testmod qnew -m1 1.diff
+  $ testmod qnew --cwd .. -R repo-2499-qnew -X path:no-effect -m1 1.diff
   adding a
   % abort when modifying .hgsub w/dirty subrepo
   M .hgsub
   A sub2/a
-  % qnew -m1 1.diff
+  % qnew --cwd .. -R repo-2499-qnew -X path:no-effect -m1 1.diff
   abort: uncommitted changes in subrepository sub2
   [255]
   % update substate when modifying .hgsub w/clean updated subrepo
   M .hgsub
-  % qnew -m1 1.diff
+  % qnew --cwd .. -R repo-2499-qnew -X path:no-effect -m1 1.diff
   path sub
    source   sub
    revision b2fdb12cd82b021c3b7053d67802e77b6eeaee31
@@ -407,12 +407,12 @@ both into 'revision' and 'patch file under .hg/patches':
   $ cat .hgsubstate
   b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
   $ hg diff -c tip
-  diff -r f499373e340c -r b20ffac88564 .hgsub
+  diff -r f499373e340c -r f69e96d86e75 .hgsub
   --- /dev/null
   +++ b/.hgsub
   @@ -0,0 +1,1 @@
   +sub = sub
-  diff -r f499373e340c -r b20ffac88564 .hgsubstate
+  diff -r f499373e340c -r f69e96d86e75 .hgsubstate
   --- /dev/null
   +++ b/.hgsubstate
   @@ -0,0 +1,1 @@
@@ -423,22 +423,46 @@ both into 'revision' and 'patch file under .hg/patches':
   # User test
   # Date 0 0
   
-  diff -r f499373e340c -r b20ffac88564 .hgsub
+  diff -r f499373e340c -r f69e96d86e75 .hgsub
   --- /dev/null
   +++ b/.hgsub
   @@ -0,0 +1,1 @@
   +sub = sub
-  diff -r f499373e340c -r b20ffac88564 .hgsubstate
+  diff -r f499373e340c -r f69e96d86e75 .hgsubstate
   --- /dev/null
   +++ b/.hgsubstate
   @@ -0,0 +1,1 @@
   +b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
+  $ hg parents --template '{node}\n'
+  f69e96d86e75a6d4fd88285dc9697acb23951041
+  $ hg parents --template '{files}\n'
+  .hgsub .hgsubstate
+
+check also whether qnew not including ".hgsubstate" explicitly causes
+as same result (in node hash) as one including it.
+
+  $ hg qpop -a -q
+  patch queue now empty
+  $ hg qdelete import-at-qnew
+  $ echo 'sub = sub' > .hgsub
+  $ hg add .hgsub
+  $ rm -f .hgsubstate
+  $ hg qnew -u test -d '0 0' import-at-qnew
+  $ hg parents --template '{node}\n'
+  f69e96d86e75a6d4fd88285dc9697acb23951041
+  $ hg parents --template '{files}\n'
+  .hgsub .hgsubstate
+
+check whether qrefresh imports updated .hgsubstate correctly
+
   $ hg qpop
   popping import-at-qnew
   patch queue now empty
   $ hg qpush
   applying import-at-qnew
   now at: import-at-qnew
+  $ hg parents --template '{files}\n'
+  .hgsub .hgsubstate
 
   $ hg qnew import-at-qrefresh
   $ echo sb > sub/sb
@@ -450,7 +474,7 @@ both into 'revision' and 'patch file under .hg/patches':
   $ cat .hgsubstate
   88ac1bef5ed43b689d1d200b59886b675dec474b sub
   $ hg diff -c tip
-  diff -r 44f846335325 -r b3e8c5fa3aaa .hgsubstate
+  diff -r 05b056bb9c8c -r d987bec230f4 .hgsubstate
   --- a/.hgsubstate
   +++ b/.hgsubstate
   @@ -1,1 +1,1 @@
@@ -460,20 +484,22 @@ both into 'revision' and 'patch file under .hg/patches':
   # HG changeset patch
   # Date 0 0
   # User test
-  # Parent 44f846335325209be6be35dc2c9a4be107278c09
+  # Parent 05b056bb9c8c05ff15258b84fd42ab3527271033
   
-  diff -r 44f846335325 .hgsubstate
+  diff -r 05b056bb9c8c .hgsubstate
   --- a/.hgsubstate
   +++ b/.hgsubstate
   @@ -1,1 +1,1 @@
   -b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
   +88ac1bef5ed43b689d1d200b59886b675dec474b sub
+  $ hg parents --template '{files}\n'
+  .hgsubstate
 
   $ hg qrefresh -u test -d '0 0'
   $ cat .hgsubstate
   88ac1bef5ed43b689d1d200b59886b675dec474b sub
   $ hg diff -c tip
-  diff -r 44f846335325 -r b3e8c5fa3aaa .hgsubstate
+  diff -r 05b056bb9c8c -r d987bec230f4 .hgsubstate
   --- a/.hgsubstate
   +++ b/.hgsubstate
   @@ -1,1 +1,1 @@
@@ -483,14 +509,16 @@ both into 'revision' and 'patch file under .hg/patches':
   # HG changeset patch
   # Date 0 0
   # User test
-  # Parent 44f846335325209be6be35dc2c9a4be107278c09
+  # Parent 05b056bb9c8c05ff15258b84fd42ab3527271033
   
-  diff -r 44f846335325 .hgsubstate
+  diff -r 05b056bb9c8c .hgsubstate
   --- a/.hgsubstate
   +++ b/.hgsubstate
   @@ -1,1 +1,1 @@
   -b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
   +88ac1bef5ed43b689d1d200b59886b675dec474b sub
+  $ hg parents --template '{files}\n'
+  .hgsubstate
 
   $ hg update -C tip
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -536,6 +564,37 @@ both into 'revision' and 'patch file under .hg/patches':
   @@ -1,1 +1,1 @@
   -b6f6e9c41f3dfd374a6d2ed4535c87951cf979cf sub
   +88ac1bef5ed43b689d1d200b59886b675dec474b sub
+  $ hg parents --template '{files}\n'
+  .hgsubstate
+
+check whether qrefresh not including ".hgsubstate" explicitly causes
+as same result (in node hash) as one including it.
+
+  $ hg update -C -q 0
+  $ hg qpop -a -q
+  patch queue now empty
+  $ hg qnew -u test -d '0 0' add-hgsub-at-qrefresh
+  $ echo 'sub = sub' > .hgsub
+  $ echo > .hgsubstate
+  $ hg add .hgsub .hgsubstate
+  $ hg qrefresh -u test -d '0 0'
+  $ hg parents --template '{node}\n'
+  7c48c35501aae6770ed9c2517014628615821a8e
+  $ hg parents --template '{files}\n'
+  .hgsub .hgsubstate
+
+  $ hg qpop -a -q
+  patch queue now empty
+  $ hg qdelete add-hgsub-at-qrefresh
+  $ hg qnew -u test -d '0 0' add-hgsub-at-qrefresh
+  $ echo 'sub = sub' > .hgsub
+  $ hg add .hgsub
+  $ rm -f .hgsubstate
+  $ hg qrefresh -u test -d '0 0'
+  $ hg parents --template '{node}\n'
+  7c48c35501aae6770ed9c2517014628615821a8e
+  $ hg parents --template '{files}\n'
+  .hgsub .hgsubstate
 
   $ cd ..
 

@@ -137,7 +137,7 @@ Graft out of order, skipping a merge and a duplicate
   resolving manifests
    branchmerge: True, force: True, partial: False
    ancestor: 68795b066622, local: ef0ef43d49e7+, remote: 5d205f8b35b6
-   b: local copied/moved to a -> m
+   b: local copied/moved from a -> m
     preserving b for resolve of b
   updating: b 1/1 files (100.00%)
   picked tool 'internal:merge' for b (binary False symlink False)
@@ -150,6 +150,7 @@ Graft out of order, skipping a merge and a duplicate
   resolving manifests
    branchmerge: True, force: True, partial: False
    ancestor: 4c60f11aa304, local: 6b9e5368ca4e+, remote: 97f8bfe72746
+   b: keep -> k
    e: remote is newer -> g
   getting e
   updating: e 1/1 files (100.00%)
@@ -159,6 +160,7 @@ Graft out of order, skipping a merge and a duplicate
   resolving manifests
    branchmerge: True, force: True, partial: False
    ancestor: 4c60f11aa304, local: 1905859650ec+, remote: 9c233e8e184d
+   b: keep -> k
    d: remote is newer -> g
    e: versions differ -> m
     preserving e for resolve of e

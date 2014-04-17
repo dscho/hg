@@ -304,7 +304,7 @@ def newcommit(repo, phase, *args, **kwargs):
         backup = repo.ui.backupconfig('phases', 'new-commit')
     try:
         if phase is not None:
-            repo.ui.setconfig('phases', 'new-commit', phase)
+            repo.ui.setconfig('phases', 'new-commit', phase, 'mq')
         return repo.commit(*args, **kwargs)
     finally:
         if phase is not None:
@@ -826,10 +826,10 @@ class queue(object):
                 repo.setparents(p1, merge)
 
             if all_files and '.hgsubstate' in all_files:
-                wctx = repo['.']
-                mctx = actx = repo[None]
+                wctx = repo[None]
+                pctx = repo['.']
                 overwrite = False
-                mergedsubstate = subrepo.submerge(repo, wctx, mctx, actx,
+                mergedsubstate = subrepo.submerge(repo, pctx, wctx, wctx,
                     overwrite)
                 files += mergedsubstate.keys()
 
@@ -1035,11 +1035,8 @@ class queue(object):
             self.checkpatchname(patchfn)
         inclsubs = checksubstate(repo)
         if inclsubs:
-            inclsubs.append('.hgsubstate')
             substatestate = repo.dirstate['.hgsubstate']
         if opts.get('include') or opts.get('exclude') or pats:
-            if inclsubs:
-                pats = list(pats or []) + inclsubs
             match = scmutil.match(repo[None], pats, opts)
             # detect missing files in pats
             def badfn(f, msg):
@@ -1047,14 +1044,14 @@ class queue(object):
                     raise util.Abort('%s: %s' % (f, msg))
             match.bad = badfn
             changes = repo.status(match=match)
-            m, a, r, d = changes[:4]
         else:
             changes = self.checklocalchanges(repo, force=True)
-            m, a, r, d = changes
-        match = scmutil.matchfiles(repo, m + a + r + inclsubs)
+        commitfiles = list(inclsubs)
+        for files in changes[:3]:
+            commitfiles.extend(files)
+        match = scmutil.matchfiles(repo, commitfiles)
         if len(repo[None].parents()) > 1:
             raise util.Abort(_('cannot manage merge changesets'))
-        commitfiles = m + a + r
         self.checktoppatch(repo)
         insert = self.fullseriesend()
         wlock = repo.wlock()
@@ -1494,7 +1491,6 @@ class queue(object):
 
             inclsubs = checksubstate(repo, hex(patchparent))
             if inclsubs:
-                inclsubs.append('.hgsubstate')
                 substatestate = repo.dirstate['.hgsubstate']
 
             ph = patchheader(self.join(patchfn), self.plainmode)
@@ -1987,9 +1983,11 @@ class queue(object):
                     raise util.Abort(_('-e is incompatible with import from -'))
                 filename = normname(filename)
                 self.checkreservedname(filename)
-                originpath = self.join(filename)
-                if not os.path.isfile(originpath):
-                    raise util.Abort(_("patch %s does not exist") % filename)
+                if util.url(filename).islocal():
+                    originpath = self.join(filename)
+                    if not os.path.isfile(originpath):
+                        raise util.Abort(
+                            _("patch %s does not exist") % filename)
 
                 if patchname:
                     self.checkpatchname(patchname, force)
@@ -3269,6 +3267,12 @@ def reposetup(ui, repo):
         def mq(self):
             return queue(self.ui, self.baseui, self.path)
 
+        def invalidateall(self):
+            super(mqrepo, self).invalidateall()
+            if localrepo.hasunfilteredcache(self, 'mq'):
+                # recreate mq in case queue path was changed
+                delattr(self.unfiltered(), 'mq')
+
         def abortifwdirpatched(self, errmsg, force=False):
             if self.mq.applied and self.mq.checkapplied and not force:
                 parents = self.dirstate.parents()
@@ -3285,14 +3289,14 @@ def reposetup(ui, repo):
             return super(mqrepo, self).commit(text, user, date, match, force,
                                               editor, extra)
 
-        def checkpush(self, force, revs):
-            if self.mq.applied and self.mq.checkapplied and not force:
+        def checkpush(self, pushop):
+            if self.mq.applied and self.mq.checkapplied and not pushop.force:
                 outapplied = [e.node for e in self.mq.applied]
-                if revs:
+                if pushop.revs:
                     # Assume applied patches have no non-patch descendants and
                     # are not on remote already. Filtering any changeset not
                     # pushed.
-                    heads = set(revs)
+                    heads = set(pushop.revs)
                     for node in reversed(outapplied):
                         if node in heads:
                             break
@@ -3303,7 +3307,7 @@ def reposetup(ui, repo):
                     if self[node].phase() < phases.secret:
                         raise util.Abort(_('source has mq patches applied'))
                 # no non-secret patches pushed
-            super(mqrepo, self).checkpush(force, revs)
+            super(mqrepo, self).checkpush(pushop)
 
         def _findtags(self):
             '''augment tags from base class with patch tags'''
@@ -3409,7 +3413,7 @@ def revsetmq(repo, subset, x):
     """
     revset.getargs(x, 0, 0, _("mq takes no arguments"))
     applied = set([repo[r.node].rev() for r in repo.mq.applied])
-    return [r for r in subset if r in applied]
+    return revset.baseset([r for r in subset if r in applied])
 
 # tell hggettext to extract docstrings from these functions:
 i18nfunctions = [revsetmq]

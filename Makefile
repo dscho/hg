@@ -71,7 +71,7 @@ install-doc: doc
 install-home: install-home-bin install-home-doc
 
 install-home-bin: build
-	$(PYTHON) setup.py $(PURE) install --home="$(HOME)" --force
+	$(PYTHON) setup.py $(PURE) install --home="$(HOME)" --prefix="" --force
 
 install-home-doc: doc
 	cd doc && $(MAKE) $(MFLAGS) PREFIX="$(HOME)" install
@@ -102,7 +102,7 @@ check-code:
 
 update-pot: i18n/hg.pot
 
-i18n/hg.pot: $(PYFILES) $(DOCFILES)
+i18n/hg.pot: $(PYFILES) $(DOCFILES) i18n/posplit i18n/hggettext
 	$(PYTHON) i18n/hggettext mercurial/commands.py \
 	  hgext/*.py hgext/*/__init__.py \
 	  mercurial/fileset.py mercurial/revset.py \

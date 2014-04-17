@@ -43,6 +43,9 @@ use "hg help" for the full list of commands or "hg -v" for details
 000000000000
  runcommand id
 000000000000 tip
+ runcommand id -runknown
+abort: unknown revision 'unknown'!
+ [255]
 
 testing inputeof:
 
@@ -70,7 +73,7 @@ testing cwd:
 testing localhgrc:
 
  runcommand showconfig
-bundle.mainreporoot=$TESTTMP
+bundle.mainreporoot=$TESTTMP/repo
 defaults.backout=-d "0 0"
 defaults.commit=-d "0 0"
 defaults.shelve=--date "0 0"
@@ -142,6 +145,7 @@ testing rollback:
 
  runcommand phase -r . -p
 no phases changed
+ [1]
  runcommand commit -Am.
  runcommand rollback
 repository tip rolled back to revision 3 (undo commit)
@@ -222,3 +226,27 @@ user:        test
 date:        Thu Jan 01 00:00:00 1970 +0000
 summary:     1
 
+
+testing mqoutsidechanges:
+
+ runcommand qapplied
+ runcommand qapplied
+0.diff
+ runcommand qpop --all
+popping 0.diff
+patch queue now empty
+ runcommand qqueue --active
+foo
+
+testing hellomessage:
+
+o, 'capabilities: getencoding runcommand\nencoding: ***'
+ runcommand id
+abort: there is no Mercurial repository here (.hg not found)
+ [255]
+
+testing startwithoutrepo:
+
+ runcommand init repo2
+ runcommand id -R repo2
+000000000000 tip

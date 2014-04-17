@@ -81,6 +81,12 @@ Killing a single changeset with replacement
   $ hg debugobsolete --flag 12 `getid original_c`  `getid new_c` -d '56 12'
   $ hg log -r 'hidden()' --template '{rev}:{node|short} {desc}\n' --hidden
   2:245bde4270cd add original_c
+  $ hg debugrevlog -cd
+  # rev p1rev p2rev start   end deltastart base   p1   p2 rawsize totalsize compression heads
+      0    -1    -1     0    59          0    0    0    0      58        58           0     1
+      1     0    -1    59   118         59   59    0    0      58       116           0     1
+      2     1    -1   118   204         59   59   59    0      76       192           0     1
+      3     1    -1   204   271        204  204   59    0      66       258           0     2
   $ hg debugobsolete
   245bde4270cd1072a27757984f9cda8ba26f08ca cdbce2fbb16313928851e97e0d85413f3f7eb77f C {'date': '56 12', 'user': 'test'}
 
@@ -884,4 +890,20 @@ This test issue 3814
   no changes found
   [1]
 
+Test that a local tag blocks a changeset from being hidden
 
+  $ hg tag -l visible -r 0 --hidden
+  $ hg log -G
+  @  changeset:   2:3816541e5485
+     tag:         tip
+     parent:      -1:000000000000
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     A
+  
+  x  changeset:   0:193e9254ce7e
+     tag:         visible
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     A
+  

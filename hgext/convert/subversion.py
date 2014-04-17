@@ -41,13 +41,30 @@ class SvnPathNotFound(Exception):
     pass
 
 def revsplit(rev):
-    """Parse a revision string and return (uuid, path, revnum)."""
-    url, revnum = rev.rsplit('@', 1)
-    parts = url.split('/', 1)
-    mod = ''
+    """Parse a revision string and return (uuid, path, revnum).
+    >>> revsplit('svn:a2147622-4a9f-4db4-a8d3-13562ff547b2'
+    ...          '/proj%20B/mytrunk/mytrunk@1')
+    ('a2147622-4a9f-4db4-a8d3-13562ff547b2', '/proj%20B/mytrunk/mytrunk', 1)
+    >>> revsplit('svn:8af66a51-67f5-4354-b62c-98d67cc7be1d@1')
+    ('', '', 1)
+    >>> revsplit('@7')
+    ('', '', 7)
+    >>> revsplit('7')
+    ('', '', 0)
+    >>> revsplit('bad')
+    ('', '', 0)
+    """
+    parts = rev.rsplit('@', 1)
+    revnum = 0
     if len(parts) > 1:
+        revnum = int(parts[1])
+    parts = parts[0].split('/', 1)
+    uuid = ''
+    mod = ''
+    if len(parts) > 1 and parts[0].startswith('svn:'):
+        uuid = parts[0][4:]
         mod = '/' + parts[1]
-    return parts[0][4:], mod, int(revnum)
+    return uuid, mod, revnum
 
 def quote(s):
     # As of svn 1.7, many svn calls expect "canonical" paths. In
@@ -157,6 +174,30 @@ class logstream(object):
             self._stdout.close()
             self._stdout = None
 
+class directlogstream(list):
+    """Direct revision log iterator.
+    This can be used for debugging and development but it will probably leak
+    memory and is not suitable for real conversions."""
+    def __init__(self, url, paths, start, end, limit=0,
+                  discover_changed_paths=True, strict_node_history=False):
+
+        def receiver(orig_paths, revnum, author, date, message, pool):
+            paths = {}
+            if orig_paths is not None:
+                for k, v in orig_paths.iteritems():
+                    paths[k] = changedpath(v)
+            self.append((paths, revnum, author, date, message))
+
+        # Use an ra of our own so that our parent can consume
+        # our results without confusing the server.
+        t = transport.SvnRaTransport(url=url)
+        svn.ra.get_log(t.ra, paths, start, end, limit,
+                       discover_changed_paths,
+                       strict_node_history,
+                       receiver)
+
+    def close(self):
+        pass
 
 # Check to see if the given path is a local Subversion repo. Verify this by
 # looking for several svn-specific files and directories in the given
@@ -454,13 +495,13 @@ class svn_source(converter_source):
         del self.commits[rev]
         return commit
 
-    def checkrevformat(self, revstr):
+    def checkrevformat(self, revstr, mapname='splicemap'):
         """ fails if revision format does not match the correct format"""
         if not re.match(r'svn:[0-9a-f]{8,8}-[0-9a-f]{4,4}-'
                               '[0-9a-f]{4,4}-[0-9a-f]{4,4}-[0-9a-f]'
                               '{12,12}(.*)\@[0-9]+$',revstr):
-            raise util.Abort(_('splicemap entry %s is not a valid revision'
-                               ' identifier') % revstr)
+            raise util.Abort(_('%s entry %s is not a valid revision'
+                               ' identifier') % (mapname, revstr))
 
     def gettags(self):
         tags = {}
@@ -975,6 +1016,9 @@ class svn_source(converter_source):
             relpaths.append(p.strip('/'))
         args = [self.baseurl, relpaths, start, end, limit,
                 discover_changed_paths, strict_node_history]
+        # undocumented feature: debugsvnlog can be disabled
+        if not self.ui.configbool('convert', 'svn.debugsvnlog', True):
+            return directlogstream(*args)
         arg = encodeargs(args)
         hgexe = util.hgexecutable()
         cmd = '%s debugsvnlog' % util.shellquote(hgexe)

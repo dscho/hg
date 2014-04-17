@@ -35,6 +35,18 @@ Issue2232: committing a subrepo without .hgsub
   update: (current)
   $ hg ci -m1
 
+test handling .hgsubstate "added" explicitly.
+
+  $ hg parents --template '{node}\n{files}\n'
+  7cf8cfea66e410e8e3336508dfeec07b3192de51
+  .hgsub .hgsubstate
+  $ hg rollback -q
+  $ hg add .hgsubstate
+  $ hg ci -m1
+  $ hg parents --template '{node}\n{files}\n'
+  7cf8cfea66e410e8e3336508dfeec07b3192de51
+  .hgsub .hgsubstate
+
 Revert subrepo and test subrepo fileset keyword:
 
   $ echo b > s/a
@@ -98,6 +110,19 @@ add sub sub
   branch: default
   commit: (clean)
   update: (current)
+
+test handling .hgsubstate "modified" explicitly.
+
+  $ hg parents --template '{node}\n{files}\n'
+  df30734270ae757feb35e643b7018e818e78a9aa
+  .hgsubstate
+  $ hg rollback -q
+  $ hg status -A .hgsubstate
+  M .hgsubstate
+  $ hg ci -m2
+  $ hg parents --template '{node}\n{files}\n'
+  df30734270ae757feb35e643b7018e818e78a9aa
+  .hgsubstate
 
 bump sub rev (and check it is ignored by ui.commitsubrepos)
 
@@ -183,6 +208,18 @@ new branch for merge tests
 8
 
   $ hg ci -m8 # remove sub
+
+test handling .hgsubstate "removed" explicitly.
+
+  $ hg parents --template '{node}\n{files}\n'
+  96615c1dad2dc8e3796d7332c77ce69156f7b78e
+  .hgsub .hgsubstate
+  $ hg rollback -q
+  $ hg remove .hgsubstate
+  $ hg ci -m8
+  $ hg parents --template '{node}\n{files}\n'
+  96615c1dad2dc8e3796d7332c77ce69156f7b78e
+  .hgsub .hgsubstate
 
 merge tests
 
@@ -755,6 +792,19 @@ Prepare a repo with subrepo
   $ echo test >> sub/repo/foo
   $ hg ci -mtest
   committing subrepository sub/repo (glob)
+  $ hg cat sub/repo/foo
+  test
+  test
+  $ mkdir -p tmp/sub/repo
+  $ hg cat -r 0 --output tmp/%p_p sub/repo/foo
+  $ cat tmp/sub/repo/foo_p
+  test
+  $ mv sub/repo sub_
+  $ hg cat sub/repo/baz
+  skipping missing subrepository: sub/repo
+  [1]
+  $ rm -rf sub/repo
+  $ mv sub_ sub/repo
   $ cd ..
 
 Create repo without default path, pull top repo, and see what happens on update
@@ -911,7 +961,7 @@ Sticky subrepositories, no changes
   $ hg -R t id
   e95bcfa18a35
 
-Sticky subrepositorys, file changes
+Sticky subrepositories, file changes
   $ touch s/f1
   $ touch t/f1
   $ hg add -S s/f1
@@ -1296,7 +1346,7 @@ configuration
   $ cd ..
 
 
-Test that comit --secret works on both repo and subrepo (issue4182)
+Test that commit --secret works on both repo and subrepo (issue4182)
 
   $ cd main
   $ echo secret >> b

@@ -121,6 +121,7 @@ testpats = [
     (r'^( *)\t', "don't use tabs to indent"),
     (r'sed (-e )?\'(\d+|/[^/]*/)i(?!\\\n)',
      "put a backslash-escaped newline after sed 'i' command"),
+    (r'^diff *-\w*u.*$\n(^  \$ |^$)', "prefix diff -u with cmp"),
   ],
   # warnings
   [
@@ -150,6 +151,9 @@ utestpats = [
      "explicit exit code checks unnecessary"),
     (uprefix + r'set -e', "don't use set -e"),
     (uprefix + r'(\s|fi\b|done\b)', "use > for continued lines"),
+    (uprefix + r'.*:\.\S*/', "x:.y in a path does not work on msys, rewrite "
+     "as x://.y, or see `hg log -k msys` for alternatives", r'-\S+:\.|' #-Rxxx
+     'hg pull -q file:../test'), # in test-pull.t which is skipped on windows
     (r'^  saved backup bundle to \$TESTTMP.*\.hg$', winglobmsg),
     (r'^  changeset .* references (corrupted|missing) \$TESTTMP/.*[^)]$',
      winglobmsg),
@@ -162,6 +166,8 @@ utestpats = [
     (r'^  moving \S+/.*[^)]$', winglobmsg),
     (r'^  no changes made to subrepo since.*/.*[^)]$', winglobmsg),
     (r'^  .*: largefile \S+ not available from file:.*/.*[^)]$', winglobmsg),
+    (r'^  .*file://\$TESTTMP',
+     'write "file:/*/$TESTTMP" + (glob) to match on windows too'),
   ],
   # warnings
   [
@@ -185,6 +191,7 @@ utestfilters = [
 
 pypats = [
   [
+    (r'\([^)]*\*\w[^()]+\w+=', "can't pass varargs with keyword in Py2.5"),
     (r'^\s*def\s*\w+\s*\(.*,\s*\(',
      "tuple parameter unpacking not available in Python 3+"),
     (r'lambda\s*\(.*,.*\)',
@@ -194,12 +201,14 @@ pypats = [
      'use "import foo.bar" on its own line instead.'),
     (r'(?<!def)\s+(cmp)\(', "cmp is not available in Python 3+"),
     (r'\breduce\s*\(.*', "reduce is not available in Python 3+"),
+    (r'dict\(.*=', 'dict() is different in Py2 and 3 and is slower than {}',
+     'dict-from-generator'),
     (r'\.has_key\b', "dict.has_key is not available in Python 3+"),
     (r'\s<>\s', '<> operator is not available in Python 3+, use !='),
     (r'^\s*\t', "don't use tabs"),
     (r'\S;\s*\n', "semicolon"),
-    (r'[^_]_\((?:"[^"]+"[ \t\n+]*)+%', "don't use % inside _()"),
-    (r"[^_]_\((?:'[^']+'[ \t\n+]*)+%", "don't use % inside _()"),
+    (r'[^_]_\([ \t\n]*(?:"[^"]+"[ \t\n+]*)+%', "don't use % inside _()"),
+    (r"[^_]_\([ \t\n]*(?:'[^']+'[ \t\n+]*)+%", "don't use % inside _()"),
     (r'(\w|\)),\w', "missing whitespace after ,"),
     (r'(\w|\))[+/*\-<>]\w', "missing whitespace in expression"),
     (r'^\s+(\w|\.)+=\w[^,()\n]*$', "missing whitespace in assignment"),
@@ -306,6 +315,7 @@ txtfilters = []
 txtpats = [
   [
     ('\s$', 'trailing whitespace'),
+    ('.. note::[ \n][^\n]', 'add two newlines after note::')
   ],
   []
 ]

@@ -6,24 +6,24 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from mercurial import changegroup
+from mercurial import changegroup, exchange
 from mercurial.node import short
 from mercurial.i18n import _
-import os
 import errno
 
 def _bundle(repo, bases, heads, node, suffix, compress=True):
     """create a bundle with the specified revisions as a backup"""
-    cg = repo.changegroupsubset(bases, heads, 'strip')
-    backupdir = repo.join("strip-backup")
-    if not os.path.isdir(backupdir):
-        os.mkdir(backupdir)
-    name = os.path.join(backupdir, "%s-%s.hg" % (short(node), suffix))
+    cg = changegroup.changegroupsubset(repo, bases, heads, 'strip')
+    backupdir = "strip-backup"
+    vfs = repo.vfs
+    if not vfs.isdir(backupdir):
+        vfs.mkdir(backupdir)
+    name = "%s/%s-%s.hg" % (backupdir, short(node), suffix)
     if compress:
         bundletype = "HG10BZ"
     else:
         bundletype = "HG10UN"
-    return changegroup.writebundle(cg, name, bundletype)
+    return changegroup.writebundle(cg, name, bundletype, vfs)
 
 def _collectfiles(repo, striprev):
     """find out the filelogs affected by the strip"""
@@ -108,10 +108,13 @@ def strip(ui, repo, nodelist, backup="all", topic='backup'):
 
     # create a changegroup for all the branches we need to keep
     backupfile = None
+    vfs = repo.vfs
     if backup == "all":
         backupfile = _bundle(repo, stripbases, cl.heads(), node, topic)
-        repo.ui.status(_("saved backup bundle to %s\n") % backupfile)
-        repo.ui.log("backupbundle", "saved backup bundle to %s\n", backupfile)
+        repo.ui.status(_("saved backup bundle to %s\n") %
+                       vfs.join(backupfile))
+        repo.ui.log("backupbundle", "saved backup bundle to %s\n",
+                    vfs.join(backupfile))
     if saveheads or savebases:
         # do not compress partial bundle if we remove it from disk later
         chgrpfile = _bundle(repo, savebases, saveheads, node, 'temp',
@@ -134,6 +137,8 @@ def strip(ui, repo, nodelist, backup="all", topic='backup'):
             for i in xrange(offset, len(tr.entries)):
                 file, troffset, ignore = tr.entries[i]
                 repo.sopener(file, 'a').truncate(troffset)
+                if troffset == 0:
+                    repo.store.markremoved(file)
             tr.close()
         except: # re-raises
             tr.abort()
@@ -141,25 +146,27 @@ def strip(ui, repo, nodelist, backup="all", topic='backup'):
 
         if saveheads or savebases:
             ui.note(_("adding branch\n"))
-            f = open(chgrpfile, "rb")
-            gen = changegroup.readbundle(f, chgrpfile)
+            f = vfs.open(chgrpfile, "rb")
+            gen = exchange.readbundle(ui, f, chgrpfile, vfs)
             if not repo.ui.verbose:
                 # silence internal shuffling chatter
                 repo.ui.pushbuffer()
-            repo.addchangegroup(gen, 'strip', 'bundle:' + chgrpfile, True)
+            changegroup.addchangegroup(repo, gen, 'strip',
+                                       'bundle:' + vfs.join(chgrpfile), True)
             if not repo.ui.verbose:
                 repo.ui.popbuffer()
             f.close()
             if not keeppartialbundle:
-                os.unlink(chgrpfile)
+                vfs.unlink(chgrpfile)
 
         # remove undo files
-        for undofile in repo.undofiles():
+        for undovfs, undofile in repo.undofiles():
             try:
-                os.unlink(undofile)
+                undovfs.unlink(undofile)
             except OSError, e:
                 if e.errno != errno.ENOENT:
-                    ui.warn(_('error removing %s: %s\n') % (undofile, str(e)))
+                    ui.warn(_('error removing %s: %s\n') %
+                            (undovfs.join(undofile), str(e)))
 
         for m in updatebm:
             bm[m] = repo[newbmtarget].node()
@@ -167,10 +174,10 @@ def strip(ui, repo, nodelist, backup="all", topic='backup'):
     except: # re-raises
         if backupfile:
             ui.warn(_("strip failed, full bundle stored in '%s'\n")
-                    % backupfile)
+                    % vfs.join(backupfile))
         elif saveheads:
             ui.warn(_("strip failed, partial bundle stored in '%s'\n")
-                    % chgrpfile)
+                    % vfs.join(chgrpfile))
         raise
 
     repo.destroyed()

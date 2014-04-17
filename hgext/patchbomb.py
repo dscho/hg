@@ -291,7 +291,11 @@ def patchbomb(ui, repo, *revs, **opts):
         return [str(r) for r in revs]
 
     def getpatches(revs):
+        prev = repo['.'].rev()
         for r in scmutil.revrange(repo, revs):
+            if r == prev and (repo[None].files() or repo[None].deleted()):
+                ui.warn(_('warning: working directory has '
+                          'uncommitted changes\n'))
             output = cStringIO.StringIO()
             cmdutil.export(repo, [r], fp=output,
                          opts=patch.diffopts(ui, opts))
@@ -546,11 +550,11 @@ def patchbomb(ui, repo, *revs, **opts):
             if not sendmail:
                 verifycert = ui.config('smtp', 'verifycert')
                 if opts.get('insecure'):
-                    ui.setconfig('smtp', 'verifycert', 'loose')
+                    ui.setconfig('smtp', 'verifycert', 'loose', 'patchbomb')
                 try:
                     sendmail = mail.connect(ui, mbox=mbox)
                 finally:
-                    ui.setconfig('smtp', 'verifycert', verifycert)
+                    ui.setconfig('smtp', 'verifycert', verifycert, 'patchbomb')
             ui.status(_('sending '), subj, ' ...\n')
             ui.progress(_('sending'), i, item=subj, total=len(msgs))
             if not mbox:

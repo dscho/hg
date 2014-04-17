@@ -66,6 +66,46 @@ def promptchoice(pe):
 def warningchecker(msgidpat=None):
     return checker('warning', msgidpat)
 
+@warningchecker()
+def taildoublecolons(pe):
+    """Check equality of tail '::'-ness between msgid and msgstr
+
+    >>> pe = polib.POEntry(
+    ...     msgid ='ends with ::',
+    ...     msgstr='ends with ::')
+    >>> for e in taildoublecolons(pe): print e
+    >>> pe = polib.POEntry(
+    ...     msgid ='ends with ::',
+    ...     msgstr='ends without double-colons')
+    >>> for e in taildoublecolons(pe): print e
+    tail '::'-ness differs between msgid and msgstr
+    >>> pe = polib.POEntry(
+    ...     msgid ='ends without double-colons',
+    ...     msgstr='ends with ::')
+    >>> for e in taildoublecolons(pe): print e
+    tail '::'-ness differs between msgid and msgstr
+    """
+    if pe.msgid.endswith('::') != pe.msgstr.endswith('::'):
+        yield "tail '::'-ness differs between msgid and msgstr"
+
+@warningchecker()
+def indentation(pe):
+    """Check equality of initial indentation between msgid and msgstr
+
+    This may report unexpected warning, because this doesn't aware
+    the syntax of rst document and the context of msgstr.
+
+    >>> pe = polib.POEntry(
+    ...     msgid ='    indented text',
+    ...     msgstr='  narrowed indentation')
+    >>> for e in indentation(pe): print e
+    initial indentation width differs betweeen msgid and msgstr
+    """
+    idindent = len(pe.msgid) - len(pe.msgid.lstrip())
+    strindent = len(pe.msgstr) - len(pe.msgstr.lstrip())
+    if idindent != strindent:
+        yield "initial indentation width differs betweeen msgid and msgstr"
+
 ####################
 
 def check(pofile, fatal=True, warning=False):

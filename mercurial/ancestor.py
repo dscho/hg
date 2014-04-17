@@ -9,6 +9,62 @@ import heapq
 import util
 from node import nullrev
 
+def commonancestorsheads(pfunc, *nodes):
+    """Returns a set with the heads of all common ancestors of all nodes,
+    heads(::nodes[0] and ::nodes[1] and ...) .
+
+    pfunc must return a list of parent vertices for a given vertex.
+    """
+    if not isinstance(nodes, set):
+        nodes = set(nodes)
+    if nullrev in nodes:
+        return set()
+    if len(nodes) <= 1:
+        return nodes
+
+    allseen = (1 << len(nodes)) - 1
+    seen = [0] * (max(nodes) + 1)
+    for i, n in enumerate(nodes):
+        seen[n] = 1 << i
+    poison = 1 << (i + 1)
+
+    gca = set()
+    interesting = len(nodes)
+    nv = len(seen) - 1
+    while nv >= 0 and interesting:
+        v = nv
+        nv -= 1
+        if not seen[v]:
+            continue
+        sv = seen[v]
+        if sv < poison:
+            interesting -= 1
+            if sv == allseen:
+                gca.add(v)
+                sv |= poison
+                if v in nodes:
+                    # history is linear
+                    return set([v])
+        if sv < poison:
+            for p in pfunc(v):
+                sp = seen[p]
+                if p == nullrev:
+                    continue
+                if sp == 0:
+                    seen[p] = sv
+                    interesting += 1
+                elif sp != sv:
+                    seen[p] |= sv
+        else:
+            for p in pfunc(v):
+                if p == nullrev:
+                    continue
+                sp = seen[p]
+                if sp and sp < poison:
+                    interesting -= 1
+                seen[p] = sv
+    return gca
+
 def ancestors(pfunc, *orignodes):
     """
     Returns the common ancestors of a and b that are furthest from a
@@ -16,59 +72,6 @@ def ancestors(pfunc, *orignodes):
 
     pfunc must return a list of parent vertices for a given vertex.
     """
-    if not isinstance(orignodes, set):
-        orignodes = set(orignodes)
-    if nullrev in orignodes:
-        return set()
-    if len(orignodes) <= 1:
-        return orignodes
-
-    def candidates(nodes):
-        allseen = (1 << len(nodes)) - 1
-        seen = [0] * (max(nodes) + 1)
-        for i, n in enumerate(nodes):
-            seen[n] = 1 << i
-        poison = 1 << (i + 1)
-
-        gca = set()
-        interesting = left = len(nodes)
-        nv = len(seen) - 1
-        while nv >= 0 and interesting:
-            v = nv
-            nv -= 1
-            if not seen[v]:
-                continue
-            sv = seen[v]
-            if sv < poison:
-                interesting -= 1
-                if sv == allseen:
-                    gca.add(v)
-                    sv |= poison
-                    if v in nodes:
-                        left -= 1
-                        if left <= 1:
-                            # history is linear
-                            return set([v])
-            if sv < poison:
-                for p in pfunc(v):
-                    sp = seen[p]
-                    if p == nullrev:
-                        continue
-                    if sp == 0:
-                        seen[p] = sv
-                        interesting += 1
-                    elif sp != sv:
-                        seen[p] |= sv
-            else:
-                for p in pfunc(v):
-                    if p == nullrev:
-                        continue
-                    sp = seen[p]
-                    if sp and sp < poison:
-                        interesting -= 1
-                    seen[p] = sv
-        return gca
-
     def deepest(nodes):
         interesting = {}
         count = max(nodes) + 1
@@ -125,94 +128,11 @@ def ancestors(pfunc, *orignodes):
             k |= i
         return set(n for (i, n) in mapping if k & i)
 
-    gca = candidates(orignodes)
+    gca = commonancestorsheads(pfunc, *orignodes)
 
     if len(gca) <= 1:
         return gca
     return deepest(gca)
-
-def genericancestor(a, b, pfunc):
-    """
-    Returns the common ancestor of a and b that is furthest from a
-    root (as measured by longest path) or None if no ancestor is
-    found. If there are multiple common ancestors at the same
-    distance, the first one found is returned.
-
-    pfunc must return a list of parent vertices for a given vertex
-    """
-
-    if a == b:
-        return a
-
-    a, b = sorted([a, b])
-
-    # find depth from root of all ancestors
-    # depth is stored as a negative for heapq
-    parentcache = {}
-    visit = [a, b]
-    depth = {}
-    while visit:
-        vertex = visit[-1]
-        pl = [p for p in pfunc(vertex) if p != nullrev]
-        parentcache[vertex] = pl
-        if not pl:
-            depth[vertex] = 0
-            visit.pop()
-        else:
-            for p in pl:
-                if p == a or p == b: # did we find a or b as a parent?
-                    return p # we're done
-                if p not in depth:
-                    visit.append(p)
-            if visit[-1] == vertex:
-                # -(maximum distance of parents + 1)
-                depth[vertex] = min([depth[p] for p in pl]) - 1
-                visit.pop()
-
-    # traverse ancestors in order of decreasing distance from root
-    def ancestors(vertex):
-        h = [(depth[vertex], vertex)]
-        seen = set()
-        while h:
-            d, n = heapq.heappop(h)
-            if n not in seen:
-                seen.add(n)
-                yield (d, n)
-                for p in parentcache[n]:
-                    heapq.heappush(h, (depth[p], p))
-
-    def generations(vertex):
-        sg, s = None, set()
-        for g, v in ancestors(vertex):
-            if g != sg:
-                if sg:
-                    yield sg, s
-                sg, s = g, set((v,))
-            else:
-                s.add(v)
-        yield sg, s
-
-    x = generations(a)
-    y = generations(b)
-    gx = x.next()
-    gy = y.next()
-
-    # increment each ancestor list until it is closer to root than
-    # the other, or they match
-    try:
-        while True:
-            if gx[0] == gy[0]:
-                for v in gx[1]:
-                    if v in gy[1]:
-                        return v
-                gy = y.next()
-                gx = x.next()
-            elif gx[0] > gy[0]:
-                gy = y.next()
-            else:
-                gx = x.next()
-    except StopIteration:
-        return None
 
 def missingancestors(revs, bases, pfunc):
     """Return all the ancestors of revs that are not ancestors of bases.

@@ -123,6 +123,7 @@
   $ cat > python3-compat.py << EOF
   > foo <> bar
   > reduce(lambda a, b: a + b, [1, 2, 3, 4])
+  > dict(key=value)
   > EOF
   $ "$check_code" python3-compat.py
   python3-compat.py:1:
@@ -131,6 +132,9 @@
   python3-compat.py:2:
    > reduce(lambda a, b: a + b, [1, 2, 3, 4])
    reduce is not available in Python 3+
+  python3-compat.py:3:
+   > dict(key=value)
+   dict() is different in Py2 and 3 and is slower than {}
   [1]
 
   $ cat > is-op.py <<EOF
@@ -251,3 +255,32 @@
    warning: add two newlines after '.. note::'
   [1]
 
+  $ cat > ./map-inside-gettext.py <<EOF
+  > print _("map inside gettext %s" % v)
+  > 
+  > print _("concatenating " " by " " space %s" % v)
+  > print _("concatenating " + " by " + " '+' %s" % v)
+  > 
+  > print _("maping operation in different line %s"
+  >         % v)
+  > 
+  > print _(
+  >         "leading spaces inside of '(' %s" % v)
+  > EOF
+  $ "$check_code" ./map-inside-gettext.py
+  ./map-inside-gettext.py:1:
+   > print _("map inside gettext %s" % v)
+   don't use % inside _()
+  ./map-inside-gettext.py:3:
+   > print _("concatenating " " by " " space %s" % v)
+   don't use % inside _()
+  ./map-inside-gettext.py:4:
+   > print _("concatenating " + " by " + " '+' %s" % v)
+   don't use % inside _()
+  ./map-inside-gettext.py:6:
+   > print _("maping operation in different line %s"
+   don't use % inside _()
+  ./map-inside-gettext.py:9:
+   > print _(
+   don't use % inside _()
+  [1]

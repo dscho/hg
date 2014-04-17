@@ -40,7 +40,7 @@ def dispatch(req):
         if not req.ui:
             req.ui = uimod.ui()
         if '--traceback' in req.args:
-            req.ui.setconfig('ui', 'traceback', 'on')
+            req.ui.setconfig('ui', 'traceback', 'on', '--traceback')
 
         # set ui streams from the request
         if req.fin:
@@ -103,8 +103,8 @@ def _runcatch(req):
             if req.repo:
                 # copy configs that were passed on the cmdline (--config) to
                 # the repo ui
-                for cfg in cfgs:
-                    req.repo.ui.setconfig(*cfg)
+                for sec, name, val in cfgs:
+                    req.repo.ui.setconfig(sec, name, val, source='--config')
 
             # if we are in HGPLAIN mode, then disable custom debugging
             debugger = ui.config("ui", "debugger")
@@ -522,7 +522,7 @@ def _parseconfig(ui, config):
             section, name = name.split('.', 1)
             if not section or not name:
                 raise IndexError
-            ui.setconfig(section, name, value)
+            ui.setconfig(section, name, value, '--config')
             configs.append((section, name, value))
         except (IndexError, ValueError):
             raise util.Abort(_('malformed --config option: %r '
@@ -739,19 +739,19 @@ def _dispatch(req):
         for opt in ('verbose', 'debug', 'quiet'):
             val = str(bool(options[opt]))
             for ui_ in uis:
-                ui_.setconfig('ui', opt, val)
+                ui_.setconfig('ui', opt, val, '--' + opt)
 
     if options['traceback']:
         for ui_ in uis:
-            ui_.setconfig('ui', 'traceback', 'on')
+            ui_.setconfig('ui', 'traceback', 'on', '--traceback')
 
     if options['noninteractive']:
         for ui_ in uis:
-            ui_.setconfig('ui', 'interactive', 'off')
+            ui_.setconfig('ui', 'interactive', 'off', '-y')
 
     if cmdoptions.get('insecure', False):
         for ui_ in uis:
-            ui_.setconfig('web', 'cacerts', '')
+            ui_.setconfig('web', 'cacerts', '', '--insecure')
 
     if options['version']:
         return commands.version_(ui)
@@ -777,7 +777,7 @@ def _dispatch(req):
                 repo = hg.repository(ui, path=path)
                 if not repo.local():
                     raise util.Abort(_("repository '%s' is not local") % path)
-                repo.ui.setconfig("bundle", "mainreporoot", repo.root)
+                repo.ui.setconfig("bundle", "mainreporoot", repo.root, 'repo')
             except error.RequirementError:
                 raise
             except error.RepoError:

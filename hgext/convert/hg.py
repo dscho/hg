@@ -25,6 +25,9 @@ from mercurial import hg, util, context, bookmarks, error, scmutil
 
 from common import NoRepo, commit, converter_source, converter_sink
 
+import re
+sha1re = re.compile(r'\b[0-9a-f]{6,40}\b')
+
 class mercurial_sink(converter_sink):
     def __init__(self, ui, path):
         converter_sink.__init__(self, ui, path)
@@ -74,10 +77,6 @@ class mercurial_sink(converter_sink):
 
     def authorfile(self):
         return self.repo.join("authormap")
-
-    def getheads(self):
-        h = self.repo.changelog.heads()
-        return [hex(x) for x in h]
 
     def setbranch(self, branch, pbranches):
         if not self.clonebranches:
@@ -157,6 +156,14 @@ class mercurial_sink(converter_sink):
         p2 = parents.pop(0)
 
         text = commit.desc
+
+        sha1s = re.findall(sha1re, text)
+        for sha1 in sha1s:
+            oldrev = source.lookuprev(sha1)
+            newrev = revmap.get(oldrev)
+            if newrev is not None:
+                text = text.replace(sha1, newrev[:len(sha1)])
+
         extra = commit.extra.copy()
         if self.branchnames and commit.branch:
             extra['branch'] = commit.branch
@@ -190,14 +197,36 @@ class mercurial_sink(converter_sink):
             parentctx = None
             tagparent = nullid
 
-        try:
-            oldlines = sorted(parentctx['.hgtags'].data().splitlines(True))
-        except Exception:
-            oldlines = []
+        oldlines = set()
+        for branch, heads in self.repo.branchmap().iteritems():
+            for h in heads:
+                if '.hgtags' in self.repo[h]:
+                    oldlines.update(
+                        set(self.repo[h]['.hgtags'].data().splitlines(True)))
+        oldlines = sorted(list(oldlines))
 
         newlines = sorted([("%s %s\n" % (tags[tag], tag)) for tag in tags])
         if newlines == oldlines:
             return None, None
+
+        # if the old and new tags match, then there is nothing to update
+        oldtags = set()
+        newtags = set()
+        for line in oldlines:
+            s = line.strip().split(' ', 1)
+            if len(s) != 2:
+                continue
+            oldtags.add(s[1])
+        for line in newlines:
+            s = line.strip().split(' ', 1)
+            if len(s) != 2:
+                continue
+            if s[1] not in oldtags:
+                newtags.add(s[1].strip())
+
+        if not newtags:
+            return None, None
+
         data = "".join(newlines)
         def getfilectx(repo, memctx, f):
             return context.memfilectx(f, data, False, False, None)
@@ -412,6 +441,6 @@ class mercurial_source(converter_source):
     def getbookmarks(self):
         return bookmarks.listbookmarks(self.repo)
 
-    def checkrevformat(self, revstr):
+    def checkrevformat(self, revstr, mapname='splicemap'):
         """ Mercurial, revision string is a 40 byte hex """
-        self.checkhexformat(revstr)
+        self.checkhexformat(revstr, mapname)

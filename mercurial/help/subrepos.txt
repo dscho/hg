@@ -39,6 +39,7 @@ Subrepositories are made of three components:
    repositories states when committing in the parent repository.
 
    .. note::
+
       The ``.hgsubstate`` file should not be edited manually.
 
 
@@ -82,6 +83,9 @@ Interaction with Mercurial Commands
 
 :archive: archive does not recurse in subrepositories unless
     -S/--subrepos is specified.
+
+:cat: cat currently only handles exact file matches in subrepos.
+    Git and Subversion subrepositories are currently ignored.
 
 :commit: commit creates a consistent snapshot of the state of the
     entire project and its subrepositories. If any subrepositories

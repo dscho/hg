@@ -73,7 +73,7 @@ def findblocks(text):
         if lines:
             indent = min((len(l) - len(l.lstrip())) for l in lines)
             lines = [l[indent:] for l in lines]
-            blocks.append(dict(indent=indent, lines=lines))
+            blocks.append({'indent': indent, 'lines': lines})
     return blocks
 
 def findliteralblocks(blocks):
@@ -109,7 +109,7 @@ def findliteralblocks(blocks):
             elif len(blocks[i]['lines']) == 1 and \
                  blocks[i]['lines'][0].lstrip(' ').startswith('.. ') and \
                  blocks[i]['lines'][0].find(' ', 3) == -1:
-                # directive on its onw line, not a literal block
+                # directive on its own line, not a literal block
                 i += 1
                 continue
             else:
@@ -174,8 +174,8 @@ def splitparagraphs(blocks):
                     items = []
                     for j, line in enumerate(lines):
                         if match(lines, j, itemre, singleline):
-                            items.append(dict(type=type, lines=[],
-                                              indent=blocks[i]['indent']))
+                            items.append({'type': type, 'lines': [],
+                                          'indent': blocks[i]['indent']})
                         items[-1]['lines'].append(line)
                     blocks[i:i + 1] = items
                     break
@@ -382,10 +382,10 @@ def addmargins(blocks):
             blocks[i]['type'] in ('bullet', 'option', 'field')):
             i += 1
         elif not blocks[i - 1]['lines']:
-            # no lines in previous block, do not seperate
+            # no lines in previous block, do not separate
             i += 1
         else:
-            blocks.insert(i, dict(lines=[''], indent=0, type='margin'))
+            blocks.insert(i, {'lines': [''], 'indent': 0, 'type': 'margin'})
             i += 2
     return blocks
 
@@ -697,6 +697,10 @@ def maketable(data, indent=0, header=False):
     for row in data:
         l = []
         for w, v in zip(widths, row):
+            if '\n' in v:
+                # only remove line breaks and indentation, long lines are
+                # handled by the next tool
+                v = ' '.join(e.lstrip() for e in v.split('\n'))
             pad = ' ' * (w - encoding.colwidth(v))
             l.append(v + pad)
         out.append(indent + ' '.join(l) + "\n")
