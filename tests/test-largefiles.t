@@ -214,8 +214,18 @@ Test copies and moves from a directory other than root (issue3516)
   ./baz/largefile
   ./dirb
   ./dirb/largefile
-  ./foo
-  $ cd ../../a
+  $ cd ..
+  $ hg mv dira dirc
+  moving .hglf/dira/baz/largefile to .hglf/dirc/baz/largefile (glob)
+  moving .hglf/dira/dirb/largefile to .hglf/dirc/dirb/largefile (glob)
+  $ find * | sort
+  dirc
+  dirc/baz
+  dirc/baz/largefile
+  dirc/dirb
+  dirc/dirb/largefile
+  $ hg up -qC
+  $ cd ../a
 
 #if serve
 Test display of largefiles in hgweb
@@ -763,6 +773,18 @@ Test graph log
   @  7:daea875e9014
   |
   $ cd ..
+
+Test log from outside repo
+
+  $ hg log  b/sub -T '{rev}:{node|short}  {desc|firstline}\n'
+  6:4355d653f84f  edit files yet again
+  5:9d5af5072dbd  edit files again
+  4:74c02385b94c  move files
+  1:ce8896473775  edit files
+  0:30d30fe6a5be  add files
+
+Test clone at revision
+
   $ hg clone a -r 3 c
   adding changesets
   adding manifests

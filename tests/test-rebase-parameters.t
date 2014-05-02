@@ -80,16 +80,16 @@ These fail:
   [255]
 
   $ hg rebase --rev '1 & !1'
-  abort: empty "rev" revision set - nothing to rebase
-  [255]
+  empty "rev" revision set - nothing to rebase
+  [1]
 
   $ hg rebase --source '1 & !1'
-  abort: empty "source" revision set - nothing to rebase
-  [255]
+  empty "source" revision set - nothing to rebase
+  [1]
 
   $ hg rebase --base '1 & !1'
-  abort: empty "base" revision set - can't compute rebase set
-  [255]
+  empty "base" revision set - can't compute rebase set
+  [1]
 
   $ hg rebase
   nothing to rebase - working directory parent is also destination

@@ -15,6 +15,7 @@ Create an extension to test bundle2 API
   > from mercurial import scmutil
   > from mercurial import discovery
   > from mercurial import changegroup
+  > from mercurial import error
   > cmdtable = {}
   > command = cmdutil.command(cmdtable)
   > 
@@ -59,6 +60,7 @@ Create an extension to test bundle2 API
   >           ('', 'unknown', False, 'include an unknown mandatory part in the bundle'),
   >           ('', 'parts', False, 'include some arbitrary parts to the bundle'),
   >           ('', 'reply', False, 'produce a reply bundle'),
+  >           ('', 'pushrace', False, 'includes a check:head part with unknown nodes'),
   >           ('r', 'rev', [], 'includes those changeset in the bundle'),],
   >          '[OUTPUTFILE]')
   > def cmdbundle2(ui, repo, path=None, **opts):
@@ -74,6 +76,10 @@ Create an extension to test bundle2 API
   >     if opts['reply']:
   >         capsstring = 'ping-pong\nelephants=babar,celeste\ncity%3D%21=celeste%2Cville'
   >         bundler.addpart(bundle2.bundlepart('b2x:replycaps', data=capsstring))
+  > 
+  >     if opts['pushrace']:
+  >         dummynode = '01234567890123456789'
+  >         bundler.addpart(bundle2.bundlepart('b2x:check:heads', data=dummynode))
   > 
   >     revs = opts['rev']
   >     if 'rev' in opts:
@@ -132,6 +138,8 @@ Create an extension to test bundle2 API
   >             tr.close()
   >         except KeyError, exc:
   >             raise util.Abort('missing support for %s' % exc)
+  >         except error.PushRaced, exc:
+  >             raise util.Abort('push race: %s' % exc)
   >     finally:
   >         if tr is not None:
   >             tr.release()
@@ -601,6 +609,15 @@ Unbundle the reply to get the output:
   remote: replying to ping request (id 6)
   0 unread bytes
 
+Test push race detection
+
+  $ hg bundle2 --pushrace ../part-race.hg2
+
+  $ hg unbundle2 < ../part-race.hg2
+  0 unread bytes
+  abort: push race: repository changed while pushing - please try again
+  [255]
+
 Support for changegroup
 ===================================
 
@@ -883,3 +900,183 @@ Check final content.
      date:        Sat Apr 30 15:24:48 2011 +0200
      summary:     A
   
+
+Error Handling
+==============
+
+Check that errors are properly returned to the client during push.
+
+Setting up
+
+  $ cat > failpush.py << EOF
+  > """A small extension that makes push fails when using bundle2
+  > 
+  > used to test error handling in bundle2
+  > """
+  > 
+  > from mercurial import util
+  > from mercurial import bundle2
+  > from mercurial import exchange
+  > from mercurial import extensions
+  > 
+  > def _pushbundle2failpart(orig, pushop, bundler):
+  >     extradata = orig(pushop, bundler)
+  >     reason = pushop.ui.config('failpush', 'reason', None)
+  >     part = None
+  >     if reason == 'abort':
+  >         part = bundle2.bundlepart('test:abort')
+  >     if reason == 'unknown':
+  >         part = bundle2.bundlepart('TEST:UNKNOWN')
+  >     if reason == 'race':
+  >         # 20 Bytes of crap
+  >         part = bundle2.bundlepart('b2x:check:heads', data='01234567890123456789')
+  >     if part is not None:
+  >         bundler.addpart(part)
+  >     return extradata
+  > 
+  > @bundle2.parthandler("test:abort")
+  > def handleabort(op, part):
+  >     raise util.Abort('Abandon ship!', hint="don't panic")
+  > 
+  > def uisetup(ui):
+  >     extensions.wrapfunction(exchange, '_pushbundle2extraparts', _pushbundle2failpart)
+  > 
+  > EOF
+
+  $ cd main
+  $ hg up tip
+  3 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo 'I' > I
+  $ hg add I
+  $ hg ci -m 'I'
+  $ hg id
+  e7ec4e813ba6 tip
+  $ cd ..
+
+  $ cat << EOF >> $HGRCPATH
+  > [extensions]
+  > failpush=$TESTTMP/failpush.py
+  > EOF
+
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
+  $ cat other.pid >> $DAEMON_PIDS
+
+Doing the actual push: Abort error
+
+  $ cat << EOF >> $HGRCPATH
+  > [failpush]
+  > reason = abort
+  > EOF
+
+  $ hg -R main push other -r e7ec4e813ba6
+  pushing to other
+  searching for changes
+  abort: Abandon ship!
+  (don't panic)
+  [255]
+
+  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
+  pushing to ssh://user@dummy/other
+  searching for changes
+  abort: Abandon ship!
+  (don't panic)
+  [255]
+
+  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
+  pushing to http://localhost:$HGPORT2/
+  searching for changes
+  abort: Abandon ship!
+  (don't panic)
+  [255]
+
+
+Doing the actual push: unknown mandatory parts
+
+  $ cat << EOF >> $HGRCPATH
+  > [failpush]
+  > reason = unknown
+  > EOF
+
+  $ hg -R main push other -r e7ec4e813ba6
+  pushing to other
+  searching for changes
+  abort: missing support for 'test:unknown'
+  [255]
+
+  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
+  pushing to ssh://user@dummy/other
+  searching for changes
+  abort: missing support for "'test:unknown'"
+  [255]
+
+  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
+  pushing to http://localhost:$HGPORT2/
+  searching for changes
+  abort: missing support for "'test:unknown'"
+  [255]
+
+Doing the actual push: race
+
+  $ cat << EOF >> $HGRCPATH
+  > [failpush]
+  > reason = race
+  > EOF
+
+  $ hg -R main push other -r e7ec4e813ba6
+  pushing to other
+  searching for changes
+  abort: push failed:
+  'repository changed while pushing - please try again'
+  [255]
+
+  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
+  pushing to ssh://user@dummy/other
+  searching for changes
+  abort: push failed:
+  'repository changed while pushing - please try again'
+  [255]
+
+  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
+  pushing to http://localhost:$HGPORT2/
+  searching for changes
+  abort: push failed:
+  'repository changed while pushing - please try again'
+  [255]
+
+Doing the actual push: hook abort
+
+  $ cat << EOF >> $HGRCPATH
+  > [failpush]
+  > reason =
+  > [hooks]
+  > b2x-pretransactionclose.failpush = false
+  > EOF
+
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
+  $ cat other.pid >> $DAEMON_PIDS
+
+  $ hg -R main push other -r e7ec4e813ba6
+  pushing to other
+  searching for changes
+  transaction abort!
+  rollback completed
+  abort: b2x-pretransactionclose.failpush hook exited with status 1
+  [255]
+
+  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
+  pushing to ssh://user@dummy/other
+  searching for changes
+  abort: b2x-pretransactionclose.failpush hook exited with status 1
+  remote: transaction abort!
+  remote: rollback completed
+  [255]
+
+  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
+  pushing to http://localhost:$HGPORT2/
+  searching for changes
+  abort: b2x-pretransactionclose.failpush hook exited with status 1
+  [255]
+
+

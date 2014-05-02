@@ -145,7 +145,7 @@ import struct
 import urllib
 import string
 
-import changegroup
+import changegroup, error
 from i18n import _
 
 _pack = struct.pack
@@ -169,6 +169,10 @@ def _makefpartparamsizes(nbparams):
     dynamically.
     """
     return '>'+('BB'*nbparams)
+
+class UnknownPartError(KeyError):
+    """error raised when no handler is found for a Mandatory part"""
+    pass
 
 parthandlermapping = {}
 
@@ -297,7 +301,7 @@ def processbundle(repo, unbundler, transactiongetter=_notransaction):
                 if key != parttype: # mandatory parts
                     # todo:
                     # - use a more precise exception
-                    raise
+                    raise UnknownPartError(key)
                 op.ui.debug('ignoring unknown advisory part %r\n' % key)
                 # consuming the part
                 part.read()
@@ -323,13 +327,19 @@ def processbundle(repo, unbundler, transactiongetter=_notransaction):
                                      data=output)
                 op.reply.addpart(outpart)
             part.read()
-    except Exception:
+    except Exception, exc:
         if part is not None:
             # consume the bundle content
             part.read()
         for part in iterparts:
             # consume the bundle content
             part.read()
+        # Small hack to let caller code distinguish exceptions from bundle2
+        # processing fron the ones from bundle1 processing. This is mostly
+        # needed to handle different return codes to unbundle according to the
+        # type of bundle. We should probably clean up or drop this return code
+        # craziness in a future version.
+        exc.duringunbundle2 = True
         raise
     return op
 
@@ -720,7 +730,8 @@ def handlechangegroup(op, inpart):
         h = inpart.read(20)
     assert not h
     if heads != op.repo.heads():
-        raise exchange.PushRaced()
+        raise error.PushRaced('repository changed while pushing - '
+                              'please try again')
 
 @parthandler('b2x:output')
 def handleoutput(op, inpart):
@@ -737,3 +748,21 @@ def handlereplycaps(op, inpart):
     if op.reply is None:
         op.reply = bundle20(op.ui, caps)
 
+@parthandler('b2x:error:abort')
+def handlereplycaps(op, inpart):
+    """Used to transmit abort error over the wire"""
+    manargs = dict(inpart.mandatoryparams)
+    advargs = dict(inpart.advisoryparams)
+    raise util.Abort(manargs['message'], hint=advargs.get('hint'))
+
+@parthandler('b2x:error:unknownpart')
+def handlereplycaps(op, inpart):
+    """Used to transmit unknown part error over the wire"""
+    manargs = dict(inpart.mandatoryparams)
+    raise UnknownPartError(manargs['parttype'])
+
+@parthandler('b2x:error:pushraced')
+def handlereplycaps(op, inpart):
+    """Used to transmit push race error over the wire"""
+    manargs = dict(inpart.mandatoryparams)
+    raise error.ResponseError(_('push failed:'), manargs['message'])

@@ -133,8 +133,8 @@ class localpeer(peer.peerrepository):
                 stream = util.chunkbuffer(ret.getchunks())
                 ret = bundle2.unbundle20(self.ui, stream)
             return ret
-        except exchange.PushRaced, exc:
-            raise error.ResponseError(_('push failed:'), exc.message)
+        except error.PushRaced, exc:
+            raise error.ResponseError(_('push failed:'), str(exc))
 
     def lock(self):
         return self._repo.lock()

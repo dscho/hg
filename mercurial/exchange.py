@@ -8,7 +8,7 @@
 from i18n import _
 from node import hex, nullid
 import errno, urllib
-import util, scmutil, changegroup, base85
+import util, scmutil, changegroup, base85, error
 import discovery, phases, obsolete, bookmarks, bundle2
 
 def readbundle(ui, fh, fname, vfs=None):
@@ -225,10 +225,13 @@ def _pushbundle2(pushop):
     cgpart = bundle2.bundlepart('B2X:CHANGEGROUP', data=cg.getchunks())
     bundler.addpart(cgpart)
     stream = util.chunkbuffer(bundler.getchunks())
-    reply = pushop.remote.unbundle(stream, ['force'], 'push')
+    try:
+        reply = pushop.remote.unbundle(stream, ['force'], 'push')
+    except bundle2.UnknownPartError, exc:
+        raise util.Abort('missing support for %s' % exc)
     try:
         op = bundle2.processbundle(pushop.repo, reply)
-    except KeyError, exc:
+    except bundle2.UnknownPartError, exc:
         raise util.Abort('missing support for %s' % exc)
     cgreplies = op.records.getreplies(cgpart.id)
     assert len(cgreplies['changegroup']) == 1
@@ -584,7 +587,7 @@ def _pullbundle2(pullop):
     bundle = pullop.remote.getbundle('pull', **kwargs)
     try:
         op = bundle2.processbundle(pullop.repo, bundle, pullop.gettransaction)
-    except KeyError, exc:
+    except bundle2.UnknownPartError, exc:
         raise util.Abort('missing support for %s' % exc)
     assert len(op.records['changegroup']) == 1
     pullop.cgresult = op.records['changegroup'][0]['return']
@@ -705,9 +708,6 @@ def _getbundleextrapart(bundler, repo, source, heads=None, common=None,
     """hook function to let extensions add parts to the requested bundle"""
     pass
 
-class PushRaced(RuntimeError):
-    """An exception raised during unbundling that indicate a push race"""
-
 def check_heads(repo, their_heads, context):
     """check if the heads of a repo have been modified
 
@@ -719,8 +719,8 @@ def check_heads(repo, their_heads, context):
             their_heads == ['hashed', heads_hash]):
         # someone else committed/pushed/unbundled while we
         # were transferring data
-        raise PushRaced('repository changed while %s - '
-                        'please try again' % context)
+        raise error.PushRaced('repository changed while %s - '
+                              'please try again' % context)
 
 def unbundle(repo, cg, heads, source, url):
     """Apply a bundle to a repo.
@@ -738,16 +738,20 @@ def unbundle(repo, cg, heads, source, url):
         check_heads(repo, heads, 'uploading changes')
         # push can proceed
         if util.safehasattr(cg, 'params'):
-            tr = repo.transaction('unbundle')
-            tr.hookargs['bundle2-exp'] = '1'
-            r = bundle2.processbundle(repo, cg, lambda: tr).reply
-            cl = repo.unfiltered().changelog
-            p = cl.writepending() and repo.root or ""
-            repo.hook('b2x-pretransactionclose', throw=True, source=source,
-                      url=url, pending=p, **tr.hookargs)
-            tr.close()
-            repo.hook('b2x-transactionclose', source=source, url=url,
-                      **tr.hookargs)
+            try:
+                tr = repo.transaction('unbundle')
+                tr.hookargs['bundle2-exp'] = '1'
+                r = bundle2.processbundle(repo, cg, lambda: tr).reply
+                cl = repo.unfiltered().changelog
+                p = cl.writepending() and repo.root or ""
+                repo.hook('b2x-pretransactionclose', throw=True, source=source,
+                          url=url, pending=p, **tr.hookargs)
+                tr.close()
+                repo.hook('b2x-transactionclose', source=source, url=url,
+                          **tr.hookargs)
+            except Exception, exc:
+                exc.duringunbundle2 = True
+                raise
         else:
             r = changegroup.addchangegroup(repo, cg, source, url)
     finally:

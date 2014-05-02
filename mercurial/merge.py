@@ -353,6 +353,7 @@ def _checkcollision(repo, wmf, actions):
         "dg": renamegetop,
         "dr": nop,
         "e": nop,
+        "k": nop,
         "f": addop, # untracked file should be kept in working directory
         "g": addop,
         "m": mergeop,
@@ -729,6 +730,10 @@ def calculateupdates(repo, wctx, mctx, ancestors, branchmerge, force, partial,
                                 partial, acceptremote, followcopies)
 
     else: # only when merge.preferancestor=* - experimentalish code
+        repo.ui.status(
+            _("note: merging %s and %s using bids from ancestors %s\n") %
+            (wctx, mctx, _(' and ').join(str(anc) for anc in ancestors)))
+
         # Call for bids
         fbids = {} # mapping filename to list af action bids
         for ancestor in ancestors:
@@ -776,12 +781,12 @@ def calculateupdates(repo, wctx, mctx, ancestors, branchmerge, force, partial,
                     continue
             # TODO: Consider other simple actions such as mode changes
             # Handle inefficient democrazy.
-            repo.ui.note(_(' %s: multiple merge bids:\n') % (f, m))
-            for a in bidsl:
-                repo.ui.note('  %s: %s\n' % (f, a[1]))
+            repo.ui.note(_(' %s: multiple bids for merge action:\n') % f)
+            for _f, m, args, msg in bidsl:
+                repo.ui.note('  %s -> %s\n' % (msg, m))
             # Pick random action. TODO: Instead, prompt user when resolving
             a0 = bidsl[0]
-            repo.ui.warn(_(' %s: ambiguous merge - picked %s action)\n') %
+            repo.ui.warn(_(' %s: ambiguous merge - picked %s action\n') %
                          (f, a0[1]))
             actions.append(a0)
             continue
@@ -987,7 +992,7 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
                 cahs = repo.changelog.commonancestorsheads(p1.node(), p2.node())
                 pas = [repo[anc] for anc in (sorted(cahs) or [nullid])]
             else:
-                pas = [p1.ancestor(p2)]
+                pas = [p1.ancestor(p2, warn=True)]
 
         fp1, fp2, xp1, xp2 = p1.node(), p2.node(), str(p1), str(p2)
 

@@ -283,7 +283,7 @@ def dagrange(repo, subset, x, y):
     r = spanset(repo)
     xs = _revsbetween(repo, getset(repo, r, x), getset(repo, r, y))
     s = subset.set()
-    return xs.filter(lambda r: r in s)
+    return xs.filter(s.__contains__)
 
 def andset(repo, subset, x, y):
     return getset(repo, getset(repo, subset, x), y)
@@ -348,7 +348,7 @@ def _ancestors(repo, subset, x, followfirst=False):
     if not args:
         return baseset([])
     s = _revancestors(repo, args, followfirst)
-    return subset.filter(lambda r: r in s)
+    return subset.filter(s.__contains__)
 
 def ancestors(repo, subset, x):
     """``ancestors(set)``
@@ -376,7 +376,7 @@ def ancestorspec(repo, subset, x, n):
         for i in range(n):
             r = cl.parentrevs(r)[0]
         ps.add(r)
-    return subset.filter(lambda r: r in ps)
+    return subset.filter(ps.__contains__)
 
 def author(repo, subset, x):
     """``author(string)``
@@ -395,6 +395,7 @@ def only(repo, subset, x):
     (i.e. ::<set1> - ::<set2>).
     """
     cl = repo.changelog
+    # i18n: "only" is a keyword
     args = getargs(x, 1, 2, _('only takes one or two arguments'))
     include = getset(repo, spanset(repo), args[0]).set()
     if len(args) == 1:
@@ -405,7 +406,7 @@ def only(repo, subset, x):
         exclude = getset(repo, spanset(repo), args[1])
 
     results = set(ancestormod.missingancestors(include, exclude, cl.parentrevs))
-    return lazyset(subset, lambda x: x in results)
+    return lazyset(subset, results.__contains__)
 
 def bisect(repo, subset, x):
     """``bisect(string)``
@@ -422,7 +423,7 @@ def bisect(repo, subset, x):
     # i18n: "bisect" is a keyword
     status = getstring(x, _("bisect requires a string")).lower()
     state = set(hbisect.get(repo, status))
-    return subset.filter(lambda r: r in state)
+    return subset.filter(state.__contains__)
 
 # Backward-compatibility
 # - no help entry so that we do not advertise it any more
@@ -465,7 +466,7 @@ def bookmark(repo, subset, x):
 
     bms = set([repo[r].rev()
                for r in repo._bookmarks.values()])
-    return subset.filter(lambda r: r in bms)
+    return subset.filter(bms.__contains__)
 
 def branch(repo, subset, x):
     """``branch(string or set)``
@@ -584,8 +585,8 @@ def closed(repo, subset, x):
 
 def contains(repo, subset, x):
     """``contains(pattern)``
-    Revision contains a file matching pattern. See :hg:`help patterns`
-    for information about file patterns.
+    The revision's manifest contains a file matching pattern (but might not
+    modify it). See :hg:`help patterns` for information about file patterns.
 
     The pattern without explicit kind like ``glob:`` is expected to be
     relative to the current directory and match against a file exactly
@@ -724,7 +725,7 @@ def destination(repo, subset, x):
             r = src
             src = _getrevsource(repo, r)
 
-    return subset.filter(lambda r: r in dests)
+    return subset.filter(dests.__contains__)
 
 def divergent(repo, subset, x):
     """``divergent()``
@@ -733,7 +734,7 @@ def divergent(repo, subset, x):
     # i18n: "divergent" is a keyword
     getargs(x, 0, 0, _("divergent takes no arguments"))
     divergent = obsmod.getrevs(repo, 'divergent')
-    return subset.filter(lambda r: r in divergent)
+    return subset.filter(divergent.__contains__)
 
 def draft(repo, subset, x):
     """``draft()``
@@ -783,9 +784,10 @@ def filelog(repo, subset, x):
     """``filelog(pattern)``
     Changesets connected to the specified filelog.
 
-    For performance reasons, ``filelog()`` does not show every changeset
-    that affects the requested file(s). See :hg:`help log` for details. For
-    a slower, more accurate result, use ``file()``.
+    For performance reasons, visits only revisions mentioned in the file-level
+    filelog, rather than filtering through all changesets (much faster, but
+    doesn't include deletes or duplicate changes). For a slower, more accurate
+    result, use ``file()``.
 
     The pattern without explicit kind like ``glob:`` is expected to be
     relative to the current directory and match against a file exactly
@@ -809,7 +811,7 @@ def filelog(repo, subset, x):
                 for fr in fl:
                     s.add(fl.linkrev(fr))
 
-    return subset.filter(lambda r: r in s)
+    return subset.filter(s.__contains__)
 
 def first(repo, subset, x):
     """``first(set, [n])``
@@ -832,7 +834,7 @@ def _follow(repo, subset, x, name, followfirst=False):
     else:
         s = _revancestors(repo, baseset([c.rev()]), followfirst)
 
-    return subset.filter(lambda r: r in s)
+    return subset.filter(s.__contains__)
 
 def follow(repo, subset, x):
     """``follow([file])``
@@ -1174,7 +1176,7 @@ def origin(repo, subset, x):
             src = prev
 
     o = set([_firstsrc(r) for r in args])
-    return subset.filter(lambda r: r in o)
+    return subset.filter(o.__contains__)
 
 def outgoing(repo, subset, x):
     """``outgoing([path])``
@@ -1197,7 +1199,7 @@ def outgoing(repo, subset, x):
     repo.ui.popbuffer()
     cl = repo.changelog
     o = set([cl.rev(r) for r in outgoing.missing])
-    return subset.filter(lambda r: r in o)
+    return subset.filter(o.__contains__)
 
 def p1(repo, subset, x):
     """``p1([set])``
@@ -2354,7 +2356,7 @@ class lazyset(object):
                 yield x
 
     def __and__(self, x):
-        return lazyset(self, lambda r: r in x)
+        return lazyset(self, x.__contains__)
 
     def __sub__(self, x):
         return lazyset(self, lambda r: r not in x)
@@ -2417,7 +2419,7 @@ class orderedlazyset(_orderedsetmixin, lazyset):
             self.reverse()
 
     def __and__(self, x):
-        return orderedlazyset(self, lambda r: r in x,
+        return orderedlazyset(self, x.__contains__,
                 ascending=self._ascending)
 
     def __sub__(self, x):
@@ -2781,9 +2783,10 @@ class spanset(_orderedsetmixin):
             for r in iterrange:
                 yield r
 
-    def __contains__(self, x):
-        return self._contained(x) and not (self._hiddenrevs and rev in
-                self._hiddenrevs)
+    def __contains__(self, rev):
+        return (((self._end < rev <= self._start)
+                  or (self._start <= rev < self._end))
+                and not (self._hiddenrevs and rev in self._hiddenrevs))
 
     def __nonzero__(self):
         for r in self:
@@ -2794,9 +2797,9 @@ class spanset(_orderedsetmixin):
         if isinstance(x, baseset):
             x = x.set()
         if self._start <= self._end:
-            return orderedlazyset(self, lambda r: r in x)
+            return orderedlazyset(self, x.__contains__)
         else:
-            return orderedlazyset(self, lambda r: r in x, ascending=False)
+            return orderedlazyset(self, x.__contains__, ascending=False)
 
     def __sub__(self, x):
         if isinstance(x, baseset):
@@ -2819,8 +2822,10 @@ class spanset(_orderedsetmixin):
             return abs(self._end - self._start)
         else:
             count = 0
+            start = self._start
+            end = self._end
             for rev in self._hiddenrevs:
-                if self._contained(rev):
+                if (end < rev <= start) or (start <= rev and rev < end):
                     count += 1
             return abs(self._end - self._start) - count
 

@@ -803,12 +803,35 @@ def unbundle(repo, proto, heads):
         finally:
             fp.close()
             os.unlink(tempname)
+    except bundle2.UnknownPartError, exc:
+            bundler = bundle2.bundle20(repo.ui)
+            part = bundle2.bundlepart('B2X:ERROR:UNKNOWNPART',
+                                      [('parttype', str(exc))])
+            bundler.addpart(part)
+            return streamres(bundler.getchunks())
     except util.Abort, inst:
         # The old code we moved used sys.stderr directly.
         # We did not change it to minimise code change.
         # This need to be moved to something proper.
         # Feel free to do it.
-        sys.stderr.write("abort: %s\n" % inst)
-        return pushres(0)
-    except exchange.PushRaced, exc:
-        return pusherr(str(exc))
+        if getattr(inst, 'duringunbundle2', False):
+            bundler = bundle2.bundle20(repo.ui)
+            manargs = [('message', str(inst))]
+            advargs = []
+            if inst.hint is not None:
+                advargs.append(('hint', inst.hint))
+            bundler.addpart(bundle2.bundlepart('B2X:ERROR:ABORT',
+                                               manargs, advargs))
+            return streamres(bundler.getchunks())
+        else:
+            sys.stderr.write("abort: %s\n" % inst)
+            return pushres(0)
+    except error.PushRaced, exc:
+        if getattr(exc, 'duringunbundle2', False):
+            bundler = bundle2.bundle20(repo.ui)
+            part = bundle2.bundlepart('B2X:ERROR:PUSHRACED',
+                                      [('message', str(exc))])
+            bundler.addpart(part)
+            return streamres(bundler.getchunks())
+        else:
+            return pusherr(str(exc))
