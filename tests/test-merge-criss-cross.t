@@ -81,11 +81,11 @@ Criss cross merging
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: 0f6b37dbe527, local: 3b08d01b0ab5+, remote: adfe50279922
+   preserving f2 for resolve of f2
    f1: remote is newer -> g
-   f2: versions differ -> m
-    preserving f2 for resolve of f2
   getting f1
   updating: f1 1/2 files (50.00%)
+   f2: versions differ -> m
   updating: f2 2/2 files (100.00%)
   picked tool 'internal:dump' for f2 (binary False symlink False)
   merging f2
@@ -135,16 +135,16 @@ Redo merge with merge.preferancestor="*" to enable bid merge
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: 0f6b37dbe527, local: 3b08d01b0ab5+, remote: adfe50279922
-   f1: g
-   f2: m
+   f1: remote is newer -> g
+   f2: versions differ -> m
   
   calculating bids for ancestor 40663881a6dd
     searching for copies back to rev 3
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: 40663881a6dd, local: 3b08d01b0ab5+, remote: adfe50279922
-   f1: m
-   f2: k
+   f2: keep -> k
+   f1: versions differ -> m
   
   auction for merging merge bids
    f1: picking 'get' action
@@ -152,9 +152,9 @@ Redo merge with merge.preferancestor="*" to enable bid merge
   end of auction
   
    f1: remote is newer -> g
-   f2: keep -> k
   getting f1
   updating: f1 1/1 files (100.00%)
+   f2: keep -> k
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
 
@@ -180,26 +180,26 @@ The other way around:
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: 0f6b37dbe527, local: adfe50279922+, remote: 3b08d01b0ab5
-   f1: k
-   f2: m
+   f1: keep -> k
+   f2: versions differ -> m
   
   calculating bids for ancestor 40663881a6dd
     searching for copies back to rev 3
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: 40663881a6dd, local: adfe50279922+, remote: 3b08d01b0ab5
-   f1: m
-   f2: g
+   f2: remote is newer -> g
+   f1: versions differ -> m
   
   auction for merging merge bids
    f1: picking 'keep' action
    f2: picking 'get' action
   end of auction
   
-   f1: keep -> k
    f2: remote is newer -> g
   getting f2
   updating: f2 1/1 files (100.00%)
+   f1: keep -> k
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
 
@@ -246,16 +246,16 @@ Verify how the output looks and and how verbose it is:
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: 0f6b37dbe527, local: 3b08d01b0ab5+, remote: adfe50279922
-   f1: g
-   f2: m
+   f1: remote is newer -> g
+   f2: versions differ -> m
   
   calculating bids for ancestor 40663881a6dd
     searching for copies back to rev 3
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: 40663881a6dd, local: 3b08d01b0ab5+, remote: adfe50279922
-   f1: m
-   f2: k
+   f2: keep -> k
+   f1: versions differ -> m
   
   auction for merging merge bids
    f1: picking 'get' action
@@ -263,9 +263,9 @@ Verify how the output looks and and how verbose it is:
   end of auction
   
    f1: remote is newer -> g
-   f2: keep -> k
   getting f1
   updating: f1 1/1 files (100.00%)
+   f2: keep -> k
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
 

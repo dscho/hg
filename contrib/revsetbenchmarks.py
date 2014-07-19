@@ -14,7 +14,12 @@
 # to compare performance.
 
 import sys
+import os
 from subprocess import check_call, Popen, CalledProcessError, STDOUT, PIPE
+# cannot use argparse, python 2.7 only
+from optparse import OptionParser
+
+
 
 def check_output(*args, **kwargs):
     kwargs.setdefault('stderr', PIPE)
@@ -33,15 +38,19 @@ def update(rev):
         print >> sys.stderr, 'update to revision %s failed, aborting' % rev
         sys.exit(exc.returncode)
 
-def perf(revset):
+def perf(revset, target=None):
     """run benchmark for this very revset"""
     try:
-        output = check_output(['./hg',
-                               '--config',
-                               'extensions.perf=contrib/perf.py',
-                               'perfrevset',
-                               revset],
-                               stderr=STDOUT)
+        cmd = ['./hg',
+               '--config',
+               'extensions.perf='
+               + os.path.join(contribdir, 'perf.py'),
+               'perfrevset',
+               revset]
+        if target is not None:
+            cmd.append('-R')
+            cmd.append(target)
+        output = check_output(cmd, stderr=STDOUT)
         output = output.lstrip('!') # remove useless ! in this context
         return output.strip()
     except CalledProcessError, exc:
@@ -65,12 +74,26 @@ def getrevs(spec):
     return [r for r in out.split() if r]
 
 
+parser = OptionParser(usage="usage: %prog [options] <revs>")
+parser.add_option("-f", "--file",
+                  help="read revset from FILE", metavar="FILE")
+parser.add_option("-R", "--repo",
+                  help="run benchmark on REPO", metavar="REPO")
 
-target_rev = sys.argv[1]
+(options, args) = parser.parse_args()
+
+if len(sys.argv) < 2:
+    parser.print_help()
+    sys.exit(255)
+
+# the directory where both this script and the perf.py extension live.
+contribdir = os.path.dirname(__file__)
+
+target_rev = args[0]
 
 revsetsfile = sys.stdin
-if len(sys.argv) > 2:
-    revsetsfile = open(sys.argv[2])
+if options.file:
+    revsetsfile = open(options.file)
 
 revsets = [l.strip() for l in revsetsfile]
 
@@ -95,7 +118,7 @@ for r in revs:
     res = []
     results.append(res)
     for idx, rset in enumerate(revsets):
-        data = perf(rset)
+        data = perf(rset, target=options.repo)
         res.append(data)
         print "%i)" % idx, data
         sys.stdout.flush()

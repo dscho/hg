@@ -149,6 +149,8 @@ def makepatch(ui, repo, patchlines, opts, _charsets, idx, total, numbered,
         subj = '[PATCH %0*d of %d%s] %s' % (tlen, idx, total, flag, subj)
     msg['Subject'] = mail.headencode(ui, subj, _charsets, opts.get('test'))
     msg['X-Mercurial-Node'] = node
+    msg['X-Mercurial-Series-Index'] = '%i' % idx
+    msg['X-Mercurial-Series-Total'] = '%i' % total
     return msg, subj, ds
 
 emailopts = [
@@ -507,9 +509,13 @@ def patchbomb(ui, repo, *revs, **opts):
     sender_addr = email.Utils.parseaddr(sender)[1]
     sender = mail.addressencode(ui, sender, _charsets, opts.get('test'))
     sendmail = None
+    firstpatch = None
     for i, (m, subj, ds) in enumerate(msgs):
         try:
             m['Message-Id'] = genmsgid(m['X-Mercurial-Node'])
+            if not firstpatch:
+                firstpatch = m['Message-Id']
+            m['X-Mercurial-Series-Id'] = firstpatch
         except TypeError:
             m['Message-Id'] = genmsgid('patchbomb')
         if parent:

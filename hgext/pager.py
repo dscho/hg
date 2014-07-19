@@ -39,12 +39,20 @@ paged.
 
 If pager.attend is present, pager.ignore will be ignored.
 
+Lastly, you can enable and disable paging for individual commands with
+the attend-<command> option. This setting takes precedence over
+existing attend and ignore options and defaults::
+
+  [pager]
+  attend-cat = false
+
 To ignore global commands like :hg:`version` or :hg:`help`, you have
 to specify them in your user configuration file.
 
 The --pager=... option can also be used to control when the pager is
 used. Use a boolean value like yes, no, on, off, or use auto for
 normal behavior.
+
 '''
 
 import atexit, sys, os, signal, subprocess, errno, shlex
@@ -116,25 +124,37 @@ def uisetup(ui):
 
     def pagecmd(orig, ui, options, cmd, cmdfunc):
         p = ui.config("pager", "pager", os.environ.get("PAGER"))
+        usepager = False
+        always = util.parsebool(options['pager'])
+        auto = options['pager'] == 'auto'
 
-        if p:
+        if not p:
+            pass
+        elif always:
+            usepager = True
+        elif not auto:
+            usepager = False
+        else:
             attend = ui.configlist('pager', 'attend', attended)
-            auto = options['pager'] == 'auto'
-            always = util.parsebool(options['pager'])
-
+            ignore = ui.configlist('pager', 'ignore')
             cmds, _ = cmdutil.findcmd(cmd, commands.table)
 
-            ignore = ui.configlist('pager', 'ignore')
             for cmd in cmds:
-                if (always or auto and
-                    (cmd in attend or
-                     (cmd not in ignore and not attend))):
-                    ui.setconfig('ui', 'formatted', ui.formatted(), 'pager')
-                    ui.setconfig('ui', 'interactive', False, 'pager')
-                    if util.safehasattr(signal, "SIGPIPE"):
-                        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-                    _runpager(ui, p)
+                var = 'attend-%s' % cmd
+                if ui.config('pager', var):
+                    usepager = ui.configbool('pager', var)
                     break
+                if (cmd in attend or
+                     (cmd not in ignore and not attend)):
+                    usepager = True
+                    break
+
+        if usepager:
+            ui.setconfig('ui', 'formatted', ui.formatted(), 'pager')
+            ui.setconfig('ui', 'interactive', False, 'pager')
+            if util.safehasattr(signal, "SIGPIPE"):
+                signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+            _runpager(ui, p)
         return orig(ui, options, cmd, cmdfunc)
 
     extensions.wrapfunction(dispatch, '_runcommand', pagecmd)

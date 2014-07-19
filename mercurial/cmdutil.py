@@ -109,6 +109,30 @@ def logmessage(ui, opts):
                              (logfile, inst.strerror))
     return message
 
+def getcommiteditor(edit=False, finishdesc=None, extramsg=None, **opts):
+    """get appropriate commit message editor according to '--edit' option
+
+    'finishdesc' is a function to be called with edited commit message
+    (= 'description' of the new changeset) just after editing, but
+    before checking empty-ness. It should return actual text to be
+    stored into history. This allows to change description before
+    storing.
+
+    'extramsg' is a extra message to be shown in the editor instead of
+    'Leave message empty to abort commit' line. 'HG: ' prefix and EOL
+    is automatically added.
+
+    'getcommiteditor' returns 'commitforceeditor' regardless of
+    'edit', if one of 'finishdesc' or 'extramsg' is specified, because
+    they are specific for usage in MQ.
+    """
+    if edit or finishdesc or extramsg:
+        return lambda r, c, s: commitforceeditor(r, c, s,
+                                                 finishdesc=finishdesc,
+                                                 extramsg=extramsg)
+    else:
+        return commiteditor
+
 def loglimit(opts):
     """get the log limit according to option -l/--limit"""
     limit = opts.get('limit')
@@ -562,15 +586,15 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
     tmpname, message, user, date, branch, nodeid, p1, p2 = \
         patch.extract(ui, hunk)
 
-    editor = commiteditor
-    if opts.get('edit'):
-        editor = commitforceeditor
+    editor = getcommiteditor(**opts)
     update = not opts.get('bypass')
     strip = opts["strip"]
     sim = float(opts.get('similarity') or 0)
     if not tmpname:
-        return (None, None)
+        return (None, None, False)
     msg = _('applied to working directory')
+
+    rejects = False
 
     try:
         cmdline_message = logmessage(ui, opts)
@@ -617,9 +641,17 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
             if opts.get('exact') or opts.get('import_branch'):
                 repo.dirstate.setbranch(branch or 'default')
 
+            partial = opts.get('partial', False)
             files = set()
-            patch.patch(ui, repo, tmpname, strip=strip, files=files,
-                        eolmode=None, similarity=sim / 100.0)
+            try:
+                patch.patch(ui, repo, tmpname, strip=strip, files=files,
+                            eolmode=None, similarity=sim / 100.0)
+            except patch.PatchError, e:
+                if not partial:
+                    raise util.Abort(str(e))
+                if partial:
+                    rejects = True
+
             files = list(files)
             if opts.get('no_commit'):
                 if message:
@@ -634,7 +666,7 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
                     m = scmutil.matchfiles(repo, files or [])
                 n = repo.commit(message, opts.get('user') or user,
                                 opts.get('date') or date, match=m,
-                                editor=editor)
+                                editor=editor, force=partial)
         else:
             if opts.get('exact') or opts.get('import_branch'):
                 branch = branch or 'default'
@@ -653,8 +685,7 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
                                             opts.get('user') or user,
                                             opts.get('date') or date,
                                             branch, files, store,
-                                            editor=commiteditor)
-                repo.savecommitmessage(memctx.description())
+                                            editor=getcommiteditor())
                 n = memctx.commit()
             finally:
                 store.close()
@@ -663,7 +694,7 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
         if n:
             # i18n: refers to a short changeset id
             msg = _('created %s') % short(n)
-        return (msg, n)
+        return (msg, n, rejects)
     finally:
         os.unlink(tmpname)
 
@@ -1468,7 +1499,6 @@ def _makelogfilematcher(repo, files, followfirst):
     fcache = {}
     fcacheready = [False]
     pctx = repo['.']
-    wctx = repo[None]
 
     def populate():
         for fn in files:
@@ -1481,7 +1511,7 @@ def _makelogfilematcher(repo, files, followfirst):
             # Lazy initialization
             fcacheready[0] = True
             populate()
-        return scmutil.match(wctx, fcache.get(rev, []), default='path')
+        return scmutil.matchfiles(repo, fcache.get(rev, []))
 
     return filematcher
 
@@ -1690,7 +1720,7 @@ def getlogrevs(repo, pats, opts):
     if opts.get('rev'):
         revs = scmutil.revrange(repo, opts['rev'])
     elif follow:
-        revs = revset.baseset(repo.revs('reverse(:.)'))
+        revs = repo.revs('reverse(:.)')
     else:
         revs = revset.spanset(repo)
         revs.reverse()
@@ -2039,7 +2069,8 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
                     try:
                         fctx = ctx[path]
                         flags = fctx.flags()
-                        mctx = context.memfilectx(fctx.path(), fctx.data(),
+                        mctx = context.memfilectx(repo,
+                                                  fctx.path(), fctx.data(),
                                                   islink='l' in flags,
                                                   isexec='x' in flags,
                                                   copied=copied.get(path))
@@ -2058,12 +2089,10 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
 
                 user = opts.get('user') or old.user()
                 date = opts.get('date') or old.date()
-            editmsg = False
+            editor = getcommiteditor(**opts)
             if not message:
-                editmsg = True
+                editor = getcommiteditor(edit=True)
                 message = old.description()
-            elif opts.get('edit'):
-                editmsg = True
 
             pureextra = extra.copy()
             extra['amend_source'] = old.hex()
@@ -2075,10 +2104,8 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
                                  filectxfn=filectxfn,
                                  user=user,
                                  date=date,
-                                 extra=extra)
-            if editmsg:
-                new._text = commitforceeditor(repo, new, [])
-            repo.savecommitmessage(new.description())
+                                 extra=extra,
+                                 editor=editor)
 
             newdesc =  changelog.stripdesc(new.description())
             if ((not node)
@@ -2143,7 +2170,46 @@ def commiteditor(repo, ctx, subs):
         return ctx.description()
     return commitforceeditor(repo, ctx, subs)
 
-def commitforceeditor(repo, ctx, subs):
+def commitforceeditor(repo, ctx, subs, finishdesc=None, extramsg=None):
+    if not extramsg:
+        extramsg = _("Leave message empty to abort commit.")
+    tmpl = repo.ui.config('committemplate', 'changeset', '').strip()
+    if tmpl:
+        committext = buildcommittemplate(repo, ctx, subs, extramsg, tmpl)
+    else:
+        committext = buildcommittext(repo, ctx, subs, extramsg)
+
+    # run editor in the repository root
+    olddir = os.getcwd()
+    os.chdir(repo.root)
+    text = repo.ui.edit(committext, ctx.user(), ctx.extra())
+    text = re.sub("(?m)^HG:.*(\n|$)", "", text)
+    os.chdir(olddir)
+
+    if finishdesc:
+        text = finishdesc(text)
+    if not text.strip():
+        raise util.Abort(_("empty commit message"))
+
+    return text
+
+def buildcommittemplate(repo, ctx, subs, extramsg, tmpl):
+    ui = repo.ui
+    tmpl, mapfile = gettemplate(ui, tmpl, None)
+
+    try:
+        t = changeset_templater(ui, repo, None, {}, tmpl, mapfile, False)
+    except SyntaxError, inst:
+        raise util.Abort(inst.args[0])
+
+    if not extramsg:
+        extramsg = '' # ensure that extramsg is string
+
+    ui.pushbuffer()
+    t.show(ctx, extramsg=extramsg)
+    return ui.popbuffer()
+
+def buildcommittext(repo, ctx, subs, extramsg):
     edittext = []
     modified, added, removed = ctx.modified(), ctx.added(), ctx.removed()
     if ctx.description():
@@ -2152,7 +2218,7 @@ def commitforceeditor(repo, ctx, subs):
     edittext.append("") # Empty line between message and comments.
     edittext.append(_("HG: Enter commit message."
                       "  Lines beginning with 'HG:' are removed."))
-    edittext.append(_("HG: Leave message empty to abort commit."))
+    edittext.append("HG: %s" % extramsg)
     edittext.append("HG: --")
     edittext.append(_("HG: user: %s") % ctx.user())
     if ctx.p2():
@@ -2168,17 +2234,8 @@ def commitforceeditor(repo, ctx, subs):
     if not added and not modified and not removed:
         edittext.append(_("HG: no files changed"))
     edittext.append("")
-    # run editor in the repository root
-    olddir = os.getcwd()
-    os.chdir(repo.root)
-    text = repo.ui.edit("\n".join(edittext), ctx.user(), ctx.extra())
-    text = re.sub("(?m)^HG:.*(\n|$)", "", text)
-    os.chdir(olddir)
 
-    if not text.strip():
-        raise util.Abort(_("empty commit message"))
-
-    return text
+    return "\n".join(edittext)
 
 def commitstatus(repo, node, branch, bheads=None, opts={}):
     ctx = repo[node]
@@ -2231,6 +2288,8 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
     node = ctx.node()
 
     mf = ctx.manifest()
+    if node == p2:
+        parent = p2
     if node == parent:
         pmf = mf
     else:
@@ -2240,18 +2299,22 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
     # so have to walk both. do not print errors if files exist in one
     # but not other.
 
+    # `names` is a mapping for all elements in working copy and target revision
+    # The mapping is in the form:
+    #   <asb path in repo> -> (<path from CWD>, <exactly specified by matcher?>)
     names = {}
 
     wlock = repo.wlock()
     try:
-        # walk dirstate.
+        ## filling of the `names` mapping
+        # walk dirstate to fill `names`
 
         m = scmutil.match(repo[None], pats, opts)
         m.bad = lambda x, y: False
         for abs in repo.walk(m):
             names[abs] = m.rel(abs), m.exact(abs)
 
-        # walk target manifest.
+        # walk target manifest to fill `names`
 
         def badfn(path, msg):
             if path in names:
@@ -2272,11 +2335,13 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
 
         # get the list of subrepos that must be reverted
         targetsubs = sorted(s for s in ctx.substate if m(s))
+
+        # Find status of all file in `names`. (Against working directory parent)
         m = scmutil.matchfiles(repo, names)
-        changes = repo.status(match=m)[:4]
+        changes = repo.status(node1=parent, match=m)[:4]
         modified, added, removed, deleted = map(set, changes)
 
-        # if f is a rename, also revert the source
+        # if f is a rename, update `names` to also revert the source
         cwd = repo.getcwd()
         for f in added:
             src = repo.dirstate.copied(f)
@@ -2284,15 +2349,19 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
                 removed.add(src)
                 names[src] = (repo.pathto(src, cwd), True)
 
+        ## computation of the action to performs on `names` content.
+
         def removeforget(abs):
             if repo.dirstate[abs] == 'a':
                 return _('forgetting %s\n')
             return _('removing %s\n')
 
-        revert = ([], _('reverting %s\n'))
-        add = ([], _('adding %s\n'))
-        remove = ([], removeforget)
-        undelete = ([], _('undeleting %s\n'))
+        # action to be actually performed by revert
+        # (<list of file>, message>) tuple
+        actions = {'revert': ([], _('reverting %s\n')),
+                   'add': ([], _('adding %s\n')),
+                   'remove': ([], removeforget),
+                   'undelete': ([], _('undeleting %s\n'))}
 
         disptable = (
             # dispatch table:
@@ -2301,14 +2370,20 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
             #   action if not in target manifest
             #   make backup if in target manifest
             #   make backup if not in target manifest
-            (modified, revert, remove, True, True),
-            (added, revert, remove, True, False),
-            (removed, undelete, None, True, False),
-            (deleted, revert, remove, False, False),
+            (modified, (actions['revert'],   True),
+                       (actions['remove'],   True)),
+            (added,    (actions['revert'],   True),
+                       (actions['remove'],   False)),
+            (removed,  (actions['undelete'], True),
+                       (None,                False)),
+            (deleted,  (actions['revert'], False),
+                       (actions['remove'], False)),
             )
 
         for abs, (rel, exact) in sorted(names.items()):
+            # hash on file in target manifest (or None if missing from target)
             mfentry = mf.get(abs)
+            # target file to be touch on disk (relative to cwd)
             target = repo.wjoin(abs)
             def handle(xlist, dobackup):
                 xlist[0].append(abs)
@@ -2325,27 +2400,35 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
                     if not isinstance(msg, basestring):
                         msg = msg(abs)
                     ui.status(msg % rel)
-            for table, hitlist, misslist, backuphit, backupmiss in disptable:
+            # search the entry in the dispatch table.
+            # if the file is in any of this sets, it was touched in the working
+            # directory parent and we are sure it needs to be reverted.
+            for table, hit, miss in disptable:
                 if abs not in table:
                     continue
                 # file has changed in dirstate
                 if mfentry:
-                    handle(hitlist, backuphit)
-                elif misslist is not None:
-                    handle(misslist, backupmiss)
+                    handle(*hit)
+                elif miss[0] is not None:
+                    handle(*miss)
                 break
             else:
+                # Not touched in current dirstate.
+
+                # file is unknown in parent, restore older version or ignore.
                 if abs not in repo.dirstate:
                     if mfentry:
-                        handle(add, True)
+                        handle(actions['add'], True)
                     elif exact:
                         ui.warn(_('file not managed: %s\n') % rel)
                     continue
-                # file has not changed in dirstate
+
+                # parent is target, no changes mean no changes
                 if node == parent:
                     if exact:
                         ui.warn(_('no changes needed to %s\n') % rel)
                     continue
+                # no change in dirstate but parent and target may differ
                 if pmf is None:
                     # only need parent manifest in this unlikely case,
                     # so do not read by default
@@ -2355,11 +2438,12 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
                     # manifests, do nothing
                     if (pmf[abs] != mfentry or
                         pmf.flags(abs) != mf.flags(abs)):
-                        handle(revert, False)
+                        handle(actions['revert'], False)
                 else:
-                    handle(remove, False)
+                    handle(actions['remove'], False)
+
         if not opts.get('dry_run'):
-            _performrevert(repo, parents, ctx, revert, add, remove, undelete)
+            _performrevert(repo, parents, ctx, actions)
 
             if targetsubs:
                 # Revert the subrepos on the revert list
@@ -2368,8 +2452,8 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
     finally:
         wlock.release()
 
-def _performrevert(repo, parents, ctx, revert, add, remove, undelete):
-    """function that actually perform all the action computed for revert
+def _performrevert(repo, parents, ctx, actions):
+    """function that actually perform all the actions computed for revert
 
     This is an independent function to let extension to plug in and react to
     the imminent revert.
@@ -2383,7 +2467,7 @@ def _performrevert(repo, parents, ctx, revert, add, remove, undelete):
         repo.wwrite(f, fc.data(), fc.flags())
 
     audit_path = pathutil.pathauditor(repo.root)
-    for f in remove[0]:
+    for f in actions['remove'][0]:
         if repo.dirstate[f] == 'a':
             repo.dirstate.drop(f)
             continue
@@ -2403,38 +2487,79 @@ def _performrevert(repo, parents, ctx, revert, add, remove, undelete):
             normal = repo.dirstate.normallookup
         else:
             normal = repo.dirstate.normal
-    for f in revert[0]:
+    for f in actions['revert'][0]:
         checkout(f)
         if normal:
             normal(f)
 
-    for f in add[0]:
+    for f in actions['add'][0]:
         checkout(f)
         repo.dirstate.add(f)
 
     normal = repo.dirstate.normallookup
     if node == parent and p2 == nullid:
         normal = repo.dirstate.normal
-    for f in undelete[0]:
+    for f in actions['undelete'][0]:
         checkout(f)
         normal(f)
 
     copied = copies.pathcopies(repo[parent], ctx)
 
-    for f in add[0] + undelete[0] + revert[0]:
+    for f in actions['add'][0] + actions['undelete'][0] + actions['revert'][0]:
         if f in copied:
             repo.dirstate.copy(copied[f], f)
 
 def command(table):
-    '''returns a function object bound to table which can be used as
-    a decorator for populating table as a command table'''
+    """Returns a function object to be used as a decorator for making commands.
 
-    def cmd(name, options=(), synopsis=None):
+    This function receives a command table as its argument. The table should
+    be a dict.
+
+    The returned function can be used as a decorator for adding commands
+    to that command table. This function accepts multiple arguments to define
+    a command.
+
+    The first argument is the command name.
+
+    The options argument is an iterable of tuples defining command arguments.
+    See ``mercurial.fancyopts.fancyopts()`` for the format of each tuple.
+
+    The synopsis argument defines a short, one line summary of how to use the
+    command. This shows up in the help output.
+
+    The norepo argument defines whether the command does not require a
+    local repository. Most commands operate against a repository, thus the
+    default is False.
+
+    The optionalrepo argument defines whether the command optionally requires
+    a local repository.
+
+    The inferrepo argument defines whether to try to find a repository from the
+    command line arguments. If True, arguments will be examined for potential
+    repository locations. See ``findrepo()``. If a repository is found, it
+    will be used.
+    """
+    def cmd(name, options=(), synopsis=None, norepo=False, optionalrepo=False,
+            inferrepo=False):
         def decorator(func):
             if synopsis:
                 table[name] = func, list(options), synopsis
             else:
                 table[name] = func, list(options)
+
+            if norepo:
+                # Avoid import cycle.
+                import commands
+                commands.norepo += ' %s' % ' '.join(parsealiases(name))
+
+            if optionalrepo:
+                import commands
+                commands.optionalrepo += ' %s' % ' '.join(parsealiases(name))
+
+            if inferrepo:
+                import commands
+                commands.inferrepo += ' %s' % ' '.join(parsealiases(name))
+
             return func
         return decorator
 

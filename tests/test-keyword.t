@@ -507,7 +507,6 @@ amend
   $ hg -q commit -d '14 1' -m 'prepare amend'
 
   $ hg --debug commit --amend -d '15 1' -m 'amend without changes' | grep keywords
-  invalid branchheads cache (served): tip differs
   overwriting a expanding keywords
   $ hg -q id
   67d8c481a6be
@@ -1049,15 +1048,16 @@ conflict: keyword should stay outside conflict zone
   [1]
   $ cat m
   $Id$
-  <<<<<<< local
+  <<<<<<< local: 88a80c8d172e - test: 8bar
   bar
   =======
   foo
-  >>>>>>> other
+  >>>>>>> other: 85d2d2d732a5  - test: simplemerge
 
 resolve to local
 
   $ HGMERGE=internal:local hg resolve -a
+  no more unresolved files
   $ hg commit -m localresolve
   $ cat m
   $Id: m 800511b3a22d Thu, 01 Jan 1970 00:00:00 +0000 test $

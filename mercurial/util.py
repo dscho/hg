@@ -15,7 +15,8 @@ hide platform-specific details from the core.
 
 from i18n import _
 import error, osutil, encoding
-import errno, re, shutil, sys, tempfile, traceback
+import errno, shutil, sys, tempfile, traceback
+import re as remod
 import os, time, datetime, calendar, textwrap, signal, collections
 import imp, socket, urllib
 
@@ -222,6 +223,37 @@ except AttributeError:
                 if v == val:
                     del self[i]
                     break
+
+class sortdict(dict):
+    '''a simple sorted dictionary'''
+    def __init__(self, data=None):
+        self._list = []
+        if data:
+            self.update(data)
+    def copy(self):
+        return sortdict(self)
+    def __setitem__(self, key, val):
+        if key in self:
+            self._list.remove(key)
+        self._list.append(key)
+        dict.__setitem__(self, key, val)
+    def __iter__(self):
+        return self._list.__iter__()
+    def update(self, src):
+        for k in src:
+            self[k] = src[k]
+    def clear(self):
+        dict.clear(self)
+        self._list = []
+    def items(self):
+        return [(k, self[k]) for k in self._list]
+    def __delitem__(self, key):
+        dict.__delitem__(self, key)
+        self._list.remove(key)
+    def keys(self):
+        return self._list
+    def iterkeys(self):
+        return self._list.__iter__()
 
 class lrucachedict(object):
     '''cache most recent gets from or sets to this dictionary'''
@@ -684,29 +716,50 @@ try:
 except ImportError:
     _re2 = False
 
-def compilere(pat, flags=0):
-    '''Compile a regular expression, using re2 if possible
-
-    For best performance, use only re2-compatible regexp features. The
-    only flags from the re module that are re2-compatible are
-    IGNORECASE and MULTILINE.'''
-    global _re2
-    if _re2 is None:
+class _re(object):
+    def _checkre2(self):
+        global _re2
         try:
             # check if match works, see issue3964
             _re2 = bool(re2.match(r'\[([^\[]+)\]', '[ui]'))
         except ImportError:
             _re2 = False
-    if _re2 and (flags & ~(re.IGNORECASE | re.MULTILINE)) == 0:
-        if flags & re.IGNORECASE:
-            pat = '(?i)' + pat
-        if flags & re.MULTILINE:
-            pat = '(?m)' + pat
-        try:
-            return re2.compile(pat)
-        except re2.error:
-            pass
-    return re.compile(pat, flags)
+
+    def compile(self, pat, flags=0):
+        '''Compile a regular expression, using re2 if possible
+
+        For best performance, use only re2-compatible regexp features. The
+        only flags from the re module that are re2-compatible are
+        IGNORECASE and MULTILINE.'''
+        if _re2 is None:
+            self._checkre2()
+        if _re2 and (flags & ~(remod.IGNORECASE | remod.MULTILINE)) == 0:
+            if flags & remod.IGNORECASE:
+                pat = '(?i)' + pat
+            if flags & remod.MULTILINE:
+                pat = '(?m)' + pat
+            try:
+                return re2.compile(pat)
+            except re2.error:
+                pass
+        return remod.compile(pat, flags)
+
+    @propertycache
+    def escape(self):
+        '''Return the version of escape corresponding to self.compile.
+
+        This is imperfect because whether re2 or re is used for a particular
+        function depends on the flags, etc, but it's the best we can do.
+        '''
+        global _re2
+        if _re2 is None:
+            self._checkre2()
+        if _re2:
+            return re2.escape
+        else:
+            return remod.escape
+
+re = _re()
 
 _fspathcache = {}
 def fspath(name, root):
@@ -730,7 +783,7 @@ def fspath(name, root):
         seps = seps + os.altsep
     # Protect backslashes. This gets silly very quickly.
     seps.replace('\\','\\\\')
-    pattern = re.compile(r'([^%s]+)|([%s]+)' % (seps, seps))
+    pattern = remod.compile(r'([^%s]+)|([%s]+)' % (seps, seps))
     dir = os.path.normpath(root)
     result = []
     for part, sep in pattern.findall(name):
@@ -1287,23 +1340,9 @@ def email(author):
         r = None
     return author[author.find('<') + 1:r]
 
-def _ellipsis(text, maxlength):
-    if len(text) <= maxlength:
-        return text, False
-    else:
-        return "%s..." % (text[:maxlength - 3]), True
-
 def ellipsis(text, maxlength=400):
-    """Trim string to at most maxlength (default: 400) characters."""
-    try:
-        # use unicode not to split at intermediate multi-byte sequence
-        utext, truncated = _ellipsis(text.decode(encoding.encoding),
-                                     maxlength)
-        if not truncated:
-            return text
-        return utext.encode(encoding.encoding)
-    except (UnicodeDecodeError, UnicodeEncodeError):
-        return _ellipsis(text, maxlength)[0]
+    """Trim string to at most maxlength (default: 400) columns in display."""
+    return encoding.trim(text, maxlength, ellipsis='...')
 
 def unitcountfn(*unittable):
     '''return a function that renders a readable count of some quantity'''
@@ -1548,7 +1587,7 @@ def interpolate(prefix, mapping, s, fn=None, escape_prefix=False):
         else:
             prefix_char = prefix
         mapping[prefix_char] = prefix_char
-    r = re.compile(r'%s(%s)' % (prefix, patterns))
+    r = remod.compile(r'%s(%s)' % (prefix, patterns))
     return r.sub(lambda x: fn(mapping[x.group()[1:]]), s)
 
 def getport(port):
@@ -1663,7 +1702,7 @@ class url(object):
 
     _safechars = "!~*'()+"
     _safepchars = "/!~*'()+:\\"
-    _matchscheme = re.compile(r'^[a-zA-Z0-9+.\-]+:').match
+    _matchscheme = remod.compile(r'^[a-zA-Z0-9+.\-]+:').match
 
     def __init__(self, path, parsequery=True, parsefragment=True):
         # We slowly chomp away at path until we have only the path left

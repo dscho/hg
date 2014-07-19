@@ -80,6 +80,7 @@ defaults.shelve=--date "0 0"
 defaults.tag=-d "0 0"
 ui.slash=True
 ui.interactive=False
+ui.mergemarkers=detailed
 ui.foo=bar
 ui.nontty=true
  runcommand init foo
@@ -90,6 +91,7 @@ defaults.shelve=--date "0 0"
 defaults.tag=-d "0 0"
 ui.slash=True
 ui.interactive=False
+ui.mergemarkers=detailed
 ui.nontty=true
 
 testing hookoutput:
@@ -177,6 +179,7 @@ testing phasecacheafterstrip:
 
  runcommand update -C 0
 1 files updated, 0 files merged, 2 files removed, 0 files unresolved
+(leaving bookmark bm3)
  runcommand commit -Am. a
 created new head
  runcommand log -Gq

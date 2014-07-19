@@ -208,6 +208,17 @@ def showchildren(**args):
     childrevs = ['%d:%s' % (cctx, cctx) for cctx in ctx.children()]
     return showlist('children', childrevs, element='child', **args)
 
+def showcurrentbookmark(**args):
+    """:currentbookmark: String. The active bookmark, if it is
+    associated with the changeset"""
+    import bookmarks as bookmarks # to avoid circular import issues
+    repo = args['repo']
+    if bookmarks.iscurrent(repo):
+        current = repo._bookmarkcurrent
+        if current in args['ctx'].bookmarks():
+            return current
+    return ''
+
 def showdate(repo, ctx, templ, **args):
     """:date: Date information. The date when the changeset was committed."""
     return ctx.date()
@@ -345,6 +356,22 @@ def showrev(repo, ctx, templ, **args):
     """:rev: Integer. The repository-local changeset revision number."""
     return ctx.rev()
 
+def showsubrepos(**args):
+    """:subrepos: List of strings. Updated subrepositories in the changeset."""
+    ctx = args['ctx']
+    substate = ctx.substate
+    if not substate:
+        return showlist('subrepo', [], **args)
+    psubstate = ctx.parents()[0].substate or {}
+    subrepos = []
+    for sub in substate:
+        if sub not in psubstate or substate[sub] != psubstate[sub]:
+            subrepos.append(sub) # modified or newly added in ctx
+    for sub in psubstate:
+        if sub not in substate:
+            subrepos.append(sub) # removed in ctx
+    return showlist('subrepo', sorted(subrepos), **args)
+
 def showtags(**args):
     """:tags: List of strings. Any tags associated with the changeset."""
     return showlist('tag', args['ctx'].tags(), **args)
@@ -364,6 +391,7 @@ keywords = {
     'branches': showbranches,
     'bookmarks': showbookmarks,
     'children': showchildren,
+    'currentbookmark': showcurrentbookmark,
     'date': showdate,
     'desc': showdescription,
     'diffstat': showdiffstat,
@@ -385,6 +413,7 @@ keywords = {
     'phase': showphase,
     'phaseidx': showphaseidx,
     'rev': showrev,
+    'subrepos': showsubrepos,
     'tags': showtags,
 }
 

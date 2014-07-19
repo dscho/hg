@@ -154,6 +154,7 @@ rebase --continue with bookmarks present (issue3802)
 
   $ hg up 2
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  (leaving bookmark X)
   $ echo 'C' > c
   $ hg add c
   $ hg ci -m 'other C'
@@ -168,6 +169,7 @@ rebase --continue with bookmarks present (issue3802)
   [1]
   $ echo 'c' > c
   $ hg resolve --mark c
+  no more unresolved files
   $ hg rebase --continue
   saved backup bundle to $TESTTMP/a3/.hg/strip-backup/3d5fa227f4b5-backup.hg (glob)
   $ hg tglog

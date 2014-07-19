@@ -212,10 +212,10 @@ Show all commands + options
   serve: accesslog, daemon, daemon-pipefds, errorlog, port, address, prefix, name, web-conf, webdir-conf, pid-file, stdio, cmdserver, templates, style, ipv6, certificate
   status: all, modified, added, removed, deleted, clean, unknown, ignored, no-status, copies, print0, rev, change, include, exclude, subrepos
   summary: remote
-  update: clean, check, date, rev
+  update: clean, check, date, rev, tool
   addremove: similarity, include, exclude, dry-run
   archive: no-decode, prefix, rev, type, subrepos, include, exclude
-  backout: merge, parent, rev, tool, include, exclude, message, logfile, date, user
+  backout: merge, parent, rev, edit, tool, include, exclude, message, logfile, date, user
   bisect: reset, good, bad, skip, extend, command, noupdate
   bookmarks: force, rev, delete, rename, inactive
   branch: force, clean
@@ -262,7 +262,7 @@ Show all commands + options
   heads: rev, topo, active, closed, style, template
   help: extension, command, keyword
   identify: rev, num, id, branch, tags, bookmarks, ssh, remotecmd, insecure
-  import: strip, base, edit, force, no-commit, bypass, exact, import-branch, message, logfile, date, user, similarity
+  import: strip, base, edit, force, no-commit, bypass, partial, exact, import-branch, message, logfile, date, user, similarity
   incoming: force, newest-first, bundle, rev, bookmarks, branch, patch, git, limit, no-merges, stat, graph, style, template, ssh, remotecmd, insecure, subrepos
   locate: rev, print0, fullpath, include, exclude
   manifest: rev, all

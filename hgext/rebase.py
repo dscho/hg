@@ -138,9 +138,7 @@ def rebase(ui, repo, **opts):
     skipped = set()
     targetancestors = set()
 
-    editor = None
-    if opts.get('edit'):
-        editor = cmdutil.commitforceeditor
+    editor = cmdutil.getcommiteditor(**opts)
 
     lock = wlock = None
     try:
@@ -385,7 +383,7 @@ def rebase(ui, repo, **opts):
                 for rebased in state:
                     if rebased not in skipped and state[rebased] > nullmerge:
                         commitmsg += '\n* %s' % repo[rebased].description()
-                editor = cmdutil.commitforceeditor
+                editor = cmdutil.getcommiteditor(edit=True)
             newrev = concludenode(repo, rev, p1, external, commitmsg=commitmsg,
                                   extrafn=extrafn, editor=editor)
             for oldrev in state.iterkeys():
@@ -542,7 +540,8 @@ def rebasenode(repo, rev, p1, state, collapse):
         repo.ui.debug("   detach base %d:%s\n" % (repo[base].rev(), repo[base]))
     # When collapsing in-place, the parent is the common ancestor, we
     # have to allow merging with it.
-    return merge.update(repo, rev, True, True, False, base, collapse)
+    return merge.update(repo, rev, True, True, False, base, collapse,
+                        labels=['dest', 'source'])
 
 def nearestrebased(repo, rev, state):
     """return the nearest ancestors of rev in the rebase result"""

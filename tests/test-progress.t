@@ -1,7 +1,11 @@
 
   $ cat > loop.py <<EOF
-  > from mercurial import commands
+  > from mercurial import cmdutil, commands
   > import time
+  > 
+  > cmdtable = {}
+  > command = cmdutil.command(cmdtable)
+  > 
   > class incrementingtime(object):
   >     def __init__(self):
   >         self._time = 0.0
@@ -10,6 +14,12 @@
   >         return self._time
   > time.time = incrementingtime()
   > 
+  > @command('loop',
+  >     [('', 'total', '', 'override for total'),
+  >     ('', 'nested', False, 'show nested results'),
+  >     ('', 'parallel', False, 'show parallel sets of results')],
+  >     'hg loop LOOPS',
+  >     norepo=True)
   > def loop(ui, loops, **opts):
   >     loops = int(loops)
   >     total = None
@@ -23,7 +33,7 @@
   >     loops = abs(loops)
   > 
   >     for i in range(loops):
-  >         ui.progress('loop', i, 'loop.%d' % i, 'loopnum', total)
+  >         ui.progress(topiclabel, i, getloopitem(i), 'loopnum', total)
   >         if opts.get('parallel'):
   >             ui.progress('other', i, 'other.%d' % i, 'othernum', total)
   >         if nested:
@@ -35,17 +45,12 @@
   >                   'nested', j, 'nested.%d' % j, 'nestnum', nested_steps)
   >             ui.progress(
   >               'nested', None, 'nested.done', 'nestnum', nested_steps)
-  >     ui.progress('loop', None, 'loop.done', 'loopnum', total)
+  >     ui.progress(topiclabel, None, 'loop.done', 'loopnum', total)
   > 
-  > commands.norepo += " loop"
+  > topiclabel = 'loop'
+  > def getloopitem(i):
+  >     return 'loop.%d' % i
   > 
-  > cmdtable = {
-  >     "loop": (loop, [('', 'total', '', 'override for total'),
-  >                     ('', 'nested', False, 'show nested results'),
-  >                     ('', 'parallel', False, 'show parallel sets of results'),
-  >                    ],
-  >              'hg loop LOOPS'),
-  > }
   > EOF
 
   $ cp $HGRCPATH $HGRCPATH.orig
@@ -237,3 +242,98 @@ Time estimates should not fail when there's no end point:
   loop [ <=>                                              ] 2\r (no-eol) (esc)
   loop [  <=>                                             ] 3\r (no-eol) (esc)
                                                               \r (no-eol) (esc)
+
+test line trimming by '[progress] width', when progress topic contains
+multi-byte characters, of which length of byte sequence and columns in
+display are different from each other.
+
+  $ cp $HGRCPATH.orig $HGRCPATH
+  $ cat >> $HGRCPATH <<EOF
+  > [extensions]
+  > progress=
+  > loop=`pwd`/loop.py
+  > [progress]
+  > assume-tty = 1
+  > delay = 0
+  > refresh = 0
+  > EOF
+
+  $ rm -f loop.pyc
+  $ cat >> loop.py <<EOF
+  > # use non-ascii characters as topic label of progress
+  > # 2 x 4 = 8 columns, but 3 x 4 = 12 bytes
+  > topiclabel = u'\u3042\u3044\u3046\u3048'.encode('utf-8')
+  > EOF
+
+  $ cat >> $HGRCPATH <<EOF
+  > [progress]
+  > format = topic number
+  > width= 12
+  > EOF
+
+  $ hg --encoding utf-8 -y loop --total 3 3
+  \r (no-eol) (esc)
+  \xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\xe3\x81\x88 0/3\r (no-eol) (esc)
+  \xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\xe3\x81\x88 1/3\r (no-eol) (esc)
+  \xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\xe3\x81\x88 2/3\r (no-eol) (esc)
+              \r (no-eol) (esc)
+
+test calculation of bar width, when progress topic contains multi-byte
+characters, of which length of byte sequence and columns in display
+are different from each other.
+
+  $ cat >> $HGRCPATH <<EOF
+  > [progress]
+  > format = topic bar
+  > width= 21
+  > # progwidth should be 9 (= 21 - (8+1) - 3)
+  > EOF
+
+  $ hg --encoding utf-8 -y loop --total 3 3
+  \r (no-eol) (esc)
+  \xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\xe3\x81\x88 [         ]\r (no-eol) (esc)
+  \xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\xe3\x81\x88 [==>      ]\r (no-eol) (esc)
+  \xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\xe3\x81\x88 [=====>   ]\r (no-eol) (esc)
+                       \r (no-eol) (esc)
+
+test triming progress items, when they contain multi-byte characters,
+of which length of byte sequence and columns in display are different
+from each other.
+
+  $ rm -f loop.pyc
+  $ cat >> loop.py <<EOF
+  > # use non-ascii characters as loop items of progress
+  > loopitems = [
+  >     u'\u3042\u3044'.encode('utf-8'), # 2 x 2 = 4 columns
+  >     u'\u3042\u3044\u3046'.encode('utf-8'), # 2 x 3 = 6 columns
+  >     u'\u3042\u3044\u3046\u3048'.encode('utf-8'), # 2 x 4 = 8 columns
+  > ]
+  > def getloopitem(i):
+  >     return loopitems[i % len(loopitems)]
+  > EOF
+
+  $ cat >> $HGRCPATH <<EOF
+  > [progress]
+  > # trim at tail side
+  > format = item+6
+  > EOF
+
+  $ hg --encoding utf-8 -y loop --total 3 3
+  \r (no-eol) (esc)
+  \xe3\x81\x82\xe3\x81\x84  \r (no-eol) (esc)
+  \xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\r (no-eol) (esc)
+  \xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\r (no-eol) (esc)
+                       \r (no-eol) (esc)
+
+  $ cat >> $HGRCPATH <<EOF
+  > [progress]
+  > # trim at left side
+  > format = item-6
+  > EOF
+
+  $ hg --encoding utf-8 -y loop --total 3 3
+  \r (no-eol) (esc)
+  \xe3\x81\x82\xe3\x81\x84  \r (no-eol) (esc)
+  \xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\r (no-eol) (esc)
+  \xe3\x81\x84\xe3\x81\x86\xe3\x81\x88\r (no-eol) (esc)
+                       \r (no-eol) (esc)

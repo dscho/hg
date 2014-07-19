@@ -132,6 +132,37 @@ i18n/hg.pot: $(PYFILES) $(DOCFILES) i18n/posplit i18n/hggettext
 	msgmerge --no-location --update $@.tmp $^
 	mv -f $@.tmp $@
 
+# Packaging targets
+
+osx:
+	@which -s bdist_mpkg || \
+	   (echo "Missing bdist_mpkg (easy_install bdist_mpkg)"; false)
+	bdist_mpkg setup.py
+	mkdir -p packages/osx
+	rm -rf dist/mercurial-*.mpkg
+	mv dist/mercurial*macosx*.zip packages/osx
+
+fedora:
+	mkdir -p packages/fedora
+	contrib/buildrpm
+	cp rpmbuild/RPMS/*/* packages/fedora
+	cp rpmbuild/SRPMS/* packages/fedora
+	rm -rf rpmbuild
+
+docker-fedora:
+	mkdir -p packages/fedora
+	contrib/dockerrpm fedora
+
+centos6:
+	mkdir -p packages/centos6
+	contrib/buildrpm
+	cp rpmbuild/RPMS/*/* packages/centos6
+	cp rpmbuild/SRPMS/* packages/centos6
+
+docker-centos6:
+	mkdir -p packages/centos6
+	contrib/dockerrpm centos6
+
 .PHONY: help all local build doc clean install install-bin install-doc \
 	install-home install-home-bin install-home-doc dist dist-notests tests \
-	update-pot
+	update-pot fedora docker-fedora

@@ -35,8 +35,10 @@ def _calcfilehash(filename):
     data = ''
     if os.path.exists(filename):
         fd = open(filename, 'rb')
-        data = fd.read()
-        fd.close()
+        try:
+            data = fd.read()
+        finally:
+            fd.close()
     return util.sha1(data).hexdigest()
 
 class SubrepoAbort(error.Abort):
@@ -205,12 +207,13 @@ def submerge(repo, wctx, mctx, actx, overwrite):
                 sm[s] = r
             else:
                 debug(s, "both sides changed")
+                srepo = wctx.sub(s)
                 option = repo.ui.promptchoice(
                     _(' subrepository %s diverged (local revision: %s, '
                       'remote revision: %s)\n'
                       '(M)erge, keep (l)ocal or keep (r)emote?'
                       '$$ &Merge $$ &Local $$ &Remote')
-                    % (s, l[1][:12], r[1][:12]), 0)
+                    % (s, srepo.shortid(l[1]), srepo.shortid(r[1])), 0)
                 if option == 0:
                     wctx.sub(s).merge(r)
                     sm[s] = l
@@ -502,6 +505,9 @@ class abstractsubrepo(object):
             % (substate[0], substate[2]))
         return []
 
+    def shortid(self, revid):
+        return revid
+
 class hgsubrepo(abstractsubrepo):
     def __init__(self, ctx, path, state):
         self._path = path
@@ -521,8 +527,14 @@ class hgsubrepo(abstractsubrepo):
         self._initrepo(r, state[0], create)
 
     def storeclean(self, path):
-        clean = True
         lock = self._repo.lock()
+        try:
+            return self._storeclean(path)
+        finally:
+            lock.release()
+
+    def _storeclean(self, path):
+        clean = True
         itercache = self._calcstorehash(path)
         try:
             for filehash in self._readstorehashcache(path):
@@ -539,7 +551,6 @@ class hgsubrepo(abstractsubrepo):
                 clean = False
             except StopIteration:
                 pass
-        lock.release()
         return clean
 
     def _calcstorehash(self, remotepath):
@@ -565,8 +576,10 @@ class hgsubrepo(abstractsubrepo):
         if not os.path.exists(cachefile):
             return ''
         fd = open(cachefile, 'r')
-        pullstate = fd.readlines()
-        fd.close()
+        try:
+            pullstate = fd.readlines()
+        finally:
+            fd.close()
         return pullstate
 
     def _cachestorehash(self, remotepath):
@@ -577,14 +590,18 @@ class hgsubrepo(abstractsubrepo):
         '''
         cachefile = self._getstorehashcachepath(remotepath)
         lock = self._repo.lock()
-        storehash = list(self._calcstorehash(remotepath))
-        cachedir = os.path.dirname(cachefile)
-        if not os.path.exists(cachedir):
-            util.makedirs(cachedir, notindexed=True)
-        fd = open(cachefile, 'w')
-        fd.writelines(storehash)
-        fd.close()
-        lock.release()
+        try:
+            storehash = list(self._calcstorehash(remotepath))
+            cachedir = os.path.dirname(cachefile)
+            if not os.path.exists(cachedir):
+                util.makedirs(cachedir, notindexed=True)
+            fd = open(cachefile, 'w')
+            try:
+                fd.writelines(storehash)
+            finally:
+                fd.close()
+        finally:
+            lock.release()
 
     @annotatesubrepoerror
     def _initrepo(self, parentrepo, source, create):
@@ -592,12 +609,11 @@ class hgsubrepo(abstractsubrepo):
         self._repo._subsource = source
 
         if create:
-            fp = self._repo.opener("hgrc", "w", text=True)
-            fp.write('[paths]\n')
+            lines = ['[paths]\n']
 
             def addpathconfig(key, value):
                 if value:
-                    fp.write('%s = %s\n' % (key, value))
+                    lines.append('%s = %s\n' % (key, value))
                     self._repo.ui.setconfig('paths', key, value, 'subrepo')
 
             defpath = _abssource(self._repo, abort=False)
@@ -605,7 +621,12 @@ class hgsubrepo(abstractsubrepo):
             addpathconfig('default', defpath)
             if defpath != defpushpath:
                 addpathconfig('default-push', defpushpath)
-            fp.close()
+
+            fp = self._repo.opener("hgrc", "w", text=True)
+            try:
+                fp.write(''.join(lines))
+            finally:
+                fp.close()
 
     @annotatesubrepoerror
     def add(self, ui, match, dryrun, listsubrepos, prefix, explicitonly):
@@ -866,6 +887,9 @@ class hgsubrepo(abstractsubrepo):
         else:
             pats = []
         cmdutil.revert(ui, self._repo, ctx, parents, *pats, **opts)
+
+    def shortid(self, revid):
+        return revid[:12]
 
 class svnsubrepo(abstractsubrepo):
     def __init__(self, ctx, path, state):
@@ -1562,6 +1586,9 @@ class gitsubrepo(abstractsubrepo):
 
         deleted = unknown = ignored = clean = []
         return modified, added, removed, deleted, unknown, ignored, clean
+
+    def shortid(self, revid):
+        return revid[:7]
 
 types = {
     'hg': hgsubrepo,

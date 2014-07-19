@@ -417,12 +417,12 @@ class fsbackend(abstractbackend):
         return os.path.join(self.opener.base, f)
 
     def getfile(self, fname):
-        path = self._join(fname)
-        if os.path.islink(path):
-            return (os.readlink(path), (True, False))
+        if self.opener.islink(fname):
+            return (self.opener.readlink(fname), (True, False))
+
         isexec = False
         try:
-            isexec = os.lstat(path).st_mode & 0100 != 0
+            isexec = self.opener.lstat(fname).st_mode & 0100 != 0
         except OSError, e:
             if e.errno != errno.ENOENT:
                 raise
@@ -431,17 +431,17 @@ class fsbackend(abstractbackend):
     def setfile(self, fname, data, mode, copysource):
         islink, isexec = mode
         if data is None:
-            util.setflags(self._join(fname), islink, isexec)
+            self.opener.setflags(fname, islink, isexec)
             return
         if islink:
             self.opener.symlink(data, fname)
         else:
             self.opener.write(fname, data)
             if isexec:
-                util.setflags(self._join(fname), False, True)
+                self.opener.setflags(fname, False, True)
 
     def unlink(self, fname):
-        util.unlinkpath(self._join(fname), ignoremissing=True)
+        self.opener.unlinkpath(fname, ignoremissing=True)
 
     def writerej(self, fname, failed, total, lines):
         fname = fname + ".rej"
@@ -453,7 +453,7 @@ class fsbackend(abstractbackend):
         fp.close()
 
     def exists(self, fname):
-        return os.path.lexists(self._join(fname))
+        return self.opener.lexists(fname)
 
 class workingbackend(fsbackend):
     def __init__(self, ui, repo, similarity):
@@ -1521,14 +1521,11 @@ def patch(ui, repo, patchname, strip=1, files=None, eolmode='strict',
     patcher = ui.config('ui', 'patch')
     if files is None:
         files = set()
-    try:
-        if patcher:
-            return _externalpatch(ui, repo, patcher, patchname, strip,
-                                  files, similarity)
-        return internalpatch(ui, repo, patchname, strip, files, eolmode,
-                             similarity)
-    except PatchError, err:
-        raise util.Abort(str(err))
+    if patcher:
+        return _externalpatch(ui, repo, patcher, patchname, strip,
+                              files, similarity)
+    return internalpatch(ui, repo, patchname, strip, files, eolmode,
+                         similarity)
 
 def changedfiles(ui, repo, patchpath, strip=1):
     backend = fsbackend(ui, repo.root)
@@ -1564,6 +1561,7 @@ def diffopts(ui, opts=None, untrusted=False, section='diff'):
         text=opts and opts.get('text'),
         git=get('git'),
         nodates=get('nodates'),
+        nobinary=get('nobinary'),
         showfunc=get('show_function', 'showfunc'),
         ignorews=get('ignore_all_space', 'ignorews'),
         ignorewsamount=get('ignore_space_change', 'ignorewsamount'),
@@ -1624,7 +1622,7 @@ def diff(repo, node1=None, node2=None, match=None, changes=None, opts=None,
 
     revs = None
     hexfunc = repo.ui.debugflag and hex or short
-    revs = [hexfunc(node) for node in [node1, node2] if node]
+    revs = [hexfunc(node) for node in [ctx1.node(), ctx2.node()] if node]
 
     copy = {}
     if opts.git or opts.upgrade:
@@ -1818,7 +1816,7 @@ def trydiff(repo, revs, ctx1, ctx2, modified, added, removed,
         if dodiff:
             if opts.git or revs:
                 header.insert(0, diffline(join(a), join(b), revs))
-            if dodiff == 'binary':
+            if dodiff == 'binary' and not opts.nobinary:
                 text = mdiff.b85diff(to, tn)
                 if text:
                     addindexmeta(header, [gitindex(to), gitindex(tn)])

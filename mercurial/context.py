@@ -13,6 +13,7 @@ import os, errno, stat
 import obsolete as obsmod
 import repoview
 import fileset
+import revlog
 
 propertycache = util.propertycache
 
@@ -63,9 +64,86 @@ class basectx(object):
         for f in sorted(self._manifest):
             yield f
 
+    def _manifestmatches(self, match, s):
+        """generate a new manifest filtered by the match argument
+
+        This method is for internal use only and mainly exists to provide an
+        object oriented way for other contexts to customize the manifest
+        generation.
+        """
+        if match.always():
+            return self.manifest().copy()
+
+        files = match.files()
+        if (match.matchfn == match.exact or
+            (not match.anypats() and util.all(fn in self for fn in files))):
+            return self.manifest().intersectfiles(files)
+
+        mf = self.manifest().copy()
+        for fn in mf.keys():
+            if not match(fn):
+                del mf[fn]
+        return mf
+
+    def _matchstatus(self, other, s, match, listignored, listclean,
+                     listunknown):
+        """return match.always if match is none
+
+        This internal method provides a way for child objects to override the
+        match operator.
+        """
+        return match or matchmod.always(self._repo.root, self._repo.getcwd())
+
+    def _prestatus(self, other, s, match, listignored, listclean, listunknown):
+        """provide a hook to allow child objects to preprocess status results
+
+        For example, this allows other contexts, such as workingctx, to query
+        the dirstate before comparing the manifests.
+        """
+        # load earliest manifest first for caching reasons
+        if self.rev() < other.rev():
+            self.manifest()
+        return s
+
+    def _poststatus(self, other, s, match, listignored, listclean, listunknown):
+        """provide a hook to allow child objects to postprocess status results
+
+        For example, this allows other contexts, such as workingctx, to filter
+        suspect symlinks in the case of FAT32 and NTFS filesytems.
+        """
+        return s
+
+    def _buildstatus(self, other, s, match, listignored, listclean,
+                     listunknown):
+        """build a status with respect to another context"""
+        mf1 = other._manifestmatches(match, s)
+        mf2 = self._manifestmatches(match, s)
+
+        modified, added, clean = [], [], []
+        deleted, unknown, ignored = s[3], [], []
+        withflags = mf1.withflags() | mf2.withflags()
+        for fn, mf2node in mf2.iteritems():
+            if fn in mf1:
+                if (fn not in deleted and
+                    ((fn in withflags and mf1.flags(fn) != mf2.flags(fn)) or
+                     (mf1[fn] != mf2node and
+                      (mf2node or self[fn].cmp(other[fn]))))):
+                    modified.append(fn)
+                elif listclean:
+                    clean.append(fn)
+                del mf1[fn]
+            elif fn not in deleted:
+                added.append(fn)
+        removed = mf1.keys()
+
+        return [modified, added, removed, deleted, unknown, ignored, clean]
+
     @propertycache
     def substate(self):
         return subrepo.state(self, self._repo.ui)
+
+    def subrev(self, subpath):
+        return self.substate[subpath][1]
 
     def rev(self):
         return self._rev
@@ -185,8 +263,7 @@ class basectx(object):
         if ctx2 is not None:
             ctx2 = self._repo[ctx2]
         diffopts = patch.diffopts(self._repo.ui, opts)
-        return patch.diff(self._repo, ctx2.node(), self.node(),
-                          match=match, opts=diffopts)
+        return patch.diff(self._repo, ctx2, self, match=match, opts=diffopts)
 
     @propertycache
     def _dirs(self):
@@ -198,19 +275,81 @@ class basectx(object):
     def dirty(self):
         return False
 
+    def status(self, other=None, match=None, listignored=False,
+               listclean=False, listunknown=False, listsubrepos=False):
+        """return status of files between two nodes or node and working
+        directory.
+
+        If other is None, compare this node with working directory.
+
+        returns (modified, added, removed, deleted, unknown, ignored, clean)
+        """
+
+        ctx1 = self
+        ctx2 = self._repo[other]
+
+        # This next code block is, admittedly, fragile logic that tests for
+        # reversing the contexts and wouldn't need to exist if it weren't for
+        # the fast (and common) code path of comparing the working directory
+        # with its first parent.
+        #
+        # What we're aiming for here is the ability to call:
+        #
+        # workingctx.status(parentctx)
+        #
+        # If we always built the manifest for each context and compared those,
+        # then we'd be done. But the special case of the above call means we
+        # just copy the manifest of the parent.
+        reversed = False
+        if (not isinstance(ctx1, changectx)
+            and isinstance(ctx2, changectx)):
+            reversed = True
+            ctx1, ctx2 = ctx2, ctx1
+
+        r = [[], [], [], [], [], [], []]
+        match = ctx2._matchstatus(ctx1, r, match, listignored, listclean,
+                                  listunknown)
+        r = ctx2._prestatus(ctx1, r, match, listignored, listclean, listunknown)
+        r = ctx2._buildstatus(ctx1, r, match, listignored, listclean,
+                              listunknown)
+        r = ctx2._poststatus(ctx1, r, match, listignored, listclean,
+                             listunknown)
+
+        if reversed:
+            r[1], r[2], r[3], r[4] = r[2], r[1], r[4], r[3]
+
+        if listsubrepos:
+            for subpath, sub in scmutil.itersubrepos(ctx1, ctx2):
+                rev2 = ctx2.subrev(subpath)
+                try:
+                    submatch = matchmod.narrowmatcher(subpath, match)
+                    s = sub.status(rev2, match=submatch, ignored=listignored,
+                                   clean=listclean, unknown=listunknown,
+                                   listsubrepos=True)
+                    for rfiles, sfiles in zip(r, s):
+                        rfiles.extend("%s/%s" % (subpath, f) for f in sfiles)
+                except error.LookupError:
+                    self._repo.ui.status(_("skipping missing "
+                                           "subrepository: %s\n") % subpath)
+
+        for l in r:
+            l.sort()
+
+        # we return a tuple to signify that this list isn't changing
+        return tuple(r)
+
+
 def makememctx(repo, parents, text, user, date, branch, files, store,
                editor=None):
     def getfilectx(repo, memctx, path):
         data, (islink, isexec), copied = store.getfile(path)
-        return memfilectx(path, data, islink=islink, isexec=isexec,
-                                  copied=copied)
+        return memfilectx(repo, path, data, islink=islink, isexec=isexec,
+                                  copied=copied, memctx=memctx)
     extra = {}
     if branch:
         extra['branch'] = encoding.fromlocal(branch)
     ctx =  memctx(repo, parents, text, files, getfilectx, user,
-                          date, extra)
-    if editor:
-        ctx._text = editor(repo, ctx, [])
+                          date, extra, editor)
     return ctx
 
 class changectx(basectx):
@@ -823,14 +962,7 @@ class committablectx(basectx):
         if user:
             self._user = user
         if changes:
-            self._status = list(changes[:4])
-            self._unknown = changes[4]
-            self._ignored = changes[5]
-            self._clean = changes[6]
-        else:
-            self._unknown = None
-            self._ignored = None
-            self._clean = None
+            self._status = changes
 
         self._extra = {}
         if extra:
@@ -849,9 +981,6 @@ class committablectx(basectx):
 
     def __nonzero__(self):
         return True
-
-    def __contains__(self, key):
-        return self._repo.dirstate[key] not in "?r"
 
     def _buildflagfunc(self):
         # Create a fallback function for getting file flags when the
@@ -891,7 +1020,7 @@ class committablectx(basectx):
 
     @propertycache
     def _manifest(self):
-        """generate a manifest corresponding to the working directory"""
+        """generate a manifest corresponding to the values in self._status"""
 
         man = self._parents[0].manifest().copy()
         if len(self._parents) > 1:
@@ -905,7 +1034,7 @@ class committablectx(basectx):
 
         copied = self._repo.dirstate.copies()
         ff = self._flagfunc
-        modified, added, removed, deleted = self._status
+        modified, added, removed, deleted = self._status[:4]
         for i, l in (("a", added), ("m", modified)):
             for f in l:
                 orig = copied.get(f, f)
@@ -923,7 +1052,7 @@ class committablectx(basectx):
 
     @propertycache
     def _status(self):
-        return self._repo.status()[:4]
+        return self._repo.status()
 
     @propertycache
     def _user(self):
@@ -933,21 +1062,8 @@ class committablectx(basectx):
     def _date(self):
         return util.makedate()
 
-    def status(self, ignored=False, clean=False, unknown=False):
-        """Explicit status query
-        Unless this method is used to query the working copy status, the
-        _status property will implicitly read the status using its default
-        arguments."""
-        stat = self._repo.status(ignored=ignored, clean=clean, unknown=unknown)
-        self._unknown = self._ignored = self._clean = None
-        if unknown:
-            self._unknown = stat[4]
-        if ignored:
-            self._ignored = stat[5]
-        if clean:
-            self._clean = stat[6]
-        self._status = stat[:4]
-        return stat
+    def subrev(self, subpath):
+        return None
 
     def user(self):
         return self._user or self._repo.ui.username()
@@ -967,14 +1083,11 @@ class committablectx(basectx):
     def deleted(self):
         return self._status[3]
     def unknown(self):
-        assert self._unknown is not None  # must call status first
-        return self._unknown
+        return self._status[4]
     def ignored(self):
-        assert self._ignored is not None  # must call status first
-        return self._ignored
+        return self._status[5]
     def clean(self):
-        assert self._clean is not None  # must call status first
-        return self._clean
+        return self._status[6]
     def branch(self):
         return encoding.tolocal(self._extra['branch'])
     def closesbranch(self):
@@ -1068,6 +1181,9 @@ class workingctx(committablectx):
         for f in d:
             if d[f] != 'r':
                 yield f
+
+    def __contains__(self, key):
+        return self._repo.dirstate[key] not in "?r"
 
     @propertycache
     def _parents(self):
@@ -1180,6 +1296,170 @@ class workingctx(committablectx):
             finally:
                 wlock.release()
 
+    def _filtersuspectsymlink(self, files):
+        if not files or self._repo.dirstate._checklink:
+            return files
+
+        # Symlink placeholders may get non-symlink-like contents
+        # via user error or dereferencing by NFS or Samba servers,
+        # so we filter out any placeholders that don't look like a
+        # symlink
+        sane = []
+        for f in files:
+            if self.flags(f) == 'l':
+                d = self[f].data()
+                if d == '' or len(d) >= 1024 or '\n' in d or util.binary(d):
+                    self._repo.ui.debug('ignoring suspect symlink placeholder'
+                                        ' "%s"\n' % f)
+                    continue
+            sane.append(f)
+        return sane
+
+    def _checklookup(self, files):
+        # check for any possibly clean files
+        if not files:
+            return [], []
+
+        modified = []
+        fixup = []
+        pctx = self._parents[0]
+        # do a full compare of any files that might have changed
+        for f in sorted(files):
+            if (f not in pctx or self.flags(f) != pctx.flags(f)
+                or pctx[f].cmp(self[f])):
+                modified.append(f)
+            else:
+                fixup.append(f)
+
+        # update dirstate for files that are actually clean
+        if fixup:
+            try:
+                # updating the dirstate is optional
+                # so we don't wait on the lock
+                normal = self._repo.dirstate.normal
+                wlock = self._repo.wlock(False)
+                try:
+                    for f in fixup:
+                        normal(f)
+                finally:
+                    wlock.release()
+            except error.LockError:
+                pass
+        return modified, fixup
+
+    def _manifestmatches(self, match, s):
+        """Slow path for workingctx
+
+        The fast path is when we compare the working directory to its parent
+        which means this function is comparing with a non-parent; therefore we
+        need to build a manifest and return what matches.
+        """
+        mf = self._repo['.']._manifestmatches(match, s)
+        modified, added, removed = s[0:3]
+        for f in modified + added:
+            mf[f] = None
+            mf.set(f, self.flags(f))
+        for f in removed:
+            if f in mf:
+                del mf[f]
+        return mf
+
+    def _prestatus(self, other, s, match, listignored, listclean, listunknown):
+        """override the parent hook with a dirstate query
+
+        We use this prestatus hook to populate the status with information from
+        the dirstate.
+        """
+        # doesn't need to call super; if that changes, be aware that super
+        # calls self.manifest which would slow down the common case of calling
+        # status against a workingctx's parent
+        return self._dirstatestatus(match, listignored, listclean, listunknown)
+
+    def _poststatus(self, other, s, match, listignored, listclean, listunknown):
+        """override the parent hook with a filter for suspect symlinks
+
+        We use this poststatus hook to filter out symlinks that might have
+        accidentally ended up with the entire contents of the file they are
+        susposed to be linking to.
+        """
+        s[0] = self._filtersuspectsymlink(s[0])
+        self._status = s[:]
+        return s
+
+    def _dirstatestatus(self, match=None, ignored=False, clean=False,
+                        unknown=False):
+        '''Gets the status from the dirstate -- internal use only.'''
+        listignored, listclean, listunknown = ignored, clean, unknown
+        match = match or matchmod.always(self._repo.root, self._repo.getcwd())
+        subrepos = []
+        if '.hgsub' in self:
+            subrepos = sorted(self.substate)
+        s = self._repo.dirstate.status(match, subrepos, listignored,
+                                       listclean, listunknown)
+        cmp, modified, added, removed, deleted, unknown, ignored, clean = s
+
+        # check for any possibly clean files
+        if cmp:
+            modified2, fixup = self._checklookup(cmp)
+            modified += modified2
+
+            # update dirstate for files that are actually clean
+            if fixup and listclean:
+                clean += fixup
+
+        return [modified, added, removed, deleted, unknown, ignored, clean]
+
+    def _buildstatus(self, other, s, match, listignored, listclean,
+                     listunknown):
+        """build a status with respect to another context
+
+        This includes logic for maintaining the fast path of status when
+        comparing the working directory against its parent, which is to skip
+        building a new manifest if self (working directory) is not comparing
+        against its parent (repo['.']).
+        """
+        if other != self._repo['.']:
+            s = super(workingctx, self)._buildstatus(other, s, match,
+                                                     listignored, listclean,
+                                                     listunknown)
+        return s
+
+    def _matchstatus(self, other, s, match, listignored, listclean,
+                     listunknown):
+        """override the match method with a filter for directory patterns
+
+        We use inheritance to customize the match.bad method only in cases of
+        workingctx since it belongs only to the working directory when
+        comparing against the parent changeset.
+
+        If we aren't comparing against the working directory's parent, then we
+        just use the default match object sent to us.
+        """
+        superself = super(workingctx, self)
+        match = superself._matchstatus(other, s, match, listignored, listclean,
+                                       listunknown)
+        if other != self._repo['.']:
+            def bad(f, msg):
+                # 'f' may be a directory pattern from 'match.files()',
+                # so 'f not in ctx1' is not enough
+                if f not in other and f not in other.dirs():
+                    self._repo.ui.warn('%s: %s\n' %
+                                       (self._repo.dirstate.pathto(f), msg))
+            match.bad = bad
+        return match
+
+    def status(self, other='.', match=None, listignored=False,
+               listclean=False, listunknown=False, listsubrepos=False):
+        # yet to be determined: what to do if 'other' is a 'workingctx' or a
+        # 'memctx'?
+        s = super(workingctx, self).status(other, match, listignored, listclean,
+                                           listunknown, listsubrepos)
+        # calling 'super' subtly reveresed the contexts, so we flip the results
+        # (s[1] is 'added' and s[2] is 'removed')
+        s = list(s)
+        s[1], s[2] = s[2], s[1]
+        return tuple(s)
+
 class committablefilectx(basefilectx):
     """A committablefilectx provides common functionality for a file context
     that wants the ability to commit, e.g. workingfilectx or memfilectx."""
@@ -1259,7 +1539,7 @@ class workingfilectx(committablefilectx):
         # invert comparison to reuse the same code path
         return fctx.cmp(self)
 
-class memctx(object):
+class memctx(committablectx):
     """Use memctx to perform in-memory commits via localrepo.commitctx().
 
     Revision information is supplied at initialization time while
@@ -1287,73 +1567,25 @@ class memctx(object):
     is a dictionary of metadata or is left empty.
     """
     def __init__(self, repo, parents, text, files, filectxfn, user=None,
-                 date=None, extra=None):
-        self._repo = repo
+                 date=None, extra=None, editor=False):
+        super(memctx, self).__init__(repo, text, user, date, extra)
         self._rev = None
         self._node = None
-        self._text = text
-        self._date = date and util.parsedate(date) or util.makedate()
-        self._user = user
         parents = [(p or nullid) for p in parents]
         p1, p2 = parents
         self._parents = [changectx(self._repo, p) for p in (p1, p2)]
         files = sorted(set(files))
         self._status = [files, [], [], [], []]
         self._filectxfn = filectxfn
+        self.substate = None
 
         self._extra = extra and extra.copy() or {}
         if self._extra.get('branch', '') == '':
             self._extra['branch'] = 'default'
 
-    def __str__(self):
-        return str(self._parents[0]) + "+"
-
-    def __int__(self):
-        return self._rev
-
-    def __nonzero__(self):
-        return True
-
-    def __getitem__(self, key):
-        return self.filectx(key)
-
-    def p1(self):
-        return self._parents[0]
-    def p2(self):
-        return self._parents[1]
-
-    def user(self):
-        return self._user or self._repo.ui.username()
-    def date(self):
-        return self._date
-    def description(self):
-        return self._text
-    def files(self):
-        return self.modified()
-    def modified(self):
-        return self._status[0]
-    def added(self):
-        return self._status[1]
-    def removed(self):
-        return self._status[2]
-    def deleted(self):
-        return self._status[3]
-    def unknown(self):
-        return self._status[4]
-    def ignored(self):
-        return self._status[5]
-    def clean(self):
-        return self._status[6]
-    def branch(self):
-        return encoding.tolocal(self._extra['branch'])
-    def extra(self):
-        return self._extra
-    def flags(self, f):
-        return self[f].flags()
-
-    def parents(self):
-        """return contexts for each parent changeset"""
-        return self._parents
+        if editor:
+            self._text = editor(self._repo, self, [])
+            self._repo.savecommitmessage(self._text)
 
     def filectx(self, path, filelog=None):
         """get a file context from the working directory"""
@@ -1363,12 +1595,34 @@ class memctx(object):
         """commit context to the repo"""
         return self._repo.commitctx(self)
 
-class memfilectx(object):
+    @propertycache
+    def _manifest(self):
+        """generate a manifest based on the return values of filectxfn"""
+
+        # keep this simple for now; just worry about p1
+        pctx = self._parents[0]
+        man = pctx.manifest().copy()
+
+        for f, fnode in man.iteritems():
+            p1node = nullid
+            p2node = nullid
+            p = pctx[f].parents()
+            if len(p) > 0:
+                p1node = p[0].node()
+                if len(p) > 1:
+                    p2node = p[1].node()
+            man[f] = revlog.hash(self[f].data(), p1node, p2node)
+
+        return man
+
+
+class memfilectx(committablefilectx):
     """memfilectx represents an in-memory file to commit.
 
-    See memctx for more details.
+    See memctx and commitablefilectx for more details.
     """
-    def __init__(self, path, data, islink=False, isexec=False, copied=None):
+    def __init__(self, repo, path, data, islink=False,
+                 isexec=False, copied=None, memctx=None):
         """
         path is the normalized file path relative to repository root.
         data is the file content as a string.
@@ -1376,21 +1630,17 @@ class memfilectx(object):
         isexec is True if the file is executable.
         copied is the source file path if current file was copied in the
         revision being committed, or None."""
-        self._path = path
+        super(memfilectx, self).__init__(repo, path, None, memctx)
         self._data = data
         self._flags = (islink and 'l' or '') + (isexec and 'x' or '')
         self._copied = None
         if copied:
             self._copied = (copied, nullid)
 
-    def __nonzero__(self):
-        return True
-    def __str__(self):
-        return "%s@%s" % (self.path(), self._changectx)
-    def path(self):
-        return self._path
     def data(self):
         return self._data
+    def size(self):
+        return len(self.data())
     def flags(self):
         return self._flags
     def isexec(self):

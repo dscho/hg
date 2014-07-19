@@ -76,10 +76,24 @@ Can't graft with dirty wd:
   $ hg revert a
 
 Graft a rename:
+(this also tests that editor is invoked if '--edit' is specified)
 
-  $ hg graft 2 -u foo
+  $ hg status --rev "2^1" --rev 2
+  A b
+  R a
+  $ HGEDITOR=cat hg graft 2 -u foo --edit
   grafting revision 2
   merging a and b to b
+  2
+  
+  
+  HG: Enter commit message.  Lines beginning with 'HG:' are removed.
+  HG: Leave message empty to abort commit.
+  HG: --
+  HG: user: foo
+  HG: branch 'default'
+  HG: changed b
+  HG: removed a
   $ hg export tip --git
   # HG changeset patch
   # User foo
@@ -114,6 +128,7 @@ Look for extra:source
   
 
 Graft out of order, skipping a merge and a duplicate
+(this also tests that editor is not invoked if '--edit' is not specified)
 
   $ hg graft 1 5 4 3 'merge()' 2 -n
   skipping ungraftable merge revision 6
@@ -123,7 +138,7 @@ Graft out of order, skipping a merge and a duplicate
   grafting revision 4
   grafting revision 3
 
-  $ hg graft 1 5 4 3 'merge()' 2 --debug
+  $ HGEDITOR=cat hg graft 1 5 4 3 'merge()' 2 --debug
   skipping ungraftable merge revision 6
   scanning for duplicate grafts
   skipping revision 2 (already grafted to 7)
@@ -137,8 +152,8 @@ Graft out of order, skipping a merge and a duplicate
   resolving manifests
    branchmerge: True, force: True, partial: False
    ancestor: 68795b066622, local: ef0ef43d49e7+, remote: 5d205f8b35b6
+   preserving b for resolve of b
    b: local copied/moved from a -> m
-    preserving b for resolve of b
   updating: b 1/1 files (100.00%)
   picked tool 'internal:merge' for b (binary False symlink False)
   merging b and a to b
@@ -150,22 +165,22 @@ Graft out of order, skipping a merge and a duplicate
   resolving manifests
    branchmerge: True, force: True, partial: False
    ancestor: 4c60f11aa304, local: 6b9e5368ca4e+, remote: 97f8bfe72746
-   b: keep -> k
    e: remote is newer -> g
   getting e
   updating: e 1/1 files (100.00%)
+   b: keep -> k
   e
   grafting revision 4
     searching for copies back to rev 1
   resolving manifests
    branchmerge: True, force: True, partial: False
    ancestor: 4c60f11aa304, local: 1905859650ec+, remote: 9c233e8e184d
-   b: keep -> k
+   preserving e for resolve of e
    d: remote is newer -> g
-   e: versions differ -> m
-    preserving e for resolve of e
   getting d
   updating: d 1/2 files (50.00%)
+   b: keep -> k
+   e: versions differ -> m
   updating: e 2/2 files (100.00%)
   picked tool 'internal:merge' for e (binary False symlink False)
   merging e
@@ -220,6 +235,7 @@ Fix up:
 
   $ echo b > e
   $ hg resolve -m e
+  no more unresolved files
 
 Continue with a revision should fail:
 
@@ -354,6 +370,7 @@ Resolve conflicted graft
   [255]
   $ hg resolve --all
   merging a
+  no more unresolved files
   $ hg graft -c
   grafting revision 1
   $ hg export tip --git
@@ -382,6 +399,7 @@ Resolve conflicted graft with rename
   [255]
   $ hg resolve --all
   merging a and b to b
+  no more unresolved files
   $ hg graft -c
   grafting revision 2
   $ hg export tip --git
@@ -443,6 +461,37 @@ Now transplant a graft to test following through copies
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     2
   
+Test that the graft and transplant markers in extra are converted, allowing
+origin() to still work.  Note that these recheck the immediately preceeding two
+tests.
+  $ hg --quiet --config extensions.convert= --config convert.hg.saverev=True convert . ../converted
+
+The graft case
+  $ hg -R ../converted log -r 7 --template "{rev}: {node}\n{join(extras, '\n')}\n"
+  7: 7ae846e9111fc8f57745634250c7b9ac0a60689b
+  branch=default
+  convert_revision=ef0ef43d49e79e81ddafdc7997401ba0041efc82
+  source=e0213322b2c1a5d5d236c74e79666441bee67a7d
+  $ hg -R ../converted log -r 'origin(7)'
+  changeset:   2:e0213322b2c1
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+The transplant case
+  $ hg -R ../converted log -r tip --template "{rev}: {node}\n{join(extras, '\n')}\n"
+  21: fbb6c5cc81002f2b4b49c9d731404688bcae5ade
+  branch=dev
+  convert_revision=7e61b508e709a11d28194a5359bc3532d910af21
+  transplant_source=z\xe8F\xe9\x11\x1f\xc8\xf5wEcBP\xc7\xb9\xac (esc)
+  `h\x9b (esc)
+  $ hg -R ../converted log -r 'origin(tip)'
+  changeset:   2:e0213322b2c1
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     2
+  
+
 Test simple destination
   $ hg log -r 'destination()'
   changeset:   7:ef0ef43d49e7

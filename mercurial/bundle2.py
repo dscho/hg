@@ -113,6 +113,8 @@ Binary format is as follow
 
             Mandatory parameters comes first, then the advisory ones.
 
+            Each parameter's key MUST be unique within the part.
+
 :payload:
 
     payload is a series of `<chunksize><chunkdata>`.
@@ -144,6 +146,7 @@ import util
 import struct
 import urllib
 import string
+import pushkey
 
 import changegroup, error
 from i18n import _
@@ -170,18 +173,14 @@ def _makefpartparamsizes(nbparams):
     """
     return '>'+('BB'*nbparams)
 
-class UnknownPartError(KeyError):
-    """error raised when no handler is found for a Mandatory part"""
-    pass
-
 parthandlermapping = {}
 
-def parthandler(parttype):
+def parthandler(parttype, params=()):
     """decorator that register a function as a bundle2 part handler
 
     eg::
 
-        @parthandler('myparttype')
+        @parthandler('myparttype', ('mandatory', 'param', 'handled'))
         def myparttypehandler(...):
             '''process a part of type "my part".'''
             ...
@@ -190,6 +189,7 @@ def parthandler(parttype):
         lparttype = parttype.lower() # enforce lower case matching.
         assert lparttype not in parthandlermapping
         parthandlermapping[lparttype] = func
+        func.params = frozenset(params)
         return func
     return _decorator
 
@@ -295,17 +295,24 @@ def processbundle(repo, unbundler, transactiongetter=_notransaction):
             # part key are matched lower case
             key = parttype.lower()
             try:
-                handler = parthandlermapping[key]
+                handler = parthandlermapping.get(key)
+                if handler is None:
+                    raise error.BundleValueError(parttype=key)
                 op.ui.debug('found a handler for part %r\n' % parttype)
-            except KeyError:
+                unknownparams = part.mandatorykeys - handler.params
+                if unknownparams:
+                    unknownparams = list(unknownparams)
+                    unknownparams.sort()
+                    raise error.BundleValueError(parttype=key,
+                                                   params=unknownparams)
+            except error.BundleValueError, exc:
                 if key != parttype: # mandatory parts
-                    # todo:
-                    # - use a more precise exception
-                    raise UnknownPartError(key)
-                op.ui.debug('ignoring unknown advisory part %r\n' % key)
+                    raise
+                op.ui.debug('ignoring unsupported advisory part %s\n' % exc)
                 # consuming the part
                 part.read()
                 continue
+
 
             # handler is called outside the above try block so that we don't
             # risk catching KeyErrors from anything other than the
@@ -321,11 +328,8 @@ def processbundle(repo, unbundler, transactiongetter=_notransaction):
                 if output is not None:
                     output = op.ui.popbuffer()
             if output:
-                outpart = bundlepart('b2x:output',
-                                     advisoryparams=[('in-reply-to',
-                                                      str(part.id))],
-                                     data=output)
-                op.reply.addpart(outpart)
+                outpart = op.reply.newpart('b2x:output', data=output)
+                outpart.addparam('in-reply-to', str(part.id), mandatory=False)
             part.read()
     except Exception, exc:
         if part is not None:
@@ -381,7 +385,7 @@ def encodecaps(caps):
 class bundle20(object):
     """represent an outgoing bundle2 container
 
-    Use the `addparam` method to add stream level parameter. and `addpart` to
+    Use the `addparam` method to add stream level parameter. and `newpart` to
     populate it. Then call `getchunks` to retrieve all the binary chunks of
     data that compose the bundle2 container."""
 
@@ -391,6 +395,12 @@ class bundle20(object):
         self._parts = []
         self.capabilities = dict(capabilities)
 
+    @property
+    def nbparts(self):
+        """total number of parts added to the bundler"""
+        return len(self._parts)
+
+    # methods used to defines the bundle2 content
     def addparam(self, name, value=None):
         """add a stream level parameter"""
         if not name:
@@ -407,6 +417,20 @@ class bundle20(object):
         part.id = len(self._parts) # very cheap counter
         self._parts.append(part)
 
+    def newpart(self, typeid, *args, **kwargs):
+        """create a new part and add it to the containers
+
+        As the part is directly added to the containers. For now, this means
+        that any failure to properly initialize the part after calling
+        ``newpart`` should result in a failure of the whole bundling process.
+
+        You can still fall back to manually create and add if you need better
+        control."""
+        part = bundlepart(typeid, *args, **kwargs)
+        self.addpart(part)
+        return part
+
+    # methods used to generate the bundle2 stream
     def getchunks(self):
         self.ui.debug('start emission of %s stream\n' % _magicstring)
         yield _magicstring
@@ -505,7 +529,7 @@ class unbundle20(unpackermixin):
         if name[0].islower():
             self.ui.debug("ignoring unknown parameter %r\n" % name)
         else:
-            raise KeyError(name)
+            raise error.BundleValueError(params=(name,))
 
 
     def iterparts(self):
@@ -536,17 +560,71 @@ class bundlepart(object):
 
     The part `type` is used to route the part to the application level
     handler.
+
+    The part payload is contained in ``part.data``. It could be raw bytes or a
+    generator of byte chunks.
+
+    You can add parameters to the part using the ``addparam`` method.
+    Parameters can be either mandatory (default) or advisory. Remote side
+    should be able to safely ignore the advisory ones.
+
+    Both data and parameters cannot be modified after the generation has begun.
     """
 
     def __init__(self, parttype, mandatoryparams=(), advisoryparams=(),
                  data=''):
         self.id = None
         self.type = parttype
-        self.data = data
-        self.mandatoryparams = mandatoryparams
-        self.advisoryparams = advisoryparams
+        self._data = data
+        self._mandatoryparams = list(mandatoryparams)
+        self._advisoryparams = list(advisoryparams)
+        # checking for duplicated entries
+        self._seenparams = set()
+        for pname, __ in self._mandatoryparams + self._advisoryparams:
+            if pname in self._seenparams:
+                raise RuntimeError('duplicated params: %s' % pname)
+            self._seenparams.add(pname)
+        # status of the part's generation:
+        # - None: not started,
+        # - False: currently generated,
+        # - True: generation done.
+        self._generated = None
 
+    # methods used to defines the part content
+    def __setdata(self, data):
+        if self._generated is not None:
+            raise error.ReadOnlyPartError('part is being generated')
+        self._data = data
+    def __getdata(self):
+        return self._data
+    data = property(__getdata, __setdata)
+
+    @property
+    def mandatoryparams(self):
+        # make it an immutable tuple to force people through ``addparam``
+        return tuple(self._mandatoryparams)
+
+    @property
+    def advisoryparams(self):
+        # make it an immutable tuple to force people through ``addparam``
+        return tuple(self._advisoryparams)
+
+    def addparam(self, name, value='', mandatory=True):
+        if self._generated is not None:
+            raise error.ReadOnlyPartError('part is being generated')
+        if name in self._seenparams:
+            raise ValueError('duplicated params: %s' % name)
+        self._seenparams.add(name)
+        params = self._advisoryparams
+        if mandatory:
+            params = self._mandatoryparams
+        params.append((name, value))
+
+    # methods used to generates the bundle2 stream
     def getchunks(self):
+        if self._generated is not None:
+            raise RuntimeError('part can only be consumed once')
+        self._generated = False
         #### header
         ## parttype
         header = [_pack(_fparttypesize, len(self.type)),
@@ -584,6 +662,7 @@ class bundlepart(object):
             yield chunk
         # end of payload
         yield _pack(_fpayloadsize, 0)
+        self._generated = True
 
     def _payloadchunks(self):
         """yield chunks of a the part payload
@@ -616,6 +695,8 @@ class unbundlepart(unpackermixin):
         self.type = None
         self.mandatoryparams = None
         self.advisoryparams = None
+        self.params = None
+        self.mandatorykeys = ()
         self._payloadstream = None
         self._readheader()
 
@@ -632,6 +713,16 @@ class unbundlepart(unpackermixin):
         This automatically compute the size of the format to read."""
         data = self._fromheader(struct.calcsize(format))
         return _unpack(format, data)
+
+    def _initparams(self, mandatoryparams, advisoryparams):
+        """internal function to setup all logic related parameters"""
+        # make it read only to prevent people touching it by mistake.
+        self.mandatoryparams = tuple(mandatoryparams)
+        self.advisoryparams  = tuple(advisoryparams)
+        # user friendly UI
+        self.params = dict(self.mandatoryparams)
+        self.params.update(dict(self.advisoryparams))
+        self.mandatorykeys = frozenset(p[0] for p in mandatoryparams)
 
     def _readheader(self):
         """read the header and setup the object"""
@@ -659,8 +750,7 @@ class unbundlepart(unpackermixin):
         advparams = []
         for key, value in advsizes:
             advparams.append((self._fromheader(key), self._fromheader(value)))
-        self.mandatoryparams = manparams
-        self.advisoryparams  = advparams
+        self._initparams(manparams, advparams)
         ## part payload
         def payloadchunks():
             payloadsize = self._unpack(_fpayloadsize)[0]
@@ -685,6 +775,13 @@ class unbundlepart(unpackermixin):
             self.consumed = True
         return data
 
+def bundle2caps(remote):
+    """return the bundlecapabilities of a peer as dict"""
+    raw = remote.capable('bundle2-exp')
+    if not raw and raw != '':
+        return {}
+    capsblob = urllib.unquote(remote.capable('bundle2-exp'))
+    return decodecaps(capsblob)
 
 @parthandler('b2x:changegroup')
 def handlechangegroup(op, inpart):
@@ -705,17 +802,16 @@ def handlechangegroup(op, inpart):
     if op.reply is not None:
         # This is definitly not the final form of this
         # return. But one need to start somewhere.
-        part = bundlepart('b2x:reply:changegroup', (),
-                           [('in-reply-to', str(inpart.id)),
-                            ('return', '%i' % ret)])
-        op.reply.addpart(part)
+        part = op.reply.newpart('b2x:reply:changegroup')
+        part.addparam('in-reply-to', str(inpart.id), mandatory=False)
+        part.addparam('return', '%i' % ret, mandatory=False)
     assert not inpart.read()
 
-@parthandler('b2x:reply:changegroup')
+@parthandler('b2x:reply:changegroup', ('return', 'in-reply-to'))
 def handlechangegroup(op, inpart):
-    p = dict(inpart.advisoryparams)
-    ret = int(p['return'])
-    op.records.add('changegroup', {'return': ret}, int(p['in-reply-to']))
+    ret = int(inpart.params['return'])
+    replyto = int(inpart.params['in-reply-to'])
+    op.records.add('changegroup', {'return': ret}, replyto)
 
 @parthandler('b2x:check:heads')
 def handlechangegroup(op, inpart):
@@ -748,21 +844,58 @@ def handlereplycaps(op, inpart):
     if op.reply is None:
         op.reply = bundle20(op.ui, caps)
 
-@parthandler('b2x:error:abort')
+@parthandler('b2x:error:abort', ('message', 'hint'))
 def handlereplycaps(op, inpart):
     """Used to transmit abort error over the wire"""
-    manargs = dict(inpart.mandatoryparams)
-    advargs = dict(inpart.advisoryparams)
-    raise util.Abort(manargs['message'], hint=advargs.get('hint'))
+    raise util.Abort(inpart.params['message'], hint=inpart.params.get('hint'))
 
-@parthandler('b2x:error:unknownpart')
+@parthandler('b2x:error:unsupportedcontent', ('parttype', 'params'))
 def handlereplycaps(op, inpart):
-    """Used to transmit unknown part error over the wire"""
-    manargs = dict(inpart.mandatoryparams)
-    raise UnknownPartError(manargs['parttype'])
+    """Used to transmit unknown content error over the wire"""
+    kwargs = {}
+    parttype = inpart.params.get('parttype')
+    if parttype is not None:
+        kwargs['parttype'] = parttype
+    params = inpart.params.get('params')
+    if params is not None:
+        kwargs['params'] = params.split('\0')
 
-@parthandler('b2x:error:pushraced')
+    raise error.BundleValueError(**kwargs)
+
+@parthandler('b2x:error:pushraced', ('message',))
 def handlereplycaps(op, inpart):
     """Used to transmit push race error over the wire"""
-    manargs = dict(inpart.mandatoryparams)
-    raise error.ResponseError(_('push failed:'), manargs['message'])
+    raise error.ResponseError(_('push failed:'), inpart.params['message'])
+
+@parthandler('b2x:listkeys', ('namespace',))
+def handlelistkeys(op, inpart):
+    """retrieve pushkey namespace content stored in a bundle2"""
+    namespace = inpart.params['namespace']
+    r = pushkey.decodekeys(inpart.read())
+    op.records.add('listkeys', (namespace, r))
+
+@parthandler('b2x:pushkey', ('namespace', 'key', 'old', 'new'))
+def handlepushkey(op, inpart):
+    """process a pushkey request"""
+    dec = pushkey.decode
+    namespace = dec(inpart.params['namespace'])
+    key = dec(inpart.params['key'])
+    old = dec(inpart.params['old'])
+    new = dec(inpart.params['new'])
+    ret = op.repo.pushkey(namespace, key, old, new)
+    record = {'namespace': namespace,
+              'key': key,
+              'old': old,
+              'new': new}
+    op.records.add('pushkey', record)
+    if op.reply is not None:
+        rpart = op.reply.newpart('b2x:reply:pushkey')
+        rpart.addparam('in-reply-to', str(inpart.id), mandatory=False)
+        rpart.addparam('return', '%i' % ret, mandatory=False)
+
+@parthandler('b2x:reply:pushkey', ('return', 'in-reply-to'))
+def handlepushkeyreply(op, inpart):
+    """retrieve the result of a pushkey request"""
+    ret = int(inpart.params['return'])
+    partid = int(inpart.params['in-reply-to'])
+    op.records.add('pushkey', {'return': ret}, partid)

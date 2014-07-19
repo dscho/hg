@@ -66,11 +66,11 @@ running from a devel copy, not a temp installation
   [1]
   $ aftermerge
   # cat f
-  <<<<<<< local
+  <<<<<<< local: ef83787e2614  - test: revision 1
   revision 1
   =======
   revision 2
-  >>>>>>> other
+  >>>>>>> other: 0185f4e0cf02  - test: revision 2
   space
   # hg stat
   M f
@@ -586,6 +586,54 @@ HGMERGE specifies internal:other but is overruled by --tool=false
   ? f.orig
 
   $ unset HGMERGE # make sure HGMERGE doesn't interfere with remaining tests
+
+update is a merge ...
+
+  $ beforemerge
+  [merge-tools]
+  false.whatever=
+  true.priority=1
+  true.executable=cat
+  # hg update -C 1
+  $ hg debugsetparent 0
+  $ hg update -r 2
+  merging f
+  revision 1
+  space
+  revision 0
+  space
+  revision 2
+  space
+  0 files updated, 1 files merged, 0 files removed, 0 files unresolved
+  $ aftermerge
+  # cat f
+  revision 1
+  space
+  # hg stat
+  M f
+
+update should also have --tool
+
+  $ beforemerge
+  [merge-tools]
+  false.whatever=
+  true.priority=1
+  true.executable=cat
+  # hg update -C 1
+  $ hg debugsetparent 0
+  $ hg update -r 2 --tool false
+  merging f
+  merging f failed!
+  0 files updated, 0 files merged, 0 files removed, 1 files unresolved
+  use 'hg resolve' to retry unresolved file merges
+  [1]
+  $ aftermerge
+  # cat f
+  revision 1
+  space
+  # hg stat
+  M f
+  ? f.orig
 
 Default is silent simplemerge:
 

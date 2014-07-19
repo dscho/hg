@@ -399,6 +399,9 @@ def only(repo, subset, x):
     args = getargs(x, 1, 2, _('only takes one or two arguments'))
     include = getset(repo, spanset(repo), args[0]).set()
     if len(args) == 1:
+        if len(include) == 0:
+            return baseset([])
+
         descendants = set(_revdescendants(repo, include, False))
         exclude = [rev for rev in cl.headrevs()
             if not rev in descendants and not rev in include]
@@ -1102,16 +1105,6 @@ def minrev(repo, subset, x):
             return baseset([m])
     return baseset([])
 
-def _missingancestors(repo, subset, x):
-    # i18n: "_missingancestors" is a keyword
-    revs, bases = getargs(x, 2, 2,
-                          _("_missingancestors requires two arguments"))
-    rs = baseset(repo)
-    revs = getset(repo, rs, revs)
-    bases = getset(repo, rs, bases)
-    missing = set(repo.changelog.findmissingrevs(bases, revs))
-    return baseset([r for r in subset if r in missing])
-
 def modifies(repo, subset, x):
     """``modifies(pattern)``
     Changesets modifying files matched by pattern.
@@ -1724,7 +1717,6 @@ symbols = {
     "max": maxrev,
     "merge": merge,
     "min": minrev,
-    "_missingancestors": _missingancestors,
     "modifies": modifies,
     "obsolete": obsolete,
     "origin": origin,
@@ -1796,7 +1788,6 @@ safesymbols = set([
     "max",
     "merge",
     "min",
-    "_missingancestors",
     "modifies",
     "obsolete",
     "origin",
@@ -1867,7 +1858,7 @@ def optimize(x, small):
         wb, tb = optimize(x[2], True)
 
         # (::x and not ::y)/(not ::y and ::x) have a fast path
-        def ismissingancestors(revs, bases):
+        def isonly(revs, bases):
             return (
                 revs[0] == 'func'
                 and getstring(revs[1], _('not a symbol')) == 'ancestors'
@@ -1876,12 +1867,10 @@ def optimize(x, small):
                 and getstring(bases[1][1], _('not a symbol')) == 'ancestors')
 
         w = min(wa, wb)
-        if ismissingancestors(ta, tb):
-            return w, ('func', ('symbol', '_missingancestors'),
-                       ('list', ta[2], tb[1][2]))
-        if ismissingancestors(tb, ta):
-            return w, ('func', ('symbol', '_missingancestors'),
-                       ('list', tb[2], ta[1][2]))
+        if isonly(ta, tb):
+            return w, ('func', ('symbol', 'only'), ('list', ta[2], tb[1][2]))
+        if isonly(tb, ta):
+            return w, ('func', ('symbol', 'only'), ('list', tb[2], ta[1][2]))
 
         if wa > wb:
             return w, (op, tb, ta)
@@ -2243,11 +2232,7 @@ class baseset(list):
         """Returns a new object with the substraction of the two collections.
 
         This is part of the mandatory API for smartset."""
-        if isinstance(other, baseset):
-            s = other.set()
-        else:
-            s = set(other)
-        return baseset(self.set() - s)
+        return self.filter(lambda x: x not in other)
 
     def __and__(self, other):
         """Returns a new object with the intersection of the two collections.
@@ -2764,10 +2749,6 @@ class spanset(_orderedsetmixin):
         if self._start < self._end:
             self.reverse()
 
-    def _contained(self, rev):
-        return (rev <= self._start and rev > self._end) or (rev >= self._start
-                and rev < self._end)
-
     def __iter__(self):
         if self._start <= self._end:
             iterrange = xrange(self._start, self._end)
@@ -2825,7 +2806,7 @@ class spanset(_orderedsetmixin):
             start = self._start
             end = self._end
             for rev in self._hiddenrevs:
-                if (end < rev <= start) or (start <= rev and rev < end):
+                if (end < rev <= start) or (start <= rev < end):
                     count += 1
             return abs(self._end - self._start) - count
 

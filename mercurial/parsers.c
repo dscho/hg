@@ -153,6 +153,122 @@ quit:
 	return NULL;
 }
 
+static inline dirstateTupleObject *make_dirstate_tuple(char state, int mode,
+						       int size, int mtime)
+{
+	dirstateTupleObject *t = PyObject_New(dirstateTupleObject,
+					      &dirstateTupleType);
+	if (!t)
+		return NULL;
+	t->state = state;
+	t->mode = mode;
+	t->size = size;
+	t->mtime = mtime;
+	return t;
+}
+
+static PyObject *dirstate_tuple_new(PyTypeObject *subtype, PyObject *args,
+				    PyObject *kwds)
+{
+	/* We do all the initialization here and not a tp_init function because
+	 * dirstate_tuple is immutable. */
+	dirstateTupleObject *t;
+	char state;
+	int size, mode, mtime;
+	if (!PyArg_ParseTuple(args, "ciii", &state, &mode, &size, &mtime))
+		return NULL;
+
+	t = (dirstateTupleObject *)subtype->tp_alloc(subtype, 1);
+	if (!t)
+		return NULL;
+	t->state = state;
+	t->mode = mode;
+	t->size = size;
+	t->mtime = mtime;
+
+	return (PyObject *)t;
+}
+
+static void dirstate_tuple_dealloc(PyObject *o)
+{
+	PyObject_Del(o);
+}
+
+static Py_ssize_t dirstate_tuple_length(PyObject *o)
+{
+	return 4;
+}
+
+static PyObject *dirstate_tuple_item(PyObject *o, Py_ssize_t i)
+{
+	dirstateTupleObject *t = (dirstateTupleObject *)o;
+	switch (i) {
+	case 0:
+		return PyBytes_FromStringAndSize(&t->state, 1);
+	case 1:
+		return PyInt_FromLong(t->mode);
+	case 2:
+		return PyInt_FromLong(t->size);
+	case 3:
+		return PyInt_FromLong(t->mtime);
+	default:
+		PyErr_SetString(PyExc_IndexError, "index out of range");
+		return NULL;
+	}
+}
+
+static PySequenceMethods dirstate_tuple_sq = {
+	dirstate_tuple_length,     /* sq_length */
+	0,                         /* sq_concat */
+	0,                         /* sq_repeat */
+	dirstate_tuple_item,       /* sq_item */
+	0,                         /* sq_ass_item */
+	0,                         /* sq_contains */
+	0,                         /* sq_inplace_concat */
+	0                          /* sq_inplace_repeat */
+};
+
+PyTypeObject dirstateTupleType = {
+	PyVarObject_HEAD_INIT(NULL, 0)
+	"dirstate_tuple",          /* tp_name */
+	sizeof(dirstateTupleObject),/* tp_basicsize */
+	0,                         /* tp_itemsize */
+	(destructor)dirstate_tuple_dealloc, /* tp_dealloc */
+	0,                         /* tp_print */
+	0,                         /* tp_getattr */
+	0,                         /* tp_setattr */
+	0,                         /* tp_compare */
+	0,                         /* tp_repr */
+	0,                         /* tp_as_number */
+	&dirstate_tuple_sq,        /* tp_as_sequence */
+	0,                         /* tp_as_mapping */
+	0,                         /* tp_hash  */
+	0,                         /* tp_call */
+	0,                         /* tp_str */
+	0,                         /* tp_getattro */
+	0,                         /* tp_setattro */
+	0,                         /* tp_as_buffer */
+	Py_TPFLAGS_DEFAULT,        /* tp_flags */
+	"dirstate tuple",          /* tp_doc */
+	0,                         /* tp_traverse */
+	0,                         /* tp_clear */
+	0,                         /* tp_richcompare */
+	0,                         /* tp_weaklistoffset */
+	0,                         /* tp_iter */
+	0,                         /* tp_iternext */
+	0,                         /* tp_methods */
+	0,                         /* tp_members */
+	0,                         /* tp_getset */
+	0,                         /* tp_base */
+	0,                         /* tp_dict */
+	0,                         /* tp_descr_get */
+	0,                         /* tp_descr_set */
+	0,                         /* tp_dictoffset */
+	0,                         /* tp_init */
+	0,                         /* tp_alloc */
+	dirstate_tuple_new,        /* tp_new */
+};
+
 static PyObject *parse_dirstate(PyObject *self, PyObject *args)
 {
 	PyObject *dmap, *cmap, *parents = NULL, *ret = NULL;
@@ -192,11 +308,8 @@ static PyObject *parse_dirstate(PyObject *self, PyObject *args)
 			goto quit;
 		}
 
-		entry = Py_BuildValue("ciii", state, mode, size, mtime);
-		if (!entry)
-			goto quit;
-		PyObject_GC_UnTrack(entry); /* don't waste time with this */
-
+		entry = (PyObject *)make_dirstate_tuple(state, mode, size,
+							mtime);
 		cpos = memchr(cur, 0, flen);
 		if (cpos) {
 			fname = PyBytes_FromStringAndSize(cur, cpos - cur);
@@ -229,39 +342,13 @@ quit:
 	return ret;
 }
 
-static inline int getintat(PyObject *tuple, int off, uint32_t *v)
-{
-	PyObject *o = PyTuple_GET_ITEM(tuple, off);
-	long val;
-
-	if (PyInt_Check(o))
-		val = PyInt_AS_LONG(o);
-	else if (PyLong_Check(o)) {
-		val = PyLong_AsLong(o);
-		if (val == -1 && PyErr_Occurred())
-			return -1;
-	} else {
-		PyErr_SetString(PyExc_TypeError, "expected an int or long");
-		return -1;
-	}
-	if (LONG_MAX > INT_MAX && (val > INT_MAX || val < INT_MIN)) {
-		PyErr_SetString(PyExc_OverflowError,
-				"Python value to large to convert to uint32_t");
-		return -1;
-	}
-	*v = (uint32_t)val;
-	return 0;
-}
-
-static PyObject *dirstate_unset;
-
 /*
  * Efficiently pack a dirstate object into its on-disk format.
  */
 static PyObject *pack_dirstate(PyObject *self, PyObject *args)
 {
 	PyObject *packobj = NULL;
-	PyObject *map, *copymap, *pl;
+	PyObject *map, *copymap, *pl, *mtime_unset = NULL;
 	Py_ssize_t nbytes, pos, l;
 	PyObject *k, *v, *pn;
 	char *p, *s;
@@ -318,34 +405,38 @@ static PyObject *pack_dirstate(PyObject *self, PyObject *args)
 	p += 20;
 
 	for (pos = 0; PyDict_Next(map, &pos, &k, &v); ) {
+		dirstateTupleObject *tuple;
+		char state;
 		uint32_t mode, size, mtime;
 		Py_ssize_t len, l;
 		PyObject *o;
-		char *s, *t;
+		char *t;
 
-		if (!PyTuple_Check(v) || PyTuple_GET_SIZE(v) != 4) {
-			PyErr_SetString(PyExc_TypeError, "expected a 4-tuple");
+		if (!dirstate_tuple_check(v)) {
+			PyErr_SetString(PyExc_TypeError,
+					"expected a dirstate tuple");
 			goto bail;
 		}
-		o = PyTuple_GET_ITEM(v, 0);
-		if (PyString_AsStringAndSize(o, &s, &l) == -1 || l != 1) {
-			PyErr_SetString(PyExc_TypeError, "expected one byte");
-			goto bail;
-		}
-		*p++ = *s;
-		if (getintat(v, 1, &mode) == -1)
-			goto bail;
-		if (getintat(v, 2, &size) == -1)
-			goto bail;
-		if (getintat(v, 3, &mtime) == -1)
-			goto bail;
-		if (*s == 'n' && mtime == (uint32_t)now) {
+		tuple = (dirstateTupleObject *)v;
+
+		state = tuple->state;
+		mode = tuple->mode;
+		size = tuple->size;
+		mtime = tuple->mtime;
+		if (state == 'n' && mtime == (uint32_t)now) {
 			/* See pure/parsers.py:pack_dirstate for why we do
 			 * this. */
-			if (PyDict_SetItem(map, k, dirstate_unset) == -1)
-				goto bail;
 			mtime = -1;
+			mtime_unset = (PyObject *)make_dirstate_tuple(
+				state, mode, size, mtime);
+			if (!mtime_unset)
+				goto bail;
+			if (PyDict_SetItem(map, k, mtime_unset) == -1)
+				goto bail;
+			Py_DECREF(mtime_unset);
+			mtime_unset = NULL;
 		}
+		*p++ = state;
 		putbe32(mode, p);
 		putbe32(size, p + 4);
 		putbe32(mtime, p + 8);
@@ -374,6 +465,7 @@ static PyObject *pack_dirstate(PyObject *self, PyObject *args)
 
 	return packobj;
 bail:
+	Py_XDECREF(mtime_unset);
 	Py_XDECREF(packobj);
 	return NULL;
 }
@@ -2016,18 +2108,19 @@ static void module_init(PyObject *mod)
 	dirs_module_init(mod);
 
 	indexType.tp_new = PyType_GenericNew;
-	if (PyType_Ready(&indexType) < 0)
+	if (PyType_Ready(&indexType) < 0 ||
+	    PyType_Ready(&dirstateTupleType) < 0)
 		return;
 	Py_INCREF(&indexType);
-
 	PyModule_AddObject(mod, "index", (PyObject *)&indexType);
+	Py_INCREF(&dirstateTupleType);
+	PyModule_AddObject(mod, "dirstatetuple",
+			   (PyObject *)&dirstateTupleType);
 
 	nullentry = Py_BuildValue("iiiiiiis#", 0, 0, 0,
 				  -1, -1, -1, -1, nullid, 20);
 	if (nullentry)
 		PyObject_GC_UnTrack(nullentry);
-
-	dirstate_unset = Py_BuildValue("ciii", 'n', 0, -1, -1);
 }
 
 static int check_python_version(void)

@@ -5,7 +5,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import os, builtins
+import builtins
 
 from numbers import Number
 
@@ -51,13 +51,6 @@ def bytesformatter(format, args):
     ret = format % args
     return ret.encode('utf-8', 'surrogateescape')
 builtins.bytesformatter = bytesformatter
-
-# Create bytes equivalents for os.environ values
-for key in list(os.environ.keys()):
-    # UTF-8 is fine for us
-    bkey = key.encode('utf-8', 'surrogateescape')
-    bvalue = os.environ[key].encode('utf-8', 'surrogateescape')
-    os.environ[bkey] = bvalue
 
 origord = builtins.ord
 def fakeord(char):

@@ -178,7 +178,8 @@ def createcmd(ui, repo, pats, opts):
         if hasmq:
             saved, repo.mq.checkapplied = repo.mq.checkapplied, False
         try:
-            return repo.commit(message, user, opts.get('date'), match)
+            return repo.commit(message, user, opts.get('date'), match,
+                               editor=cmdutil.getcommiteditor(**opts))
         finally:
             if hasmq:
                 repo.mq.checkapplied = saved
@@ -635,6 +636,8 @@ def unshelve(ui, repo, *shelved, **opts):
            _('shelve with the specified commit date'), _('DATE')),
           ('d', 'delete', None,
            _('delete the named shelved change(s)')),
+          ('e', 'edit', False,
+           _('invoke editor on commit messages')),
           ('l', 'list', None,
            _('list current shelves')),
           ('m', 'message', '',
@@ -675,20 +678,32 @@ def shelvecmd(ui, repo, *pats, **opts):
     '''
     cmdutil.checkunfinished(repo)
 
-    def checkopt(opt, incompatible):
+    allowables = [
+        ('addremove', 'create'), # 'create' is pseudo action
+        ('cleanup', 'cleanup'),
+#       ('date', 'create'), # ignored for passing '--date "0 0"' in tests
+        ('delete', 'delete'),
+        ('edit', 'create'),
+        ('list', 'list'),
+        ('message', 'create'),
+        ('name', 'create'),
+        ('patch', 'list'),
+        ('stat', 'list'),
+    ]
+    def checkopt(opt):
         if opts[opt]:
-            for i in incompatible.split():
-                if opts[i]:
+            for i, allowable in allowables:
+                if opts[i] and opt != allowable:
                     raise util.Abort(_("options '--%s' and '--%s' may not be "
                                        "used together") % (opt, i))
             return True
-    if checkopt('cleanup', 'addremove delete list message name patch stat'):
+    if checkopt('cleanup'):
         if pats:
             raise util.Abort(_("cannot specify names when using '--cleanup'"))
         return cleanupcmd(ui, repo)
-    elif checkopt('delete', 'addremove cleanup list message name patch stat'):
+    elif checkopt('delete'):
         return deletecmd(ui, repo, pats)
-    elif checkopt('list', 'addremove cleanup delete message name'):
+    elif checkopt('list'):
         return listcmd(ui, repo, pats, opts)
     else:
         for i in ('patch', 'stat'):

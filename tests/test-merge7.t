@@ -57,6 +57,7 @@ resolve conflict
   > EOF
   $ rm -f *.orig
   $ hg resolve -m test.txt
+  no more unresolved files
   $ hg commit -m "Merge 1"
 
 change test-a again
@@ -83,8 +84,8 @@ pull and merge from test-a again
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: 96b70246a118, local: 50c3a7e29886+, remote: 40d11a4173a8
+   preserving test.txt for resolve of test.txt
    test.txt: versions differ -> m
-    preserving test.txt for resolve of test.txt
   updating: test.txt 1/1 files (100.00%)
   picked tool 'internal:merge' for test.txt (binary False symlink False)
   merging test.txt
@@ -97,11 +98,11 @@ pull and merge from test-a again
 
   $ cat test.txt
   one
-  <<<<<<< local
+  <<<<<<< local: 50c3a7e29886  - test: Merge 1
   two-point-five
   =======
   two-point-one
-  >>>>>>> other
+  >>>>>>> other: 40d11a4173a8 - test: two -> two-point-one
   three
 
   $ hg debugindex test.txt

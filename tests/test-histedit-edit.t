@@ -156,7 +156,19 @@ check histedit_source
   update: 1 new changesets (update)
   hist:   1 remaining (histedit --continue)
 
-  $ HGEDITOR='true' hg histedit --continue
+(test also that editor is invoked if histedit is continued for
+"edit" action)
+
+  $ HGEDITOR='cat' hg histedit --continue
+  f
+  
+  
+  HG: Enter commit message.  Lines beginning with 'HG:' are removed.
+  HG: Leave message empty to abort commit.
+  HG: --
+  HG: user: test
+  HG: branch 'default'
+  HG: added f
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   saved backup bundle to $TESTTMP/r/.hg/strip-backup/b5f70786f9b0-backup.hg (glob)
 
@@ -200,8 +212,9 @@ check saving last-message.txt, at first
   >             raise util.Abort('emulating unexpected abort')
   >     repo.__class__ = commitfailure
   > EOF
-  $ cat > .hg/hgrc <<EOF
+  $ cat >> .hg/hgrc <<EOF
   > [extensions]
+  > # this failure occurs before editor invocation
   > commitfailure = $TESTTMP/commitfailure.py
   > EOF
 
@@ -211,22 +224,87 @@ check saving last-message.txt, at first
   > echo "===="
   > echo "check saving last-message.txt" >> \$1
   > EOF
+
+(test that editor is not invoked before transaction starting)
+
   $ rm -f .hg/last-message.txt
   $ HGEDITOR="sh $TESTTMP/editor.sh" hg histedit tip --commands - 2>&1 << EOF | fixbundle
   > mess 1fd3b2fe7754 f
   > EOF
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
-  ==== before editing
-  f
-  ====
   abort: emulating unexpected abort
   $ cat .hg/last-message.txt
-  f
-  check saving last-message.txt
+  cat: .hg/last-message.txt: No such file or directory
+  [1]
 
-  $ cat > .hg/hgrc <<EOF
+  $ cat >> .hg/hgrc <<EOF
   > [extensions]
   > commitfailure = !
+  > EOF
+  $ hg histedit --abort -q
+
+(test that editor is invoked and commit message is saved into
+"last-message.txt")
+
+  $ cat >> .hg/hgrc <<EOF
+  > [hooks]
+  > # this failure occurs after editor invocation
+  > pretxncommit.unexpectedabort = false
+  > EOF
+
+  $ hg status --rev '1fd3b2fe7754^1' --rev 1fd3b2fe7754
+  A f
+
+  $ rm -f .hg/last-message.txt
+  $ HGEDITOR="sh $TESTTMP/editor.sh" hg histedit tip --commands - 2>&1 << EOF
+  > mess 1fd3b2fe7754 f
+  > EOF
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  adding f
+  ==== before editing
+  f
+  
+  
+  HG: Enter commit message.  Lines beginning with 'HG:' are removed.
+  HG: Leave message empty to abort commit.
+  HG: --
+  HG: user: test
+  HG: branch 'default'
+  HG: added f
+  ====
+  transaction abort!
+  rollback completed
+  note: commit message saved in .hg/last-message.txt
+  abort: pretxncommit.unexpectedabort hook exited with status 1
+  [255]
+  $ cat .hg/last-message.txt
+  f
+  
+  
+  check saving last-message.txt
+
+(test also that editor is invoked if histedit is continued for "message"
+action)
+
+  $ HGEDITOR=cat hg histedit --continue
+  f
+  
+  
+  HG: Enter commit message.  Lines beginning with 'HG:' are removed.
+  HG: Leave message empty to abort commit.
+  HG: --
+  HG: user: test
+  HG: branch 'default'
+  HG: added f
+  transaction abort!
+  rollback completed
+  note: commit message saved in .hg/last-message.txt
+  abort: pretxncommit.unexpectedabort hook exited with status 1
+  [255]
+
+  $ cat >> .hg/hgrc <<EOF
+  > [hooks]
+  > pretxncommit.unexpectedabort =
   > EOF
   $ hg histedit --abort -q
 

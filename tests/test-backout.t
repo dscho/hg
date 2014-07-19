@@ -11,6 +11,8 @@ should complain
   [255]
 
 basic operation
+(this also tests that editor is invoked if the commit message is not
+specified explicitly)
 
   $ echo a > a
   $ hg commit -d '0 0' -A -m a
@@ -18,8 +20,19 @@ basic operation
   $ echo b >> a
   $ hg commit -d '1 0' -m b
 
-  $ hg backout -d '2 0' tip --tool=true
+  $ hg status --rev tip --rev "tip^1"
+  M a
+  $ HGEDITOR=cat hg backout -d '2 0' tip --tool=true
   reverting a
+  Backed out changeset a820f4f40a57
+  
+  
+  HG: Enter commit message.  Lines beginning with 'HG:' are removed.
+  HG: Leave message empty to abort commit.
+  HG: --
+  HG: user: test
+  HG: branch 'default'
+  HG: changed a
   changeset 2:2929462c3dff backs out changeset 1:a820f4f40a57
   $ cat a
   a
@@ -31,6 +44,8 @@ basic operation
   update: (current)
 
 file that was removed is recreated
+(this also tests that editor is not invoked if the commit message is
+specified explicitly)
 
   $ cd ..
   $ hg init remove
@@ -43,7 +58,7 @@ file that was removed is recreated
   $ hg rm a
   $ hg commit -d '1 0' -m b
 
-  $ hg backout -d '2 0' tip --tool=true
+  $ HGEDITOR=cat hg backout -d '2 0' tip --tool=true -m "Backed out changeset 76862dcce372"
   adding a
   changeset 2:de31bdc76c0d backs out changeset 1:76862dcce372
   $ cat a
@@ -340,9 +355,21 @@ without --merge
   update: (current)
 
 with --merge
+(this also tests that editor is invoked if '--edit' is specified
+explicitly regardless of '--message')
+
   $ hg update -qC
-  $ hg backout --merge -d '3 0' -r 1 -m 'backout on branch1' --tool=true
+  $ HGEDITOR=cat hg backout --merge -d '3 0' -r 1 -m 'backout on branch1' --tool=true --edit
   removing file1
+  backout on branch1
+  
+  
+  HG: Enter commit message.  Lines beginning with 'HG:' are removed.
+  HG: Leave message empty to abort commit.
+  HG: --
+  HG: user: test
+  HG: branch 'branch2'
+  HG: removed file1
   created new head
   changeset 3:d4e8f6db59fb backs out changeset 1:bf1602f437f3
   merging with changeset 3:d4e8f6db59fb
@@ -490,6 +517,7 @@ Test usage of `hg resolve` in case of conflict
   merging foo
   my foo@b71750c4b0fd+ other foo@a30dd8addae3 ancestor foo@913609522437
    premerge successful
+  no more unresolved files
   $ hg status
   M foo
   ? foo.orig

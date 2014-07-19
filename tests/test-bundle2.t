@@ -47,9 +47,7 @@ Create an extension to test bundle2 API
   >     op.ui.write('received ping request (id %i)\n' % part.id)
   >     if op.reply is not None and 'ping-pong' in op.reply.capabilities:
   >         op.ui.write_err('replying to ping request (id %i)\n' % part.id)
-  >         rpart = bundle2.bundlepart('test:pong',
-  >                                    [('in-reply-to', str(part.id))])
-  >         op.reply.addpart(rpart)
+  >         op.reply.newpart('test:pong', [('in-reply-to', str(part.id))])
   > 
   > @bundle2.parthandler('test:debugreply')
   > def debugreply(op, part):
@@ -66,6 +64,7 @@ Create an extension to test bundle2 API
   > @command('bundle2',
   >          [('', 'param', [], 'stream level parameter'),
   >           ('', 'unknown', False, 'include an unknown mandatory part in the bundle'),
+  >           ('', 'unknownparams', False, 'include an unknown part parameters in the bundle'),
   >           ('', 'parts', False, 'include some arbitrary parts to the bundle'),
   >           ('', 'reply', False, 'produce a reply bundle'),
   >           ('', 'pushrace', False, 'includes a check:head part with unknown nodes'),
@@ -83,11 +82,12 @@ Create an extension to test bundle2 API
   > 
   >     if opts['reply']:
   >         capsstring = 'ping-pong\nelephants=babar,celeste\ncity%3D%21=celeste%2Cville'
-  >         bundler.addpart(bundle2.bundlepart('b2x:replycaps', data=capsstring))
+  >         bundler.newpart('b2x:replycaps', data=capsstring)
   > 
   >     if opts['pushrace']:
-  >         dummynode = '01234567890123456789'
-  >         bundler.addpart(bundle2.bundlepart('b2x:check:heads', data=dummynode))
+  >         # also serve to test the assignement of data outside of init
+  >         part = bundler.newpart('b2x:check:heads')
+  >         part.data = '01234567890123456789'
   > 
   >     revs = opts['rev']
   >     if 'rev' in opts:
@@ -99,31 +99,27 @@ Create an extension to test bundle2 API
   >             headcommon  = [c.node() for c in repo.set('parents(%ld) - %ld', revs, revs)]
   >             outgoing = discovery.outgoing(repo.changelog, headcommon, headmissing)
   >             cg = changegroup.getlocalbundle(repo, 'test:bundle2', outgoing, None)
-  >             part = bundle2.bundlepart('b2x:changegroup', data=cg.getchunks())
-  >             bundler.addpart(part)
+  >             bundler.newpart('b2x:changegroup', data=cg.getchunks())
   > 
   >     if opts['parts']:
-  >        part = bundle2.bundlepart('test:empty')
-  >        bundler.addpart(part)
+  >        bundler.newpart('test:empty')
   >        # add a second one to make sure we handle multiple parts
-  >        part = bundle2.bundlepart('test:empty')
-  >        bundler.addpart(part)
-  >        part = bundle2.bundlepart('test:song', data=ELEPHANTSSONG)
-  >        bundler.addpart(part)
-  >        part = bundle2.bundlepart('test:debugreply')
-  >        bundler.addpart(part)
-  >        part = bundle2.bundlepart('test:math',
-  >                                  [('pi', '3.14'), ('e', '2.72')],
-  >                                  [('cooking', 'raw')],
-  >                                  '42')
-  >        bundler.addpart(part)
+  >        bundler.newpart('test:empty')
+  >        bundler.newpart('test:song', data=ELEPHANTSSONG)
+  >        bundler.newpart('test:debugreply')
+  >        mathpart = bundler.newpart('test:math')
+  >        mathpart.addparam('pi', '3.14')
+  >        mathpart.addparam('e', '2.72')
+  >        mathpart.addparam('cooking', 'raw', mandatory=False)
+  >        mathpart.data = '42'
+  >        # advisory known part with unknown mandatory param
+  >        bundler.newpart('test:song', [('randomparam','')])
   >     if opts['unknown']:
-  >        part = bundle2.bundlepart('test:UNKNOWN',
-  >                                  data='some random content')
-  >        bundler.addpart(part)
+  >        bundler.newpart('test:UNKNOWN', data='some random content')
+  >     if opts['unknownparams']:
+  >        bundler.newpart('test:SONG', [('randomparams', '')])
   >     if opts['parts']:
-  >        part = bundle2.bundlepart('test:ping')
-  >        bundler.addpart(part)
+  >        bundler.newpart('test:ping')
   > 
   >     if path is None:
   >        file = sys.stdout
@@ -144,7 +140,7 @@ Create an extension to test bundle2 API
   >             unbundler = bundle2.unbundle20(ui, sys.stdin)
   >             op = bundle2.processbundle(repo, unbundler, lambda: tr)
   >             tr.close()
-  >         except KeyError, exc:
+  >         except error.BundleValueError, exc:
   >             raise util.Abort('missing support for %s' % exc)
   >         except error.PushRaced, exc:
   >             raise util.Abort('push race: %s' % exc)
@@ -170,7 +166,7 @@ Create an extension to test bundle2 API
   >     unbundler = bundle2.unbundle20(ui, sys.stdin)
   >     try:
   >         params = unbundler.params
-  >     except KeyError, exc:
+  >     except error.BundleValueError, exc:
   >        raise util.Abort('unknown parameters: %s' % exc)
   >     ui.write('options count: %i\n' % len(params))
   >     for key in sorted(params):
@@ -194,9 +190,12 @@ Create an extension to test bundle2 API
   > bundle2-exp=True
   > [ui]
   > ssh=python "$TESTDIR/dummyssh"
+  > logtemplate={rev}:{node|short} {phase} {author} {desc|firstline}
   > [web]
   > push_ssl = false
   > allow_push = *
+  > [phases]
+  > publish=False
   > EOF
 
 The extension requires a repo (currently unused)
@@ -308,7 +307,7 @@ Test unknown mandatory option
 ---------------------------------------------------
 
   $ hg bundle2 --param 'Gravity' | hg statbundle2
-  abort: unknown parameters: 'Gravity'
+  abort: unknown parameters: Stream Parameter - Gravity
   [255]
 
 Test debug output
@@ -372,6 +371,7 @@ Test part
   bundle part: "test:song"
   bundle part: "test:debugreply"
   bundle part: "test:math"
+  bundle part: "test:song"
   bundle part: "test:ping"
   end of bundle
 
@@ -380,7 +380,7 @@ Test part
   test:empty\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x11 (esc)
   test:empty\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x10	test:song\x00\x00\x00\x02\x00\x00\x00\x00\x00\xb2Patali Dirapata, Cromda Cromda Ripalo, Pata Pata, Ko Ko Ko (esc)
   Bokoro Dipoulito, Rondi Rondi Pepino, Pata Pata, Ko Ko Ko
-  Emana Karassoli, Loucra Loucra Ponponto, Pata Pata, Ko Ko Ko.\x00\x00\x00\x00\x00\x16\x0ftest:debugreply\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00+	test:math\x00\x00\x00\x04\x02\x01\x02\x04\x01\x04\x07\x03pi3.14e2.72cookingraw\x00\x00\x00\x0242\x00\x00\x00\x00\x00\x10	test:ping\x00\x00\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00 (no-eol) (esc)
+  Emana Karassoli, Loucra Loucra Ponponto, Pata Pata, Ko Ko Ko.\x00\x00\x00\x00\x00\x16\x0ftest:debugreply\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00+	test:math\x00\x00\x00\x04\x02\x01\x02\x04\x01\x04\x07\x03pi3.14e2.72cookingraw\x00\x00\x00\x0242\x00\x00\x00\x00\x00\x1d	test:song\x00\x00\x00\x05\x01\x00\x0b\x00randomparam\x00\x00\x00\x00\x00\x10	test:ping\x00\x00\x00\x06\x00\x00\x00\x00\x00\x00\x00\x00 (no-eol) (esc)
 
 
   $ hg statbundle2 < ../parts.hg2
@@ -405,11 +405,15 @@ Test part
       mandatory: 2
       advisory: 1
       payload: 2 bytes
+    :test:song:
+      mandatory: 1
+      advisory: 0
+      payload: 0 bytes
     :test:ping:
       mandatory: 0
       advisory: 0
       payload: 0 bytes
-  parts count:   6
+  parts count:   7
 
   $ hg statbundle2 --debug < ../parts.hg2
   start processing of HG2X stream
@@ -463,9 +467,18 @@ Test part
   payload chunk size: 2
   payload chunk size: 0
       payload: 2 bytes
+  part header size: 29
+  part type: "test:song"
+  part id: "5"
+  part parameters: 1
+    :test:song:
+      mandatory: 1
+      advisory: 0
+  payload chunk size: 0
+      payload: 0 bytes
   part header size: 16
   part type: "test:ping"
-  part id: "5"
+  part id: "6"
   part parameters: 0
     :test:ping:
       mandatory: 0
@@ -474,7 +487,7 @@ Test part
       payload: 0 bytes
   part header size: 0
   end of bundle2 stream
-  parts count:   6
+  parts count:   7
 
 Test actual unbundling of test part
 =======================================
@@ -489,13 +502,13 @@ Process the bundle
   part type: "test:empty"
   part id: "0"
   part parameters: 0
-  ignoring unknown advisory part 'test:empty'
+  ignoring unsupported advisory part test:empty
   payload chunk size: 0
   part header size: 17
   part type: "test:empty"
   part id: "1"
   part parameters: 0
-  ignoring unknown advisory part 'test:empty'
+  ignoring unsupported advisory part test:empty
   payload chunk size: 0
   part header size: 16
   part type: "test:song"
@@ -519,15 +532,22 @@ Process the bundle
   part type: "test:math"
   part id: "4"
   part parameters: 3
-  ignoring unknown advisory part 'test:math'
+  ignoring unsupported advisory part test:math
   payload chunk size: 2
+  payload chunk size: 0
+  part header size: 29
+  part type: "test:song"
+  part id: "5"
+  part parameters: 1
+  found a handler for part 'test:song'
+  ignoring unsupported advisory part test:song - randomparam
   payload chunk size: 0
   part header size: 16
   part type: "test:ping"
-  part id: "5"
+  part id: "6"
   part parameters: 0
   found a handler for part 'test:ping'
-  received ping request (id 5)
+  received ping request (id 6)
   payload chunk size: 0
   part header size: 0
   end of bundle2 stream
@@ -546,7 +566,17 @@ Unbundle with an unknown mandatory part
       Emana Karassoli, Loucra Loucra Ponponto, Pata Pata, Ko Ko Ko.
   debugreply: no reply
   0 unread bytes
-  abort: missing support for 'test:unknown'
+  abort: missing support for test:unknown
+  [255]
+
+Unbundle with an unknown mandatory part parameters
+(should abort)
+
+  $ hg bundle2 --unknownparams ../unknown.hg2
+
+  $ hg unbundle2 < ../unknown.hg2
+  0 unread bytes
+  abort: missing support for test:song - randomparams
   [255]
 
 unbundle with a reply
@@ -572,9 +602,9 @@ The reply is a bundle
   debugreply:         'babar'
   debugreply:         'celeste'
   debugreply:     'ping-pong'
-  \x00\x00\x00\x00\x00\x1e	test:pong\x00\x00\x00\x02\x01\x00\x0b\x01in-reply-to6\x00\x00\x00\x00\x00\x1f (esc)
-  b2x:output\x00\x00\x00\x03\x00\x01\x0b\x01in-reply-to6\x00\x00\x00=received ping request (id 6) (esc)
-  replying to ping request (id 6)
+  \x00\x00\x00\x00\x00\x1e	test:pong\x00\x00\x00\x02\x01\x00\x0b\x01in-reply-to7\x00\x00\x00\x00\x00\x1f (esc)
+  b2x:output\x00\x00\x00\x03\x00\x01\x0b\x01in-reply-to7\x00\x00\x00=received ping request (id 7) (esc)
+  replying to ping request (id 7)
   \x00\x00\x00\x00\x00\x00 (no-eol) (esc)
 
 The reply is valid
@@ -613,8 +643,8 @@ Unbundle the reply to get the output:
   remote: debugreply:         'babar'
   remote: debugreply:         'celeste'
   remote: debugreply:     'ping-pong'
-  remote: received ping request (id 6)
-  remote: replying to ping request (id 6)
+  remote: received ping request (id 7)
+  remote: replying to ping request (id 7)
   0 unread bytes
 
 Test push race detection
@@ -637,57 +667,23 @@ Support for changegroup
   (run 'hg heads' to see heads, 'hg merge' to merge)
 
   $ hg log -G
-  o  changeset:   8:02de42196ebe
-  |  tag:         tip
-  |  parent:      6:24b6387c8c8c
-  |  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  |  date:        Sat Apr 30 15:24:48 2011 +0200
-  |  summary:     H
+  o  8:02de42196ebe draft Nicolas Dumazet <nicdumz.commits@gmail.com> H
   |
-  | o  changeset:   7:eea13746799a
-  |/|  parent:      6:24b6387c8c8c
-  | |  parent:      5:9520eea781bc
-  | |  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  | |  date:        Sat Apr 30 15:24:48 2011 +0200
-  | |  summary:     G
+  | o  7:eea13746799a draft Nicolas Dumazet <nicdumz.commits@gmail.com> G
+  |/|
+  o |  6:24b6387c8c8c draft Nicolas Dumazet <nicdumz.commits@gmail.com> F
   | |
-  o |  changeset:   6:24b6387c8c8c
-  | |  parent:      1:cd010b8cd998
-  | |  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  | |  date:        Sat Apr 30 15:24:48 2011 +0200
-  | |  summary:     F
+  | o  5:9520eea781bc draft Nicolas Dumazet <nicdumz.commits@gmail.com> E
+  |/
+  | o  4:32af7686d403 draft Nicolas Dumazet <nicdumz.commits@gmail.com> D
   | |
-  | o  changeset:   5:9520eea781bc
-  |/   parent:      1:cd010b8cd998
-  |    user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  |    date:        Sat Apr 30 15:24:48 2011 +0200
-  |    summary:     E
-  |
-  | o  changeset:   4:32af7686d403
-  | |  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  | |  date:        Sat Apr 30 15:24:48 2011 +0200
-  | |  summary:     D
+  | o  3:5fddd98957c8 draft Nicolas Dumazet <nicdumz.commits@gmail.com> C
   | |
-  | o  changeset:   3:5fddd98957c8
-  | |  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  | |  date:        Sat Apr 30 15:24:48 2011 +0200
-  | |  summary:     C
-  | |
-  | o  changeset:   2:42ccdea3bb16
-  |/   user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  |    date:        Sat Apr 30 15:24:48 2011 +0200
-  |    summary:     B
-  |
-  o  changeset:   1:cd010b8cd998
-     parent:      -1:000000000000
-     user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-     date:        Sat Apr 30 15:24:48 2011 +0200
-     summary:     A
+  | o  2:42ccdea3bb16 draft Nicolas Dumazet <nicdumz.commits@gmail.com> B
+  |/
+  o  1:cd010b8cd998 draft Nicolas Dumazet <nicdumz.commits@gmail.com> A
   
-  @  changeset:   0:3903775176ed
-     user:        test
-     date:        Thu Jan 01 00:00:00 1970 +0000
-     summary:     a
+  @  0:3903775176ed draft test a
   
 
   $ hg bundle2 --debug --rev '8+7+5+4' ../rev.hg2
@@ -768,6 +764,7 @@ Real world exchange
 clone --pull
 
   $ cd ..
+  $ hg -R main phase --public cd010b8cd998
   $ hg clone main other --pull --rev 9520eea781bc
   adding changesets
   adding manifests
@@ -776,20 +773,14 @@ clone --pull
   updating to branch default
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg -R other log -G
-  @  changeset:   1:9520eea781bc
-  |  tag:         tip
-  |  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  |  date:        Sat Apr 30 15:24:48 2011 +0200
-  |  summary:     E
+  @  1:9520eea781bc draft Nicolas Dumazet <nicdumz.commits@gmail.com> E
   |
-  o  changeset:   0:cd010b8cd998
-     user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-     date:        Sat Apr 30 15:24:48 2011 +0200
-     summary:     A
+  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
   
 
 pull
 
+  $ hg -R main phase --public 9520eea781bc
   $ hg -R other pull -r 24b6387c8c8c
   pulling from $TESTTMP/main (glob)
   searching for changes
@@ -798,15 +789,43 @@ pull
   adding file changes
   added 1 changesets with 1 changes to 1 files (+1 heads)
   (run 'hg heads' to see heads, 'hg merge' to merge)
+  $ hg -R other log -G
+  o  2:24b6387c8c8c draft Nicolas Dumazet <nicdumz.commits@gmail.com> F
+  |
+  | @  1:9520eea781bc draft Nicolas Dumazet <nicdumz.commits@gmail.com> E
+  |/
+  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
+  
 
+pull empty (with phase movement)
+
+  $ hg -R main phase --public 24b6387c8c8c
+  $ hg -R other pull -r 24b6387c8c8c
+  pulling from $TESTTMP/main (glob)
+  no changes found
+  $ hg -R other log -G
+  o  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com> F
+  |
+  | @  1:9520eea781bc draft Nicolas Dumazet <nicdumz.commits@gmail.com> E
+  |/
+  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
+  
 pull empty
 
   $ hg -R other pull -r 24b6387c8c8c
   pulling from $TESTTMP/main (glob)
   no changes found
+  $ hg -R other log -G
+  o  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com> F
+  |
+  | @  1:9520eea781bc draft Nicolas Dumazet <nicdumz.commits@gmail.com> E
+  |/
+  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
+  
 
 push
 
+  $ hg -R main phase --public eea13746799a
   $ hg -R main push other --rev eea13746799a
   pushing to other
   searching for changes
@@ -814,6 +833,15 @@ push
   remote: adding manifests
   remote: adding file changes
   remote: added 1 changesets with 0 changes to 0 files (-1 heads)
+  $ hg -R other log -G
+  o    3:eea13746799a public Nicolas Dumazet <nicdumz.commits@gmail.com> G
+  |\
+  | o  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com> F
+  | |
+  @ |  1:9520eea781bc public Nicolas Dumazet <nicdumz.commits@gmail.com> E
+  |/
+  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
+  
 
 pull over ssh
 
@@ -850,12 +878,28 @@ push over ssh
   remote: adding manifests
   remote: adding file changes
   remote: added 1 changesets with 1 changes to 1 files
+  $ hg -R other log -G
+  o  6:5fddd98957c8 draft Nicolas Dumazet <nicdumz.commits@gmail.com> C
+  |
+  o  5:42ccdea3bb16 draft Nicolas Dumazet <nicdumz.commits@gmail.com> B
+  |
+  | o  4:02de42196ebe draft Nicolas Dumazet <nicdumz.commits@gmail.com> H
+  | |
+  | | o  3:eea13746799a public Nicolas Dumazet <nicdumz.commits@gmail.com> G
+  | |/|
+  | o |  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com> F
+  |/ /
+  | @  1:9520eea781bc public Nicolas Dumazet <nicdumz.commits@gmail.com> E
+  |/
+  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
+  
 
 push over http
 
   $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
   $ cat other.pid >> $DAEMON_PIDS
 
+  $ hg -R main phase --public 32af7686d403
   $ hg -R main push http://localhost:$HGPORT2/ -r 32af7686d403
   pushing to http://localhost:$HGPORT2/
   searching for changes
@@ -868,51 +912,21 @@ push over http
 Check final content.
 
   $ hg -R other log -G
-  o  changeset:   7:32af7686d403
-  |  tag:         tip
-  |  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  |  date:        Sat Apr 30 15:24:48 2011 +0200
-  |  summary:     D
+  o  7:32af7686d403 public Nicolas Dumazet <nicdumz.commits@gmail.com> D
   |
-  o  changeset:   6:5fddd98957c8
-  |  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  |  date:        Sat Apr 30 15:24:48 2011 +0200
-  |  summary:     C
+  o  6:5fddd98957c8 public Nicolas Dumazet <nicdumz.commits@gmail.com> C
   |
-  o  changeset:   5:42ccdea3bb16
-  |  parent:      0:cd010b8cd998
-  |  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  |  date:        Sat Apr 30 15:24:48 2011 +0200
-  |  summary:     B
+  o  5:42ccdea3bb16 public Nicolas Dumazet <nicdumz.commits@gmail.com> B
   |
-  | o  changeset:   4:02de42196ebe
-  | |  parent:      2:24b6387c8c8c
-  | |  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  | |  date:        Sat Apr 30 15:24:48 2011 +0200
-  | |  summary:     H
+  | o  4:02de42196ebe draft Nicolas Dumazet <nicdumz.commits@gmail.com> H
   | |
-  | | o  changeset:   3:eea13746799a
-  | |/|  parent:      2:24b6387c8c8c
-  | | |  parent:      1:9520eea781bc
-  | | |  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  | | |  date:        Sat Apr 30 15:24:48 2011 +0200
-  | | |  summary:     G
-  | | |
-  | o |  changeset:   2:24b6387c8c8c
-  |/ /   parent:      0:cd010b8cd998
-  | |    user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  | |    date:        Sat Apr 30 15:24:48 2011 +0200
-  | |    summary:     F
-  | |
-  | @  changeset:   1:9520eea781bc
-  |/   user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-  |    date:        Sat Apr 30 15:24:48 2011 +0200
-  |    summary:     E
-  |
-  o  changeset:   0:cd010b8cd998
-     user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
-     date:        Sat Apr 30 15:24:48 2011 +0200
-     summary:     A
+  | | o  3:eea13746799a public Nicolas Dumazet <nicdumz.commits@gmail.com> G
+  | |/|
+  | o |  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com> F
+  |/ /
+  | @  1:9520eea781bc public Nicolas Dumazet <nicdumz.commits@gmail.com> E
+  |/
+  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
   
 
 Error Handling
@@ -933,27 +947,24 @@ Setting up
   > from mercurial import exchange
   > from mercurial import extensions
   > 
-  > def _pushbundle2failpart(orig, pushop, bundler):
-  >     extradata = orig(pushop, bundler)
+  > def _pushbundle2failpart(pushop, bundler):
   >     reason = pushop.ui.config('failpush', 'reason', None)
   >     part = None
   >     if reason == 'abort':
-  >         part = bundle2.bundlepart('test:abort')
+  >         bundler.newpart('test:abort')
   >     if reason == 'unknown':
-  >         part = bundle2.bundlepart('TEST:UNKNOWN')
+  >         bundler.newpart('TEST:UNKNOWN')
   >     if reason == 'race':
   >         # 20 Bytes of crap
-  >         part = bundle2.bundlepart('b2x:check:heads', data='01234567890123456789')
-  >     if part is not None:
-  >         bundler.addpart(part)
-  >     return extradata
+  >         bundler.newpart('b2x:check:heads', data='01234567890123456789')
+  >     return lambda op: None
   > 
   > @bundle2.parthandler("test:abort")
   > def handleabort(op, part):
   >     raise util.Abort('Abandon ship!', hint="don't panic")
   > 
   > def uisetup(ui):
-  >     extensions.wrapfunction(exchange, '_pushbundle2extraparts', _pushbundle2failpart)
+  >     exchange.bundle2partsgenerators.insert(0, _pushbundle2failpart)
   > 
   > EOF
 
@@ -1015,19 +1026,19 @@ Doing the actual push: unknown mandatory parts
   $ hg -R main push other -r e7ec4e813ba6
   pushing to other
   searching for changes
-  abort: missing support for 'test:unknown'
+  abort: missing support for test:unknown
   [255]
 
   $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
   pushing to ssh://user@dummy/other
   searching for changes
-  abort: missing support for "'test:unknown'"
+  abort: missing support for test:unknown
   [255]
 
   $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
   pushing to http://localhost:$HGPORT2/
   searching for changes
-  abort: missing support for "'test:unknown'"
+  abort: missing support for test:unknown
   [255]
 
 Doing the actual push: race

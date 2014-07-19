@@ -72,8 +72,6 @@ from mercurial import localrepo
 from mercurial import subrepo
 import os, re, errno, shutil
 
-commands.norepo += " qclone"
-
 seriesopts = [('s', 'summary', None, _('print first line of patch header'))]
 
 cmdtable = {}
@@ -1026,6 +1024,7 @@ class queue(object):
            msg: a string or a no-argument function returning a string
         """
         msg = opts.get('msg')
+        edit = opts.get('edit')
         user = opts.get('user')
         date = opts.get('date')
         if date:
@@ -1078,12 +1077,25 @@ class queue(object):
                         p.write("# User " + user + "\n")
                     if date:
                         p.write("# Date %s %s\n\n" % date)
-                if util.safehasattr(msg, '__call__'):
-                    msg = msg()
-                    repo.savecommitmessage(msg)
-                commitmsg = msg and msg or ("[mq]: %s" % patchfn)
+
+                defaultmsg = "[mq]: %s" % patchfn
+                editor = cmdutil.getcommiteditor()
+                if edit:
+                    def finishdesc(desc):
+                        if desc.rstrip():
+                            return desc
+                        else:
+                            return defaultmsg
+                    # i18n: this message is shown in editor with "HG: " prefix
+                    extramsg = _('Leave message empty to use default message.')
+                    editor = cmdutil.getcommiteditor(finishdesc=finishdesc,
+                                                     extramsg=extramsg)
+                    commitmsg = msg
+                else:
+                    commitmsg = msg or defaultmsg
+
                 n = newcommit(repo, None, commitmsg, user, date, match=match,
-                              force=True)
+                              force=True, editor=editor)
                 if n is None:
                     raise util.Abort(_("repo commit failed"))
                 try:
@@ -1092,8 +1104,9 @@ class queue(object):
                     self.parseseries()
                     self.seriesdirty = True
                     self.applieddirty = True
-                    if msg:
-                        msg = msg + "\n\n"
+                    nctx = repo[n]
+                    if nctx.description() != defaultmsg.rstrip():
+                        msg = nctx.description() + "\n\n"
                         p.write(msg)
                     if commitfiles:
                         parent = self.qparents(repo, n)
@@ -1471,6 +1484,7 @@ class queue(object):
             self.ui.write(_("no patches applied\n"))
             return 1
         msg = opts.get('msg', '').rstrip()
+        edit = opts.get('edit')
         newuser = opts.get('user')
         newdate = opts.get('date')
         if newdate:
@@ -1495,8 +1509,6 @@ class queue(object):
 
             ph = patchheader(self.join(patchfn), self.plainmode)
             diffopts = self.diffopts({'git': opts.get('git')}, patchfn)
-            if msg:
-                ph.setmessage(msg)
             if newuser:
                 ph.setuser(newuser)
             if newdate:
@@ -1505,10 +1517,6 @@ class queue(object):
 
             # only commit new patch when write is complete
             patchf = self.opener(patchfn, 'w', atomictemp=True)
-
-            comments = str(ph)
-            if comments:
-                patchf.write(comments)
 
             # update the dirstate in place, strip off the qtip commit
             # and then commit.
@@ -1629,14 +1637,6 @@ class queue(object):
                 for f in forget:
                     repo.dirstate.drop(f)
 
-                if not msg:
-                    if not ph.message:
-                        message = "[mq]: %s\n" % patchfn
-                    else:
-                        message = "\n".join(ph.message)
-                else:
-                    message = msg
-
                 user = ph.user or changes[1]
 
                 oldphase = repo[top].phase()
@@ -1653,16 +1653,41 @@ class queue(object):
             try:
                 # might be nice to attempt to roll back strip after this
 
+                defaultmsg = "[mq]: %s" % patchfn
+                editor = cmdutil.getcommiteditor()
+                if edit:
+                    def finishdesc(desc):
+                        if desc.rstrip():
+                            ph.setmessage(desc)
+                            return desc
+                        return defaultmsg
+                    # i18n: this message is shown in editor with "HG: " prefix
+                    extramsg = _('Leave message empty to use default message.')
+                    editor = cmdutil.getcommiteditor(finishdesc=finishdesc,
+                                                     extramsg=extramsg)
+                    message = msg or "\n".join(ph.message)
+                elif not msg:
+                    if not ph.message:
+                        message = defaultmsg
+                    else:
+                        message = "\n".join(ph.message)
+                else:
+                    message = msg
+                    ph.setmessage(msg)
+
                 # Ensure we create a new changeset in the same phase than
                 # the old one.
                 n = newcommit(repo, oldphase, message, user, ph.date,
-                              match=match, force=True)
+                              match=match, force=True, editor=editor)
                 # only write patch after a successful commit
                 c = [list(x) for x in refreshchanges]
                 if inclsubs:
                     self.putsubstate2changes(substatestate, c)
                 chunks = patchmod.diff(repo, patchparent,
                                        changes=c, opts=diffopts)
+                comments = str(ph)
+                if comments:
+                    patchf.write(comments)
                 for chunk in chunks:
                     patchf.write(chunk)
                 patchf.close()
@@ -2228,7 +2253,8 @@ def init(ui, repo, **opts):
           ('p', 'patches', '',
            _('location of source patch repository'), _('REPO')),
          ] + commands.remoteopts,
-         _('hg qclone [OPTION]... SOURCE [DEST]'))
+         _('hg qclone [OPTION]... SOURCE [DEST]'),
+         norepo=True)
 def clone(ui, source, dest=None, **opts):
     '''clone main and patch repository at same time
 
@@ -2307,7 +2333,8 @@ def clone(ui, source, dest=None, **opts):
 
 @command("qcommit|qci",
          commands.table["^commit|ci"][1],
-         _('hg qcommit [OPTION]... [FILE]...'))
+         _('hg qcommit [OPTION]... [FILE]...'),
+         inferrepo=True)
 def commit(ui, repo, *pats, **opts):
     """commit changes in the queue repository (DEPRECATED)
 
@@ -2390,7 +2417,8 @@ def setupheaderopts(ui, opts):
           ('d', 'date', '',
            _('add "Date: <DATE>" to patch'), _('DATE'))
           ] + commands.walkopts + commands.commitopts,
-         _('hg qnew [-e] [-m TEXT] [-l FILE] PATCH [FILE]...'))
+         _('hg qnew [-e] [-m TEXT] [-l FILE] PATCH [FILE]...'),
+         inferrepo=True)
 def new(ui, repo, patch, *args, **opts):
     """create a new patch
 
@@ -2417,14 +2445,8 @@ def new(ui, repo, patch, *args, **opts):
     Returns 0 on successful creation of a new patch.
     """
     msg = cmdutil.logmessage(ui, opts)
-    def getmsg():
-        return ui.edit(msg, opts.get('user') or ui.username())
     q = repo.mq
     opts['msg'] = msg
-    if opts.get('edit'):
-        opts['msg'] = getmsg
-    else:
-        opts['msg'] = msg
     setupheaderopts(ui, opts)
     q.new(repo, patch, *args, **opts)
     q.savedirty()
@@ -2444,7 +2466,8 @@ def new(ui, repo, patch, *args, **opts):
           ('d', 'date', '',
            _('add/update date field in patch with given date'), _('DATE'))
           ] + commands.walkopts + commands.commitopts,
-         _('hg qrefresh [-I] [-X] [-e] [-m TEXT] [-l FILE] [-s] [FILE]...'))
+         _('hg qrefresh [-I] [-X] [-e] [-m TEXT] [-l FILE] [-s] [FILE]...'),
+         inferrepo=True)
 def refresh(ui, repo, *pats, **opts):
     """update the current patch
 
@@ -2468,17 +2491,6 @@ def refresh(ui, repo, *pats, **opts):
     """
     q = repo.mq
     message = cmdutil.logmessage(ui, opts)
-    if opts.get('edit'):
-        if not q.applied:
-            ui.write(_("no patches applied\n"))
-            return 1
-        if message:
-            raise util.Abort(_('option "-e" incompatible with "-m" or "-l"'))
-        patch = q.applied[-1].name
-        ph = patchheader(q.join(patch), q.plainmode)
-        message = ui.edit('\n'.join(ph.message), ph.user or ui.username())
-        # We don't want to lose the patch message if qrefresh fails (issue2062)
-        repo.savecommitmessage(message)
     setupheaderopts(ui, opts)
     wlock = repo.wlock()
     try:
@@ -2490,7 +2502,8 @@ def refresh(ui, repo, *pats, **opts):
 
 @command("^qdiff",
          commands.diffopts + commands.diffopts2 + commands.walkopts,
-         _('hg qdiff [OPTION]... [FILE]...'))
+         _('hg qdiff [OPTION]... [FILE]...'),
+         inferrepo=True)
 def diff(ui, repo, *pats, **opts):
     """diff of the current patch and subsequent modifications
 
@@ -2536,9 +2549,6 @@ def fold(ui, repo, *files, **opts):
     q.checklocalchanges(repo)
 
     message = cmdutil.logmessage(ui, opts)
-    if opts.get('edit'):
-        if message:
-            raise util.Abort(_('option "-e" incompatible with "-m" or "-l"'))
 
     parent = q.lookup('qtip')
     patches = []
@@ -2564,7 +2574,7 @@ def fold(ui, repo, *files, **opts):
 
     if not message:
         ph = patchheader(q.join(parent), q.plainmode)
-        message, user = ph.message, ph.user
+        message = ph.message
         for msg in messages:
             if msg:
                 if message:
@@ -2572,14 +2582,10 @@ def fold(ui, repo, *files, **opts):
                 message.extend(msg)
         message = '\n'.join(message)
 
-    if opts.get('edit'):
-        message = ui.edit(message, user or ui.username())
-        repo.savecommitmessage(message)
-
     diffopts = q.patchopts(q.diffopts(), *patches)
     wlock = repo.wlock()
     try:
-        q.refresh(repo, msg=message, git=diffopts.git)
+        q.refresh(repo, msg=message, git=diffopts.git, edit=opts.get('edit'))
         q.delete(repo, patches, opts)
         q.savedirty()
     finally:
@@ -3454,5 +3460,3 @@ colortable = {'qguard.negative': 'red',
               'qseries.guarded': 'black bold',
               'qseries.missing': 'red bold',
               'qseries.unapplied': 'black bold'}
-
-commands.inferrepo += " qnew qrefresh qdiff qcommit"

@@ -5,7 +5,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import bookmarks, phases, obsolete
+import bookmarks, phases, obsolete, encoding
 
 def _nslist(repo):
     n = {}
@@ -37,3 +37,18 @@ def list(repo, namespace):
     lk = _get(namespace)[1]
     return lk(repo)
 
+encode = encoding.fromlocal
+
+decode = encoding.tolocal
+
+def encodekeys(keys):
+    """encode the content of a pushkey namespace for exchange over the wire"""
+    return '\n'.join(['%s\t%s' % (encode(k), encode(v)) for k, v in keys])
+
+def decodekeys(data):
+    """decode the content of a pushkey namespace from exchange over the wire"""
+    result = {}
+    for l in data.splitlines():
+        k, v = l.split('\t')
+        result[decode(k)] = decode(v)
+    return result

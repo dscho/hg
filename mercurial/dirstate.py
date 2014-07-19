@@ -14,6 +14,8 @@ propertycache = util.propertycache
 filecache = scmutil.filecache
 _rangemask = 0x7fffffff
 
+dirstatetuple = parsers.dirstatetuple
+
 class repocache(filecache):
     """filecache for files in .hg/"""
     def join(self, obj, fname):
@@ -335,7 +337,7 @@ class dirstate(object):
         if oldstate in "?r" and "_dirs" in self.__dict__:
             self._dirs.addpath(f)
         self._dirty = True
-        self._map[f] = (state, mode, size, mtime)
+        self._map[f] = dirstatetuple(state, mode, size, mtime)
 
     def normal(self, f):
         '''Mark a file normal and clean.'''
@@ -400,7 +402,7 @@ class dirstate(object):
                 size = -1
             elif entry[0] == 'n' and entry[2] == -2: # other parent
                 size = -2
-        self._map[f] = ('r', 0, size, 0)
+        self._map[f] = dirstatetuple('r', 0, size, 0)
         if size == 0 and f in self._copymap:
             del self._copymap[f]
 
@@ -493,9 +495,9 @@ class dirstate(object):
                 self._map[f] = oldmap[f]
             else:
                 if 'x' in allfiles.flags(f):
-                    self._map[f] = ('n', 0777, -1, 0)
+                    self._map[f] = dirstatetuple('n', 0777, -1, 0)
                 else:
-                    self._map[f] = ('n', 0666, -1, 0)
+                    self._map[f] = dirstatetuple('n', 0666, -1, 0)
         self._pl = (parent, nullid)
         self._dirty = True
 
@@ -821,7 +823,18 @@ class dirstate(object):
                     uadd(fn)
                 continue
 
-            state, mode, size, time = dmap[fn]
+            # This is equivalent to 'state, mode, size, time = dmap[fn]' but not
+            # written like that for performance reasons. dmap[fn] is not a
+            # Python tuple in compiled builds. The CPython UNPACK_SEQUENCE
+            # opcode has fast paths when the value to be unpacked is a tuple or
+            # a list, but falls back to creating a full-fledged iterator in
+            # general. That is much slower than simply accessing and storing the
+            # tuple members one by one.
+            t = dmap[fn]
+            state = t[0]
+            mode = t[1]
+            size = t[2]
+            time = t[3]
 
             if not st and state in "nma":
                 dadd(fn)

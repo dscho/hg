@@ -1,121 +1,203 @@
-Simple commands:
+This file tests the behavior of run-tests.py itself.
 
-  $ echo foo
-  foo
-  $ printf 'oh no'
-  oh no (no-eol)
-  $ printf 'bar\nbaz\n' | cat
-  bar
-  baz
+Smoke test
+============
 
-Multi-line command:
-
-  $ foo() {
-  >     echo bar
-  > }
-  $ foo
-  bar
-
-Return codes before inline python:
-
-  $ sh -c 'exit 1'
-  [1]
-
-Doctest commands:
-
-  >>> print 'foo'
-  foo
-  $ echo interleaved
-  interleaved
-  >>> for c in 'xyz':
-  ...     print c
-  x
-  y
-  z
-  >>> print
+  $ $TESTDIR/run-tests.py
   
+  # Ran 0 tests, 0 skipped, 0 warned, 0 failed.
 
-Regular expressions:
+a succesful test
+=======================
 
-  $ echo foobarbaz
-  foobar.* (re)
-  $ echo barbazquux
-  .*quux.* (re)
+  $ cat > test-success.t << EOF
+  >   $ echo babar
+  >   babar
+  > EOF
 
-Globs:
+  $ $TESTDIR/run-tests.py --with-hg=`which hg`
+  .
+  # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
-  $ printf '* \\foobarbaz {10}\n'
-  \* \\fo?bar* {10} (glob)
+failing test
+==================
 
-Literal match ending in " (re)":
+  $ cat > test-failure.t << EOF
+  >   $ echo babar
+  >   rataxes
+  > EOF
 
-  $ echo 'foo (re)'
-  foo (re)
-
-Windows: \r\n is handled like \n and can be escaped:
-
-#if windows
-  $ printf 'crlf\r\ncr\r\tcrlf\r\ncrlf\r\n'
-  crlf
-  cr\r (no-eol) (esc)
-  \tcrlf (esc)
-  crlf\r (esc)
-#endif
-
-Combining esc with other markups - and handling lines ending with \r instead of \n:
-
-  $ printf 'foo/bar\r'
-  fo?/bar\r (no-eol) (glob) (esc)
-#if windows
-  $ printf 'foo\\bar\r'
-  foo/bar\r (no-eol) (glob) (esc)
-#endif
-  $ printf 'foo/bar\rfoo/bar\r'
-  foo.bar\r \(no-eol\) (re) (esc)
-  foo.bar\r \(no-eol\) (re)
-
-testing hghave
-
-  $ "$TESTDIR/hghave" true
-  $ "$TESTDIR/hghave" false
-  skipped: missing feature: nail clipper
+  $ $TESTDIR/run-tests.py --with-hg=`which hg`
+  
+  --- $TESTTMP/test-failure.t
+  +++ $TESTTMP/test-failure.t.err
+  @@ -1,2 +1,2 @@
+     $ echo babar
+  -  rataxes
+  +  babar
+  
+  ERROR: test-failure.t output changed
+  !.
+  Failed test-failure.t: output changed
+  # Ran 2 tests, 0 skipped, 0 warned, 1 failed.
+  python hash seed: * (glob)
   [1]
-  $ "$TESTDIR/hghave" no-true
-  skipped: system supports yak shaving
+
+test for --retest
+====================
+
+  $ $TESTDIR/run-tests.py --with-hg=`which hg` --retest
+  
+  --- $TESTTMP/test-failure.t
+  +++ $TESTTMP/test-failure.t.err
+  @@ -1,2 +1,2 @@
+     $ echo babar
+  -  rataxes
+  +  babar
+  
+  ERROR: test-failure.t output changed
+  !
+  Failed test-failure.t: output changed
+  # Ran 1 tests, 1 skipped, 0 warned, 1 failed.
+  python hash seed: * (glob)
   [1]
-  $ "$TESTDIR/hghave" no-false
 
-Conditional sections based on hghave:
+Selecting Tests To Run
+======================
 
-#if true
-  $ echo tested
-  tested
-#else
-  $ echo skipped
-#endif
+successful
 
-#if false
-  $ echo skipped
-#else
-  $ echo tested
-  tested
-#endif
+  $ $TESTDIR/run-tests.py --with-hg=`which hg` test-success.t
+  .
+  # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
-#if no-false
-  $ echo tested
-  tested
-#else
-  $ echo skipped
-#endif
+failed
 
-#if no-true
-  $ echo skipped
-#else
-  $ echo tested
-  tested
-#endif
+  $ $TESTDIR/run-tests.py --with-hg=`which hg` test-failure.t
+  
+  --- $TESTTMP/test-failure.t
+  +++ $TESTTMP/test-failure.t.err
+  @@ -1,2 +1,2 @@
+     $ echo babar
+  -  rataxes
+  +  babar
+  
+  ERROR: test-failure.t output changed
+  !
+  Failed test-failure.t: output changed
+  # Ran 1 tests, 0 skipped, 0 warned, 1 failed.
+  python hash seed: * (glob)
+  [1]
 
-Exit code:
+Running In Debug Mode
+======================
 
-  $ (exit 1)
+  $ $TESTDIR/run-tests.py --with-hg=`which hg` --debug
+  + echo SALT* 0 0 (glob)
+  SALT* 0 0 (glob)
+  + echo babar
+  babar
+  + echo SALT* 2 0 (glob)
+  SALT* 2 0 (glob)
+  .+ echo SALT* 0 0 (glob)
+  SALT* 0 0 (glob)
+  + echo babar
+  babar
+  + echo SALT* 2 0 (glob)
+  SALT* 2 0 (glob)
+  .
+  # Ran 2 tests, 0 skipped, 0 warned, 0 failed.
+
+Parallel runs
+==============
+
+(duplicate the failing test to get predictable output)
+  $ cp test-failure.t test-failure-copy.t
+
+  $ $TESTDIR/run-tests.py --with-hg=`which hg` --jobs 2 test-failure*.t
+  
+  --- $TESTTMP/test-failure*.t (glob)
+  +++ $TESTTMP/test-failure*.t.err (glob)
+  @@ -1,2 +1,2 @@
+     $ echo babar
+  -  rataxes
+  +  babar
+  
+  ERROR: test-failure*.t output changed (glob)
+  !
+  --- $TESTTMP/test-failure*.t (glob)
+  +++ $TESTTMP/test-failure*.t.err (glob)
+  @@ -1,2 +1,2 @@
+     $ echo babar
+  -  rataxes
+  +  babar
+  
+  ERROR: test-failure*.t output changed (glob)
+  !
+  Failed test-failure*.t: output changed (glob)
+  Failed test-failure*.t: output changed (glob)
+  # Ran 2 tests, 0 skipped, 0 warned, 2 failed.
+  python hash seed: * (glob)
+  [1]
+
+(delete the duplicated test file)
+  $ rm test-failure-copy.t
+
+
+Interactive run
+===============
+
+(backup the failing test)
+  $ cp test-failure.t backup
+
+Refuse the fix
+
+  $ echo 'n' | $TESTDIR/run-tests.py --with-hg=`which hg` -i
+  
+  --- $TESTTMP/test-failure.t
+  +++ $TESTTMP/test-failure.t.err
+  @@ -1,2 +1,2 @@
+     $ echo babar
+  -  rataxes
+  +  babar
+  Accept this change? [n] 
+  ERROR: test-failure.t output changed
+  !.
+  Failed test-failure.t: output changed
+  # Ran 2 tests, 0 skipped, 0 warned, 1 failed.
+  python hash seed: * (glob)
+  [1]
+
+  $ cat test-failure.t
+    $ echo babar
+    rataxes
+
+Accept the fix
+
+  $ echo 'y' | $TESTDIR/run-tests.py --with-hg=`which hg` -i
+  
+  --- $TESTTMP/test-failure.t
+  +++ $TESTTMP/test-failure.t.err
+  @@ -1,2 +1,2 @@
+     $ echo babar
+  -  rataxes
+  +  babar
+  Accept this change? [n] ..
+  # Ran 2 tests, 0 skipped, 0 warned, 0 failed.
+
+  $ cat test-failure.t
+    $ echo babar
+    babar
+
+(reinstall)
+  $ mv backup test-failure.t
+
+No Diff
+===============
+
+  $ $TESTDIR/run-tests.py --with-hg=`which hg` --nodiff
+  !.
+  Failed test-failure.t: output changed
+  # Ran 2 tests, 0 skipped, 0 warned, 1 failed.
+  python hash seed: * (glob)
   [1]

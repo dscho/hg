@@ -138,7 +138,7 @@ def wrapcommand(table, command, wrapper):
     where orig is the original (wrapped) function, and *args, **kwargs
     are the arguments passed to it.
     '''
-    assert util.safehasattr(wrapper, '__call__')
+    assert callable(wrapper)
     aliases, entry = cmdutil.findcmd(command, table)
     for alias, e in table.iteritems():
         if e is entry:
@@ -191,12 +191,12 @@ def wrapfunction(container, funcname, wrapper):
     your end users, you should play nicely with others by using the
     subclass trick.
     '''
-    assert util.safehasattr(wrapper, '__call__')
+    assert callable(wrapper)
     def wrap(*args, **kwargs):
         return wrapper(origfn, *args, **kwargs)
 
     origfn = getattr(container, funcname)
-    assert util.safehasattr(origfn, '__call__')
+    assert callable(origfn)
     setattr(container, funcname, wrap)
     return origfn
 
@@ -367,3 +367,16 @@ def enabled(shortname=True):
         exts[ename] = doc.splitlines()[0].strip()
 
     return exts
+
+def moduleversion(module):
+    '''return version information from given module as a string'''
+    if (util.safehasattr(module, 'getversion')
+          and callable(module.getversion)):
+        version = module.getversion()
+    elif util.safehasattr(module, '__version__'):
+        version = module.__version__
+    else:
+        version = ''
+    if isinstance(version, (list, tuple)):
+        version = '.'.join(str(o) for o in version)
+    return version

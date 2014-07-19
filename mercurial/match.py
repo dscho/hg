@@ -12,7 +12,7 @@ from i18n import _
 def _rematcher(regex):
     '''compile the regexp with the best available regexp engine and return a
     matcher function'''
-    m = util.compilere(regex)
+    m = util.re.compile(regex)
     try:
         # slightly faster, provided by facebook's re2 bindings
         return m.test_match
@@ -247,7 +247,7 @@ def _globre(pat):
     i, n = 0, len(pat)
     res = ''
     group = 0
-    escape = re.escape
+    escape = util.re.escape
     def peek():
         return i < n and pat[i]
     while i < n:
@@ -310,11 +310,11 @@ def _regex(kind, pat, globsuffix):
     if kind == 're':
         return pat
     if kind == 'path':
-        return '^' + re.escape(pat) + '(?:/|$)'
+        return '^' + util.re.escape(pat) + '(?:/|$)'
     if kind == 'relglob':
         return '(?:|.*/)' + _globre(pat) + globsuffix
     if kind == 'relpath':
-        return re.escape(pat) + '(?:/|$)'
+        return util.re.escape(pat) + '(?:/|$)'
     if kind == 'relre':
         if pat.startswith('^'):
             return pat

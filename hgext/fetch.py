@@ -12,8 +12,18 @@ from mercurial.node import nullid, short
 from mercurial import commands, cmdutil, hg, util, error
 from mercurial.lock import release
 
+cmdtable = {}
+command = cmdutil.command(cmdtable)
 testedwith = 'internal'
 
+@command('fetch',
+    [('r', 'rev', [],
+     _('a specific revision you would like to pull'), _('REV')),
+    ('e', 'edit', None, _('edit commit message')),
+    ('', 'force-editor', None, _('edit commit message (DEPRECATED)')),
+    ('', 'switch-parent', None, _('switch parents when merging')),
+    ] + commands.commitopts + commands.commitopts2 + commands.remoteopts,
+    _('hg fetch [SOURCE]'))
 def fetch(ui, repo, source='default', **opts):
     '''pull changes from a remote repository, merge new changes if needed.
 
@@ -132,10 +142,9 @@ def fetch(ui, repo, source='default', **opts):
             message = (cmdutil.logmessage(ui, opts) or
                        ('Automated merge with %s' %
                         util.removeauth(other.url())))
-            editor = cmdutil.commiteditor
-            if opts.get('force_editor') or opts.get('edit'):
-                editor = cmdutil.commitforceeditor
-            n = repo.commit(message, opts['user'], opts['date'], editor=editor)
+            editopt = opts.get('edit') or opts.get('force_editor')
+            n = repo.commit(message, opts['user'], opts['date'],
+                            editor=cmdutil.getcommiteditor(edit=editopt))
             ui.status(_('new changeset %d:%s merges remote changes '
                         'with local\n') % (repo.changelog.rev(n),
                                            short(n)))
@@ -144,15 +153,3 @@ def fetch(ui, repo, source='default', **opts):
 
     finally:
         release(lock, wlock)
-
-cmdtable = {
-    'fetch':
-        (fetch,
-        [('r', 'rev', [],
-          _('a specific revision you would like to pull'), _('REV')),
-         ('e', 'edit', None, _('edit commit message')),
-         ('', 'force-editor', None, _('edit commit message (DEPRECATED)')),
-         ('', 'switch-parent', None, _('switch parents when merging')),
-        ] + commands.commitopts + commands.commitopts2 + commands.remoteopts,
-        _('hg fetch [SOURCE]')),
-}

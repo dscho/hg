@@ -29,12 +29,15 @@ lines = []
 for line in sys.stdin:
     # We whitelist tests (see more messages in pyflakes.messages)
     pats = [
-            r"imported but unused",
-            r"local variable '.*' is assigned to but never used",
-            r"unable to detect undefined names",
+            (r"imported but unused", None),
+            (r"local variable '.*' is assigned to but never used", None),
+            (r"unable to detect undefined names", None),
+            (r"undefined name '.*'",
+             r"undefined name '(WindowsError|memoryview)'")
            ]
-    for msgtype, pat in enumerate(pats):
-        if re.search(pat, line):
+
+    for msgtype, (pat, excl) in enumerate(pats):
+        if re.search(pat, line) and (not excl or not re.search(excl, line)):
             break # pattern matches
     else:
         continue # no pattern matched, next line
@@ -49,3 +52,7 @@ for line in sys.stdin:
 for msgtype, line in sorted(lines, key=makekey):
     sys.stdout.write(line)
 print
+
+# self test of "undefined name" detection for other than 'memoryview'
+if False:
+    print undefinedname

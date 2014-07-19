@@ -282,6 +282,8 @@ def overridelog(orig, ui, repo, *pats, **opts):
             standin = lfutil.standin(m._files[i])
             if standin in repo[ctx.node()]:
                 m._files[i] = standin
+            elif m._files[i] not in repo[ctx.node()]:
+                m._files.append(standin)
             pats.add(standin)
 
         m._fmap = set(m._files)
@@ -408,14 +410,13 @@ def overridecalculateupdates(origfn, repo, p1, p2, pas, branchmerge, force,
     if overwrite:
         return actions
 
-    removes = set(a[0] for a in actions if a[1] == 'r')
-    processed = []
+    removes = set(a[0] for a in actions['r'])
 
-    for action in actions:
-        f, m, args, msg = action
-
+    newglist = []
+    for action in actions['g']:
+        f, args, msg = action
         splitstandin = f and lfutil.splitstandin(f)
-        if (m == "g" and splitstandin is not None and
+        if (splitstandin is not None and
             splitstandin in p1 and splitstandin not in removes):
             # Case 1: normal file in the working copy, largefile in
             # the second parent
@@ -425,12 +426,11 @@ def overridecalculateupdates(origfn, repo, p1, p2, pas, branchmerge, force,
                     'use (l)argefile or keep (n)ormal file?'
                     '$$ &Largefile $$ &Normal file') % lfile
             if repo.ui.promptchoice(msg, 0) == 0:
-                processed.append((lfile, "r", None, msg))
-                processed.append((standin, "g", (p2.flags(standin),), msg))
+                actions['r'].append((lfile, None, msg))
+                newglist.append((standin, (p2.flags(standin),), msg))
             else:
-                processed.append((standin, "r", None, msg))
-        elif (m == "g" and
-            lfutil.standin(f) in p1 and lfutil.standin(f) not in removes):
+                actions['r'].append((standin, None, msg))
+        elif lfutil.standin(f) in p1 and lfutil.standin(f) not in removes:
             # Case 2: largefile in the working copy, normal file in
             # the second parent
             standin = lfutil.standin(f)
@@ -439,20 +439,23 @@ def overridecalculateupdates(origfn, repo, p1, p2, pas, branchmerge, force,
                     'keep (l)argefile or use (n)ormal file?'
                     '$$ &Largefile $$ &Normal file') % lfile
             if repo.ui.promptchoice(msg, 0) == 0:
-                processed.append((lfile, "r", None, msg))
+                actions['r'].append((lfile, None, msg))
             else:
-                processed.append((standin, "r", None, msg))
-                processed.append((lfile, "g", (p2.flags(lfile),), msg))
+                actions['r'].append((standin, None, msg))
+                newglist.append((lfile, (p2.flags(lfile),), msg))
         else:
-            processed.append(action)
+            newglist.append(action)
 
-    return processed
+    newglist.sort()
+    actions['g'] = newglist
+
+    return actions
 
 # Override filemerge to prompt the user about how they wish to merge
 # largefiles. This will handle identical edits without prompting the user.
-def overridefilemerge(origfn, repo, mynode, orig, fcd, fco, fca):
+def overridefilemerge(origfn, repo, mynode, orig, fcd, fco, fca, labels=None):
     if not lfutil.isstandin(orig):
-        return origfn(repo, mynode, orig, fcd, fco, fca)
+        return origfn(repo, mynode, orig, fcd, fco, fca, labels=labels)
 
     ahash = fca.data().strip().lower()
     dhash = fcd.data().strip().lower()
@@ -989,17 +992,59 @@ def overrideforget(orig, ui, repo, *pats, **opts):
 
     return result
 
+def _getoutgoings(repo, other, missing, addfunc):
+    """get pairs of filename and largefile hash in outgoing revisions
+    in 'missing'.
+
+    largefiles already existing on 'other' repository are ignored.
+
+    'addfunc' is invoked with each unique pairs of filename and
+    largefile hash value.
+    """
+    knowns = set()
+    lfhashes = set()
+    def dedup(fn, lfhash):
+        k = (fn, lfhash)
+        if k not in knowns:
+            knowns.add(k)
+            lfhashes.add(lfhash)
+    lfutil.getlfilestoupload(repo, missing, dedup)
+    if lfhashes:
+        lfexists = basestore._openstore(repo, other).exists(lfhashes)
+        for fn, lfhash in knowns:
+            if not lfexists[lfhash]: # lfhash doesn't exist on "other"
+                addfunc(fn, lfhash)
+
 def outgoinghook(ui, repo, other, opts, missing):
     if opts.pop('large', None):
-        toupload = set()
-        lfutil.getlfilestoupload(repo, missing,
-                                 lambda fn, lfhash: toupload.add(fn))
+        lfhashes = set()
+        if ui.debugflag:
+            toupload = {}
+            def addfunc(fn, lfhash):
+                if fn not in toupload:
+                    toupload[fn] = []
+                toupload[fn].append(lfhash)
+                lfhashes.add(lfhash)
+            def showhashes(fn):
+                for lfhash in sorted(toupload[fn]):
+                    ui.debug('    %s\n' % (lfhash))
+        else:
+            toupload = set()
+            def addfunc(fn, lfhash):
+                toupload.add(fn)
+                lfhashes.add(lfhash)
+            def showhashes(fn):
+                pass
+        _getoutgoings(repo, other, missing, addfunc)
+
         if not toupload:
             ui.status(_('largefiles: no files to upload\n'))
         else:
-            ui.status(_('largefiles to upload:\n'))
+            ui.status(_('largefiles to upload (%d entities):\n')
+                      % (len(lfhashes)))
             for file in sorted(toupload):
                 ui.status(lfutil.splitstandin(file) + '\n')
+                showhashes(file)
             ui.status('\n')
 
 def summaryremotehook(ui, repo, opts, changes):
@@ -1017,14 +1062,19 @@ def summaryremotehook(ui, repo, opts, changes):
             return
 
         toupload = set()
-        lfutil.getlfilestoupload(repo, outgoing.missing,
-                                 lambda fn, lfhash: toupload.add(fn))
+        lfhashes = set()
+        def addfunc(fn, lfhash):
+            toupload.add(fn)
+            lfhashes.add(lfhash)
+        _getoutgoings(repo, peer, outgoing.missing, addfunc)
+
         if not toupload:
             # i18n: column positioning for "hg summary"
             ui.status(_('largefiles: (no files to upload)\n'))
         else:
             # i18n: column positioning for "hg summary"
-            ui.status(_('largefiles: %d to upload\n') % len(toupload))
+            ui.status(_('largefiles: %d entities for %d files to upload\n')
+                      % (len(lfhashes), len(toupload)))
 
 def overridesummary(orig, ui, repo, *pats, **opts):
     try:

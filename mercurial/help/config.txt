@@ -330,6 +330,64 @@ If no suitable authentication entry is found, the user is prompted
 for credentials as usual if required by the remote.
 
 
+``committemplate``
+------------------
+
+``changeset`` configuration in this section is used as the template to
+customize the text shown in the editor when committing.
+
+In addition to pre-defined template keywords, commit log specific one
+below can be used for customization:
+
+``extramsg``
+    String: Extra message (typically 'Leave message empty to abort
+    commit.'). This may be changed by some commands or extensions.
+
+For example, the template configuration below shows as same text as
+one shown by default::
+
+    [committemplate]
+    changeset = {desc}\n\n
+        HG: Enter commit message.  Lines beginning with 'HG:' are removed.
+        HG: {extramsg}
+        HG: --
+        HG: user: {author}\n{ifeq(p2rev, "-1", "",
+       "HG: branch merge\n")
+       }HG: branch '{branch}'\n{if(currentbookmark,
+       "HG: bookmark '{currentbookmark}'\n")  }{subrepos %
+       "HG: subrepo {subrepo}\n"              }{file_adds %
+       "HG: added {file}\n"                   }{file_mods %
+       "HG: changed {file}\n"                 }{file_dels %
+       "HG: removed {file}\n"                 }{if(files, "",
+       "HG: no files changed\n")}
+
+.. note::
+
+   For some problematic encodings (see :hg:`help win32mbcs` for
+   detail), this customization should be configured carefully, to
+   avoid showing broken characters.
+
+   For example, if multibyte character ending with backslash (0x5c) is
+   followed by ASCII character 'n' in the customized template,
+   sequence of backslash and 'n' is treated as line-feed unexpectedly
+   (and multibyte character is broken, too).
+
+Customized template is used for commands below (``--edit`` may be
+required):
+
+- :hg:`backout`
+- :hg:`commit`
+- :hg:`fetch` (for merge commit only)
+- :hg:`graft`
+- :hg:`histedit`
+- :hg:`import`
+- :hg:`qfold`, :hg:`qnew` and :hg:`qrefresh`
+- :hg:`rebase`
+- :hg:`shelve`
+- :hg:`sign`
+- :hg:`tag`
+- :hg:`transplant`
+
 ``decode/encode``
 -----------------
 
@@ -807,7 +865,9 @@ Example::
 ---------------
 
 This section configures external merge tools to use for file-level
-merges.
+merges. This section has likely been preconfigured at install time.
+Use :hg:`config merge-tools` to check the existing configuration.
+Also see :hg:`help merge-tools` for more details.
 
 Example ``~/.hgrc``::
 
@@ -818,6 +878,9 @@ Example ``~/.hgrc``::
   kdiff3.args = $base $local $other -o $output
   # Give higher priority
   kdiff3.priority = 1
+
+  # Changing the priority of preconfigured tool
+  vimdiff.priority = 0
 
   # Define new tool
   myHtmlTool.args = -m $local $other $base $output
@@ -838,7 +901,13 @@ Supported arguments:
 ``args``
   The arguments to pass to the tool executable. You can refer to the
   files being merged as well as the output file through these
-  variables: ``$base``, ``$local``, ``$other``, ``$output``.
+  variables: ``$base``, ``$local``, ``$other``, ``$output``. The meaning
+  of ``$local`` and ``$other`` can vary depending on which action is being
+  performed. During and update or merge, ``$local`` represents the original
+  state of the file, while ``$other`` represents the commit you are updating
+  to or the commit you are merging with. During a rebase ``$local``
+  represents the destination of the rebase, and ``$other`` represents the
+  commit being rebased.
   Default: ``$local $base $other``
 
 ``premerge``
@@ -1202,6 +1271,27 @@ User interface controls.
     The conflict resolution program to use during a manual merge.
     For more information on merge tools see :hg:`help merge-tools`.
     For configuring merge tools see the ``[merge-tools]`` section.
+
+``mergemarkers``
+    Sets the merge conflict marker label styling. The ``detailed``
+    style uses the ``mergemarkertemplate`` setting to style the labels.
+    The ``basic`` style just uses 'local' and 'other' as the marker label.
+    One of ``basic`` or ``detailed``.
+    Default is ``basic``.
+
+``mergemarkertemplate``
+    The template used to print the commit description next to each conflict
+    marker during merge conflicts. See :hg:`help templates` for the template
+    format.
+    Defaults to showing the hash, tags, branches, bookmarks, author, and
+    the first line of the commit description.
+    You have to pay attention to encodings of managed files, if you
+    use non-ASCII characters in tags, branches, bookmarks, author
+    and/or commit descriptions. At template expansion, non-ASCII
+    characters use the encoding specified by ``--encoding`` global
+    option, ``HGENCODING`` or other locale setting environment
+    variables. The difference of encoding between merged file and
+    conflict markers causes serious problem.
 
 ``portablefilenames``
     Check for portable filenames. Can be ``warn``, ``ignore`` or ``abort``.

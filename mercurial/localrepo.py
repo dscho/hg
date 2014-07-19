@@ -180,7 +180,9 @@ class localrepository(object):
     requirements = ['revlogv1']
     filtername = None
 
-    bundle2caps = {'HG2X': ()}
+    bundle2caps = {'HG2X': (),
+                   'b2x:listkeys': (),
+                   'b2x:pushkey': ()}
 
     # a list of (ui, featureset) functions.
     # only functions defined in module of enabled extensions are invoked
@@ -476,10 +478,17 @@ class localrepository(object):
         return 'file:' + self.root
 
     def hook(self, name, throw=False, **args):
+        """Call a hook, passing this repo instance.
+
+        This a convenience method to aid invoking hooks. Extensions likely
+        won't call this unless they have registered a custom hook or are
+        replacing code that is expected to call a hook.
+        """
         return hook.hook(self.ui, self, name, throw, **args)
 
     @unfilteredmethod
-    def _tag(self, names, node, message, local, user, date, extra={}):
+    def _tag(self, names, node, message, local, user, date, extra={},
+             editor=False):
         if isinstance(names, str):
             names = (names,)
 
@@ -539,14 +548,15 @@ class localrepository(object):
             self[None].add(['.hgtags'])
 
         m = matchmod.exact(self.root, '', ['.hgtags'])
-        tagnode = self.commit(message, user, date, extra=extra, match=m)
+        tagnode = self.commit(message, user, date, extra=extra, match=m,
+                              editor=editor)
 
         for name in names:
             self.hook('tag', node=hex(node), tag=name, local=local)
 
         return tagnode
 
-    def tag(self, names, node, message, local, user, date):
+    def tag(self, names, node, message, local, user, date, editor=False):
         '''tag a revision with one or more symbolic names.
 
         names is a list of strings or, when adding a single tag, names may be a
@@ -574,7 +584,7 @@ class localrepository(object):
                                        '(please commit .hgtags manually)'))
 
         self.tags() # instantiate the cache
-        self._tag(names, node, message, local, user, date)
+        self._tag(names, node, message, local, user, date, editor=editor)
 
     @filteredpropertycache
     def _tagscache(self):
@@ -855,7 +865,8 @@ class localrepository(object):
         # abort here if the journal already exists
         if self.svfs.exists("journal"):
             raise error.RepoError(
-                _("abandoned transaction found - run hg recover"))
+                _("abandoned transaction found"),
+                hint=_("run 'hg recover' to clean up transaction"))
 
         def onclose():
             self.store.write(self._transref())
@@ -1501,149 +1512,9 @@ class localrepository(object):
     def status(self, node1='.', node2=None, match=None,
                ignored=False, clean=False, unknown=False,
                listsubrepos=False):
-        """return status of files between two nodes or node and working
-        directory.
-
-        If node1 is None, use the first dirstate parent instead.
-        If node2 is None, compare node1 with working directory.
-        """
-
-        def mfmatches(ctx):
-            mf = ctx.manifest().copy()
-            if match.always():
-                return mf
-            for fn in mf.keys():
-                if not match(fn):
-                    del mf[fn]
-            return mf
-
-        ctx1 = self[node1]
-        ctx2 = self[node2]
-
-        working = ctx2.rev() is None
-        parentworking = working and ctx1 == self['.']
-        match = match or matchmod.always(self.root, self.getcwd())
-        listignored, listclean, listunknown = ignored, clean, unknown
-
-        # load earliest manifest first for caching reasons
-        if not working and ctx2.rev() < ctx1.rev():
-            ctx2.manifest()
-
-        if not parentworking:
-            def bad(f, msg):
-                # 'f' may be a directory pattern from 'match.files()',
-                # so 'f not in ctx1' is not enough
-                if f not in ctx1 and f not in ctx1.dirs():
-                    self.ui.warn('%s: %s\n' % (self.dirstate.pathto(f), msg))
-            match.bad = bad
-
-        if working: # we need to scan the working dir
-            subrepos = []
-            if '.hgsub' in self.dirstate:
-                subrepos = sorted(ctx2.substate)
-            s = self.dirstate.status(match, subrepos, listignored,
-                                     listclean, listunknown)
-            cmp, modified, added, removed, deleted, unknown, ignored, clean = s
-
-            # check for any possibly clean files
-            if parentworking and cmp:
-                fixup = []
-                # do a full compare of any files that might have changed
-                for f in sorted(cmp):
-                    if (f not in ctx1 or ctx2.flags(f) != ctx1.flags(f)
-                        or ctx1[f].cmp(ctx2[f])):
-                        modified.append(f)
-                    else:
-                        fixup.append(f)
-
-                # update dirstate for files that are actually clean
-                if fixup:
-                    if listclean:
-                        clean += fixup
-
-                    try:
-                        # updating the dirstate is optional
-                        # so we don't wait on the lock
-                        wlock = self.wlock(False)
-                        try:
-                            for f in fixup:
-                                self.dirstate.normal(f)
-                        finally:
-                            wlock.release()
-                    except error.LockError:
-                        pass
-
-        if not parentworking:
-            mf1 = mfmatches(ctx1)
-            if working:
-                # we are comparing working dir against non-parent
-                # generate a pseudo-manifest for the working dir
-                mf2 = mfmatches(self['.'])
-                for f in cmp + modified + added:
-                    mf2[f] = None
-                    mf2.set(f, ctx2.flags(f))
-                for f in removed:
-                    if f in mf2:
-                        del mf2[f]
-            else:
-                # we are comparing two revisions
-                deleted, unknown, ignored = [], [], []
-                mf2 = mfmatches(ctx2)
-
-            modified, added, clean = [], [], []
-            withflags = mf1.withflags() | mf2.withflags()
-            for fn, mf2node in mf2.iteritems():
-                if fn in mf1:
-                    if (fn not in deleted and
-                        ((fn in withflags and mf1.flags(fn) != mf2.flags(fn)) or
-                         (mf1[fn] != mf2node and
-                          (mf2node or ctx1[fn].cmp(ctx2[fn]))))):
-                        modified.append(fn)
-                    elif listclean:
-                        clean.append(fn)
-                    del mf1[fn]
-                elif fn not in deleted:
-                    added.append(fn)
-            removed = mf1.keys()
-
-        if working and modified and not self.dirstate._checklink:
-            # Symlink placeholders may get non-symlink-like contents
-            # via user error or dereferencing by NFS or Samba servers,
-            # so we filter out any placeholders that don't look like a
-            # symlink
-            sane = []
-            for f in modified:
-                if ctx2.flags(f) == 'l':
-                    d = ctx2[f].data()
-                    if d == '' or len(d) >= 1024 or '\n' in d or util.binary(d):
-                        self.ui.debug('ignoring suspect symlink placeholder'
-                                      ' "%s"\n' % f)
-                        continue
-                sane.append(f)
-            modified = sane
-
-        r = modified, added, removed, deleted, unknown, ignored, clean
-
-        if listsubrepos:
-            for subpath, sub in scmutil.itersubrepos(ctx1, ctx2):
-                if working:
-                    rev2 = None
-                else:
-                    rev2 = ctx2.substate[subpath][1]
-                try:
-                    submatch = matchmod.narrowmatcher(subpath, match)
-                    s = sub.status(rev2, match=submatch, ignored=listignored,
-                                   clean=listclean, unknown=listunknown,
-                                   listsubrepos=True)
-                    for rfiles, sfiles in zip(r, s):
-                        rfiles.extend("%s/%s" % (subpath, f) for f in sfiles)
-                except error.LookupError:
-                    self.ui.status(_("skipping missing subrepository: %s\n")
-                                   % subpath)
-
-        for l in r:
-            l.sort()
-        return r
+        '''a convenience method that calls node1.status(node2)'''
+        return self[node1].status(node2, match, ignored, clean, unknown,
+                                  listsubrepos)
 
     def heads(self, start=None):
         heads = self.changelog.heads(start)

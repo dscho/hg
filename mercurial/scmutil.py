@@ -178,8 +178,14 @@ class abstractvfs(object):
     def islink(self, path=None):
         return os.path.islink(self.join(path))
 
+    def lexists(self, path=None):
+        return os.path.lexists(self.join(path))
+
     def lstat(self, path=None):
         return os.lstat(self.join(path))
+
+    def listdir(self, path=None):
+        return os.listdir(self.join(path))
 
     def makedir(self, path=None, notindexed=True):
         return util.makedir(self.join(path), notindexed)
@@ -222,6 +228,9 @@ class abstractvfs(object):
 
     def unlink(self, path=None):
         return util.unlink(self.join(path))
+
+    def unlinkpath(self, path=None, ignoremissing=False):
+        return util.unlinkpath(self.join(path), ignoremissing)
 
     def utime(self, path=None, t=None):
         return os.utime(self.join(path), t)

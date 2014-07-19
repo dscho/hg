@@ -9,7 +9,7 @@ from i18n import _
 from node import hex, nullid
 import errno, urllib
 import util, scmutil, changegroup, base85, error
-import discovery, phases, obsolete, bookmarks, bundle2
+import discovery, phases, obsolete, bookmarks, bundle2, pushkey
 
 def readbundle(ui, fh, fname, vfs=None):
     header = changegroup.readexactly(fh, 4)
@@ -61,6 +61,9 @@ class pushoperation(object):
         self.newbranch = newbranch
         # did a local lock get acquired?
         self.locallocked = None
+        # step already performed
+        # (used to check what steps have been already performed through bundle2)
+        self.stepsdone = set()
         # Integer version of the push result
         # - None means nothing to push
         # - 0 means HTTP error
@@ -128,16 +131,11 @@ def push(repo, remote, force=False, revs=None, newbranch=False):
             lock = pushop.remote.lock()
         try:
             _pushdiscovery(pushop)
-            if _pushcheckoutgoing(pushop):
-                pushop.repo.prepushoutgoinghooks(pushop.repo,
-                                                 pushop.remote,
-                                                 pushop.outgoing)
-                if (pushop.repo.ui.configbool('experimental', 'bundle2-exp',
-                                              False)
-                    and pushop.remote.capable('bundle2-exp')):
-                    _pushbundle2(pushop)
-                else:
-                    _pushchangeset(pushop)
+            if (pushop.repo.ui.configbool('experimental', 'bundle2-exp',
+                                          False)
+                and pushop.remote.capable('bundle2-exp')):
+                _pushbundle2(pushop)
+            _pushchangeset(pushop)
             _pushcomputecommonheads(pushop)
             _pushsyncphase(pushop)
             _pushobsolete(pushop)
@@ -203,57 +201,73 @@ def _pushcheckoutgoing(pushop):
                              newbm)
     return True
 
+def _pushb2ctx(pushop, bundler):
+    """handle changegroup push through bundle2
+
+    addchangegroup result is stored in the ``pushop.ret`` attribute.
+    """
+    if 'changesets' in pushop.stepsdone:
+        return
+    pushop.stepsdone.add('changesets')
+    # Send known heads to the server for race detection.
+    pushop.stepsdone.add('changesets')
+    if not _pushcheckoutgoing(pushop):
+        return
+    pushop.repo.prepushoutgoinghooks(pushop.repo,
+                                     pushop.remote,
+                                     pushop.outgoing)
+    if not pushop.force:
+        bundler.newpart('B2X:CHECK:HEADS', data=iter(pushop.remoteheads))
+    cg = changegroup.getlocalbundle(pushop.repo, 'push', pushop.outgoing)
+    cgpart = bundler.newpart('B2X:CHANGEGROUP', data=cg.getchunks())
+    def handlereply(op):
+        """extract addchangroup returns from server reply"""
+        cgreplies = op.records.getreplies(cgpart.id)
+        assert len(cgreplies['changegroup']) == 1
+        pushop.ret = cgreplies['changegroup'][0]['return']
+    return handlereply
+
+# list of function that may decide to add parts to an outgoing bundle2
+bundle2partsgenerators = [_pushb2ctx]
+
 def _pushbundle2(pushop):
     """push data to the remote using bundle2
 
     The only currently supported type of data is changegroup but this will
     evolve in the future."""
-    # Send known head to the server for race detection.
-    capsblob = urllib.unquote(pushop.remote.capable('bundle2-exp'))
-    caps = bundle2.decodecaps(capsblob)
-    bundler = bundle2.bundle20(pushop.ui, caps)
+    bundler = bundle2.bundle20(pushop.ui, bundle2.bundle2caps(pushop.remote))
     # create reply capability
     capsblob = bundle2.encodecaps(pushop.repo.bundle2caps)
-    bundler.addpart(bundle2.bundlepart('b2x:replycaps', data=capsblob))
-    if not pushop.force:
-        part = bundle2.bundlepart('B2X:CHECK:HEADS',
-                                  data=iter(pushop.remoteheads))
-        bundler.addpart(part)
-    extrainfo = _pushbundle2extraparts(pushop, bundler)
-    # add the changegroup bundle
-    cg = changegroup.getlocalbundle(pushop.repo, 'push', pushop.outgoing)
-    cgpart = bundle2.bundlepart('B2X:CHANGEGROUP', data=cg.getchunks())
-    bundler.addpart(cgpart)
+    bundler.newpart('b2x:replycaps', data=capsblob)
+    replyhandlers = []
+    for partgen in bundle2partsgenerators:
+        ret = partgen(pushop, bundler)
+        replyhandlers.append(ret)
+    # do not push if nothing to push
+    if bundler.nbparts <= 1:
+        return
     stream = util.chunkbuffer(bundler.getchunks())
     try:
         reply = pushop.remote.unbundle(stream, ['force'], 'push')
-    except bundle2.UnknownPartError, exc:
+    except error.BundleValueError, exc:
         raise util.Abort('missing support for %s' % exc)
     try:
         op = bundle2.processbundle(pushop.repo, reply)
-    except bundle2.UnknownPartError, exc:
+    except error.BundleValueError, exc:
         raise util.Abort('missing support for %s' % exc)
-    cgreplies = op.records.getreplies(cgpart.id)
-    assert len(cgreplies['changegroup']) == 1
-    pushop.ret = cgreplies['changegroup'][0]['return']
-    _pushbundle2extrareply(pushop, op, extrainfo)
-
-def _pushbundle2extraparts(pushop, bundler):
-    """hook function to let extensions add parts
-
-    Return a dict to let extensions pass data to the reply processing.
-    """
-    return {}
-
-def _pushbundle2extrareply(pushop, op, extrainfo):
-    """hook function to let extensions react to part replies
-
-    The dict from _pushbundle2extrareply is fed to this function.
-    """
-    pass
+    for rephand in replyhandlers:
+        rephand(op)
 
 def _pushchangeset(pushop):
     """Make the actual push of changeset bundle to remote repo"""
+    if 'changesets' in pushop.stepsdone:
+        return
+    pushop.stepsdone.add('changesets')
+    if not _pushcheckoutgoing(pushop):
+        return
+    pushop.repo.prepushoutgoinghooks(pushop.repo,
+                                     pushop.remote,
+                                     pushop.outgoing)
     outgoing = pushop.outgoing
     unbundle = pushop.remote.capable('unbundle')
     # TODO: get bundlecaps from remote
@@ -330,37 +344,6 @@ def _pushsyncphase(pushop):
     """synchronise phase information locally and remotely"""
     unfi = pushop.repo.unfiltered()
     cheads = pushop.commonheads
-    if pushop.ret:
-        # push succeed, synchronize target of the push
-        cheads = pushop.outgoing.missingheads
-    elif pushop.revs is None:
-        # All out push fails. synchronize all common
-        cheads = pushop.outgoing.commonheads
-    else:
-        # I want cheads = heads(::missingheads and ::commonheads)
-        # (missingheads is revs with secret changeset filtered out)
-        #
-        # This can be expressed as:
-        #     cheads = ( (missingheads and ::commonheads)
-        #              + (commonheads and ::missingheads))"
-        #              )
-        #
-        # while trying to push we already computed the following:
-        #     common = (::commonheads)
-        #     missing = ((commonheads::missingheads) - commonheads)
-        #
-        # We can pick:
-        # * missingheads part of common (::commonheads)
-        common = set(pushop.outgoing.common)
-        nm = pushop.repo.changelog.nodemap
-        cheads = [node for node in pushop.revs if nm[node] in common]
-        # and
-        # * commonheads parents on missing
-        revset = unfi.set('%ln and parents(roots(%ln))',
-                         pushop.outgoing.commonheads,
-                         pushop.outgoing.missing)
-        cheads.extend(c.node() for c in revset)
-    pushop.commonheads = cheads
     # even when we don't push, exchanging phase data is useful
     remotephases = pushop.remote.listkeys('phases')
     if (pushop.ui.configbool('ui', '_usedassubrepo', False)
@@ -395,16 +378,54 @@ def _pushsyncphase(pushop):
         # Get the list of all revs draft on remote by public here.
         # XXX Beware that revset break if droots is not strictly
         # XXX root we may want to ensure it is but it is costly
-        outdated =  unfi.set('heads((%ln::%ln) and public())',
-                             droots, cheads)
-        for newremotehead in outdated:
-            r = pushop.remote.pushkey('phases',
-                                      newremotehead.hex(),
-                                      str(phases.draft),
-                                      str(phases.public))
-            if not r:
-                pushop.ui.warn(_('updating %s to public failed!\n')
-                                       % newremotehead)
+        outdated = unfi.set('heads((%ln::%ln) and public())',
+                            droots, cheads)
+
+        b2caps = bundle2.bundle2caps(pushop.remote)
+        if 'b2x:pushkey' in b2caps:
+            # server supports bundle2, let's do a batched push through it
+            #
+            # This will eventually be unified with the changesets bundle2 push
+            bundler = bundle2.bundle20(pushop.ui, b2caps)
+            capsblob = bundle2.encodecaps(pushop.repo.bundle2caps)
+            bundler.newpart('b2x:replycaps', data=capsblob)
+            part2node = []
+            enc = pushkey.encode
+            for newremotehead in outdated:
+                part = bundler.newpart('b2x:pushkey')
+                part.addparam('namespace', enc('phases'))
+                part.addparam('key', enc(newremotehead.hex()))
+                part.addparam('old', enc(str(phases.draft)))
+                part.addparam('new', enc(str(phases.public)))
+                part2node.append((part.id, newremotehead))
+            stream = util.chunkbuffer(bundler.getchunks())
+            try:
+                reply = pushop.remote.unbundle(stream, ['force'], 'push')
+                op = bundle2.processbundle(pushop.repo, reply)
+            except error.BundleValueError, exc:
+                raise util.Abort('missing support for %s' % exc)
+            for partid, node in part2node:
+                partrep = op.records.getreplies(partid)
+                results = partrep['pushkey']
+                assert len(results) <= 1
+                msg = None
+                if not results:
+                    msg = _('server ignored update of %s to public!\n') % node
+                elif not int(results[0]['return']):
+                    msg = _('updating %s to public failed!\n') % node
+                if msg is not None:
+                    pushop.ui.warn(msg)
+
+        else:
+            # fallback to independant pushkey command
+            for newremotehead in outdated:
+                r = pushop.remote.pushkey('phases',
+                                          newremotehead.hex(),
+                                          str(phases.draft),
+                                          str(phases.public))
+                if not r:
+                    pushop.ui.warn(_('updating %s to public failed!\n')
+                                   % newremotehead)
 
 def _localphasemove(pushop, nodes, phase=phases.public):
     """move <nodes> to <phase> in the local source repo"""
@@ -568,14 +589,15 @@ def _pullbundle2(pullop):
     """pull data using bundle2
 
     For now, the only supported data are changegroup."""
-    kwargs = {'bundlecaps': set(['HG2X'])}
-    capsblob = bundle2.encodecaps(pullop.repo.bundle2caps)
-    kwargs['bundlecaps'].add('bundle2=' + urllib.quote(capsblob))
+    remotecaps = bundle2.bundle2caps(pullop.remote)
+    kwargs = {'bundlecaps': caps20to10(pullop.repo)}
     # pulling changegroup
     pullop.todosteps.remove('changegroup')
 
     kwargs['common'] = pullop.common
     kwargs['heads'] = pullop.heads or pullop.rheads
+    if 'b2x:listkeys' in remotecaps:
+        kwargs['listkeys'] = ['phase']
     if not pullop.fetch:
         pullop.repo.ui.status(_("no changes found\n"))
         pullop.cgresult = 0
@@ -588,12 +610,17 @@ def _pullbundle2(pullop):
     bundle = pullop.remote.getbundle('pull', **kwargs)
     try:
         op = bundle2.processbundle(pullop.repo, bundle, pullop.gettransaction)
-    except bundle2.UnknownPartError, exc:
+    except error.BundleValueError, exc:
         raise util.Abort('missing support for %s' % exc)
 
     if pullop.fetch:
         assert len(op.records['changegroup']) == 1
         pullop.cgresult = op.records['changegroup'][0]['return']
+
+    # processing phases change
+    for namespace, value in op.records['listkeys']:
+        if namespace == 'phases':
+            _pullapplyphases(pullop, value)
 
 def _pullbundle2extraprepare(pullop, kwargs):
     """hook function so that extensions can extend the getbundle call"""
@@ -624,8 +651,8 @@ def _pullchangeset(pullop):
         cg = pullop.remote.changegroup(pullop.fetch, 'pull')
     elif not pullop.remote.capable('changegroupsubset'):
         raise util.Abort(_("partial pull cannot be done because "
-                                   "other repository doesn't support "
-                                   "changegroupsubset."))
+                           "other repository doesn't support "
+                           "changegroupsubset."))
     else:
         cg = pullop.remote.changegroupsubset(pullop.fetch, pullop.heads, 'pull')
     pullop.cgresult = changegroup.addchangegroup(pullop.repo, cg, 'pull',
@@ -633,8 +660,12 @@ def _pullchangeset(pullop):
 
 def _pullphase(pullop):
     # Get remote phases data from remote
-    pullop.todosteps.remove('phases')
     remotephases = pullop.remote.listkeys('phases')
+    _pullapplyphases(pullop, remotephases)
+
+def _pullapplyphases(pullop, remotephases):
+    """apply phase movement from observed remote state"""
+    pullop.todosteps.remove('phases')
     publishing = bool(remotephases.get('publishing', False))
     if remotephases and not publishing:
         # remote is new and unpublishing
@@ -672,6 +703,13 @@ def _pullobsolete(pullop):
             pullop.repo.invalidatevolatilesets()
     return tr
 
+def caps20to10(repo):
+    """return a set with appropriate options to use bundle20 during getbundle"""
+    caps = set(['HG2X'])
+    capsblob = bundle2.encodecaps(repo.bundle2caps)
+    caps.add('bundle2=' + urllib.quote(capsblob))
+    return caps
+
 def getbundle(repo, source, heads=None, common=None, bundlecaps=None,
               **kwargs):
     """return a full bundle (with potentially multiple kind of parts)
@@ -691,6 +729,9 @@ def getbundle(repo, source, heads=None, common=None, bundlecaps=None,
     cg = changegroup.getbundle(repo, source, heads=heads,
                                common=common, bundlecaps=bundlecaps)
     if bundlecaps is None or 'HG2X' not in bundlecaps:
+        if kwargs:
+            raise ValueError(_('unsupported getbundle arguments: %s')
+                             % ', '.join(sorted(kwargs.keys())))
         return cg
     # very crude first implementation,
     # the bundle API will change and the generation will be done lazily.
@@ -701,8 +742,13 @@ def getbundle(repo, source, heads=None, common=None, bundlecaps=None,
             b2caps.update(bundle2.decodecaps(blob))
     bundler = bundle2.bundle20(repo.ui, b2caps)
     if cg:
-        part = bundle2.bundlepart('b2x:changegroup', data=cg.getchunks())
-        bundler.addpart(part)
+        bundler.newpart('b2x:changegroup', data=cg.getchunks())
+    listkeys = kwargs.get('listkeys', ())
+    for namespace in listkeys:
+        part = bundler.newpart('b2x:listkeys')
+        part.addparam('namespace', namespace)
+        keys = repo.listkeys(namespace).items()
+        part.data = pushkey.encodekeys(keys)
     _getbundleextrapart(bundler, repo, source, heads=heads, common=common,
                         bundlecaps=bundlecaps, **kwargs)
     return util.chunkbuffer(bundler.getchunks())

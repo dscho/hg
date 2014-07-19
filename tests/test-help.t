@@ -55,7 +55,7 @@ Short help:
    archive       create an unversioned archive of a repository revision
    backout       reverse effect of earlier changeset
    bisect        subdivision search of changesets
-   bookmarks     track a line of development with movable markers
+   bookmarks     create a new bookmark or list existing bookmarks
    branch        set or show the current branch name
    branches      list repository named branches
    bundle        create a changegroup file
@@ -131,7 +131,7 @@ Short help:
    archive       create an unversioned archive of a repository revision
    backout       reverse effect of earlier changeset
    bisect        subdivision search of changesets
-   bookmarks     track a line of development with movable markers
+   bookmarks     create a new bookmark or list existing bookmarks
    branch        set or show the current branch name
    branches      list repository named branches
    bundle        create a changegroup file
@@ -596,30 +596,8 @@ Test command without options
   show changed files in the working directory
 
   $ hg help foo
-  hg: unknown command 'foo'
-  Mercurial Distributed SCM
-  
-  basic commands:
-  
-   add           add the specified files on the next commit
-   annotate      show changeset information by line for each file
-   clone         make a copy of an existing repository
-   commit        commit the specified files or all outstanding changes
-   diff          diff repository (or selected files)
-   export        dump the header and diffs for one or more changesets
-   forget        forget the specified files on the next commit
-   init          create a new repository in the given directory
-   log           show revision history of entire repository or files
-   merge         merge working directory with another revision
-   pull          pull changes from the specified source
-   push          push changes to the specified destination
-   remove        remove the specified files on the next commit
-   serve         start stand-alone webserver
-   status        show changed files in the working directory
-   summary       summarize working directory state
-   update        update working directory (or switch revisions)
-  
-  use "hg help" for the full list of commands or "hg -v" for details
+  abort: no such help topic: foo
+  (try "hg help --keyword foo")
   [255]
 
   $ hg skjdfks
@@ -652,20 +630,21 @@ Test command without options
 
   $ cat > helpext.py <<EOF
   > import os
-  > from mercurial import commands
+  > from mercurial import cmdutil, commands
   > 
+  > cmdtable = {}
+  > command = cmdutil.command(cmdtable)
+  > 
+  > @command('nohelp',
+  >     [('', 'longdesc', 3, 'x'*90),
+  >     ('n', '', None, 'normal desc'),
+  >     ('', 'newline', '', 'line1\nline2')],
+  >     'hg nohelp',
+  >     norepo=True)
+  > @command('debugoptDEP', [('', 'dopt', None, 'option is DEPRECATED')])
   > def nohelp(ui, *args, **kwargs):
   >     pass
   > 
-  > cmdtable = {
-  >     "debugoptDEP": (nohelp, [('', 'dopt', None, 'option is DEPRECATED')],),
-  >     "nohelp": (nohelp, [('', 'longdesc', 3, 'x'*90),
-  >                         ('n', '', None, 'normal desc'),
-  >                         ('', 'newline', '', 'line1\nline2'),
-  >                        ], "hg nohelp"),
-  > }
-  > 
-  > commands.norepo += ' nohelp'
   > EOF
   $ echo '[extensions]' >> $HGRCPATH
   $ echo "helpext = `pwd`/helpext.py" >> $HGRCPATH
@@ -708,7 +687,7 @@ Test that default list of commands omits extension commands
    archive       create an unversioned archive of a repository revision
    backout       reverse effect of earlier changeset
    bisect        subdivision search of changesets
-   bookmarks     track a line of development with movable markers
+   bookmarks     create a new bookmark or list existing bookmarks
    branch        set or show the current branch name
    branches      list repository named branches
    bundle        create a changegroup file
@@ -973,7 +952,7 @@ Test keyword search help
   
   Commands:
   
-   bookmarks track a line of development with movable markers
+   bookmarks create a new bookmark or list existing bookmarks
    clone     make a copy of an existing repository
    paths     show aliases for remote repositories
    update    update working directory (or switch revisions)
@@ -986,6 +965,20 @@ Test keyword search help
   Extension Commands:
   
    qclone clone main and patch repository at same time
+
+Test unfound topic
+
+  $ hg help nonexistingtopicthatwillneverexisteverever
+  abort: no such help topic: nonexistingtopicthatwillneverexisteverever
+  (try "hg help --keyword nonexistingtopicthatwillneverexisteverever")
+  [255]
+
+Test unfound keyword
+
+  $ hg help --keyword nonexistingwordthatwillneverexisteverever
+  abort: no matches
+  (try "hg help" for a list of topics)
+  [255]
 
 Test omit indicating for help
 
@@ -1409,7 +1402,7 @@ Dish up an empty repo; serve it cold.
   bookmarks
   </a>
   </td><td>
-  track a line of development with movable markers
+  create a new bookmark or list existing bookmarks
   </td></tr>
   <tr><td>
   <a href="/help/branch">

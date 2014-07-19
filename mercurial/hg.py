@@ -172,15 +172,15 @@ def share(ui, source, dest=None, update=True):
 
     sharedpath = srcrepo.sharedpath # if our source is already sharing
 
-    root = os.path.realpath(dest)
-    roothg = os.path.join(root, '.hg')
+    destwvfs = scmutil.vfs(dest, realpath=True)
+    destvfs = scmutil.vfs(os.path.join(destwvfs.base, '.hg'), realpath=True)
 
-    if os.path.exists(roothg):
+    if destvfs.lexists():
         raise util.Abort(_('destination already exists'))
 
-    if not os.path.isdir(root):
-        os.mkdir(root)
-    util.makedir(roothg, notindexed=True)
+    if not destwvfs.isdir():
+        destwvfs.mkdir()
+    destvfs.makedir()
 
     requirements = ''
     try:
@@ -190,10 +190,10 @@ def share(ui, source, dest=None, update=True):
             raise
 
     requirements += 'shared\n'
-    util.writefile(os.path.join(roothg, 'requires'), requirements)
-    util.writefile(os.path.join(roothg, 'sharedpath'), sharedpath)
+    destvfs.write('requires', requirements)
+    destvfs.write('sharedpath', sharedpath)
 
-    r = repository(ui, root)
+    r = repository(ui, destwvfs.base)
 
     default = srcrepo.ui.config('paths', 'default')
     if default:
@@ -311,10 +311,12 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
 
     if not dest:
         raise util.Abort(_("empty destination path is not valid"))
-    if os.path.exists(dest):
-        if not os.path.isdir(dest):
+
+    destvfs = scmutil.vfs(dest, expandpath=True)
+    if destvfs.lexists():
+        if not destvfs.isdir():
             raise util.Abort(_("destination '%s' already exists") % dest)
-        elif os.listdir(dest):
+        elif destvfs.listdir():
             raise util.Abort(_("destination '%s' is not empty") % dest)
 
     srclock = destlock = cleandir = None
@@ -483,7 +485,8 @@ def updaterepo(repo, node, overwrite):
     When overwrite is set, changes are clobbered, merged else
 
     returns stats (see pydoc mercurial.merge.applyupdates)"""
-    return mergemod.update(repo, node, False, overwrite, None)
+    return mergemod.update(repo, node, False, overwrite, None,
+                           labels=['working copy', 'destination'])
 
 def update(repo, node):
     """update the working directory to node, merging linear changes"""

@@ -34,8 +34,8 @@ Symlink is local parent, executable is other:
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: c334dc3be0da, local: 521a1e40188f+, remote: 3574f3e69b1c
+   preserving a for resolve of a
    a: versions differ -> m
-    preserving a for resolve of a
   updating: a 1/1 files (100.00%)
   picked tool 'internal:merge' for a (binary False symlink True)
   merging a
@@ -50,6 +50,7 @@ Symlink is local parent, executable is other:
   a is a symlink:
   a -> symlink
   $ hg resolve a --tool internal:other
+  no more unresolved files
   $ tellmeabout a
   a is an executable file with content:
   a
@@ -67,8 +68,8 @@ Symlink is other parent, executable is local:
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: c334dc3be0da, local: 3574f3e69b1c+, remote: 521a1e40188f
+   preserving a for resolve of a
    a: versions differ -> m
-    preserving a for resolve of a
   updating: a 1/1 files (100.00%)
   picked tool 'internal:merge' for a (binary False symlink True)
   merging a
@@ -101,8 +102,8 @@ Update to link with local change should cause a merge prompt (issue3200):
   resolving manifests
    branchmerge: False, force: False, partial: False
    ancestor: c334dc3be0da, local: c334dc3be0da+, remote: 521a1e40188f
+   preserving a for resolve of a
    a: versions differ -> m
-    preserving a for resolve of a
   updating: a 1/1 files (100.00%)
   (couldn't find merge tool hgmerge|tool hgmerge can't handle symlinks) (re)
   picked tool 'internal:prompt' for a (binary False symlink True)
@@ -289,18 +290,18 @@ h: l vs l, different
   U h
   $ tellmeabout a
   a is a plain file with content:
-  <<<<<<< local
+  <<<<<<< local: 0139c5610547 - test: 2
   2
   =======
   1
-  >>>>>>> other
+  >>>>>>> other: 97e29675e796  - test: 1
   $ tellmeabout b
   b is a plain file with content:
-  <<<<<<< local
+  <<<<<<< local: 0139c5610547 - test: 2
   2
   =======
   1
-  >>>>>>> other
+  >>>>>>> other: 97e29675e796  - test: 1
   $ tellmeabout c
   c is a plain file with content:
   x
@@ -344,18 +345,18 @@ h: l vs l, different
   [1]
   $ tellmeabout a
   a is a plain file with content:
-  <<<<<<< local
+  <<<<<<< local: 97e29675e796  - test: 1
   1
   =======
   2
-  >>>>>>> other
+  >>>>>>> other: 0139c5610547 - test: 2
   $ tellmeabout b
   b is an executable file with content:
-  <<<<<<< local
+  <<<<<<< local: 97e29675e796  - test: 1
   1
   =======
   2
-  >>>>>>> other
+  >>>>>>> other: 0139c5610547 - test: 2
   $ tellmeabout c
   c is an executable file with content:
   x

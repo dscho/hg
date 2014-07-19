@@ -98,3 +98,22 @@ class SignatureError(Exception):
 class PushRaced(RuntimeError):
     """An exception raised during unbundling that indicate a push race"""
 
+# bundle2 related errors
+class BundleValueError(ValueError):
+    """error raised when bundle2 cannot be processed"""
+
+    def __init__(self, parttype=None, params=()):
+        self.parttype = parttype
+        self.params = params
+        if self.parttype is None:
+            msg = 'Stream Parameter'
+        else:
+            msg = parttype
+        if self.params:
+            msg = '%s - %s' % (msg, ', '.join(self.params))
+        ValueError.__init__(self, msg)
+
+class ReadOnlyPartError(RuntimeError):
+    """error raised when code tries to alter a part being generated"""
+    pass
+

@@ -2,27 +2,20 @@ Test basic extension support
 
   $ cat > foobar.py <<EOF
   > import os
-  > from mercurial import commands
-  > 
+  > from mercurial import cmdutil, commands
+  > cmdtable = {}
+  > command = cmdutil.command(cmdtable)
   > def uisetup(ui):
   >     ui.write("uisetup called\\n")
-  > 
   > def reposetup(ui, repo):
   >     ui.write("reposetup called for %s\\n" % os.path.basename(repo.root))
   >     ui.write("ui %s= repo.ui\\n" % (ui == repo.ui and "=" or "!"))
-  > 
+  > @command('foo', [], 'hg foo')
   > def foo(ui, *args, **kwargs):
   >     ui.write("Foo\\n")
-  > 
+  > @command('bar', [], 'hg bar', norepo=True)
   > def bar(ui, *args, **kwargs):
   >     ui.write("Bar\\n")
-  > 
-  > cmdtable = {
-  >    "foo": (foo, [], "hg foo"),
-  >    "bar": (bar, [], "hg bar"),
-  > }
-  > 
-  > commands.norepo += ' bar'
   > EOF
   $ abspath=`pwd`/foobar.py
 
@@ -107,7 +100,6 @@ Check hgweb's load order:
   > from mercurial import demandimport; demandimport.enable()
   > from mercurial.hgweb import hgweb
   > from mercurial.hgweb import wsgicgi
-  > 
   > application = hgweb('.', 'test repo')
   > wsgicgi.launch(application)
   > EOF
@@ -202,21 +194,16 @@ Check absolute/relative import of extension specific modules
   >     # "not locals" case
   >     import extroot.bar
   >     buf.append('import extroot.bar in func(): %s' % extroot.bar.s)
-  > 
   >     return '\n(extroot) '.join(buf)
-  > 
   > # "fromlist == ('*',)" case
   > from extroot.bar import *
   > buf.append('from extroot.bar import *: %s' % s)
-  > 
   > # "not fromlist" and "if '.' in name" case
   > import extroot.sub1.baz
   > buf.append('import extroot.sub1.baz: %s' % extroot.sub1.baz.s)
-  > 
   > # "not fromlist" and NOT "if '.' in name" case
   > import extroot
   > buf.append('import extroot: %s' % extroot.s)
-  > 
   > # NOT "not fromlist" and NOT "level != -1" case
   > from extroot.bar import s
   > buf.append('from extroot.bar import s: %s' % s)
@@ -238,21 +225,16 @@ Check absolute/relative import of extension specific modules
   >     # "not locals" case
   >     import bar
   >     buf.append('import bar in func(): %s' % bar.s)
-  > 
   >     return '\n(extroot) '.join(buf)
-  > 
   > # "fromlist == ('*',)" case
   > from bar import *
   > buf.append('from bar import *: %s' % s)
-  > 
   > # "not fromlist" and "if '.' in name" case
   > import sub1.baz
   > buf.append('import sub1.baz: %s' % sub1.baz.s)
-  > 
   > # "not fromlist" and NOT "if '.' in name" case
   > import sub1
   > buf.append('import sub1: %s' % sub1.s)
-  > 
   > # NOT "not fromlist" and NOT "level != -1" case
   > from bar import s
   > buf.append('from bar import s: %s' % s)
@@ -283,26 +265,25 @@ hide outer repo
   
   no commands defined
 
+
   $ echo 'empty = !' >> $HGRCPATH
 
   $ cat > debugextension.py <<EOF
   > '''only debugcommands
   > '''
+  > from mercurial import cmdutil
+  > cmdtable = {}
+  > command = cmdutil.command(cmdtable)
+  > @command('debugfoobar', [], 'hg debugfoobar')
   > def debugfoobar(ui, repo, *args, **opts):
   >     "yet another debug command"
   >     pass
-  > 
+  > @command('foo', [], 'hg foo')
   > def foo(ui, repo, *args, **opts):
   >     """yet another foo command
-  > 
   >     This command has been DEPRECATED since forever.
   >     """
   >     pass
-  > 
-  > cmdtable = {
-  >    "debugfoobar": (debugfoobar, (), "hg debugfoobar"),
-  >    "foo": (foo, (), "hg foo")
-  > }
   > EOF
   $ debugpath=`pwd`/debugextension.py
   $ echo "debugextension = $debugpath" >> $HGRCPATH
@@ -311,6 +292,7 @@ hide outer repo
   debugextension extension - only debugcommands
   
   no commands defined
+
 
   $ hg --verbose help debugextension
   debugextension extension - only debugcommands
@@ -342,6 +324,11 @@ hide outer repo
   
   [+] marked option can be specified multiple times
 
+
+
+
+
+
   $ hg --debug help debugextension
   debugextension extension - only debugcommands
   
@@ -372,6 +359,11 @@ hide outer repo
       --hidden            consider hidden changesets
   
   [+] marked option can be specified multiple times
+
+
+
+
+
   $ echo 'debugextension = !' >> $HGRCPATH
 
 Extension module help vs command help:
@@ -410,6 +402,15 @@ Extension module help vs command help:
   [+] marked option can be specified multiple times
   
   use "hg -v help extdiff" to show the global options
+
+
+
+
+
+
+
+
+
 
   $ hg help --extension extdiff
   extdiff extension - command to allow external programs to compare revisions
@@ -470,21 +471,35 @@ Extension module help vs command help:
   
   use "hg -v help extdiff" to show builtin aliases and global options
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   $ echo 'extdiff = !' >> $HGRCPATH
 
 Test help topic with same name as extension
 
   $ cat > multirevs.py <<EOF
-  > from mercurial import commands
+  > from mercurial import cmdutil, commands
+  > cmdtable = {}
+  > command = cmdutil.command(cmdtable)
   > """multirevs extension
   > Big multi-line module docstring."""
+  > @command('multirevs', [], 'ARG', norepo=True)
   > def multirevs(ui, repo, arg, *args, **opts):
   >     """multirevs command"""
   >     pass
-  > cmdtable = {
-  >    "multirevs": (multirevs, [], 'ARG')
-  > }
-  > commands.norepo += ' multirevs'
   > EOF
   $ echo "multirevs = multirevs.py" >> $HGRCPATH
 
@@ -508,12 +523,19 @@ Test help topic with same name as extension
   
   use "hg help -c multirevs" to see help for the multirevs command
 
+
+
+
+
+
   $ hg help -c multirevs
   hg multirevs ARG
   
   multirevs command
   
   use "hg -v help multirevs" to show the global options
+
+
 
   $ hg multirevs
   hg multirevs: invalid arguments
@@ -524,6 +546,8 @@ Test help topic with same name as extension
   use "hg help multirevs" to show the full help text
   [255]
 
+
+
   $ echo "multirevs = !" >> $HGRCPATH
 
 Issue811: Problem loading extensions twice (by site and by user)
@@ -532,14 +556,13 @@ Issue811: Problem loading extensions twice (by site and by user)
   $ cat > debugissue811.py <<EOF
   > '''show all loaded extensions
   > '''
-  > from mercurial import extensions, commands
-  > 
+  > from mercurial import cmdutil, commands, extensions
+  > cmdtable = {}
+  > command = cmdutil.command(cmdtable)
+  > @command('debugextensions', [], 'hg debugextensions', norepo=True)
   > def debugextensions(ui):
   >     "yet another debug command"
   >     ui.write("%s\n" % '\n'.join([x for x, y in extensions.extensions()]))
-  > 
-  > cmdtable = {"debugextensions": (debugextensions, (), "hg debugextensions")}
-  > commands.norepo += " debugextensions"
   > EOF
   $ echo "debugissue811 = $debugpath" >> $HGRCPATH
   $ echo "mq=" >> $HGRCPATH
@@ -566,6 +589,8 @@ Disabled extension commands:
       patchbomb     command to send changesets as (a series of) patch emails
   
   use "hg help extensions" for information on enabling extensions
+
+
   $ hg qdel
   hg: unknown command 'qdel'
   'qdelete' is provided by the following extension:
@@ -574,6 +599,8 @@ Disabled extension commands:
   
   use "hg help extensions" for information on enabling extensions
   [255]
+
+
   $ hg churn
   hg: unknown command 'churn'
   'churn' is provided by the following extension:
@@ -583,16 +610,20 @@ Disabled extension commands:
   use "hg help extensions" for information on enabling extensions
   [255]
 
+
+
 Disabled extensions:
 
   $ hg help churn
   churn extension - command to display statistics about repository history
   
   use "hg help extensions" for information on enabling extensions
+
   $ hg help patchbomb
   patchbomb extension - command to send changesets as (a series of) patch emails
   
   use "hg help extensions" for information on enabling extensions
+
 
 Broken disabled extension and command:
 
@@ -613,13 +644,14 @@ Broken disabled extension and command:
   
   use "hg help extensions" for information on enabling extensions
 
+
   $ cat > hgext/forest.py <<EOF
   > cmdtable = None
   > EOF
   $ hg --config extensions.path=./path.py help foo > /dev/null
   warning: error finding commands in $TESTTMP/hgext/forest.py (glob)
-  hg: unknown command 'foo'
-  warning: error finding commands in $TESTTMP/hgext/forest.py (glob)
+  abort: no such help topic: foo
+  (try "hg help --keyword foo")
   [255]
 
   $ cat > throw.py <<EOF
@@ -627,12 +659,10 @@ Broken disabled extension and command:
   > cmdtable = {}
   > command = cmdutil.command(cmdtable)
   > class Bogon(Exception): pass
-  > 
-  > @command('throw', [], 'hg throw')
+  > @command('throw', [], 'hg throw', norepo=True)
   > def throw(ui, **opts):
   >     """throws an exception"""
   >     raise Bogon()
-  > commands.norepo += " throw"
   > EOF
 No declared supported version, extension complains:
   $ hg --config extensions.throw=throw.py throw 2>&1 | egrep '^\*\*'
@@ -714,6 +744,34 @@ Declare the version as supporting this hg version, show regular bts link:
   ** Python * (glob)
   ** Mercurial Distributed SCM (*) (glob)
   ** Extensions loaded: throw
+
+Test version number support in 'hg version':
+  $ echo '__version__ = (1, 2, 3)' >> throw.py
+  $ rm -f throw.pyc throw.pyo
+  $ hg version -v --config extensions.throw=throw.py
+  Mercurial Distributed SCM (version *) (glob)
+  (see http://mercurial.selenic.com for more information)
+  
+  Copyright (C) 2005-* Matt Mackall and others (glob)
+  This is free software; see the source for copying conditions. There is NO
+  warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  
+  Enabled extensions:
+  
+    throw  1.2.3
+  $ echo 'getversion = lambda: "1.twentythree"' >> throw.py
+  $ rm -f throw.pyc throw.pyo
+  $ hg version -v --config extensions.throw=throw.py
+  Mercurial Distributed SCM (version *) (glob)
+  (see http://mercurial.selenic.com for more information)
+  
+  Copyright (C) 2005-* Matt Mackall and others (glob)
+  This is free software; see the source for copying conditions. There is NO
+  warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  
+  Enabled extensions:
+  
+    throw  1.twentythree
 
 Restore HGRCPATH
 

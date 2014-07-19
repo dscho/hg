@@ -26,13 +26,30 @@ failing merge
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]
 
-  $ echo resolved > file
-  $ hg resolve -m file
-  $ hg commit -m 'resolved'
-
-resolve -l, should be empty
+resolve -l should contain an unresolved entry
 
   $ hg resolve -l
+  U file
+
+resolving an unknown path emits a warning
+  $ hg resolve -m does-not-exist
+  arguments do not match paths that need resolving
+
+resolve the failure
+
+  $ echo resolved > file
+  $ hg resolve -m file
+  no more unresolved files
+  $ hg commit -m 'resolved'
+
+resolve -l should be empty
+
+  $ hg resolve -l
+
+resolve -m should abort since no merge in progress
+  $ hg resolve -m
+  abort: resolve command not applicable when not merging
+  [255]
 
 test crashed merge with empty mergestate
 

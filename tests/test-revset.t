@@ -427,6 +427,16 @@ min: empty on unordered set
   7
   8
   9
+
+Test empty set input
+  $ log 'only(p2())'
+  $ log 'only(p1(), p2())'
+  0
+  1
+  2
+  4
+  8
+  9
   $ log 'outgoing()'
   8
   9
@@ -562,7 +572,7 @@ test intersecting something with an addset
   5
   8
 
-check that conversion to _missingancestors works
+check that conversion to only works
   $ try --optimize '::3 - ::1'
   (minus
     (dagrangepre
@@ -571,7 +581,7 @@ check that conversion to _missingancestors works
       ('symbol', '1')))
   * optimized:
   (func
-    ('symbol', '_missingancestors')
+    ('symbol', 'only')
     (list
       ('symbol', '3')
       ('symbol', '1')))
@@ -586,7 +596,7 @@ check that conversion to _missingancestors works
       ('symbol', '3')))
   * optimized:
   (func
-    ('symbol', '_missingancestors')
+    ('symbol', 'only')
     (list
       ('symbol', '1')
       ('symbol', '3')))
@@ -599,7 +609,7 @@ check that conversion to _missingancestors works
       ('symbol', '6')))
   * optimized:
   (func
-    ('symbol', '_missingancestors')
+    ('symbol', 'only')
     (list
       ('symbol', '6')
       ('symbol', '2')))
@@ -618,7 +628,7 @@ check that conversion to _missingancestors works
         ('symbol', '4'))))
   * optimized:
   (func
-    ('symbol', '_missingancestors')
+    ('symbol', 'only')
     (list
       ('symbol', '6')
       ('symbol', '4')))
@@ -1007,6 +1017,11 @@ issue2549 - correct optimizations
   $ log 'max(1 or 2) and not 2'
   $ log 'min(1 or 2) and not 1'
   $ log 'last(1 or 2, 1) and not 2'
+
+issue4289 - ordering of built-ins
+  $ hg log -M -q -r 3:2
+  3:8528aa5637f2
+  2:5ed5505e9f1c
 
 test revsets started with 40-chars hash (issue3669)
 

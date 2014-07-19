@@ -41,6 +41,8 @@ import time
 from mercurial.i18n import _
 testedwith = 'internal'
 
+from mercurial import encoding
+
 def spacejoin(*args):
     return ' '.join(s for s in args if s)
 
@@ -137,10 +139,10 @@ class progbar(object):
                 else:
                     wid = 20
                 if slice == 'end':
-                    add = item[-wid:]
+                    add = encoding.trim(item, wid, leftside=True)
                 else:
-                    add = item[:wid]
-                add += (wid - len(add)) * ' '
+                    add = encoding.trim(item, wid)
+                add += (wid - encoding.colwidth(add)) * ' '
             elif indicator == 'bar':
                 add = ''
                 needprogress = True
@@ -157,9 +159,9 @@ class progbar(object):
         if needprogress:
             used = 0
             if head:
-                used += len(head) + 1
+                used += encoding.colwidth(head) + 1
             if tail:
-                used += len(tail) + 1
+                used += encoding.colwidth(tail) + 1
             progwidth = termwidth - used - 3
             if total and pos <= total:
                 amt = pos * progwidth // total
@@ -180,7 +182,7 @@ class progbar(object):
             out = spacejoin(head, prog, tail)
         else:
             out = spacejoin(head, tail)
-        sys.stderr.write('\r' + out[:termwidth])
+        sys.stderr.write('\r' + encoding.trim(out, termwidth))
         self.lasttopic = topic
         sys.stderr.flush()
 

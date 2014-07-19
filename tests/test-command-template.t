@@ -1850,6 +1850,15 @@ Test current bookmark templating
   2 bar* foo 
   1 
   0 
+  $ hg log --template "{rev} {currentbookmark}\n"
+  2 bar
+  1 
+  0 
+  $ hg bookmarks --inactive bar
+  $ hg log --template "{rev} {currentbookmark}\n"
+  2 
+  1 
+  0 
 
 Test stringify on sub expressions
 
@@ -1859,3 +1868,119 @@ Test stringify on sub expressions
   $ hg log -R a -r 8 --template '{strip(if("1", if("1", "-abc-")), if("1", if("1", "-")))}\n'
   abc
 
+Test splitlines
+
+  $ hg log -Gv -R a --template "{splitlines(desc) % 'foo {line}\n'}"
+  @  foo future
+  |
+  o  foo third
+  |
+  o  foo second
+  
+  o    foo merge
+  |\
+  | o  foo new head
+  | |
+  o |  foo new branch
+  |/
+  o  foo no user, no domain
+  |
+  o  foo no person
+  |
+  o  foo other 1
+  |  foo other 2
+  |  foo
+  |  foo other 3
+  o  foo line 1
+     foo line 2
+
+Test startswith
+  $ hg log -Gv -R a --template "{startswith(desc)}"
+  hg: parse error: startswith expects two arguments
+  [255]
+
+  $ hg log -Gv -R a --template "{startswith('line', desc)}"
+  @
+  |
+  o
+  |
+  o
+  
+  o
+  |\
+  | o
+  | |
+  o |
+  |/
+  o
+  |
+  o
+  |
+  o
+  |
+  o  line 1
+     line 2
+
+Test bad template with better error message
+
+  $ hg log -Gv -R a --template '{desc|user()}'
+  hg: parse error: expected a symbol, got 'func'
+  [255]
+
+Test word function (including index out of bounds graceful failure)
+
+  $ hg log -Gv -R a --template "{word('1', desc)}"
+  @
+  |
+  o
+  |
+  o
+  
+  o
+  |\
+  | o  head
+  | |
+  o |  branch
+  |/
+  o  user,
+  |
+  o  person
+  |
+  o  1
+  |
+  o  1
+  
+
+Test word third parameter used as splitter
+
+  $ hg log -Gv -R a --template "{word('0', desc, 'o')}"
+  @  future
+  |
+  o  third
+  |
+  o  sec
+  
+  o    merge
+  |\
+  | o  new head
+  | |
+  o |  new branch
+  |/
+  o  n
+  |
+  o  n
+  |
+  o
+  |
+  o  line 1
+     line 2
+
+Test word error messages for not enough and too many arguments
+
+  $ hg log -Gv -R a --template "{word('0')}"
+  hg: parse error: word expects two or three arguments, got 1
+  [255]
+
+  $ hg log -Gv -R a --template "{word('0', desc, 'o', 'h', 'b', 'o', 'y')}"
+  hg: parse error: word expects two or three arguments, got 7
+  [255]
