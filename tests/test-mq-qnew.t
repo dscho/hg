@@ -158,7 +158,7 @@ plain headers
   merging a incomplete! (edit conflicts, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
-  no more unresolved files
+  (no more unresolved files)
   abort: cannot manage merge changesets
   $ rm -r sandbox
 
@@ -232,7 +232,7 @@ hg headers
   merging a incomplete! (edit conflicts, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
-  no more unresolved files
+  (no more unresolved files)
   abort: cannot manage merge changesets
   $ rm -r sandbox
 
@@ -268,8 +268,7 @@ Test saving last-message.txt
   $ HGEDITOR="sh $TESTTMP/editor.sh" hg qnew -e patch
   abort: emulating unexpected abort
   [255]
-  $ cat .hg/last-message.txt
-  cat: .hg/last-message.txt: No such file or directory
+  $ test -f .hg/last-message.txt
   [1]
 
 (test that editor is invoked and commit message is saved into

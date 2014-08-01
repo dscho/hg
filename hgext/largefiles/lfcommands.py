@@ -435,7 +435,8 @@ def downloadlfiles(ui, repo, rev=None):
         ui.status(_("%d largefiles failed to download\n") % totalmissing)
     return totalsuccess, totalmissing
 
-def updatelfiles(ui, repo, filelist=None, printmessage=True):
+def updatelfiles(ui, repo, filelist=None, printmessage=True,
+                 normallookup=False):
     wlock = repo.wlock()
     try:
         lfdirstate = lfutil.openlfdirstate(ui, repo)
@@ -509,15 +510,20 @@ def updatelfiles(ui, repo, filelist=None, printmessage=True):
 
             updated += update1
 
-            state = repo.dirstate[lfutil.standin(lfile)]
+            standin = lfutil.standin(lfile)
+            if standin in repo.dirstate:
+                stat = repo.dirstate._map[standin]
+                state, mtime = stat[0], stat[3]
+            else:
+                state, mtime = '?', -1
             if state == 'n':
-                # When rebasing, we need to synchronize the standin and the
-                # largefile, because otherwise the largefile will get reverted.
-                # But for commit's sake, we have to mark the file as unclean.
-                if getattr(repo, "_isrebasing", False):
+                if normallookup or mtime < 0:
+                    # state 'n' doesn't ensure 'clean' in this case
                     lfdirstate.normallookup(lfile)
                 else:
                     lfdirstate.normal(lfile)
+            elif state == 'm':
+                lfdirstate.normallookup(lfile)
             elif state == 'r':
                 lfdirstate.remove(lfile)
             elif state == 'a':

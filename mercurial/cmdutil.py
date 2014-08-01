@@ -1126,6 +1126,10 @@ def gettemplate(ui, tmpl, style):
             tmpl = templater.parsestring(t, quoted=False)
         return tmpl, None
 
+    if tmpl == 'list':
+        ui.write(_("available styles: %s\n") % templater.stylelist())
+        raise util.Abort(_("specify a template"))
+
     # perhaps it's a path to a map or a template
     if ('/' in tmpl or '\\' in tmpl) and os.path.isfile(tmpl):
         # is it a mapfile for a style?
@@ -1625,7 +1629,7 @@ def _makelogrevset(repo, pats, opts, revs):
 
     filematcher = None
     if opts.get('patch') or opts.get('stat'):
-        if follow:
+        if follow and not match.always():
             # _makelogfilematcher expects its files argument to be relative to
             # the repo root, so use match.files(), not pats.
             filematcher = _makelogfilematcher(repo, match.files(), followfirst)

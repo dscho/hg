@@ -8,7 +8,7 @@
 from node import hex, bin, nullid, nullrev, short
 from lock import release
 from i18n import _
-import os, re, difflib, time, tempfile, errno
+import os, re, difflib, time, tempfile, errno, shlex
 import sys
 import hg, scmutil, util, revlog, copies, error, bookmarks
 import patch, help, encoding, templatekw, discovery
@@ -1339,8 +1339,7 @@ def clone(ui, source, dest=None, **opts):
      _('mark a branch as closed, hiding it from the branch list')),
     ('', 'amend', None, _('amend the parent of the working dir')),
     ('s', 'secret', None, _('use the secret phase for committing')),
-    ('e', 'edit', None,
-     _('further edit commit message already specified')),
+    ('e', 'edit', None, _('invoke editor on commit messages')),
     ] + walkopts + commitopts + commitopts2 + subrepoopts,
     _('[OPTION]... [FILE]...'),
     inferrepo=True)
@@ -2248,7 +2247,7 @@ def debuginstall(ui):
     # editor
     ui.status(_("checking commit editor...\n"))
     editor = ui.geteditor()
-    cmdpath = util.findexe(editor) or util.findexe(editor.split()[0])
+    cmdpath = util.findexe(shlex.split(editor)[0])
     if not cmdpath:
         if editor == 'vi':
             ui.write(_(" No commit editor set and can't find vi in PATH\n"))
@@ -3108,6 +3107,9 @@ def graft(ui, repo, *revs, **opts):
 
           hg log --debug -r .
 
+    See :hg:`help revisions` and :hg:`help revsets` for more about
+    specifying revisions.
+
     Returns 0 on successful completion.
     '''
 
@@ -3785,7 +3787,7 @@ def import_(ui, repo, patch1=None, *patches, **opts):
     by hand before :hg:`commit --amend` is run to update the created
     changeset. This flag exists to let people import patches that
     partially apply without losing the associated metadata (author,
-    date, description, ...), Note that when none of the hunk applies
+    date, description, ...). Note that when none of the hunk applies
     cleanly, :hg:`import --partial` will create an empty changeset,
     importing only the patch metadata.
 
@@ -3880,8 +3882,8 @@ def import_(ui, repo, patch1=None, *patches, **opts):
                         parents = [repo[node]]
                     if rej:
                         ui.write_err(_("patch applied partially\n"))
-                        ui.write_err(("(fix the .rej files and run "
-                                      "`hg commit --amend`)\n"))
+                        ui.write_err(_("(fix the .rej files and run "
+                                       "`hg commit --amend`)\n"))
                         ret = 1
                         break
 
@@ -4128,6 +4130,10 @@ def log(ui, repo, *pats, **opts):
       - all revision numbers that match a keyword::
 
           hg log -k bug --template "{rev}\\n"
+
+      - list available log templates::
+
+          hg log -T list
 
       - check if a given changeset is included is a tagged release::
 
@@ -4994,8 +5000,8 @@ def resolve(ui, repo, *pats, **opts):
     if pats and all:
         raise util.Abort(_("can't specify --all and patterns"))
     if not (all or pats or show or mark or unmark):
-        raise util.Abort(_('no files or directories specified; '
-                           'use --all to remerge all files'))
+        raise util.Abort(_('no files or directories specified'),
+                         hint=('use --all to remerge all files'))
 
     wlock = repo.wlock()
     try:
@@ -5058,7 +5064,7 @@ def resolve(ui, repo, *pats, **opts):
     # this with the list/show operation because we want list/show to remain
     # machine readable.
     if not list(ms.unresolved()) and not show:
-        ui.status(_('no more unresolved files\n'))
+        ui.status(_('(no more unresolved files)\n'))
 
     return ret
 
@@ -5688,8 +5694,8 @@ def summary(ui, repo, **opts):
     ('r', 'rev', '', _('revision to tag'), _('REV')),
     ('', 'remove', None, _('remove a tag')),
     # -l/--local is already there, commitopts cannot be used
-    ('e', 'edit', None, _('edit commit message')),
-    ('m', 'message', '', _('use <text> as commit message'), _('TEXT')),
+    ('e', 'edit', None, _('invoke editor on commit messages')),
+    ('m', 'message', '', _('use text as commit message'), _('TEXT')),
     ] + commitopts2,
     _('[-f] [-l] [-m TEXT] [-d DATE] [-u USER] [-r REV] NAME...'))
 def tag(ui, repo, name1, *names, **opts):
@@ -6026,6 +6032,7 @@ def version_(ui):
         for name, module in extensions.extensions():
             names.append(name)
             vers.append(extensions.moduleversion(module))
-        maxnamelen = max(len(n) for n in names)
-        for i, name in enumerate(names):
-            ui.write("  %-*s  %s\n" % (maxnamelen, name, vers[i]))
+        if names:
+            maxnamelen = max(len(n) for n in names)
+            for i, name in enumerate(names):
+                ui.write("  %-*s  %s\n" % (maxnamelen, name, vers[i]))
