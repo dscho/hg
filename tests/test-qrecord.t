@@ -9,7 +9,7 @@ help record (no record)
   record extension - commands to interactively select changes for
   commit/qrefresh
   
-  use "hg help extensions" for information on enabling extensions
+  (use "hg help extensions" for information on enabling extensions)
 
 help qrecord (no record)
 
@@ -18,7 +18,7 @@ help qrecord (no record)
   
       record        commands to interactively select changes for commit/qrefresh
   
-  use "hg help extensions" for information on enabling extensions
+  (use "hg help extensions" for information on enabling extensions)
 
   $ echo "[extensions]"     >> $HGRCPATH
   $ echo "record="          >> $HGRCPATH
@@ -54,7 +54,7 @@ help record (record)
   
       This command is not available when committing a merge.
   
-  options:
+  options ([+] can be repeated):
   
    -A --addremove           mark new/missing files as added/removed before
                             committing
@@ -74,9 +74,7 @@ help record (record)
    -b --ignore-space-change ignore changes in the amount of white space
    -B --ignore-blank-lines  ignore changes whose lines are all blank
   
-  [+] marked option can be specified multiple times
-  
-  use "hg -v help record" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
 help (no mq, so no qrecord)
 
@@ -87,7 +85,7 @@ help (no mq, so no qrecord)
   
       See "hg help qnew" & "hg help record" for more information and usage.
   
-  use "hg -v help qrecord" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
   $ hg init a
 
@@ -99,7 +97,7 @@ qrecord (mq not present)
   
   interactively record a new patch
   
-  use "hg help qrecord" to show the full help text
+  (use "hg qrecord -h" to show more help)
   [255]
 
 qrecord patch (mq not present)
@@ -119,7 +117,7 @@ help (bad mq)
   
       See "hg help qnew" & "hg help record" for more information and usage.
   
-  use "hg -v help qrecord" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
 help (mq present)
 
@@ -133,7 +131,7 @@ help (mq present)
   
       See "hg help qnew" & "hg help record" for more information and usage.
   
-  options:
+  options ([+] can be repeated):
   
    -e --edit                invoke editor on commit messages
    -g --git                 use git extended diff format
@@ -150,9 +148,7 @@ help (mq present)
    -B --ignore-blank-lines  ignore changes whose lines are all blank
       --mq                  operate on patch repository
   
-  [+] marked option can be specified multiple times
-  
-  use "hg -v help qrecord" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
   $ cd a
 
@@ -250,22 +246,26 @@ qrecord a.patch
   > EOF
   diff --git a/1.txt b/1.txt
   2 hunks, 2 lines changed
-  examine changes to '1.txt'? [Ynesfdaq?] 
+  examine changes to '1.txt'? [Ynesfdaq?] y
+  
   @@ -1,3 +1,3 @@
    1
   -2
   +2 2
    3
-  record change 1/4 to '1.txt'? [Ynesfdaq?] 
+  record change 1/4 to '1.txt'? [Ynesfdaq?] y
+  
   @@ -3,3 +3,3 @@
    3
   -4
   +4 4
    5
-  record change 2/4 to '1.txt'? [Ynesfdaq?] 
+  record change 2/4 to '1.txt'? [Ynesfdaq?] n
+  
   diff --git a/2.txt b/2.txt
   1 hunks, 1 lines changed
-  examine changes to '2.txt'? [Ynesfdaq?] 
+  examine changes to '2.txt'? [Ynesfdaq?] y
+  
   @@ -1,5 +1,5 @@
    a
   -b
@@ -273,10 +273,12 @@ qrecord a.patch
    c
    d
    e
-  record change 3/4 to '2.txt'? [Ynesfdaq?] 
+  record change 3/4 to '2.txt'? [Ynesfdaq?] y
+  
   diff --git a/dir/a.txt b/dir/a.txt
   1 hunks, 1 lines changed
-  examine changes to 'dir/a.txt'? [Ynesfdaq?] 
+  examine changes to 'dir/a.txt'? [Ynesfdaq?] n
+  
 
 After qrecord a.patch 'tip'"
 
@@ -345,7 +347,8 @@ qrecord b.patch
   > EOF
   diff --git a/1.txt b/1.txt
   1 hunks, 1 lines changed
-  examine changes to '1.txt'? [Ynesfdaq?] 
+  examine changes to '1.txt'? [Ynesfdaq?] y
+  
   @@ -1,5 +1,5 @@
    1
    2 2
@@ -353,17 +356,20 @@ qrecord b.patch
   -4
   +4 4
    5
-  record change 1/2 to '1.txt'? [Ynesfdaq?] 
+  record change 1/2 to '1.txt'? [Ynesfdaq?] y
+  
   diff --git a/dir/a.txt b/dir/a.txt
   1 hunks, 1 lines changed
-  examine changes to 'dir/a.txt'? [Ynesfdaq?] 
+  examine changes to 'dir/a.txt'? [Ynesfdaq?] y
+  
   @@ -1,4 +1,4 @@
   -hello world
   +hello world!
    
    someone
    up
-  record change 2/2 to 'dir/a.txt'? [Ynesfdaq?] 
+  record change 2/2 to 'dir/a.txt'? [Ynesfdaq?] y
+  
 
 After qrecord b.patch 'tip'
 

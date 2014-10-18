@@ -7,7 +7,7 @@
 
 from mercurial.i18n import _
 from mercurial.node import hex, bin
-from mercurial import encoding, error, util, obsolete
+from mercurial import encoding, error, util, obsolete, lock as lockmod
 import errno
 
 class bmstore(dict):
@@ -47,6 +47,14 @@ class bmstore(dict):
             if inst.errno != errno.ENOENT:
                 raise
 
+    def recordchange(self, tr):
+        """record that bookmarks have been changed in a transaction
+
+        The transaction is then responsible for updating the file content."""
+        tr.addfilegenerator('bookmarks', ('bookmarks',), self._write,
+                            vfs=self._repo.vfs)
+        tr.hookargs['bookmark_moved'] = '1'
+
     def write(self):
         '''Write bookmarks
 
@@ -64,8 +72,7 @@ class bmstore(dict):
         try:
 
             file = repo.vfs('bookmarks', 'w', atomictemp=True)
-            for name, node in self.iteritems():
-                file.write("%s %s\n" % (hex(node), encoding.fromlocal(name)))
+            self._write(file)
             file.close()
 
             # touch 00changelog.i so hgweb reloads bookmarks (no lock needed)
@@ -76,6 +83,10 @@ class bmstore(dict):
 
         finally:
             wlock.release()
+
+    def _write(self, fp):
+        for name, node in self.iteritems():
+            fp.write("%s %s\n" % (hex(node), encoding.fromlocal(name)))
 
 def readcurrent(repo):
     '''Get the current bookmark
@@ -225,10 +236,14 @@ def listbookmarks(repo):
     return d
 
 def pushbookmark(repo, key, old, new):
-    w = repo.wlock()
+    w = l = tr = None
     try:
+        w = repo.wlock()
+        l = repo.lock()
+        tr = repo.transaction('bookmarks')
         marks = repo._bookmarks
-        if hex(marks.get(key, '')) != old:
+        existing = hex(marks.get(key, ''))
+        if existing != old and existing != new:
             return False
         if new == '':
             del marks[key]
@@ -236,10 +251,11 @@ def pushbookmark(repo, key, old, new):
             if new not in repo:
                 return False
             marks[key] = repo[new].node()
-        marks.write()
+        marks.recordchange(tr)
+        tr.close()
         return True
     finally:
-        w.release()
+        lockmod.release(tr, l, w)
 
 def compare(repo, srcmarks, dstmarks,
             srchex=None, dsthex=None, targets=None):
@@ -337,64 +353,60 @@ def _diverge(ui, b, path, localmarks):
             break
     # try to use an @pathalias suffix
     # if an @pathalias already exists, we overwrite (update) it
+    if path.startswith("file:"):
+        path = util.url(path).path
     for p, u in ui.configitems("paths"):
+        if u.startswith("file:"):
+            u = util.url(u).path
         if path == u:
             n = '%s@%s' % (b, p)
     return n
 
-def updatefromremote(ui, repo, remotemarks, path):
+def updatefromremote(ui, repo, remotemarks, path, trfunc, explicit=()):
     ui.debug("checking for updated bookmarks\n")
     localmarks = repo._bookmarks
     (addsrc, adddst, advsrc, advdst, diverge, differ, invalid
      ) = compare(repo, remotemarks, localmarks, dsthex=hex)
 
+    status = ui.status
+    warn = ui.warn
+    if ui.configbool('ui', 'quietbookmarkmove', False):
+        status = warn = ui.debug
+
+    explicit = set(explicit)
     changed = []
     for b, scid, dcid in addsrc:
         if scid in repo: # add remote bookmarks for changes we already have
-            changed.append((b, bin(scid), ui.status,
+            changed.append((b, bin(scid), status,
                             _("adding remote bookmark %s\n") % (b)))
     for b, scid, dcid in advsrc:
-        changed.append((b, bin(scid), ui.status,
+        changed.append((b, bin(scid), status,
                         _("updating bookmark %s\n") % (b)))
+    # remove normal movement from explicit set
+    explicit.difference_update(d[0] for d in changed)
+
     for b, scid, dcid in diverge:
-        db = _diverge(ui, b, path, localmarks)
-        changed.append((db, bin(scid), ui.warn,
-                        _("divergent bookmark %s stored as %s\n") % (b, db)))
+        if b in explicit:
+            explicit.discard(b)
+            changed.append((b, bin(scid), status,
+                            _("importing bookmark %s\n") % (b, b)))
+        else:
+            db = _diverge(ui, b, path, localmarks)
+            changed.append((db, bin(scid), warn,
+                            _("divergent bookmark %s stored as %s\n")
+                            % (b, db)))
+    for b, scid, dcid in adddst + advdst:
+        if b in explicit:
+            explicit.discard(b)
+            changed.append((b, bin(scid), status,
+                            _("importing bookmark %s\n") % (b, b)))
+
     if changed:
+        tr = trfunc()
         for b, node, writer, msg in sorted(changed):
             localmarks[b] = node
             writer(msg)
-        localmarks.write()
-
-def pushtoremote(ui, repo, remote, targets):
-    (addsrc, adddst, advsrc, advdst, diverge, differ, invalid
-     ) = compare(repo, repo._bookmarks, remote.listkeys('bookmarks'),
-                 srchex=hex, targets=targets)
-    if invalid:
-        b, scid, dcid = invalid[0]
-        ui.warn(_('bookmark %s does not exist on the local '
-                  'or remote repository!\n') % b)
-        return 2
-
-    def push(b, old, new):
-        r = remote.pushkey('bookmarks', b, old, new)
-        if not r:
-            ui.warn(_('updating bookmark %s failed!\n') % b)
-            return 1
-        return 0
-    failed = 0
-    for b, scid, dcid in sorted(addsrc + advsrc + advdst + diverge + differ):
-        ui.status(_("exporting bookmark %s\n") % b)
-        if dcid is None:
-            dcid = ''
-        failed += push(b, dcid, scid)
-    for b, scid, dcid in adddst:
-        # treat as "deleted locally"
-        ui.status(_("deleting remote bookmark %s\n") % b)
-        failed += push(b, dcid, '')
-
-    if failed:
-        return 1
+        localmarks.recordchange(tr)
 
 def diff(ui, dst, src):
     ui.status(_("searching for changed bookmarks\n"))

@@ -16,6 +16,7 @@ http://mercurial.selenic.com/wiki/RebaseExtension
 
 from mercurial import hg, util, repair, merge, cmdutil, commands, bookmarks
 from mercurial import extensions, patch, scmutil, phases, obsolete, error
+from mercurial import copies
 from mercurial.commands import templateopts
 from mercurial.node import nullrev
 from mercurial.lock import release
@@ -50,10 +51,9 @@ def _makeextrafn(copiers):
 
 @command('rebase',
     [('s', 'source', '',
-     _('rebase from the specified changeset'), _('REV')),
+     _('rebase the specified changeset and descendants'), _('REV')),
     ('b', 'base', '',
-     _('rebase from the base of the specified changeset '
-       '(up to greatest common ancestor of base and dest)'),
+     _('rebase everything from branching point of specified changeset'),
      _('REV')),
     ('r', 'rev', [],
      _('rebase these revisions'),
@@ -69,6 +69,7 @@ def _makeextrafn(copiers):
     ('', 'keep', False, _('keep original changesets')),
     ('', 'keepbranches', False, _('keep original branch names')),
     ('D', 'detach', False, _('(DEPRECATED)')),
+    ('i', 'interactive', False, _('(DEPRECATED)')),
     ('t', 'tool', '', _('specify merge tool')),
     ('c', 'continue', False, _('continue an interrupted rebase')),
     ('a', 'abort', False, _('abort an interrupted rebase'))] +
@@ -128,8 +129,39 @@ def rebase(ui, repo, **opts):
     If a rebase is interrupted to manually resolve a merge, it can be
     continued with --continue/-c or aborted with --abort/-a.
 
+    .. container:: verbose
+
+      Examples:
+
+      - move "local changes" (current commit back to branching point)
+        to the current branch tip after a pull::
+
+          hg rebase
+
+      - move a single changeset to the stable branch::
+
+          hg rebase -r 5f493448 -d stable
+
+      - splice a commit and all its descendants onto another part of history::
+
+          hg rebase --source c0c3 --dest 4cf9
+
+      - rebase everything on a branch marked by a bookmark onto the
+        default branch::
+
+          hg rebase --base myfeature --dest default
+
+      - collapse a sequence of changes into a single commit::
+
+          hg rebase --collapse -r 1520:1525 -d .
+
+      - move a named branch while preserving its name::
+
+          hg rebase -r "branch(featureX)" -d 1.3 --keepbranches
+
     Returns 0 on success, 1 if nothing to rebase or there are
     unresolved conflicts.
+
     """
     originalwd = target = None
     activebookmark = None
@@ -138,7 +170,6 @@ def rebase(ui, repo, **opts):
     skipped = set()
     targetancestors = set()
 
-    editor = cmdutil.getcommiteditor(**opts)
 
     lock = wlock = None
     try:
@@ -163,6 +194,11 @@ def rebase(ui, repo, **opts):
         # keepopen is not meant for use on the command line, but by
         # other extensions
         keepopen = opts.get('keepopen', False)
+
+        if opts.get('interactive'):
+            msg = _("interactive history editing is supported by the "
+                    "'histedit' extension (see 'hg help histedit')")
+            raise util.Abort(msg)
 
         if collapsemsg and not collapsef:
             raise util.Abort(
@@ -241,7 +277,10 @@ def rebase(ui, repo, **opts):
                     '(children(ancestor(%ld, %d)) and ::(%ld))::',
                     base, dest, base)
                 if not rebaseset:
-                    if base == [dest.rev()]:
+                    # transform to list because smartsets are not comparable to
+                    # lists. This should be improved to honor lazyness of
+                    # smartset.
+                    if list(base) == [dest.rev()]:
                         if basef:
                             ui.status(_('nothing to rebase - %s is both "base"'
                                         ' and destination\n') % dest)
@@ -264,7 +303,8 @@ def rebase(ui, repo, **opts):
                                   ('+'.join(str(repo[r]) for r in base), dest))
                     return 1
 
-            if (not (keepf or obsolete._enabled)
+            allowunstable = obsolete.isenabled(repo, obsolete.allowunstableopt)
+            if (not (keepf or allowunstable)
                   and repo.revs('first(children(%ld) - %ld)',
                                 rebaseset, rebaseset)):
                 raise util.Abort(
@@ -336,29 +376,25 @@ def rebase(ui, repo, **opts):
                     try:
                         ui.setconfig('ui', 'forcemerge', opts.get('tool', ''),
                                      'rebase')
-                        stats = rebasenode(repo, rev, p1, state, collapsef)
+                        stats = rebasenode(repo, rev, p1, state, collapsef,
+                                           target)
                         if stats and stats[3] > 0:
                             raise error.InterventionRequired(
                                 _('unresolved conflicts (see hg '
                                   'resolve, then hg rebase --continue)'))
                     finally:
                         ui.setconfig('ui', 'forcemerge', '', 'rebase')
-                if collapsef:
-                    cmdutil.duplicatecopies(repo, rev, target)
-                else:
-                    # If we're not using --collapse, we need to
-                    # duplicate copies between the revision we're
-                    # rebasing and its first parent, but *not*
-                    # duplicate any copies that have already been
-                    # performed in the destination.
-                    p1rev = repo[rev].p1().rev()
-                    cmdutil.duplicatecopies(repo, rev, p1rev, skiprev=target)
                 if not collapsef:
+                    merging = repo[p2].rev() != nullrev
+                    editform = cmdutil.mergeeditform(merging, 'rebase')
+                    editor = cmdutil.getcommiteditor(editform=editform, **opts)
                     newrev = concludenode(repo, rev, p1, p2, extrafn=extrafn,
                                           editor=editor)
                 else:
                     # Skip commit if we are collapsing
+                    repo.dirstate.beginparentchange()
                     repo.setparents(repo[p1].node())
+                    repo.dirstate.endparentchange()
                     newrev = None
                 # Update the state
                 if newrev is not None:
@@ -376,6 +412,8 @@ def rebase(ui, repo, **opts):
         if collapsef and not keepopen:
             p1, p2 = defineparents(repo, min(state), target,
                                                         state, targetancestors)
+            editopt = opts.get('edit')
+            editform = 'rebase.collapse'
             if collapsemsg:
                 commitmsg = collapsemsg
             else:
@@ -383,7 +421,8 @@ def rebase(ui, repo, **opts):
                 for rebased in state:
                     if rebased not in skipped and state[rebased] > nullmerge:
                         commitmsg += '\n* %s' % repo[rebased].description()
-                editor = cmdutil.getcommiteditor(edit=True)
+                editopt = True
+            editor = cmdutil.getcommiteditor(edit=editopt, editform=editform)
             newrev = concludenode(repo, rev, p1, external, commitmsg=commitmsg,
                                   extrafn=extrafn, editor=editor)
             for oldrev in state.iterkeys():
@@ -461,29 +500,34 @@ def externalparent(repo, state, targetancestors):
 def concludenode(repo, rev, p1, p2, commitmsg=None, editor=None, extrafn=None):
     'Commit the changes and store useful information in extra'
     try:
+        repo.dirstate.beginparentchange()
         repo.setparents(repo[p1].node(), repo[p2].node())
+        repo.dirstate.endparentchange()
         ctx = repo[rev]
         if commitmsg is None:
             commitmsg = ctx.description()
         extra = {'rebase_source': ctx.hex()}
         if extrafn:
             extrafn(ctx, extra)
-        # Commit might fail if unresolved files exist
-        newrev = repo.commit(text=commitmsg, user=ctx.user(),
-                             date=ctx.date(), extra=extra, editor=editor)
+
+        backup = repo.ui.backupconfig('phases', 'new-commit')
+        try:
+            targetphase = max(ctx.phase(), phases.draft)
+            repo.ui.setconfig('phases', 'new-commit', targetphase, 'rebase')
+            # Commit might fail if unresolved files exist
+            newrev = repo.commit(text=commitmsg, user=ctx.user(),
+                                 date=ctx.date(), extra=extra, editor=editor)
+        finally:
+            repo.ui.restoreconfig(backup)
+
         repo.dirstate.setbranch(repo[newrev].branch())
-        targetphase = max(ctx.phase(), phases.draft)
-        # retractboundary doesn't overwrite upper phase inherited from parent
-        newnode = repo[newrev].node()
-        if newnode:
-            phases.retractboundary(repo, targetphase, [newnode])
         return newrev
     except util.Abort:
         # Invalidate the previous setparents
         repo.dirstate.invalidate()
         raise
 
-def rebasenode(repo, rev, p1, state, collapse):
+def rebasenode(repo, rev, p1, state, collapse, target):
     'Rebase a single revision'
     # Merge phase
     # Update to target and merge it with local
@@ -540,15 +584,26 @@ def rebasenode(repo, rev, p1, state, collapse):
         repo.ui.debug("   detach base %d:%s\n" % (repo[base].rev(), repo[base]))
     # When collapsing in-place, the parent is the common ancestor, we
     # have to allow merging with it.
-    return merge.update(repo, rev, True, True, False, base, collapse,
+    stats = merge.update(repo, rev, True, True, False, base, collapse,
                         labels=['dest', 'source'])
+    if collapse:
+        copies.duplicatecopies(repo, rev, target)
+    else:
+        # If we're not using --collapse, we need to
+        # duplicate copies between the revision we're
+        # rebasing and its first parent, but *not*
+        # duplicate any copies that have already been
+        # performed in the destination.
+        p1rev = repo[rev].p1().rev()
+        copies.duplicatecopies(repo, rev, p1rev, skiprev=target)
+    return stats
 
 def nearestrebased(repo, rev, state):
     """return the nearest ancestors of rev in the rebase result"""
     rebased = [r for r in state if state[r] > nullmerge]
     candidates = repo.revs('max(%ld  and (::%d))', rebased, rev)
     if candidates:
-        return state[candidates[0]]
+        return state[candidates.first()]
     else:
         return None
 
@@ -557,40 +612,40 @@ def defineparents(repo, rev, target, state, targetancestors):
     parents = repo[rev].parents()
     p1 = p2 = nullrev
 
-    P1n = parents[0].rev()
-    if P1n in targetancestors:
+    p1n = parents[0].rev()
+    if p1n in targetancestors:
         p1 = target
-    elif P1n in state:
-        if state[P1n] == nullmerge:
+    elif p1n in state:
+        if state[p1n] == nullmerge:
             p1 = target
-        elif state[P1n] == revignored:
-            p1 = nearestrebased(repo, P1n, state)
+        elif state[p1n] == revignored:
+            p1 = nearestrebased(repo, p1n, state)
             if p1 is None:
                 p1 = target
         else:
-            p1 = state[P1n]
-    else: # P1n external
+            p1 = state[p1n]
+    else: # p1n external
         p1 = target
-        p2 = P1n
+        p2 = p1n
 
     if len(parents) == 2 and parents[1].rev() not in targetancestors:
-        P2n = parents[1].rev()
+        p2n = parents[1].rev()
         # interesting second parent
-        if P2n in state:
-            if p1 == target: # P1n in targetancestors or external
-                p1 = state[P2n]
-            elif state[P2n] == revignored:
-                p2 = nearestrebased(repo, P2n, state)
+        if p2n in state:
+            if p1 == target: # p1n in targetancestors or external
+                p1 = state[p2n]
+            elif state[p2n] == revignored:
+                p2 = nearestrebased(repo, p2n, state)
                 if p2 is None:
                     # no ancestors rebased yet, detach
                     p2 = target
             else:
-                p2 = state[P2n]
-        else: # P2n external
-            if p2 != nullrev: # P1n external too => rev is a merged revision
+                p2 = state[p2n]
+        else: # p2n external
+            if p2 != nullrev: # p1n external too => rev is a merged revision
                 raise util.Abort(_('cannot use revision %d as base, result '
                         'would have 3 parents') % rev)
-            p2 = P2n
+            p2 = p2n
     repo.ui.debug(" future parents are %d and %d\n" %
                             (repo[p1].rev(), repo[p2].rev()))
     return p1, p2
@@ -874,7 +929,7 @@ def clearrebased(ui, repo, state, skipped, collapsedas=None):
 
     If `collapsedas` is not None, the rebase was a collapse whose result if the
     `collapsedas` node."""
-    if obsolete._enabled:
+    if obsolete.isenabled(repo, obsolete.createmarkersopt):
         markers = []
         for rev, newrev in sorted(state.items()):
             if newrev >= 0:

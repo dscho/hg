@@ -91,6 +91,13 @@
       directory if it is converted. To rename from a subdirectory into the root
       of the repository, use "." as the path to rename to.
   
+      "--full" will make sure the converted changesets contain exactly the right
+      files with the right content. It will make a full conversion of all files,
+      not just the ones that have changed. Files that already are correct will
+      not be changed. This can be used to apply filemap changes when converting
+      incrementally. This is currently only supported for Mercurial and
+      Subversion.
+  
       The splicemap is a file that allows insertion of synthetic history,
       letting you specify the parents of a revision. This is useful if you want
       to e.g. give a Subversion merge two parents, or graft two disconnected
@@ -229,6 +236,30 @@
       convert.svn.startrev
                     specify start Subversion revision number. The default is 0.
   
+      Git Source
+      ##########
+  
+      The Git importer converts commits from all reachable branches (refs in
+      refs/heads) and remotes (refs in refs/remotes) to Mercurial. Branches are
+      converted to bookmarks with the same name, with the leading 'refs/heads'
+      stripped. Git submodules are converted to Git subrepos in Mercurial.
+  
+      The following options can be set with "--config":
+  
+      convert.git.similarity
+                    specify how similar files modified in a commit must be to be
+                    imported as renames or copies, as a percentage between "0"
+                    (disabled) and "100" (files must be identical). For example,
+                    "90" means that a delete/add pair will be imported as a
+                    rename if more than 90% of the file hasn't changed. The
+                    default is "50".
+      convert.git.findcopiesharder
+                    while detecting copies, look at all files in the working
+                    copy instead of just changed ones. This is very expensive
+                    for large projects, and is only effective when
+                    "convert.git.similarity" is greater than 0. The default is
+                    False.
+  
       Perforce Source
       ###############
   
@@ -265,6 +296,7 @@
    -r --rev REV          import up to source revision REV
    -A --authormap FILE   remap usernames using this file
       --filemap FILE     remap file names using contents of file
+      --full             apply filemap changes by converting all files again
       --splicemap FILE   splice synthesized history into place
       --branchmap FILE   change branch names while converting
       --branchsort       try to sort changesets by branches
@@ -272,7 +304,7 @@
       --sourcesort       preserve source changesets order
       --closesort        try to reorder closed revisions
   
-  use "hg -v help convert" to show the global options
+  (some details hidden, use --verbose to show complete help)
   $ hg init a
   $ cd a
   $ echo a > a

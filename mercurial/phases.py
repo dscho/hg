@@ -163,10 +163,12 @@ class phasecache(object):
         for a in 'phaseroots dirty opener _phaserevs'.split():
             setattr(self, a, getattr(phcache, a))
 
-    def getphaserevs(self, repo, rebuild=False):
-        if rebuild or self._phaserevs is None:
+    def getphaserevs(self, repo):
+        if self._phaserevs is None:
             repo = repo.unfiltered()
             revs = [public] * len(repo.changelog)
+            self._phaserevs = revs
+            self._populatephaseroots(repo)
             for phase in trackedphases:
                 roots = map(repo.changelog.rev, self.phaseroots[phase])
                 if roots:
@@ -174,8 +176,20 @@ class phasecache(object):
                         revs[rev] = phase
                     for rev in repo.changelog.descendants(roots):
                         revs[rev] = phase
-            self._phaserevs = revs
         return self._phaserevs
+
+    def invalidate(self):
+        self._phaserevs = None
+
+    def _populatephaseroots(self, repo):
+        """Fills the _phaserevs cache with phases for the roots.
+        """
+        cl = repo.changelog
+        phaserevs = self._phaserevs
+        for phase in trackedphases:
+            roots = map(cl.rev, self.phaseroots[phase])
+            for root in roots:
+                phaserevs[root] = phase
 
     def phase(self, repo, rev):
         # We need a repo argument here to be able to build _phaserevs
@@ -188,7 +202,8 @@ class phasecache(object):
         if rev < nullrev:
             raise ValueError(_('cannot lookup negative revision'))
         if self._phaserevs is None or rev >= len(self._phaserevs):
-            self._phaserevs = self.getphaserevs(repo, rebuild=True)
+            self.invalidate()
+            self._phaserevs = self.getphaserevs(repo)
         return self._phaserevs[rev]
 
     def write(self):
@@ -196,19 +211,25 @@ class phasecache(object):
             return
         f = self.opener('phaseroots', 'w', atomictemp=True)
         try:
-            for phase, roots in enumerate(self.phaseroots):
-                for h in roots:
-                    f.write('%i %s\n' % (phase, hex(h)))
+            self._write(f)
         finally:
             f.close()
+
+    def _write(self, fp):
+        for phase, roots in enumerate(self.phaseroots):
+            for h in roots:
+                fp.write('%i %s\n' % (phase, hex(h)))
         self.dirty = False
 
-    def _updateroots(self, phase, newroots):
+    def _updateroots(self, phase, newroots, tr):
         self.phaseroots[phase] = newroots
-        self._phaserevs = None
+        self.invalidate()
         self.dirty = True
 
-    def advanceboundary(self, repo, targetphase, nodes):
+        tr.addfilegenerator('phase', ('phaseroots',), self._write)
+        tr.hookargs['phases_moved'] = '1'
+
+    def advanceboundary(self, repo, tr, targetphase, nodes):
         # Be careful to preserve shallow-copied values: do not update
         # phaseroots values, replace them.
 
@@ -224,15 +245,15 @@ class phasecache(object):
             roots = set(ctx.node() for ctx in repo.set(
                     'roots((%ln::) - (%ln::%ln))', olds, olds, nodes))
             if olds != roots:
-                self._updateroots(phase, roots)
+                self._updateroots(phase, roots, tr)
                 # some roots may need to be declared for lower phases
                 delroots.extend(olds - roots)
             # declare deleted root in the target phase
             if targetphase != 0:
-                self.retractboundary(repo, targetphase, delroots)
+                self.retractboundary(repo, tr, targetphase, delroots)
         repo.invalidatevolatilesets()
 
-    def retractboundary(self, repo, targetphase, nodes):
+    def retractboundary(self, repo, tr, targetphase, nodes):
         # Be careful to preserve shallow-copied values: do not update
         # phaseroots values, replace them.
 
@@ -247,7 +268,7 @@ class phasecache(object):
             currentroots.update(newroots)
             ctxs = repo.set('roots(%ln::)', currentroots)
             currentroots.intersection_update(ctx.node() for ctx in ctxs)
-            self._updateroots(targetphase, currentroots)
+            self._updateroots(targetphase, currentroots, tr)
         repo.invalidatevolatilesets()
 
     def filterunknown(self, repo):
@@ -276,9 +297,9 @@ class phasecache(object):
         # anyway. If this change we should consider adding a dedicated
         # "destroyed" function to phasecache or a proper cache key mechanism
         # (see branchmap one)
-        self._phaserevs = None
+        self.invalidate()
 
-def advanceboundary(repo, targetphase, nodes):
+def advanceboundary(repo, tr, targetphase, nodes):
     """Add nodes to a phase changing other nodes phases if necessary.
 
     This function move boundary *forward* this means that all nodes
@@ -286,10 +307,10 @@ def advanceboundary(repo, targetphase, nodes):
 
     Simplify boundary to contains phase roots only."""
     phcache = repo._phasecache.copy()
-    phcache.advanceboundary(repo, targetphase, nodes)
+    phcache.advanceboundary(repo, tr, targetphase, nodes)
     repo._phasecache.replace(phcache)
 
-def retractboundary(repo, targetphase, nodes):
+def retractboundary(repo, tr, targetphase, nodes):
     """Set nodes back to a phase changing other nodes phases if
     necessary.
 
@@ -298,7 +319,7 @@ def retractboundary(repo, targetphase, nodes):
 
     Simplify boundary to contains phase roots only."""
     phcache = repo._phasecache.copy()
-    phcache.retractboundary(repo, targetphase, nodes)
+    phcache.retractboundary(repo, tr, targetphase, nodes)
     repo._phasecache.replace(phcache)
 
 def listphases(repo):
@@ -331,13 +352,16 @@ def listphases(repo):
 def pushphase(repo, nhex, oldphasestr, newphasestr):
     """List phases root for serialization over pushkey"""
     repo = repo.unfiltered()
+    tr = None
     lock = repo.lock()
     try:
         currentphase = repo[nhex].phase()
         newphase = abs(int(newphasestr)) # let's avoid negative index surprise
         oldphase = abs(int(oldphasestr)) # let's avoid negative index surprise
         if currentphase == oldphase and newphase < oldphase:
-            advanceboundary(repo, newphase, [bin(nhex)])
+            tr = repo.transaction('pushkey-phase')
+            advanceboundary(repo, tr, newphase, [bin(nhex)])
+            tr.close()
             return 1
         elif currentphase == newphase:
             # raced, but got correct result
@@ -345,6 +369,8 @@ def pushphase(repo, nhex, oldphasestr, newphasestr):
         else:
             return 0
     finally:
+        if tr:
+            tr.release()
         lock.release()
 
 def analyzeremotephases(repo, subset, roots):

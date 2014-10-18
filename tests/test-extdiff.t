@@ -37,7 +37,7 @@ Should diff cloned directories:
       compared to the working directory, and, when no revisions are specified,
       the working directory files are compared to its parent.
   
-  options:
+  options ([+] can be repeated):
   
    -o --option OPT [+]      pass option to comparison program
    -r --rev REV [+]         revision
@@ -45,9 +45,7 @@ Should diff cloned directories:
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
   
-  [+] marked option can be specified multiple times
-  
-  use "hg -v help falabala" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
   $ hg ci -d '0 0' -mtest1
 

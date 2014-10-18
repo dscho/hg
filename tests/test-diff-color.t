@@ -85,7 +85,8 @@ record
   \x1b[0;36;1mold mode 100644\x1b[0m (esc)
   \x1b[0;36;1mnew mode 100755\x1b[0m (esc)
   1 hunks, 1 lines changed
-  \x1b[0;33mexamine changes to 'a'? [Ynesfdaq?]\x1b[0m  (esc)
+  \x1b[0;33mexamine changes to 'a'? [Ynesfdaq?]\x1b[0m y (esc)
+  
   \x1b[0;35m@@ -2,7 +2,7 @@\x1b[0m (esc)
    c
    a
@@ -95,7 +96,8 @@ record
    a
    a
    c
-  \x1b[0;33mrecord this change to 'a'? [Ynesfdaq?]\x1b[0m  (esc)
+  \x1b[0;33mrecord this change to 'a'? [Ynesfdaq?]\x1b[0m y (esc)
+  
 
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "mq=" >> $HGRCPATH
@@ -113,7 +115,8 @@ qrecord
   \x1b[0;36;1mold mode 100644\x1b[0m (esc)
   \x1b[0;36;1mnew mode 100755\x1b[0m (esc)
   1 hunks, 1 lines changed
-  \x1b[0;33mexamine changes to 'a'? [Ynesfdaq?]\x1b[0m  (esc)
+  \x1b[0;33mexamine changes to 'a'? [Ynesfdaq?]\x1b[0m y (esc)
+  
   \x1b[0;35m@@ -2,7 +2,7 @@\x1b[0m (esc)
    c
    a
@@ -123,7 +126,8 @@ qrecord
    a
    a
    c
-  \x1b[0;33mrecord this change to 'a'? [Ynesfdaq?]\x1b[0m  (esc)
+  \x1b[0;33mrecord this change to 'a'? [Ynesfdaq?]\x1b[0m y (esc)
+  
 
   $ hg qpop -a
   popping patch
@@ -158,5 +162,45 @@ issue3712: test colorization of subrepo diff
   \x1b[0;35m@@ -1,1 +1,2 @@\x1b[0m (esc)
    b
   \x1b[0;32m+bb\x1b[0m (esc)
+
+test tabs
+
+  $ cat >> a <<EOF
+  > 	one tab
+  > 		two tabs
+  > end tab	
+  > mid	tab
+  > 	all		tabs	
+  > EOF
+  $ hg diff --nodates --color=always
+  \x1b[0;1mdiff --git a/a b/a\x1b[0m (esc)
+  \x1b[0;31;1m--- a/a\x1b[0m (esc)
+  \x1b[0;32;1m+++ b/a\x1b[0m (esc)
+  \x1b[0;35m@@ -7,3 +7,9 @@\x1b[0m (esc)
+   a
+   c
+   c
+  \x1b[0;32m+aa\x1b[0m (esc)
+  \x1b[0;32m+\x1b[0m	\x1b[0;32mone tab\x1b[0m (esc)
+  \x1b[0;32m+\x1b[0m		\x1b[0;32mtwo tabs\x1b[0m (esc)
+  \x1b[0;32m+end tab\x1b[0m\x1b[0;1;41m	\x1b[0m (esc)
+  \x1b[0;32m+mid\x1b[0m	\x1b[0;32mtab\x1b[0m (esc)
+  \x1b[0;32m+\x1b[0m	\x1b[0;32mall\x1b[0m		\x1b[0;32mtabs\x1b[0m\x1b[0;1;41m	\x1b[0m (esc)
+  $ echo "[color]" >> $HGRCPATH
+  $ echo "diff.tab = bold magenta" >> $HGRCPATH
+  $ hg diff --nodates --color=always
+  \x1b[0;1mdiff --git a/a b/a\x1b[0m (esc)
+  \x1b[0;31;1m--- a/a\x1b[0m (esc)
+  \x1b[0;32;1m+++ b/a\x1b[0m (esc)
+  \x1b[0;35m@@ -7,3 +7,9 @@\x1b[0m (esc)
+   a
+   c
+   c
+  \x1b[0;32m+aa\x1b[0m (esc)
+  \x1b[0;32m+\x1b[0m\x1b[0;1;35m	\x1b[0m\x1b[0;32mone tab\x1b[0m (esc)
+  \x1b[0;32m+\x1b[0m\x1b[0;1;35m		\x1b[0m\x1b[0;32mtwo tabs\x1b[0m (esc)
+  \x1b[0;32m+end tab\x1b[0m\x1b[0;1;41m	\x1b[0m (esc)
+  \x1b[0;32m+mid\x1b[0m\x1b[0;1;35m	\x1b[0m\x1b[0;32mtab\x1b[0m (esc)
+  \x1b[0;32m+\x1b[0m\x1b[0;1;35m	\x1b[0m\x1b[0;32mall\x1b[0m\x1b[0;1;35m		\x1b[0m\x1b[0;32mtabs\x1b[0m\x1b[0;1;41m	\x1b[0m (esc)
 
   $ cd ..

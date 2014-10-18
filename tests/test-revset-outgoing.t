@@ -36,8 +36,20 @@
 
   $ cd b
   $ cat .hg/hgrc
+  # example repository config (see "hg help config" for more info)
   [paths]
-  default = $TESTTMP/a#stable (glob)
+  default = $TESTTMP/a#stable
+  
+  # path aliases to other clones of this repo in URLs or filesystem paths
+  # (see "hg help config.paths" for more info)
+  #
+  # default-push = ssh://jdoe@example.net/hg/jdoes-fork
+  # my-fork      = ssh://jdoe@example.net/hg/jdoes-fork
+  # my-clone     = /home/jdoe/jdoes-clone
+  
+  [ui]
+  # name and email (local to this repository, optional), e.g.
+  # username = Jane Doe <jdoe@example.com>
 
   $ echo red >> a
   $ hg ci -qm3
@@ -76,16 +88,29 @@
   $ echo "green = ../a#default" >> .hg/hgrc
 
   $ cat .hg/hgrc
+  # example repository config (see "hg help config" for more info)
   [paths]
-  default = $TESTTMP/a#stable (glob)
+  default = $TESTTMP/a#stable
+  
+  # path aliases to other clones of this repo in URLs or filesystem paths
+  # (see "hg help config.paths" for more info)
+  #
+  # default-push = ssh://jdoe@example.net/hg/jdoes-fork
+  # my-fork      = ssh://jdoe@example.net/hg/jdoes-fork
+  # my-clone     = /home/jdoe/jdoes-clone
+  
+  [ui]
+  # name and email (local to this repository, optional), e.g.
+  # username = Jane Doe <jdoe@example.com>
   green = ../a#default
 
   $ hg tout green
-  comparing with $TESTTMP/a (glob)
-  searching for changes
-  3:f0461977a3db: '4' 
+  comparing with green
+  abort: repository green not found!
+  [255]
 
   $ hg tlog -r 'outgoing("green")'
-  3:f0461977a3db: '4' 
+  abort: repository green not found!
+  [255]
 
   $ cd ..

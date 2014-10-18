@@ -8,10 +8,12 @@
 
 from i18n import _
 from lock import release
-from node import hex, nullid
+from node import nullid
+
 import localrepo, bundlerepo, unionrepo, httppeer, sshpeer, statichttprepo
 import bookmarks, lock, util, extensions, error, node, scmutil, phases, url
-import cmdutil, discovery
+import cmdutil, discovery, repoview, exchange
+import ui as uimod
 import merge as mergemod
 import verify as verifymod
 import errno, os, shutil
@@ -24,7 +26,14 @@ def addbranchrevs(lrepo, other, branches, revs):
     peer = other.peer() # a courtesy to callers using a localrepo for other
     hashbranch, branches = branches
     if not hashbranch and not branches:
-        return revs or None, revs and revs[0] or None
+        x = revs or None
+        if util.safehasattr(revs, 'first'):
+            y =  revs.first()
+        elif revs:
+            y = revs[0]
+        else:
+            y = None
+        return x, y
     revs = revs and list(revs) or []
     if not peer.capable('branchmap'):
         if branches:
@@ -363,16 +372,28 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
                 raise
 
             destlock = copystore(ui, srcrepo, destpath)
+            # copy bookmarks over
+            srcbookmarks = srcrepo.join('bookmarks')
+            dstbookmarks = os.path.join(destpath, 'bookmarks')
+            if os.path.exists(srcbookmarks):
+                util.copyfile(srcbookmarks, dstbookmarks)
 
             # Recomputing branch cache might be slow on big repos,
             # so just copy it
+            def copybranchcache(fname):
+                srcbranchcache = srcrepo.join('cache/%s' % fname)
+                dstbranchcache = os.path.join(dstcachedir, fname)
+                if os.path.exists(srcbranchcache):
+                    if not os.path.exists(dstcachedir):
+                        os.mkdir(dstcachedir)
+                    util.copyfile(srcbranchcache, dstbranchcache)
+
             dstcachedir = os.path.join(destpath, 'cache')
-            srcbranchcache = srcrepo.sjoin('cache/branch2')
-            dstbranchcache = os.path.join(dstcachedir, 'branch2')
-            if os.path.exists(srcbranchcache):
-                if not os.path.exists(dstcachedir):
-                    os.mkdir(dstcachedir)
-                util.copyfile(srcbranchcache, dstbranchcache)
+            # In local clones we're copying all nodes, not just served
+            # ones. Therefore copy all branchcaches over.
+            copybranchcache('branch2')
+            for cachename in repoview.filtertable:
+                copybranchcache('branch2-%s' % cachename)
 
             # we need to re-init the repo after manually copying the data
             # into it
@@ -401,36 +422,21 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
             if destpeer.local():
                 destpeer.local().clone(srcpeer, heads=revs, stream=stream)
             elif srcrepo:
-                srcrepo.push(destpeer, revs=revs)
+                exchange.push(srcrepo, destpeer, revs=revs,
+                              bookmarks=srcrepo._bookmarks.keys())
             else:
                 raise util.Abort(_("clone from remote to remote not supported"))
 
         cleandir = None
 
-        # clone all bookmarks except divergent ones
         destrepo = destpeer.local()
-        if destrepo and srcpeer.capable("pushkey"):
-            rb = srcpeer.listkeys('bookmarks')
-            marks = destrepo._bookmarks
-            for k, n in rb.iteritems():
-                try:
-                    m = destrepo.lookup(n)
-                    marks[k] = m
-                except error.RepoLookupError:
-                    pass
-            if rb:
-                marks.write()
-        elif srcrepo and destpeer.capable("pushkey"):
-            for k, n in srcrepo._bookmarks.iteritems():
-                destpeer.pushkey('bookmarks', k, '', hex(n))
-
         if destrepo:
+            template = uimod.samplehgrcs['cloned']
             fp = destrepo.opener("hgrc", "w", text=True)
-            fp.write("[paths]\n")
             u = util.url(abspath)
             u.passwd = None
             defaulturl = str(u)
-            fp.write("default = %s\n" % defaulturl)
+            fp.write(template % defaulturl)
             fp.close()
 
             destrepo.ui.setconfig('paths', 'default', defaulturl, 'clone')

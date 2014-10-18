@@ -28,8 +28,20 @@ Issue1199: Can't use '%' in hgrc (eg url encoded username)
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd foobar
   $ cat .hg/hgrc
+  # example repository config (see "hg help config" for more info)
   [paths]
-  default = $TESTTMP/foo%bar (glob)
+  default = $TESTTMP/foo%bar
+  
+  # path aliases to other clones of this repo in URLs or filesystem paths
+  # (see "hg help config.paths" for more info)
+  #
+  # default-push = ssh://jdoe@example.net/hg/jdoes-fork
+  # my-fork      = ssh://jdoe@example.net/hg/jdoes-fork
+  # my-clone     = /home/jdoe/jdoes-clone
+  
+  [ui]
+  # name and email (local to this repository, optional), e.g.
+  # username = Jane Doe <jdoe@example.com>
   $ hg paths
   default = $TESTTMP/foo%bar (glob)
   $ hg showconfig
@@ -43,9 +55,10 @@ issue1829: wrong indentation
   $ echo '  x = y' >> $HGRC
   $ hg version
   hg: parse error at $TESTTMP/hgrc:2:   x = y
+  unexpected leading whitespace
   [255]
 
-  $ python -c "print '[foo]\nbar = a\n b\n c \n  de\n fg \nbaz = bif cb \n'" \
+  $ $PYTHON -c "print '[foo]\nbar = a\n b\n c \n  de\n fg \nbaz = bif cb \n'" \
   > > $HGRC
   $ hg showconfig foo
   foo.bar=a\nb\nc\nde\nfg

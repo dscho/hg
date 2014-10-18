@@ -94,7 +94,7 @@ testpats = [
     (r'sed.*-i', "don't use 'sed -i', use a temporary file"),
     (r'\becho\b.*\\n', "don't use 'echo \\n', use printf"),
     (r'echo -n', "don't use 'echo -n', use printf"),
-    (r'(^| )wc[^|]*$\n(?!.*\(re\))', "filter wc output"),
+    (r'(^| )\bwc\b[^|]*$\n(?!.*\(re\))', "filter wc output"),
     (r'head -c', "don't use 'head -c', use 'dd'"),
     (r'tail -n', "don't use the '-n' option to tail, just use '-<num>'"),
     (r'sha1sum', "don't use sha1sum, use $TESTDIR/md5sum.py"),
@@ -179,12 +179,14 @@ utestpats = [
 ]
 
 for i in [0, 1]:
-    for p, m in testpats[i]:
+    for tp in testpats[i]:
+        p = tp[0]
+        m = tp[1]
         if p.startswith(r'^'):
             p = r"^  [$>] (%s)" % p[1:]
         else:
             p = r"^  [$>] .*(%s)" % p
-        utestpats[i].append((p, m))
+        utestpats[i].append((p, m) + tp[2:])
 
 utestfilters = [
     (r"<<(\S+)((.|\n)*?\n  > \1)", rephere),
@@ -214,8 +216,9 @@ pypats = [
     (r'(\w|\)),\w', "missing whitespace after ,"),
     (r'(\w|\))[+/*\-<>]\w', "missing whitespace in expression"),
     (r'^\s+(\w|\.)+=\w[^,()\n]*$', "missing whitespace in assignment"),
-    (r'(\s+)try:\n((?:\n|\1\s.*\n)+?)\1except.*?:\n'
-     r'((?:\n|\1\s.*\n)+?)\1finally:', 'no try/except/finally in Python 2.4'),
+    (r'(\s+)try:\n((?:\n|\1\s.*\n)+?)(\1except.*?:\n'
+     r'((?:\n|\1\s.*\n)+?))+\1finally:',
+     'no try/except/finally in Python 2.4'),
     (r'(?<!def)(\s+|^|\()next\(.+\)',
      'no next(foo) in Python 2.4 and 2.5, use foo.next() instead'),
     (r'(\s+)try:\n((?:\n|\1\s.*\n)*?)\1\s*yield\b.*?'
@@ -296,6 +299,7 @@ pypats = [
     (r'ui\.(status|progress|write|note|warn)\([\'\"]x',
      "missing _() in ui message (use () to hide false-positives)"),
     (r'release\(.*wlock, .*lock\)', "wrong lock release order"),
+    (r'\b__bool__\b', "__bool__ should be __nonzero__ in Python 2"),
   ],
   # warnings
   [

@@ -10,7 +10,7 @@ Prepare repo a:
 
 Create a non-inlined filelog:
 
-  $ python -c 'file("data1", "wb").write("".join("%s\n" % x for x in range(10000)))'
+  $ $PYTHON -c 'file("data1", "wb").write("".join("%s\n" % x for x in range(10000)))'
   $ for j in 0 1 2 3 4 5 6 7 8 9; do
   >   cat data1 >> b
   >   hg commit -m test
@@ -25,12 +25,25 @@ List files in store/data (should show a 'b.d'):
   .hg/store/data/b.d
   .hg/store/data/b.i
 
+Trigger branchcache creation:
+
+  $ hg branches
+  default                       10:a7949464abda
+  $ ls .hg/cache
+  branch2-served
+
 Default operation:
 
   $ hg clone . ../b
   updating to branch default
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd ../b
+
+Ensure branchcache got copied over:
+
+  $ ls .hg/cache
+  branch2-served
+
   $ cat a
   a
   $ hg verify
@@ -51,13 +64,18 @@ No update, with debug option:
 #if hardlink
   $ hg --debug clone -U . ../c
   linked 8 files
-  listing keys for "bookmarks"
 #else
   $ hg --debug clone -U . ../c
   copied 8 files
   listing keys for "bookmarks"
 #endif
   $ cd ../c
+
+Ensure branchcache got copied over:
+
+  $ ls .hg/cache
+  branch2-served
+
   $ cat a 2>/dev/null || echo "a not present"
   a not present
   $ hg verify

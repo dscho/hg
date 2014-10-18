@@ -22,10 +22,13 @@ Test --bypass with other options
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
 
 Test importing an existing revision
-(this also tests that editor is not invoked for '--bypass', if the
-patch contains the commit message, regardless of '--edit')
+(this also tests that "hg import" disallows combination of '--exact'
+and '--edit')
 
-  $ HGEDITOR=cat hg import --bypass --exact --edit ../test.diff
+  $ hg import --bypass --exact --edit ../test.diff
+  abort: cannot use --exact with --edit
+  [255]
+  $ hg import --bypass --exact ../test.diff
   applying ../test.diff
   $ shortlog
   o  1:4e322f7ce8e3 test 0 0 - foo - changea
@@ -66,8 +69,10 @@ Test --user, --date and --message
   repository tip rolled back to revision 1 (undo import)
 
 Test --import-branch
+(this also tests that editor is not invoked for '--bypass', if the
+patch contains the commit message, regardless of '--edit')
 
-  $ hg import --bypass --import-branch ../test.diff
+  $ HGEDITOR=cat hg import --bypass --import-branch --edit ../test.diff
   applying ../test.diff
   $ shortlog
   o  1:4e322f7ce8e3 test 0 0 - foo - changea
@@ -138,7 +143,7 @@ Test patch.eol is handled
 (this also tests that editor is not invoked for '--bypass', if the
 commit message is explicitly specified, regardless of '--edit')
 
-  $ python -c 'file("a", "wb").write("a\r\n")'
+  $ $PYTHON -c 'file("a", "wb").write("a\r\n")'
   $ hg ci -m makeacrlf
   $ HGEDITOR=cat hg import -m 'should fail because of eol' --edit --bypass ../test.diff
   applying ../test.diff
@@ -218,6 +223,25 @@ Test applying multiple patches with --exact
   |/
   o  0:07f494440405 test 0 0 - default - adda
   
+
+  $ cd ..
+
+Test avoiding editor invocation at applying the patch with --exact
+even if commit message is empty
+
+  $ cd repo-options
+
+  $ echo a >> a
+  $ hg commit -m ' '
+  $ hg tip -T "{node}\n"
+  1b77bc7d1db9f0e7f1716d515b630516ab386c89
+  $ hg export -o ../empty-log.diff .
+  $ hg update -q -C ".^1"
+  $ hg --config extensions.strip= strip -q tip
+  $ HGEDITOR=cat hg import --exact --bypass ../empty-log.diff
+  applying ../empty-log.diff
+  $ hg tip -T "{node}\n"
+  1b77bc7d1db9f0e7f1716d515b630516ab386c89
 
   $ cd ..
 

@@ -19,7 +19,7 @@ Missing arg:
   
   output the current or given revision of files
   
-  options:
+  options ([+] can be repeated):
   
    -o --output FORMAT       print output to file with formatted name
    -r --rev REV             print the given revision
@@ -27,9 +27,7 @@ Missing arg:
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
   
-  [+] marked option can be specified multiple times
-  
-  use "hg help cat" to show the full help text
+  (use "hg cat -h" to show more help)
   [255]
 
 [defaults]

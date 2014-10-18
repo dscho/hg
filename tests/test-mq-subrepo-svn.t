@@ -1,4 +1,4 @@
-  $ "$TESTDIR/hghave" svn13 || exit 80
+#require svn13
 
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "mq=" >> $HGRCPATH
@@ -19,9 +19,9 @@ handle svn subrepos safely
 
   $ SVNREPOPATH=`pwd`/svn-repo-2499/project
 #if windows
-  $ SVNREPOURL=file:///`python -c "import urllib, sys; sys.stdout.write(urllib.quote(sys.argv[1]))" "$SVNREPOPATH"`
+  $ SVNREPOURL=file:///`$PYTHON -c "import urllib, sys; sys.stdout.write(urllib.quote(sys.argv[1]))" "$SVNREPOPATH"`
 #else
-  $ SVNREPOURL=file://`python -c "import urllib, sys; sys.stdout.write(urllib.quote(sys.argv[1]))" "$SVNREPOPATH"`
+  $ SVNREPOURL=file://`$PYTHON -c "import urllib, sys; sys.stdout.write(urllib.quote(sys.argv[1]))" "$SVNREPOPATH"`
 #endif
 
   $ mkdir -p svn-project-2499/trunk

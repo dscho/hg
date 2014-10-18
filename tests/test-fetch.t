@@ -1,4 +1,4 @@
-  $ "$TESTDIR/hghave" serve || exit 80
+#require serve
 
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "fetch=" >> $HGRCPATH
@@ -150,7 +150,7 @@ should merge f into g
 should abort, because i is modified
 
   $ hg --cwd i fetch ../h
-  abort: working directory is missing some files
+  abort: uncommitted changes
   [255]
 
 test fetch with named branches

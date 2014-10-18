@@ -35,6 +35,27 @@ static int8_t hextable[256] = {
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
 };
 
+static char lowertable[128] = {
+	'\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x07',
+	'\x08', '\x09', '\x0a', '\x0b', '\x0c', '\x0d', '\x0e', '\x0f',
+	'\x10', '\x11', '\x12', '\x13', '\x14', '\x15', '\x16', '\x17',
+	'\x18', '\x19', '\x1a', '\x1b', '\x1c', '\x1d', '\x1e', '\x1f',
+	'\x20', '\x21', '\x22', '\x23', '\x24', '\x25', '\x26', '\x27',
+	'\x28', '\x29', '\x2a', '\x2b', '\x2c', '\x2d', '\x2e', '\x2f',
+	'\x30', '\x31', '\x32', '\x33', '\x34', '\x35', '\x36', '\x37',
+	'\x38', '\x39', '\x3a', '\x3b', '\x3c', '\x3d', '\x3e', '\x3f',
+	'\x40',
+	        '\x61', '\x62', '\x63', '\x64', '\x65', '\x66', '\x67', /* A-G */
+	'\x68', '\x69', '\x6a', '\x6b', '\x6c', '\x6d', '\x6e', '\x6f', /* H-O */
+	'\x70', '\x71', '\x72', '\x73', '\x74', '\x75', '\x76', '\x77', /* P-W */
+	'\x78', '\x79', '\x7a',                                         /* X-Z */
+	                        '\x5b', '\x5c', '\x5d', '\x5e', '\x5f',
+	'\x60', '\x61', '\x62', '\x63', '\x64', '\x65', '\x66', '\x67',
+	'\x68', '\x69', '\x6a', '\x6b', '\x6c', '\x6d', '\x6e', '\x6f',
+	'\x70', '\x71', '\x72', '\x73', '\x74', '\x75', '\x76', '\x77',
+	'\x78', '\x79', '\x7a', '\x7b', '\x7c', '\x7d', '\x7e', '\x7f'
+};
+
 static inline int hexdigit(const char *p, Py_ssize_t off)
 {
 	int8_t val = hextable[(unsigned char)p[off]];
@@ -70,6 +91,39 @@ static PyObject *unhexlify(const char *str, int len)
 	}
 
 	return ret;
+}
+
+static PyObject *asciilower(PyObject *self, PyObject *args)
+{
+	char *str, *newstr;
+	int i, len;
+	PyObject *newobj = NULL;
+
+	if (!PyArg_ParseTuple(args, "s#", &str, &len))
+		goto quit;
+
+	newobj = PyBytes_FromStringAndSize(NULL, len);
+	if (!newobj)
+		goto quit;
+
+	newstr = PyBytes_AS_STRING(newobj);
+
+	for (i = 0; i < len; i++) {
+		char c = str[i];
+		if (c & 0x80) {
+			PyObject *err = PyUnicodeDecodeError_Create(
+				"ascii", str, len, i, (i + 1),
+				"unexpected code byte");
+			PyErr_SetObject(PyExc_UnicodeDecodeError, err);
+			goto quit;
+		}
+		newstr[i] = lowertable[(unsigned char)c];
+	}
+
+	return newobj;
+quit:
+	Py_XDECREF(newobj);
+	return NULL;
 }
 
 /*
@@ -275,14 +329,19 @@ static PyObject *parse_dirstate(PyObject *self, PyObject *args)
 	PyObject *fname = NULL, *cname = NULL, *entry = NULL;
 	char state, *cur, *str, *cpos;
 	int mode, size, mtime;
-	unsigned int flen;
-	int len, pos = 40;
+	unsigned int flen, len, pos = 40;
+	int readlen;
 
 	if (!PyArg_ParseTuple(args, "O!O!s#:parse_dirstate",
 			      &PyDict_Type, &dmap,
 			      &PyDict_Type, &cmap,
-			      &str, &len))
+			      &str, &readlen))
 		goto quit;
+
+	if (readlen < 0)
+		goto quit;
+
+	len = readlen;
 
 	/* read parents */
 	if (len < 40)
@@ -503,6 +562,7 @@ typedef struct {
 	Py_ssize_t length;     /* current number of elements */
 	PyObject *added;       /* populated on demand */
 	PyObject *headrevs;    /* cache, invalidated on changes */
+	PyObject *filteredrevs;/* filtered revs set */
 	nodetree *nt;          /* base-16 trie */
 	int ntlength;          /* # nodes in use */
 	int ntcapacity;        /* # nodes allocated */
@@ -524,7 +584,7 @@ static Py_ssize_t index_length(const indexObject *self)
 static PyObject *nullentry;
 static const char nullid[20];
 
-static long inline_scan(indexObject *self, const char **offsets);
+static Py_ssize_t inline_scan(indexObject *self, const char **offsets);
 
 #if LONG_MAX == 0x7fffffffL
 static char *tuple_format = "Kiiiiiis#";
@@ -681,10 +741,10 @@ static PyObject *index_insert(indexObject *self, PyObject *args)
 {
 	PyObject *obj;
 	char *node;
-	long offset;
+	int index;
 	Py_ssize_t len, nodelen;
 
-	if (!PyArg_ParseTuple(args, "lO", &offset, &obj))
+	if (!PyArg_ParseTuple(args, "iO", &index, &obj))
 		return NULL;
 
 	if (!PyTuple_Check(obj) || PyTuple_GET_SIZE(obj) != 8) {
@@ -697,18 +757,12 @@ static PyObject *index_insert(indexObject *self, PyObject *args)
 
 	len = index_length(self);
 
-	if (offset < 0)
-		offset += len;
+	if (index < 0)
+		index += len;
 
-	if (offset != len - 1) {
+	if (index != len - 1) {
 		PyErr_SetString(PyExc_IndexError,
 				"insert only supported at index -1");
-		return NULL;
-	}
-
-	if (offset > INT_MAX) {
-		PyErr_SetString(PyExc_ValueError,
-				"currently only 2**31 revs supported");
 		return NULL;
 	}
 
@@ -722,7 +776,7 @@ static PyObject *index_insert(indexObject *self, PyObject *args)
 		return NULL;
 
 	if (self->nt)
-		nt_insert(self, node, (int)offset);
+		nt_insert(self, node, index);
 
 	Py_CLEAR(self->headrevs);
 	Py_RETURN_NONE;
@@ -819,14 +873,59 @@ static PyObject *list_copy(PyObject *list)
 	return newlist;
 }
 
-static PyObject *index_headrevs(indexObject *self)
+static int check_filter(PyObject *filter, Py_ssize_t arg) {
+	if (filter) {
+		PyObject *arglist, *result;
+		int isfiltered;
+
+		arglist = Py_BuildValue("(n)", arg);
+		if (!arglist) {
+			return -1;
+		}
+
+		result = PyEval_CallObject(filter, arglist);
+		Py_DECREF(arglist);
+		if (!result) {
+			return -1;
+		}
+
+		/* PyObject_IsTrue returns 1 if true, 0 if false, -1 if error,
+		 * same as this function, so we can just return it directly.*/
+		isfiltered = PyObject_IsTrue(result);
+		Py_DECREF(result);
+		return isfiltered;
+	} else {
+		return 0;
+	}
+}
+
+static PyObject *index_headrevs(indexObject *self, PyObject *args)
 {
 	Py_ssize_t i, len, addlen;
 	char *nothead = NULL;
-	PyObject *heads;
+	PyObject *heads = NULL;
+	PyObject *filter = NULL;
+	PyObject *filteredrevs = Py_None;
 
-	if (self->headrevs)
+	if (!PyArg_ParseTuple(args, "|O", &filteredrevs)) {
+		return NULL;
+	}
+
+	if (self->headrevs && filteredrevs == self->filteredrevs)
 		return list_copy(self->headrevs);
+
+	Py_DECREF(self->filteredrevs);
+	self->filteredrevs = filteredrevs;
+	Py_INCREF(filteredrevs);
+
+	if (filteredrevs != Py_None) {
+		filter = PyObject_GetAttrString(filteredrevs, "__contains__");
+		if (!filter) {
+			PyErr_SetString(PyExc_TypeError,
+				"filteredrevs has no attribute __contains__");
+			goto bail;
+		}
+	}
 
 	len = index_length(self) - 1;
 	heads = PyList_New(0);
@@ -846,9 +945,25 @@ static PyObject *index_headrevs(indexObject *self)
 		goto bail;
 
 	for (i = 0; i < self->raw_length; i++) {
-		const char *data = index_deref(self, i);
-		int parent_1 = getbe32(data + 24);
-		int parent_2 = getbe32(data + 28);
+		const char *data;
+		int parent_1, parent_2, isfiltered;
+
+		isfiltered = check_filter(filter, i);
+		if (isfiltered == -1) {
+			PyErr_SetString(PyExc_TypeError,
+				"unable to check filter");
+			goto bail;
+		}
+
+		if (isfiltered) {
+			nothead[i] = 1;
+			continue;
+		}
+
+		data = index_deref(self, i);
+		parent_1 = getbe32(data + 24);
+		parent_2 = getbe32(data + 28);
+
 		if (parent_1 >= 0)
 			nothead[parent_1] = 1;
 		if (parent_2 >= 0)
@@ -862,12 +977,26 @@ static PyObject *index_headrevs(indexObject *self)
 		PyObject *p1 = PyTuple_GET_ITEM(rev, 5);
 		PyObject *p2 = PyTuple_GET_ITEM(rev, 6);
 		long parent_1, parent_2;
+		int isfiltered;
 
 		if (!PyInt_Check(p1) || !PyInt_Check(p2)) {
 			PyErr_SetString(PyExc_TypeError,
 					"revlog parents are invalid");
 			goto bail;
 		}
+
+		isfiltered = check_filter(filter, i);
+		if (isfiltered == -1) {
+			PyErr_SetString(PyExc_TypeError,
+				"unable to check filter");
+			goto bail;
+		}
+
+		if (isfiltered) {
+			nothead[i] = 1;
+			continue;
+		}
+
 		parent_1 = PyInt_AS_LONG(p1);
 		parent_2 = PyInt_AS_LONG(p2);
 		if (parent_1 >= 0)
@@ -881,7 +1010,7 @@ static PyObject *index_headrevs(indexObject *self)
 
 		if (nothead[i])
 			continue;
-		head = PyInt_FromLong(i);
+		head = PyInt_FromSsize_t(i);
 		if (head == NULL || PyList_Append(heads, head) == -1) {
 			Py_XDECREF(head);
 			goto bail;
@@ -890,9 +1019,11 @@ static PyObject *index_headrevs(indexObject *self)
 
 done:
 	self->headrevs = heads;
+	Py_XDECREF(filter);
 	free(nothead);
 	return list_copy(self->headrevs);
 bail:
+	Py_XDECREF(filter);
 	Py_XDECREF(heads);
 	free(nothead);
 	return NULL;
@@ -1304,7 +1435,7 @@ static PyObject *find_gca_candidates(indexObject *self, const int *revs,
 	PyObject *gca = PyList_New(0);
 	int i, v, interesting;
 	int maxrev = -1;
-	long sp;
+	bitmask sp;
 	bitmask *seen;
 
 	if (gca == NULL)
@@ -1327,7 +1458,7 @@ static PyObject *find_gca_candidates(indexObject *self, const int *revs,
 	interesting = revcount;
 
 	for (v = maxrev; v >= 0 && interesting; v--) {
-		long sv = seen[v];
+		bitmask sv = seen[v];
 		int parents[2];
 
 		if (!sv)
@@ -1853,7 +1984,7 @@ static int index_assign_subscript(indexObject *self, PyObject *item,
  * Find all RevlogNG entries in an index that has inline data. Update
  * the optional "offsets" table with those entries.
  */
-static long inline_scan(indexObject *self, const char **offsets)
+static Py_ssize_t inline_scan(indexObject *self, const char **offsets)
 {
 	const char *data = PyString_AS_STRING(self->data);
 	Py_ssize_t pos = 0;
@@ -1892,6 +2023,8 @@ static int index_init(indexObject *self, PyObject *args)
 	self->cache = NULL;
 	self->data = NULL;
 	self->headrevs = NULL;
+	self->filteredrevs = Py_None;
+	Py_INCREF(Py_None);
 	self->nt = NULL;
 	self->offsets = NULL;
 
@@ -1913,7 +2046,7 @@ static int index_init(indexObject *self, PyObject *args)
 	Py_INCREF(self->data);
 
 	if (self->inlined) {
-		long len = inline_scan(self, NULL);
+		Py_ssize_t len = inline_scan(self, NULL);
 		if (len == -1)
 			goto bail;
 		self->raw_length = len;
@@ -1941,6 +2074,7 @@ static PyObject *index_nodemap(indexObject *self)
 static void index_dealloc(indexObject *self)
 {
 	_index_clearcaches(self);
+	Py_XDECREF(self->filteredrevs);
 	Py_XDECREF(self->data);
 	Py_XDECREF(self->added);
 	PyObject_Del(self);
@@ -1973,7 +2107,7 @@ static PyMethodDef index_methods[] = {
 	 "clear the index caches"},
 	{"get", (PyCFunction)index_m_get, METH_VARARGS,
 	 "get an index entry"},
-	{"headrevs", (PyCFunction)index_headrevs, METH_NOARGS,
+	{"headrevs", (PyCFunction)index_headrevs, METH_VARARGS,
 	 "get head revisions"},
 	{"insert", (PyCFunction)index_insert, METH_VARARGS,
 	 "insert an index entry"},
@@ -2085,6 +2219,7 @@ static PyMethodDef methods[] = {
 	{"parse_manifest", parse_manifest, METH_VARARGS, "parse a manifest\n"},
 	{"parse_dirstate", parse_dirstate, METH_VARARGS, "parse a dirstate\n"},
 	{"parse_index2", parse_index2, METH_VARARGS, "parse a revlog index\n"},
+	{"asciilower", asciilower, METH_VARARGS, "lowercase an ASCII string\n"},
 	{"encodedir", encodedir, METH_VARARGS, "encodedir a path\n"},
 	{"pathencode", pathencode, METH_VARARGS, "fncache-encode a path\n"},
 	{"lowerencode", lowerencode, METH_VARARGS, "lower-encode a path\n"},

@@ -1,3 +1,8 @@
+This test is decicated to test the bundle2 container format
+
+It test multiple existing parts to test different feature of the container. You
+probably do not need to touch this test unless you change the binary encoding
+of the bundle2 format itself.
 
 Create an extension to test bundle2 API
 
@@ -16,6 +21,8 @@ Create an extension to test bundle2 API
   > from mercurial import discovery
   > from mercurial import changegroup
   > from mercurial import error
+  > from mercurial import obsolete
+  > 
   > 
   > try:
   >     import msvcrt
@@ -69,6 +76,7 @@ Create an extension to test bundle2 API
   >           ('', 'parts', False, 'include some arbitrary parts to the bundle'),
   >           ('', 'reply', False, 'produce a reply bundle'),
   >           ('', 'pushrace', False, 'includes a check:head part with unknown nodes'),
+  >           ('', 'genraise', False, 'includes a part that raise an exception during generation'),
   >           ('r', 'rev', [], 'includes those changeset in the bundle'),],
   >          '[OUTPUTFILE]')
   > def cmdbundle2(ui, repo, path=None, **opts):
@@ -99,7 +107,7 @@ Create an extension to test bundle2 API
   >             headmissing = [c.node() for c in repo.set('heads(%ld)', revs)]
   >             headcommon  = [c.node() for c in repo.set('parents(%ld) - %ld', revs, revs)]
   >             outgoing = discovery.outgoing(repo.changelog, headcommon, headmissing)
-  >             cg = changegroup.getlocalbundle(repo, 'test:bundle2', outgoing, None)
+  >             cg = changegroup.getlocalchangegroup(repo, 'test:bundle2', outgoing, None)
   >             bundler.newpart('b2x:changegroup', data=cg.getchunks())
   > 
   >     if opts['parts']:
@@ -121,14 +129,22 @@ Create an extension to test bundle2 API
   >        bundler.newpart('test:SONG', [('randomparams', '')])
   >     if opts['parts']:
   >        bundler.newpart('test:ping')
+  >     if opts['genraise']:
+  >        def genraise():
+  >            yield 'first line\n'
+  >            raise RuntimeError('Someone set up us the bomb!')
+  >        bundler.newpart('b2x:output', data=genraise())
   > 
   >     if path is None:
   >        file = sys.stdout
   >     else:
   >         file = open(path, 'wb')
   > 
-  >     for chunk in bundler.getchunks():
-  >         file.write(chunk)
+  >     try:
+  >         for chunk in bundler.getchunks():
+  >             file.write(chunk)
+  >     except RuntimeError, exc:
+  >         raise util.Abort(exc)
   > 
   > @command('unbundle2', [], '')
   > def cmdunbundle2(ui, repo, replypath=None):
@@ -189,9 +205,10 @@ Create an extension to test bundle2 API
   > bundle2=$TESTTMP/bundle2.py
   > [experimental]
   > bundle2-exp=True
+  > evolution=createmarkers
   > [ui]
   > ssh=python "$TESTDIR/dummyssh"
-  > logtemplate={rev}:{node|short} {phase} {author} {desc|firstline}
+  > logtemplate={rev}:{node|short} {phase} {author} {bookmarks} {desc|firstline}
   > [web]
   > push_ssl = false
   > allow_push = *
@@ -217,7 +234,7 @@ Empty bundle
 Test bundling
 
   $ hg bundle2
-  HG2X\x00\x00\x00\x00 (no-eol) (esc)
+  HG2Y\x00\x00\x00\x00\x00\x00\x00\x00 (no-eol) (esc)
 
 Test unbundling
 
@@ -247,7 +264,7 @@ Simplest possible parameters form
 Test generation simple option
 
   $ hg bundle2 --param 'caution'
-  HG2X\x00\x07caution\x00\x00 (no-eol) (esc)
+  HG2Y\x00\x00\x00\x07caution\x00\x00\x00\x00 (no-eol) (esc)
 
 Test unbundling
 
@@ -259,7 +276,7 @@ Test unbundling
 Test generation multiple option
 
   $ hg bundle2 --param 'caution' --param 'meal'
-  HG2X\x00\x0ccaution meal\x00\x00 (no-eol) (esc)
+  HG2Y\x00\x00\x00\x0ccaution meal\x00\x00\x00\x00 (no-eol) (esc)
 
 Test unbundling
 
@@ -275,7 +292,7 @@ advisory parameters, with value
 Test generation
 
   $ hg bundle2 --param 'caution' --param 'meal=vegan' --param 'elephants'
-  HG2X\x00\x1ccaution meal=vegan elephants\x00\x00 (no-eol) (esc)
+  HG2Y\x00\x00\x00\x1ccaution meal=vegan elephants\x00\x00\x00\x00 (no-eol) (esc)
 
 Test unbundling
 
@@ -293,7 +310,7 @@ parameter with special char in value
 Test generation
 
   $ hg bundle2 --param 'e|! 7/=babar%#==tutu' --param simple
-  HG2X\x00)e%7C%21%207/=babar%25%23%3D%3Dtutu simple\x00\x00 (no-eol) (esc)
+  HG2Y\x00\x00\x00)e%7C%21%207/=babar%25%23%3D%3Dtutu simple\x00\x00\x00\x00 (no-eol) (esc)
 
 Test unbundling
 
@@ -317,7 +334,7 @@ Test debug output
 bundling debug
 
   $ hg bundle2 --debug --param 'e|! 7/=babar%#==tutu' --param simple ../out.hg2
-  start emission of HG2X stream
+  start emission of HG2Y stream
   bundle parameter: e%7C%21%207/=babar%25%23%3D%3Dtutu simple
   start of parts
   end of bundle
@@ -325,12 +342,12 @@ bundling debug
 file content is ok
 
   $ cat ../out.hg2
-  HG2X\x00)e%7C%21%207/=babar%25%23%3D%3Dtutu simple\x00\x00 (no-eol) (esc)
+  HG2Y\x00\x00\x00)e%7C%21%207/=babar%25%23%3D%3Dtutu simple\x00\x00\x00\x00 (no-eol) (esc)
 
 unbundling debug
 
   $ hg statbundle2 --debug < ../out.hg2
-  start processing of HG2X stream
+  start processing of HG2Y stream
   reading bundle2 stream parameters
   ignoring unknown parameter 'e|! 7/'
   ignoring unknown parameter 'simple'
@@ -364,7 +381,7 @@ Test part
 =================
 
   $ hg bundle2 --parts ../parts.hg2 --debug
-  start emission of HG2X stream
+  start emission of HG2Y stream
   bundle parameter: 
   start of parts
   bundle part: "test:empty"
@@ -377,11 +394,11 @@ Test part
   end of bundle
 
   $ cat ../parts.hg2
-  HG2X\x00\x00\x00\x11 (esc)
-  test:empty\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x11 (esc)
-  test:empty\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x10	test:song\x00\x00\x00\x02\x00\x00\x00\x00\x00\xb2Patali Dirapata, Cromda Cromda Ripalo, Pata Pata, Ko Ko Ko (esc)
+  HG2Y\x00\x00\x00\x00\x00\x00\x00\x11 (esc)
+  test:empty\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x11 (esc)
+  test:empty\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10	test:song\x00\x00\x00\x02\x00\x00\x00\x00\x00\xb2Patali Dirapata, Cromda Cromda Ripalo, Pata Pata, Ko Ko Ko (esc)
   Bokoro Dipoulito, Rondi Rondi Pepino, Pata Pata, Ko Ko Ko
-  Emana Karassoli, Loucra Loucra Ponponto, Pata Pata, Ko Ko Ko.\x00\x00\x00\x00\x00\x16\x0ftest:debugreply\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00+	test:math\x00\x00\x00\x04\x02\x01\x02\x04\x01\x04\x07\x03pi3.14e2.72cookingraw\x00\x00\x00\x0242\x00\x00\x00\x00\x00\x1d	test:song\x00\x00\x00\x05\x01\x00\x0b\x00randomparam\x00\x00\x00\x00\x00\x10	test:ping\x00\x00\x00\x06\x00\x00\x00\x00\x00\x00\x00\x00 (no-eol) (esc)
+  Emana Karassoli, Loucra Loucra Ponponto, Pata Pata, Ko Ko Ko.\x00\x00\x00\x00\x00\x00\x00\x16\x0ftest:debugreply\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00+	test:math\x00\x00\x00\x04\x02\x01\x02\x04\x01\x04\x07\x03pi3.14e2.72cookingraw\x00\x00\x00\x0242\x00\x00\x00\x00\x00\x00\x00\x1d	test:song\x00\x00\x00\x05\x01\x00\x0b\x00randomparam\x00\x00\x00\x00\x00\x00\x00\x10	test:ping\x00\x00\x00\x06\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 (no-eol) (esc)
 
 
   $ hg statbundle2 < ../parts.hg2
@@ -417,7 +434,7 @@ Test part
   parts count:   7
 
   $ hg statbundle2 --debug < ../parts.hg2
-  start processing of HG2X stream
+  start processing of HG2Y stream
   reading bundle2 stream parameters
   options count: 0
   start extraction of bundle2 parts
@@ -496,7 +513,7 @@ Test actual unbundling of test part
 Process the bundle
 
   $ hg unbundle2 --debug < ../parts.hg2
-  start processing of HG2X stream
+  start processing of HG2Y stream
   reading bundle2 stream parameters
   start extraction of bundle2 parts
   part header size: 17
@@ -590,12 +607,12 @@ unbundle with a reply
 The reply is a bundle
 
   $ cat ../reply.hg2
-  HG2X\x00\x00\x00\x1f (esc)
+  HG2Y\x00\x00\x00\x00\x00\x00\x00\x1f (esc)
   b2x:output\x00\x00\x00\x00\x00\x01\x0b\x01in-reply-to3\x00\x00\x00\xd9The choir starts singing: (esc)
       Patali Dirapata, Cromda Cromda Ripalo, Pata Pata, Ko Ko Ko
       Bokoro Dipoulito, Rondi Rondi Pepino, Pata Pata, Ko Ko Ko
       Emana Karassoli, Loucra Loucra Ponponto, Pata Pata, Ko Ko Ko.
-  \x00\x00\x00\x00\x00\x1f (esc)
+  \x00\x00\x00\x00\x00\x00\x00\x1f (esc)
   b2x:output\x00\x00\x00\x01\x00\x01\x0b\x01in-reply-to4\x00\x00\x00\xc9debugreply: capabilities: (esc)
   debugreply:     'city=!'
   debugreply:         'celeste,ville'
@@ -603,10 +620,10 @@ The reply is a bundle
   debugreply:         'babar'
   debugreply:         'celeste'
   debugreply:     'ping-pong'
-  \x00\x00\x00\x00\x00\x1e	test:pong\x00\x00\x00\x02\x01\x00\x0b\x01in-reply-to7\x00\x00\x00\x00\x00\x1f (esc)
+  \x00\x00\x00\x00\x00\x00\x00\x1e	test:pong\x00\x00\x00\x02\x01\x00\x0b\x01in-reply-to7\x00\x00\x00\x00\x00\x00\x00\x1f (esc)
   b2x:output\x00\x00\x00\x03\x00\x01\x0b\x01in-reply-to7\x00\x00\x00=received ping request (id 7) (esc)
   replying to ping request (id 7)
-  \x00\x00\x00\x00\x00\x00 (no-eol) (esc)
+  \x00\x00\x00\x00\x00\x00\x00\x00 (no-eol) (esc)
 
 The reply is valid
 
@@ -668,23 +685,23 @@ Support for changegroup
   (run 'hg heads' to see heads, 'hg merge' to merge)
 
   $ hg log -G
-  o  8:02de42196ebe draft Nicolas Dumazet <nicdumz.commits@gmail.com> H
+  o  8:02de42196ebe draft Nicolas Dumazet <nicdumz.commits@gmail.com>  H
   |
-  | o  7:eea13746799a draft Nicolas Dumazet <nicdumz.commits@gmail.com> G
+  | o  7:eea13746799a draft Nicolas Dumazet <nicdumz.commits@gmail.com>  G
   |/|
-  o |  6:24b6387c8c8c draft Nicolas Dumazet <nicdumz.commits@gmail.com> F
+  o |  6:24b6387c8c8c draft Nicolas Dumazet <nicdumz.commits@gmail.com>  F
   | |
-  | o  5:9520eea781bc draft Nicolas Dumazet <nicdumz.commits@gmail.com> E
+  | o  5:9520eea781bc draft Nicolas Dumazet <nicdumz.commits@gmail.com>  E
   |/
-  | o  4:32af7686d403 draft Nicolas Dumazet <nicdumz.commits@gmail.com> D
+  | o  4:32af7686d403 draft Nicolas Dumazet <nicdumz.commits@gmail.com>  D
   | |
-  | o  3:5fddd98957c8 draft Nicolas Dumazet <nicdumz.commits@gmail.com> C
+  | o  3:5fddd98957c8 draft Nicolas Dumazet <nicdumz.commits@gmail.com>  C
   | |
-  | o  2:42ccdea3bb16 draft Nicolas Dumazet <nicdumz.commits@gmail.com> B
+  | o  2:42ccdea3bb16 draft Nicolas Dumazet <nicdumz.commits@gmail.com>  B
   |/
-  o  1:cd010b8cd998 draft Nicolas Dumazet <nicdumz.commits@gmail.com> A
+  o  1:cd010b8cd998 draft Nicolas Dumazet <nicdumz.commits@gmail.com>  A
   
-  @  0:3903775176ed draft test a
+  @  0:3903775176ed draft test  a
   
 
   $ hg bundle2 --debug --rev '8+7+5+4' ../rev.hg2
@@ -694,7 +711,7 @@ Support for changegroup
   9520eea781bcca16c1e15acc0ba14335a0e8e5ba
   eea13746799a9e0bfd88f29d3c2e9dc9389f524f
   02de42196ebee42ef284b6780a87cdc96e8eaab6
-  start emission of HG2X stream
+  start emission of HG2Y stream
   bundle parameter: 
   start of parts
   bundle part: "b2x:changegroup"
@@ -712,7 +729,7 @@ Support for changegroup
   end of bundle
 
   $ cat ../rev.hg2
-  HG2X\x00\x00\x00\x16\x0fb2x:changegroup\x00\x00\x00\x00\x00\x00\x00\x00\x06\x13\x00\x00\x00\xa42\xafv\x86\xd4\x03\xcfE\xb5\xd9_-p\xce\xbe\xa5\x87\xac\x80j_\xdd\xd9\x89W\xc8\xa5JMCm\xfe\x1d\xa9\xd8\x7f!\xa1\xb9{\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x002\xafv\x86\xd4\x03\xcfE\xb5\xd9_-p\xce\xbe\xa5\x87\xac\x80j\x00\x00\x00\x00\x00\x00\x00)\x00\x00\x00)6e1f4c47ecb533ffd0c8e52cdc88afb6cd39e20c (esc)
+  HG2Y\x00\x00\x00\x00\x00\x00\x00\x16\x0fb2x:changegroup\x00\x00\x00\x00\x00\x00\x00\x00\x06\x13\x00\x00\x00\xa42\xafv\x86\xd4\x03\xcfE\xb5\xd9_-p\xce\xbe\xa5\x87\xac\x80j_\xdd\xd9\x89W\xc8\xa5JMCm\xfe\x1d\xa9\xd8\x7f!\xa1\xb9{\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x002\xafv\x86\xd4\x03\xcfE\xb5\xd9_-p\xce\xbe\xa5\x87\xac\x80j\x00\x00\x00\x00\x00\x00\x00)\x00\x00\x00)6e1f4c47ecb533ffd0c8e52cdc88afb6cd39e20c (esc)
   \x00\x00\x00f\x00\x00\x00h\x00\x00\x00\x02D (esc)
   \x00\x00\x00i\x00\x00\x00j\x00\x00\x00\x01D\x00\x00\x00\xa4\x95 \xee\xa7\x81\xbc\xca\x16\xc1\xe1Z\xcc\x0b\xa1C5\xa0\xe8\xe5\xba\xcd\x01\x0b\x8c\xd9\x98\xf3\x98\x1aZ\x81\x15\xf9O\x8d\xa4\xabP`\x89\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x95 \xee\xa7\x81\xbc\xca\x16\xc1\xe1Z\xcc\x0b\xa1C5\xa0\xe8\xe5\xba\x00\x00\x00\x00\x00\x00\x00)\x00\x00\x00)4dece9c826f69490507b98c6383a3009b295837d (esc)
   \x00\x00\x00f\x00\x00\x00h\x00\x00\x00\x02E (esc)
@@ -733,7 +750,7 @@ Support for changegroup
   \x0cI\xd4\xa9\xc5\x01|\xf0pC\xf5NX\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x95 \xee\xa7\x81\xbc\xca\x16\xc1\xe1Z\xcc\x0b\xa1C5\xa0\xe8\xe5\xba\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02E (esc)
   \x00\x00\x00\x00\x00\x00\x00\x05H\x00\x00\x00b\x85\x00\x18\x9et\xa9\xe0G^\x82 \x93\xbc}\xb0\xd61\xae\xb0\xb4\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\xdeB\x19n\xbe\xe4.\xf2\x84\xb6x (esc)
   \x87\xcd\xc9n\x8e\xaa\xb6\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02H (esc)
-  \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 (no-eol) (esc)
+  \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 (no-eol) (esc)
 
   $ hg unbundle2 < ../rev.hg2
   adding changesets
@@ -751,357 +768,35 @@ with reply
   addchangegroup return: 1
 
   $ cat ../rev-reply.hg2
-  HG2X\x00\x00\x003\x15b2x:reply:changegroup\x00\x00\x00\x00\x00\x02\x0b\x01\x06\x01in-reply-to1return1\x00\x00\x00\x00\x00\x1f (esc)
+  HG2Y\x00\x00\x00\x00\x00\x00\x003\x15b2x:reply:changegroup\x00\x00\x00\x00\x00\x02\x0b\x01\x06\x01in-reply-to1return1\x00\x00\x00\x00\x00\x00\x00\x1f (esc)
   b2x:output\x00\x00\x00\x01\x00\x01\x0b\x01in-reply-to1\x00\x00\x00dadding changesets (esc)
   adding manifests
   adding file changes
   added 0 changesets with 0 changes to 3 files
-  \x00\x00\x00\x00\x00\x00 (no-eol) (esc)
+  \x00\x00\x00\x00\x00\x00\x00\x00 (no-eol) (esc)
 
-Real world exchange
-=====================
+Check handling of exception during generation.
+----------------------------------------------
+(is currently not right)
 
+  $ hg bundle2 --genraise > ../genfailed.hg2
+  abort: Someone set up us the bomb!
+  [255]
 
-clone --pull
+Should still be a valid bundle
+(is currently not right)
+
+  $ cat ../genfailed.hg2
+  HG2Y\x00\x00\x00\x00\x00\x00\x00\x11 (esc)
+  b2x:output\x00\x00\x00\x00\x00\x00 (no-eol) (esc)
+
+And its handling on the other size raise a clean exception
+(is currently not right)
+
+  $ cat ../genfailed.hg2 | hg unbundle2
+  0 unread bytes
+  abort: stream ended unexpectedly (got 0 bytes, expected 4)
+  [255]
+
 
   $ cd ..
-  $ hg -R main phase --public cd010b8cd998
-  $ hg clone main other --pull --rev 9520eea781bc
-  adding changesets
-  adding manifests
-  adding file changes
-  added 2 changesets with 2 changes to 2 files
-  updating to branch default
-  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  $ hg -R other log -G
-  @  1:9520eea781bc draft Nicolas Dumazet <nicdumz.commits@gmail.com> E
-  |
-  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
-  
-
-pull
-
-  $ hg -R main phase --public 9520eea781bc
-  $ hg -R other pull -r 24b6387c8c8c
-  pulling from $TESTTMP/main (glob)
-  searching for changes
-  adding changesets
-  adding manifests
-  adding file changes
-  added 1 changesets with 1 changes to 1 files (+1 heads)
-  (run 'hg heads' to see heads, 'hg merge' to merge)
-  $ hg -R other log -G
-  o  2:24b6387c8c8c draft Nicolas Dumazet <nicdumz.commits@gmail.com> F
-  |
-  | @  1:9520eea781bc draft Nicolas Dumazet <nicdumz.commits@gmail.com> E
-  |/
-  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
-  
-
-pull empty (with phase movement)
-
-  $ hg -R main phase --public 24b6387c8c8c
-  $ hg -R other pull -r 24b6387c8c8c
-  pulling from $TESTTMP/main (glob)
-  no changes found
-  $ hg -R other log -G
-  o  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com> F
-  |
-  | @  1:9520eea781bc draft Nicolas Dumazet <nicdumz.commits@gmail.com> E
-  |/
-  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
-  
-pull empty
-
-  $ hg -R other pull -r 24b6387c8c8c
-  pulling from $TESTTMP/main (glob)
-  no changes found
-  $ hg -R other log -G
-  o  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com> F
-  |
-  | @  1:9520eea781bc draft Nicolas Dumazet <nicdumz.commits@gmail.com> E
-  |/
-  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
-  
-
-push
-
-  $ hg -R main phase --public eea13746799a
-  $ hg -R main push other --rev eea13746799a
-  pushing to other
-  searching for changes
-  remote: adding changesets
-  remote: adding manifests
-  remote: adding file changes
-  remote: added 1 changesets with 0 changes to 0 files (-1 heads)
-  $ hg -R other log -G
-  o    3:eea13746799a public Nicolas Dumazet <nicdumz.commits@gmail.com> G
-  |\
-  | o  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com> F
-  | |
-  @ |  1:9520eea781bc public Nicolas Dumazet <nicdumz.commits@gmail.com> E
-  |/
-  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
-  
-
-pull over ssh
-
-  $ hg -R other pull ssh://user@dummy/main -r 02de42196ebe --traceback
-  pulling from ssh://user@dummy/main
-  searching for changes
-  adding changesets
-  adding manifests
-  adding file changes
-  added 1 changesets with 1 changes to 1 files (+1 heads)
-  (run 'hg heads' to see heads, 'hg merge' to merge)
-
-pull over http
-
-  $ hg -R main serve -p $HGPORT -d --pid-file=main.pid -E main-error.log
-  $ cat main.pid >> $DAEMON_PIDS
-
-  $ hg -R other pull http://localhost:$HGPORT/ -r 42ccdea3bb16
-  pulling from http://localhost:$HGPORT/
-  searching for changes
-  adding changesets
-  adding manifests
-  adding file changes
-  added 1 changesets with 1 changes to 1 files (+1 heads)
-  (run 'hg heads .' to see heads, 'hg merge' to merge)
-  $ cat main-error.log
-
-push over ssh
-
-  $ hg -R main push ssh://user@dummy/other -r 5fddd98957c8
-  pushing to ssh://user@dummy/other
-  searching for changes
-  remote: adding changesets
-  remote: adding manifests
-  remote: adding file changes
-  remote: added 1 changesets with 1 changes to 1 files
-  $ hg -R other log -G
-  o  6:5fddd98957c8 draft Nicolas Dumazet <nicdumz.commits@gmail.com> C
-  |
-  o  5:42ccdea3bb16 draft Nicolas Dumazet <nicdumz.commits@gmail.com> B
-  |
-  | o  4:02de42196ebe draft Nicolas Dumazet <nicdumz.commits@gmail.com> H
-  | |
-  | | o  3:eea13746799a public Nicolas Dumazet <nicdumz.commits@gmail.com> G
-  | |/|
-  | o |  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com> F
-  |/ /
-  | @  1:9520eea781bc public Nicolas Dumazet <nicdumz.commits@gmail.com> E
-  |/
-  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
-  
-
-push over http
-
-  $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
-  $ cat other.pid >> $DAEMON_PIDS
-
-  $ hg -R main phase --public 32af7686d403
-  $ hg -R main push http://localhost:$HGPORT2/ -r 32af7686d403
-  pushing to http://localhost:$HGPORT2/
-  searching for changes
-  remote: adding changesets
-  remote: adding manifests
-  remote: adding file changes
-  remote: added 1 changesets with 1 changes to 1 files
-  $ cat other-error.log
-
-Check final content.
-
-  $ hg -R other log -G
-  o  7:32af7686d403 public Nicolas Dumazet <nicdumz.commits@gmail.com> D
-  |
-  o  6:5fddd98957c8 public Nicolas Dumazet <nicdumz.commits@gmail.com> C
-  |
-  o  5:42ccdea3bb16 public Nicolas Dumazet <nicdumz.commits@gmail.com> B
-  |
-  | o  4:02de42196ebe draft Nicolas Dumazet <nicdumz.commits@gmail.com> H
-  | |
-  | | o  3:eea13746799a public Nicolas Dumazet <nicdumz.commits@gmail.com> G
-  | |/|
-  | o |  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com> F
-  |/ /
-  | @  1:9520eea781bc public Nicolas Dumazet <nicdumz.commits@gmail.com> E
-  |/
-  o  0:cd010b8cd998 public Nicolas Dumazet <nicdumz.commits@gmail.com> A
-  
-
-Error Handling
-==============
-
-Check that errors are properly returned to the client during push.
-
-Setting up
-
-  $ cat > failpush.py << EOF
-  > """A small extension that makes push fails when using bundle2
-  > 
-  > used to test error handling in bundle2
-  > """
-  > 
-  > from mercurial import util
-  > from mercurial import bundle2
-  > from mercurial import exchange
-  > from mercurial import extensions
-  > 
-  > def _pushbundle2failpart(pushop, bundler):
-  >     reason = pushop.ui.config('failpush', 'reason', None)
-  >     part = None
-  >     if reason == 'abort':
-  >         bundler.newpart('test:abort')
-  >     if reason == 'unknown':
-  >         bundler.newpart('TEST:UNKNOWN')
-  >     if reason == 'race':
-  >         # 20 Bytes of crap
-  >         bundler.newpart('b2x:check:heads', data='01234567890123456789')
-  > 
-  > @bundle2.parthandler("test:abort")
-  > def handleabort(op, part):
-  >     raise util.Abort('Abandon ship!', hint="don't panic")
-  > 
-  > def uisetup(ui):
-  >     exchange.bundle2partsgenerators.insert(0, _pushbundle2failpart)
-  > 
-  > EOF
-
-  $ cd main
-  $ hg up tip
-  3 files updated, 0 files merged, 1 files removed, 0 files unresolved
-  $ echo 'I' > I
-  $ hg add I
-  $ hg ci -m 'I'
-  $ hg id
-  e7ec4e813ba6 tip
-  $ cd ..
-
-  $ cat << EOF >> $HGRCPATH
-  > [extensions]
-  > failpush=$TESTTMP/failpush.py
-  > EOF
-
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
-  $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
-  $ cat other.pid >> $DAEMON_PIDS
-
-Doing the actual push: Abort error
-
-  $ cat << EOF >> $HGRCPATH
-  > [failpush]
-  > reason = abort
-  > EOF
-
-  $ hg -R main push other -r e7ec4e813ba6
-  pushing to other
-  searching for changes
-  abort: Abandon ship!
-  (don't panic)
-  [255]
-
-  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
-  pushing to ssh://user@dummy/other
-  searching for changes
-  abort: Abandon ship!
-  (don't panic)
-  [255]
-
-  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
-  pushing to http://localhost:$HGPORT2/
-  searching for changes
-  abort: Abandon ship!
-  (don't panic)
-  [255]
-
-
-Doing the actual push: unknown mandatory parts
-
-  $ cat << EOF >> $HGRCPATH
-  > [failpush]
-  > reason = unknown
-  > EOF
-
-  $ hg -R main push other -r e7ec4e813ba6
-  pushing to other
-  searching for changes
-  abort: missing support for test:unknown
-  [255]
-
-  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
-  pushing to ssh://user@dummy/other
-  searching for changes
-  abort: missing support for test:unknown
-  [255]
-
-  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
-  pushing to http://localhost:$HGPORT2/
-  searching for changes
-  abort: missing support for test:unknown
-  [255]
-
-Doing the actual push: race
-
-  $ cat << EOF >> $HGRCPATH
-  > [failpush]
-  > reason = race
-  > EOF
-
-  $ hg -R main push other -r e7ec4e813ba6
-  pushing to other
-  searching for changes
-  abort: push failed:
-  'repository changed while pushing - please try again'
-  [255]
-
-  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
-  pushing to ssh://user@dummy/other
-  searching for changes
-  abort: push failed:
-  'repository changed while pushing - please try again'
-  [255]
-
-  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
-  pushing to http://localhost:$HGPORT2/
-  searching for changes
-  abort: push failed:
-  'repository changed while pushing - please try again'
-  [255]
-
-Doing the actual push: hook abort
-
-  $ cat << EOF >> $HGRCPATH
-  > [failpush]
-  > reason =
-  > [hooks]
-  > b2x-pretransactionclose.failpush = false
-  > EOF
-
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
-  $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
-  $ cat other.pid >> $DAEMON_PIDS
-
-  $ hg -R main push other -r e7ec4e813ba6
-  pushing to other
-  searching for changes
-  transaction abort!
-  rollback completed
-  abort: b2x-pretransactionclose.failpush hook exited with status 1
-  [255]
-
-  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
-  pushing to ssh://user@dummy/other
-  searching for changes
-  abort: b2x-pretransactionclose.failpush hook exited with status 1
-  remote: transaction abort!
-  remote: rollback completed
-  [255]
-
-  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
-  pushing to http://localhost:$HGPORT2/
-  searching for changes
-  abort: b2x-pretransactionclose.failpush hook exited with status 1
-  [255]
-
-

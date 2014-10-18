@@ -933,7 +933,7 @@ def static(web, req, tmpl):
     # readable by the user running the CGI script
     static = web.config("web", "static", None, untrusted=False)
     if not static:
-        tp = web.templatepath or templater.templatepath()
+        tp = web.templatepath or templater.templatepaths()
         if isinstance(tp, str):
             tp = [tp]
         static = [os.path.join(p, 'static') for p in tp]
@@ -1069,7 +1069,7 @@ def help(web, req, tmpl):
     topicname = req.form.get('node', [None])[0]
     if not topicname:
         def topics(**map):
-            for entries, summary, _ in helpmod.helptable:
+            for entries, summary, _doc in helpmod.helptable:
                 yield {'topic': entries[0], 'summary': summary}
 
         early, other = [], []

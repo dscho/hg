@@ -63,25 +63,8 @@ The file starts with a version header:
 
 - 1 unsigned byte: version number, starting at zero.
 
-
-The header is followed by the markers. Each marker is made of:
-
-- 1 unsigned byte: number of new changesets "N", can be zero.
-
-- 1 unsigned 32-bits integer: metadata size "M" in bytes.
-
-- 1 byte: a bit field. It is reserved for flags used in common
-  obsolete marker operations, to avoid repeated decoding of metadata
-  entries.
-
-- 20 bytes: obsoleted changeset identifier.
-
-- N*20 bytes: new changesets identifiers.
-
-- M bytes: metadata as a sequence of nul-terminated strings. Each
-  string contains a key and a value, separated by a colon ':', without
-  additional encoding. Keys cannot contain '\0' or ':' and values
-  cannot contain '\0'.
+The header is followed by the markers. Marker format depend of the version. See
+comment associated with each format for details.
 
 """
 import struct
@@ -98,12 +81,10 @@ _SEEK_END = 2 # os.SEEK_END was introduced in Python 2.5
 # you have to rely on third party extension extension to enable this.
 _enabled = False
 
-# data used for parsing and writing
-_fmversion = 0
-_fmfixed   = '>BIB20s'
-_fmnode = '20s'
-_fmfsize = struct.calcsize(_fmfixed)
-_fnodesize = struct.calcsize(_fmnode)
+# Options for obsolescence
+createmarkersopt = 'createmarkers'
+allowunstableopt = 'allowunstable'
+exchangeopt = 'exchange'
 
 ### obsolescence marker flag
 
@@ -136,29 +117,48 @@ _fnodesize = struct.calcsize(_fmnode)
 # bumped version and fix the situation, breaking the transitivity of
 # "bumped" here.
 bumpedfix = 1
+usingsha256 = 2
 
-def _readmarkers(data):
-    """Read and enumerate markers from raw data"""
-    off = 0
-    diskversion = _unpack('>B', data[off:off + 1])[0]
-    off += 1
-    if diskversion != _fmversion:
-        raise util.Abort(_('parsing obsolete marker: unknown version %r')
-                         % diskversion)
+## Parsing and writing of version "0"
+#
+# The header is followed by the markers. Each marker is made of:
+#
+# - 1 uint8 : number of new changesets "N", can be zero.
+#
+# - 1 uint32: metadata size "M" in bytes.
+#
+# - 1 byte: a bit field. It is reserved for flags used in common
+#   obsolete marker operations, to avoid repeated decoding of metadata
+#   entries.
+#
+# - 20 bytes: obsoleted changeset identifier.
+#
+# - N*20 bytes: new changesets identifiers.
+#
+# - M bytes: metadata as a sequence of nul-terminated strings. Each
+#   string contains a key and a value, separated by a colon ':', without
+#   additional encoding. Keys cannot contain '\0' or ':' and values
+#   cannot contain '\0'.
+_fm0version = 0
+_fm0fixed   = '>BIB20s'
+_fm0node = '20s'
+_fm0fsize = struct.calcsize(_fm0fixed)
+_fm0fnodesize = struct.calcsize(_fm0node)
 
+def _fm0readmarkers(data, off=0):
     # Loop on markers
     l = len(data)
-    while off + _fmfsize <= l:
+    while off + _fm0fsize <= l:
         # read fixed part
-        cur = data[off:off + _fmfsize]
-        off += _fmfsize
-        nbsuc, mdsize, flags, pre = _unpack(_fmfixed, cur)
+        cur = data[off:off + _fm0fsize]
+        off += _fm0fsize
+        numsuc, mdsize, flags, pre = _unpack(_fm0fixed, cur)
         # read replacement
         sucs = ()
-        if nbsuc:
-            s = (_fnodesize * nbsuc)
+        if numsuc:
+            s = (_fm0fnodesize * numsuc)
             cur = data[off:off + s]
-            sucs = _unpack(_fmnode * nbsuc, cur)
+            sucs = _unpack(_fm0node * numsuc, cur)
             off += s
         # read metadata
         # (metadata will be decoded on demand)
@@ -168,9 +168,56 @@ def _readmarkers(data):
                                'short, %d bytes expected, got %d')
                              % (mdsize, len(metadata)))
         off += mdsize
-        yield (pre, sucs, flags, metadata)
+        metadata = _fm0decodemeta(metadata)
+        try:
+            when, offset = metadata.pop('date', '0 0').split(' ')
+            date = float(when), int(offset)
+        except ValueError:
+            date = (0., 0)
+        parents = None
+        if 'p2' in metadata:
+            parents = (metadata.pop('p1', None), metadata.pop('p2', None))
+        elif 'p1' in metadata:
+            parents = (metadata.pop('p1', None),)
+        elif 'p0' in metadata:
+            parents = ()
+        if parents is not None:
+            try:
+                parents = tuple(node.bin(p) for p in parents)
+                # if parent content is not a nodeid, drop the data
+                for p in parents:
+                    if len(p) != 20:
+                        parents = None
+                        break
+            except TypeError:
+                # if content cannot be translated to nodeid drop the data.
+                parents = None
 
-def encodemeta(meta):
+        metadata = tuple(sorted(metadata.iteritems()))
+
+        yield (pre, sucs, flags, metadata, date, parents)
+
+def _fm0encodeonemarker(marker):
+    pre, sucs, flags, metadata, date, parents = marker
+    if flags & usingsha256:
+        raise util.Abort(_('cannot handle sha256 with old obsstore format'))
+    metadata = dict(metadata)
+    time, tz = date
+    metadata['date'] = '%r %i' % (time, tz)
+    if parents is not None:
+        if not parents:
+            # mark that we explicitly recorded no parents
+            metadata['p0'] = ''
+        for i, p in enumerate(parents):
+            metadata['p%i' % (i + 1)] = node.hex(p)
+    metadata = _fm0encodemeta(metadata)
+    numsuc = len(sucs)
+    format = _fm0fixed + (_fm0node * numsuc)
+    data = [numsuc, len(metadata), flags, pre]
+    data.extend(sucs)
+    return _pack(format, *data) + metadata
+
+def _fm0encodemeta(meta):
     """Return encoded metadata string to string mapping.
 
     Assume no ':' in key and no '\0' in both key and value."""
@@ -181,7 +228,7 @@ def encodemeta(meta):
             raise ValueError("':' is forbidden in metadata value'")
     return '\0'.join(['%s:%s' % (k, meta[k]) for k in sorted(meta)])
 
-def decodemeta(data):
+def _fm0decodemeta(data):
     """Return string to string dictionary from encoded version."""
     d = {}
     for l in data.split('\0'):
@@ -189,6 +236,166 @@ def decodemeta(data):
             key, value = l.split(':')
             d[key] = value
     return d
+
+## Parsing and writing of version "1"
+#
+# The header is followed by the markers. Each marker is made of:
+#
+# - uint32: total size of the marker (including this field)
+#
+# - float64: date in seconds since epoch
+#
+# - int16: timezone offset in minutes
+#
+# - uint16: a bit field. It is reserved for flags used in common
+#   obsolete marker operations, to avoid repeated decoding of metadata
+#   entries.
+#
+# - uint8: number of successors "N", can be zero.
+#
+# - uint8: number of parents "P", can be zero.
+#
+#     0: parents data stored but no parent,
+#     1: one parent stored,
+#     2: two parents stored,
+#     3: no parent data stored
+#
+# - uint8: number of metadata entries M
+#
+# - 20 or 32 bytes: precursor changeset identifier.
+#
+# - N*(20 or 32) bytes: successors changesets identifiers.
+#
+# - P*(20 or 32) bytes: parents of the precursors changesets.
+#
+# - M*(uint8, uint8): size of all metadata entries (key and value)
+#
+# - remaining bytes: the metadata, each (key, value) pair after the other.
+_fm1version = 1
+_fm1fixed = '>IdhHBBB20s'
+_fm1nodesha1 = '20s'
+_fm1nodesha256 = '32s'
+_fm1fsize = struct.calcsize(_fm1fixed)
+_fm1parentnone = 3
+_fm1parentshift = 14
+_fm1parentmask = (_fm1parentnone << _fm1parentshift)
+_fm1metapair = 'BB'
+_fm1metapairsize = struct.calcsize('BB')
+
+def _fm1readmarkers(data, off=0):
+    # Loop on markers
+    l = len(data)
+    while off + _fm1fsize <= l:
+        # read fixed part
+        cur = data[off:off + _fm1fsize]
+        off += _fm1fsize
+        fixeddata = _unpack(_fm1fixed, cur)
+        ttsize, seconds, tz, flags, numsuc, numpar, nummeta, prec = fixeddata
+        # extract the number of parents information
+        if numpar == _fm1parentnone:
+            numpar = None
+        # build the date tuple (upgrade tz minutes to seconds)
+        date = (seconds, tz * 60)
+        _fm1node = _fm1nodesha1
+        if flags & usingsha256:
+            _fm1node = _fm1nodesha256
+        fnodesize = struct.calcsize(_fm1node)
+        # read replacement
+        sucs = ()
+        if numsuc:
+            s = (fnodesize * numsuc)
+            cur = data[off:off + s]
+            sucs = _unpack(_fm1node * numsuc, cur)
+            off += s
+        # read parents
+        if numpar is None:
+            parents = None
+        elif numpar == 0:
+            parents = ()
+        elif numpar:  # neither None nor zero
+            s = (fnodesize * numpar)
+            cur = data[off:off + s]
+            parents = _unpack(_fm1node * numpar, cur)
+            off += s
+        # read metadata
+        metaformat = '>' + (_fm1metapair * nummeta)
+        s = _fm1metapairsize * nummeta
+        metapairsize = _unpack(metaformat, data[off:off + s])
+        off += s
+        metadata = []
+        for idx in xrange(0, len(metapairsize), 2):
+            sk = metapairsize[idx]
+            sv = metapairsize[idx + 1]
+            key = data[off:off + sk]
+            value = data[off + sk:off + sk + sv]
+            assert len(key) == sk
+            assert len(value) == sv
+            metadata.append((key, value))
+            off += sk + sv
+        metadata = tuple(metadata)
+
+        yield (prec, sucs, flags, metadata, date, parents)
+
+def _fm1encodeonemarker(marker):
+    pre, sucs, flags, metadata, date, parents = marker
+    # determine node size
+    _fm1node = _fm1nodesha1
+    if flags & usingsha256:
+        _fm1node = _fm1nodesha256
+    numsuc = len(sucs)
+    numextranodes = numsuc
+    if parents is None:
+        numpar = _fm1parentnone
+    else:
+        numpar = len(parents)
+        numextranodes += numpar
+    formatnodes = _fm1node * numextranodes
+    formatmeta = _fm1metapair * len(metadata)
+    format = _fm1fixed + formatnodes + formatmeta
+    # tz is stored in minutes so we divide by 60
+    tz = date[1]//60
+    data = [None, date[0], tz, flags, numsuc, numpar, len(metadata), pre]
+    data.extend(sucs)
+    if parents is not None:
+        data.extend(parents)
+    totalsize = struct.calcsize(format)
+    for key, value in metadata:
+        lk = len(key)
+        lv = len(value)
+        data.append(lk)
+        data.append(lv)
+        totalsize += lk + lv
+    data[0] = totalsize
+    data = [_pack(format, *data)]
+    for key, value in metadata:
+        data.append(key)
+        data.append(value)
+    return ''.join(data)
+
+# mapping to read/write various marker formats
+# <version> -> (decoder, encoder)
+formats = {_fm0version: (_fm0readmarkers, _fm0encodeonemarker),
+           _fm1version: (_fm1readmarkers, _fm1encodeonemarker)}
+
+def _readmarkers(data):
+    """Read and enumerate markers from raw data"""
+    off = 0
+    diskversion = _unpack('>B', data[off:off + 1])[0]
+    off += 1
+    if diskversion not in formats:
+        raise util.Abort(_('parsing obsolete marker: unknown version %r')
+                         % diskversion)
+    return diskversion, formats[diskversion][0](data, off)
+
+def encodemarkers(markers, addheader=False, version=_fm0version):
+    # Kept separate from flushmarkers(), it will be reused for
+    # markers exchange.
+    encodeone = formats[version][1]
+    if addheader:
+        yield _pack('>B', version)
+    for marker in markers:
+        yield encodeone(marker)
+
 
 class marker(object):
     """Wrap obsolete marker raw data"""
@@ -215,16 +422,21 @@ class marker(object):
         """List of successor changesets node identifiers"""
         return self._data[1]
 
+    def parentnodes(self):
+        """Parents of the precursors (None if not recorded)"""
+        return self._data[5]
+
     def metadata(self):
         """Decoded metadata dictionary"""
-        if self._decodedmeta is None:
-            self._decodedmeta = decodemeta(self._data[3])
-        return self._decodedmeta
+        return dict(self._data[3])
 
     def date(self):
         """Creation date as (unixtime, offset)"""
-        parts = self.metadata()['date'].split(' ')
-        return (float(parts[0]), int(parts[1]))
+        return self._data[4]
+
+    def flags(self):
+        """The flags field of the marker"""
+        return self._data[2]
 
 class obsstore(object):
     """Store obsolete markers
@@ -232,19 +444,32 @@ class obsstore(object):
     Markers can be accessed with two mappings:
     - precursors[x] -> set(markers on precursors edges of x)
     - successors[x] -> set(markers on successors edges of x)
+    - children[x]   -> set(markers on precursors edges of children(x)
     """
 
-    def __init__(self, sopener):
+    fields = ('prec', 'succs', 'flag', 'meta', 'date', 'parents')
+    # prec:    nodeid, precursor changesets
+    # succs:   tuple of nodeid, successor changesets (0-N length)
+    # flag:    integer, flag field carrying modifier for the markers (see doc)
+    # meta:    binary blob, encoded metadata dictionary
+    # date:    (float, int) tuple, date of marker creation
+    # parents: (tuple of nodeid) or None, parents of precursors
+    #          None is used when no data has been recorded
+
+    def __init__(self, sopener, defaultformat=_fm1version, readonly=False):
         # caches for various obsolescence related cache
         self.caches = {}
         self._all = []
-        # new markers to serialize
         self.precursors = {}
         self.successors = {}
+        self.children = {}
         self.sopener = sopener
         data = sopener.tryread('obsstore')
+        self._version = defaultformat
+        self._readonly = readonly
         if data:
-            self._load(_readmarkers(data))
+            self._version, markers = _readmarkers(data)
+            self._load(markers)
 
     def __iter__(self):
         return iter(self._all)
@@ -255,7 +480,8 @@ class obsstore(object):
     def __nonzero__(self):
         return bool(self._all)
 
-    def create(self, transaction, prec, succs=(), flag=0, metadata=None):
+    def create(self, transaction, prec, succs=(), flag=0, parents=None,
+               date=None, metadata=None):
         """obsolete: add a new obsolete marker
 
         * ensuring it is hashable
@@ -270,8 +496,12 @@ class obsstore(object):
         """
         if metadata is None:
             metadata = {}
-        if 'date' not in metadata:
-            metadata['date'] = "%d %d" % util.makedate()
+        if date is None:
+            if 'date' in metadata:
+                # as a courtesy for out-of-tree extensions
+                date = util.parsedate(metadata.pop('date'))
+            else:
+                date = util.makedate()
         if len(prec) != 20:
             raise ValueError(prec)
         for succ in succs:
@@ -279,7 +509,10 @@ class obsstore(object):
                 raise ValueError(succ)
         if prec in succs:
             raise ValueError(_('in-marker cycle with %s') % node.hex(prec))
-        marker = (str(prec), tuple(succs), int(flag), encodemeta(metadata))
+
+        metadata = tuple(sorted(metadata.iteritems()))
+
+        marker = (str(prec), tuple(succs), int(flag), metadata, date, parents)
         return bool(self.add(transaction, [marker]))
 
     def add(self, transaction, markers):
@@ -287,8 +520,9 @@ class obsstore(object):
 
         Take care of filtering duplicate.
         Return the number of new marker."""
-        if not _enabled:
-            raise util.Abort('obsolete feature is not enabled on this repo')
+        if self._readonly:
+            raise util.Abort('creating obsolete markers is not enabled on this '
+                             'repo')
         known = set(self._all)
         new = []
         for m in markers:
@@ -307,7 +541,7 @@ class obsstore(object):
                 offset = f.tell()
                 transaction.add('obsstore', offset)
                 # offset == 0: new file - add the version header
-                for bytes in _encodemarkers(new, offset == 0):
+                for bytes in encodemarkers(new, offset == 0, self._version):
                     f.write(bytes)
             finally:
                 # XXX: f.close() == filecache invalidation == obsstore rebuilt.
@@ -316,11 +550,17 @@ class obsstore(object):
             self._load(new)
             # new marker *may* have changed several set. invalidate the cache.
             self.caches.clear()
+        # records the number of new markers for the transaction hooks
+        previous = int(transaction.hookargs.get('new_obsmarkers', '0'))
+        transaction.hookargs['new_obsmarkers'] = str(previous + len(new))
         return len(new)
 
     def mergemarkers(self, transaction, data):
-        markers = _readmarkers(data)
-        self.add(transaction, markers)
+        """merge a binary stream of markers inside the obsstore
+
+        Returns the number of new markers added."""
+        version, markers = _readmarkers(data)
+        return self.add(transaction, markers)
 
     def _load(self, markers):
         for mark in markers:
@@ -329,26 +569,53 @@ class obsstore(object):
             self.successors.setdefault(pre, set()).add(mark)
             for suc in sucs:
                 self.precursors.setdefault(suc, set()).add(mark)
+            parents = mark[5]
+            if parents is not None:
+                for p in parents:
+                    self.children.setdefault(p, set()).add(mark)
         if node.nullid in self.precursors:
             raise util.Abort(_('bad obsolescence marker detected: '
                                'invalid successors nullid'))
+    def relevantmarkers(self, nodes):
+        """return a set of all obsolescence markers relevant to a set of nodes.
 
-def _encodemarkers(markers, addheader=False):
-    # Kept separate from flushmarkers(), it will be reused for
-    # markers exchange.
-    if addheader:
-        yield _pack('>B', _fmversion)
-    for marker in markers:
-        yield _encodeonemarker(marker)
+        "relevant" to a set of nodes mean:
 
+        - marker that use this changeset as successor
+        - prune marker of direct children on this changeset
+        - recursive application of the two rules on precursors of these markers
 
-def _encodeonemarker(marker):
-    pre, sucs, flags, metadata = marker
-    nbsuc = len(sucs)
-    format = _fmfixed + (_fmnode * nbsuc)
-    data = [nbsuc, len(metadata), flags, pre]
-    data.extend(sucs)
-    return _pack(format, *data) + metadata
+        It is a set so you cannot rely on order."""
+
+        pendingnodes = set(nodes)
+        seenmarkers = set()
+        seennodes = set(pendingnodes)
+        precursorsmarkers = self.precursors
+        children = self.children
+        while pendingnodes:
+            direct = set()
+            for current in pendingnodes:
+                direct.update(precursorsmarkers.get(current, ()))
+                pruned = [m for m in children.get(current, ()) if not m[1]]
+                direct.update(pruned)
+            direct -= seenmarkers
+            pendingnodes = set([m[0] for m in direct])
+            seenmarkers |= direct
+            pendingnodes -= seennodes
+            seennodes |= pendingnodes
+        return seenmarkers
+
+def commonversion(versions):
+    """Return the newest version listed in both versions and our local formats.
+
+    Returns None if no common version exists.
+    """
+    versions.sort(reverse=True)
+    # search for highest version known on both side
+    for v in versions:
+        if v in formats:
+            return v
+    return None
 
 # arbitrary picked to fit into 8K limit from HTTP server
 # you have to take in account:
@@ -365,7 +632,7 @@ def _pushkeyescape(markers):
     parts = []
     currentlen = _maxpayload * 2  # ensure we create a new part
     for marker in markers:
-        nextdata = _encodeonemarker(marker)
+        nextdata = _fm0encodeonemarker(marker)
         if (len(nextdata) + currentlen > _maxpayload):
             currentpart = []
             currentlen = 0
@@ -373,7 +640,7 @@ def _pushkeyescape(markers):
         currentpart.append(nextdata)
         currentlen += len(nextdata)
     for idx, part in enumerate(reversed(parts)):
-        data = ''.join([_pack('>B', _fmversion)] + part)
+        data = ''.join([_pack('>B', _fm0version)] + part)
         keys['dump%i' % idx] = base85.b85encode(data)
     return keys
 
@@ -404,10 +671,24 @@ def pushmarker(repo, key, old, new):
     finally:
         lock.release()
 
-def allmarkers(repo):
-    """all obsolete markers known in a repository"""
-    for markerdata in repo.obsstore:
+def getmarkers(repo, nodes=None):
+    """returns markers known in a repository
+
+    If <nodes> is specified, only markers "relevant" to those nodes are are
+    returned"""
+    if nodes is None:
+        rawmarkers = repo.obsstore
+    else:
+        rawmarkers = repo.obsstore.relevantmarkers(nodes)
+
+    for markerdata in rawmarkers:
         yield marker(repo, markerdata)
+
+def relevantmarkers(repo, node):
+    """all obsolete markers relevant to some revision"""
+    for markerdata in repo.obsstore.relevantmarkers(node):
+        yield marker(repo, markerdata)
+
 
 def precursormarkers(ctx):
     """obsolete marker marking this changeset as a successors"""
@@ -721,7 +1002,7 @@ def getrevs(repo, name):
     Such access may compute the set and cache it for future use"""
     repo = repo.unfiltered()
     if not repo.obsstore:
-        return ()
+        return frozenset()
     if name not in repo.obsstore.caches:
         repo.obsstore.caches[name] = cachefuncs[name](repo)
     return repo.obsstore.caches[name]
@@ -750,8 +1031,8 @@ def _computeobsoleteset(repo):
     obs = set()
     getrev = repo.changelog.nodemap.get
     getphase = repo._phasecache.phase
-    for node in repo.obsstore.successors:
-        rev = getrev(node)
+    for n in repo.obsstore.successors:
+        rev = getrev(n)
         if rev is not None and getphase(repo, rev):
             obs.add(rev)
     return obs
@@ -825,7 +1106,7 @@ def _computedivergentset(repo):
     return divergent
 
 
-def createmarkers(repo, relations, flag=0, metadata=None):
+def createmarkers(repo, relations, flag=0, date=None, metadata=None):
     """Add obsolete markers between changesets in a repo
 
     <relations> must be an iterable of (<old>, (<new>, ...)[,{metadata}])
@@ -844,8 +1125,6 @@ def createmarkers(repo, relations, flag=0, metadata=None):
     # prepare metadata
     if metadata is None:
         metadata = {}
-    if 'date' not in metadata:
-        metadata['date'] = '%i %i' % util.makedate()
     if 'user' not in metadata:
         metadata['user'] = repo.ui.username()
     tr = repo.transaction('add-obsolescence-marker')
@@ -862,10 +1141,35 @@ def createmarkers(repo, relations, flag=0, metadata=None):
                                  % prec)
             nprec = prec.node()
             nsucs = tuple(s.node() for s in sucs)
+            npare = None
+            if not nsucs:
+                npare = tuple(p.node() for p in prec.parents())
             if nprec in nsucs:
                 raise util.Abort("changeset %s cannot obsolete itself" % prec)
-            repo.obsstore.create(tr, nprec, nsucs, flag, localmetadata)
+            repo.obsstore.create(tr, nprec, nsucs, flag, parents=npare,
+                                 date=date, metadata=localmetadata)
             repo.filteredrevcache.clear()
         tr.close()
     finally:
         tr.release()
+
+def isenabled(repo, option):
+    """Returns True if the given repository has the given obsolete option
+    enabled.
+    """
+    result = set(repo.ui.configlist('experimental', 'evolution'))
+    if 'all' in result:
+        return True
+
+    # For migration purposes, temporarily return true if the config hasn't been
+    # set but _enabled is true.
+    if len(result) == 0 and _enabled:
+        return True
+
+    # createmarkers must be enabled if other options are enabled
+    if ((allowunstableopt in result or exchangeopt in result) and
+        not createmarkersopt in result):
+        raise util.Abort(_("'createmarkers' obsolete option must be enabled "
+                           "if other obsolete options are enabled"))
+
+    return option in result

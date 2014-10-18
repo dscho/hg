@@ -23,7 +23,7 @@ test qpush on empty series
   $ echo bar > bar
   $ hg add bar
   $ hg qrefresh -m 'patch 2'
-  $ hg qnew --config 'mq.plain=true' bad-patch
+  $ hg qnew --config 'mq.plain=true' -U bad-patch
   $ echo >> foo
   $ hg qrefresh
   $ hg qpop -a
@@ -31,7 +31,7 @@ test qpush on empty series
   popping patch2
   popping patch1
   patch queue now empty
-  $ python -c 'print "\xe9"' > message
+  $ $PYTHON -c 'print "\xe9"' > message
   $ cat .hg/patches/bad-patch >> message
   $ mv message .hg/patches/bad-patch
   $ hg qpush -a && echo 'qpush succeeded?!'

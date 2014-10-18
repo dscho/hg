@@ -10,6 +10,68 @@ import errno, getpass, os, socket, sys, tempfile, traceback
 import config, scmutil, util, error, formatter
 from node import hex
 
+samplehgrcs = {
+    'user':
+"""# example user config (see "hg help config" for more info)
+[ui]
+# name and email, e.g.
+# username = Jane Doe <jdoe@example.com>
+username =
+
+[extensions]
+# uncomment these lines to enable some popular extensions
+# (see "hg help extensions" for more info)
+#
+# pager =
+# progress =
+# color =""",
+
+    'cloned':
+"""# example repository config (see "hg help config" for more info)
+[paths]
+default = %s
+
+# path aliases to other clones of this repo in URLs or filesystem paths
+# (see "hg help config.paths" for more info)
+#
+# default-push = ssh://jdoe@example.net/hg/jdoes-fork
+# my-fork      = ssh://jdoe@example.net/hg/jdoes-fork
+# my-clone     = /home/jdoe/jdoes-clone
+
+[ui]
+# name and email (local to this repository, optional), e.g.
+# username = Jane Doe <jdoe@example.com>
+""",
+
+    'local':
+"""# example repository config (see "hg help config" for more info)
+[paths]
+# path aliases to other clones of this repo in URLs or filesystem paths
+# (see "hg help config.paths" for more info)
+#
+# default      = http://example.com/hg/example-repo
+# default-push = ssh://jdoe@example.net/hg/jdoes-fork
+# my-fork      = ssh://jdoe@example.net/hg/jdoes-fork
+# my-clone     = /home/jdoe/jdoes-clone
+
+[ui]
+# name and email (local to this repository, optional), e.g.
+# username = Jane Doe <jdoe@example.com>
+""",
+
+    'global':
+"""# example system-wide hg config (see "hg help config" for more info)
+
+[extensions]
+# uncomment these lines to enable some popular extensions
+# (see "hg help extensions" for more info)
+#
+# blackbox =
+# progress =
+# color =
+# pager =""",
+}
+
 class ui(object):
     def __init__(self, src=None):
         # _buffers: used for temporary capture of output
@@ -626,6 +688,8 @@ class ui(object):
         oldout = sys.stdout
         sys.stdin = self.fin
         sys.stdout = self.fout
+        # prompt ' ' must exist; otherwise readline may delete entire line
+        # - http://bugs.python.org/issue12833
         line = raw_input(' ')
         sys.stdin = oldin
         sys.stdout = oldout
@@ -646,7 +710,13 @@ class ui(object):
         try:
             r = self._readline(self.label(msg, 'ui.prompt'))
             if not r:
-                return default
+                r = default
+            # sometimes self.interactive disagrees with isatty,
+            # show response provided on stdin when simulating
+            # but commandserver
+            if (not util.isatty(self.fin)
+                and not self.configbool('ui', 'nontty')):
+                self.write(r, "\n")
             return r
         except EOFError:
             raise util.Abort(_('response expected'))
@@ -728,7 +798,7 @@ class ui(object):
         if self.debugflag:
             opts['label'] = opts.get('label', '') + ' ui.debug'
             self.write(*msg, **opts)
-    def edit(self, text, user, extra={}):
+    def edit(self, text, user, extra={}, editform=None):
         (fd, name) = tempfile.mkstemp(prefix="hg-editor-", suffix=".txt",
                                       text=True)
         try:
@@ -743,6 +813,8 @@ class ui(object):
                 if label in extra:
                     environ.update({'HGREVISION': extra[label]})
                     break
+            if editform:
+                environ.update({'HGEDITFORM': editform})
 
             editor = self.geteditor()
 

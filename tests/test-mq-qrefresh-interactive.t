@@ -29,7 +29,7 @@ help qrefresh (no record)
   
       Returns 0 on success.
   
-  options:
+  options ([+] can be repeated):
   
    -e --edit                invoke editor on commit messages
    -g --git                 use git extended diff format
@@ -44,9 +44,7 @@ help qrefresh (no record)
    -m --message TEXT        use text as commit message
    -l --logfile FILE        read commit message from file
   
-  [+] marked option can be specified multiple times
-  
-  use "hg -v help qrefresh" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
 help qrefresh (record)
 
@@ -73,7 +71,7 @@ help qrefresh (record)
   
       Returns 0 on success.
   
-  options:
+  options ([+] can be repeated):
   
    -e --edit                invoke editor on commit messages
    -g --git                 use git extended diff format
@@ -89,9 +87,7 @@ help qrefresh (record)
    -l --logfile FILE        read commit message from file
    -i --interactive         interactively select changes to refresh
   
-  [+] marked option can be specified multiple times
-  
-  use "hg -v help qrefresh" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
   $ hg init a
   $ cd a
@@ -185,22 +181,26 @@ partial qrefresh
   > EOF
   diff --git a/1.txt b/1.txt
   2 hunks, 2 lines changed
-  examine changes to '1.txt'? [Ynesfdaq?] 
+  examine changes to '1.txt'? [Ynesfdaq?] y
+  
   @@ -1,3 +1,3 @@
    1
   -2
   +2 2
    3
-  record change 1/4 to '1.txt'? [Ynesfdaq?] 
+  record change 1/4 to '1.txt'? [Ynesfdaq?] y
+  
   @@ -3,3 +3,3 @@
    3
   -4
   +4 4
    5
-  record change 2/4 to '1.txt'? [Ynesfdaq?] 
+  record change 2/4 to '1.txt'? [Ynesfdaq?] n
+  
   diff --git a/2.txt b/2.txt
   1 hunks, 1 lines changed
-  examine changes to '2.txt'? [Ynesfdaq?] 
+  examine changes to '2.txt'? [Ynesfdaq?] y
+  
   @@ -1,5 +1,5 @@
    a
   -b
@@ -208,10 +208,12 @@ partial qrefresh
    c
    d
    e
-  record change 3/4 to '2.txt'? [Ynesfdaq?] 
+  record change 3/4 to '2.txt'? [Ynesfdaq?] y
+  
   diff --git a/dir/a.txt b/dir/a.txt
   1 hunks, 1 lines changed
-  examine changes to 'dir/a.txt'? [Ynesfdaq?] 
+  examine changes to 'dir/a.txt'? [Ynesfdaq?] n
+  
 
 After partial qrefresh 'tip'
 
@@ -279,7 +281,8 @@ qrefresh interactively everything else
   > EOF
   diff --git a/1.txt b/1.txt
   1 hunks, 1 lines changed
-  examine changes to '1.txt'? [Ynesfdaq?] 
+  examine changes to '1.txt'? [Ynesfdaq?] y
+  
   @@ -1,5 +1,5 @@
    1
    2 2
@@ -287,17 +290,20 @@ qrefresh interactively everything else
   -4
   +4 4
    5
-  record change 1/2 to '1.txt'? [Ynesfdaq?] 
+  record change 1/2 to '1.txt'? [Ynesfdaq?] y
+  
   diff --git a/dir/a.txt b/dir/a.txt
   1 hunks, 1 lines changed
-  examine changes to 'dir/a.txt'? [Ynesfdaq?] 
+  examine changes to 'dir/a.txt'? [Ynesfdaq?] y
+  
   @@ -1,4 +1,4 @@
   -hello world
   +hello world!
    
    someone
    up
-  record change 2/2 to 'dir/a.txt'? [Ynesfdaq?] 
+  record change 2/2 to 'dir/a.txt'? [Ynesfdaq?] y
+  
 
 After final qrefresh 'tip'
 

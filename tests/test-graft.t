@@ -92,7 +92,7 @@ Graft a rename:
   HG: --
   HG: user: foo
   HG: branch 'default'
-  HG: changed b
+  HG: added b
   HG: removed a
   $ hg export tip --git
   # HG changeset patch
@@ -632,6 +632,52 @@ graft works on complex revset
   grafting revision 19
   merging b
 
+graft with --force (still doesn't graft merges)
+
+  $ hg graft 19 0 6
+  skipping ungraftable merge revision 6
+  skipping ancestor revision 0
+  skipping already grafted revision 19 (22 also has origin 2)
+  [255]
+  $ hg graft 19 0 6 --force
+  skipping ungraftable merge revision 6
+  grafting revision 19
+  merging b
+  grafting revision 0
+
+graft --force after backout
+
+  $ echo abc > a
+  $ hg ci -m 28
+  $ hg backout 28
+  reverting a
+  changeset 29:484c03b8dfa4 backs out changeset 28:6c56f0f7f033
+  $ hg graft 28
+  skipping ancestor revision 28
+  [255]
+  $ hg graft 28 --force
+  grafting revision 28
+  merging a
+  $ cat a
+  abc
+
+graft --continue after --force
+
+  $ hg backout 30
+  reverting a
+  changeset 31:3b96c18b7a1b backs out changeset 30:8f539994be33
+  $ hg graft 28 --force --tool internal:fail
+  grafting revision 28
+  abort: unresolved conflicts, can't continue
+  (use hg resolve and hg graft --continue)
+  [255]
+  $ hg resolve --all
+  merging a
+  (no more unresolved files)
+  $ hg graft -c
+  grafting revision 28
+  $ cat a
+  abc
 
 Continue testing same origin policy, using revision numbers from test above
 but do some destructive editing of the repo:

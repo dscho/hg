@@ -171,8 +171,13 @@ class changelog(revlog.revlog):
 
     def headrevs(self):
         if self.filteredrevs:
-            # XXX we should fix and use the C version
-            return self._headrevs()
+            try:
+                return self.index.headrevs(self.filteredrevs)
+            # AttributeError covers non-c-extension environments.
+            # TypeError allows us work with old c extensions.
+            except (AttributeError, TypeError):
+                return self._headrevs()
+
         return super(changelog, self).headrevs()
 
     def strip(self, *args, **kwargs):
@@ -185,31 +190,32 @@ class changelog(revlog.revlog):
         """filtered version of revlog.rev"""
         r = super(changelog, self).rev(node)
         if r in self.filteredrevs:
-            raise error.LookupError(hex(node), self.indexfile, _('no node'))
+            raise error.FilteredLookupError(hex(node), self.indexfile,
+                                            _('filtered node'))
         return r
 
     def node(self, rev):
         """filtered version of revlog.node"""
         if rev in self.filteredrevs:
-            raise IndexError(rev)
+            raise error.FilteredIndexError(rev)
         return super(changelog, self).node(rev)
 
     def linkrev(self, rev):
         """filtered version of revlog.linkrev"""
         if rev in self.filteredrevs:
-            raise IndexError(rev)
+            raise error.FilteredIndexError(rev)
         return super(changelog, self).linkrev(rev)
 
     def parentrevs(self, rev):
         """filtered version of revlog.parentrevs"""
         if rev in self.filteredrevs:
-            raise IndexError(rev)
+            raise error.FilteredIndexError(rev)
         return super(changelog, self).parentrevs(rev)
 
     def flags(self, rev):
         """filtered version of revlog.flags"""
         if rev in self.filteredrevs:
-            raise IndexError(rev)
+            raise error.FilteredIndexError(rev)
         return super(changelog, self).flags(rev)
 
     def delayupdate(self):

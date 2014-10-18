@@ -5,29 +5,31 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import revlog
+import error, revlog
 import re
 
 _mdre = re.compile('\1\n')
-def _parsemeta(text):
+def parsemeta(text):
     """return (metadatadict, keylist, metadatasize)"""
     # text can be buffer, so we can't use .startswith or .index
     if text[:2] != '\1\n':
-        return None, None, None
+        return None, None
     s = _mdre.search(text, 2).start()
     mtext = text[2:s]
     meta = {}
-    keys = []
     for l in mtext.splitlines():
         k, v = l.split(": ", 1)
         meta[k] = v
-        keys.append(k)
-    return meta, keys, (s + 2)
+    return meta, (s + 2)
 
-def _packmeta(meta, keys=None):
-    if not keys:
-        keys = sorted(meta.iterkeys())
-    return "".join("%s: %s\n" % (k, meta[k]) for k in keys)
+def packmeta(meta, text):
+    keys = sorted(meta.iterkeys())
+    metatext = "".join("%s: %s\n" % (k, meta[k]) for k in keys)
+    return "\1\n%s\1\n%s" % (metatext, text)
+
+def _censoredtext(text):
+    m, offs = parsemeta(text)
+    return m and "censored" in m and not text[offs:]
 
 class filelog(revlog.revlog):
     def __init__(self, opener, path):
@@ -43,14 +45,14 @@ class filelog(revlog.revlog):
 
     def add(self, text, meta, transaction, link, p1=None, p2=None):
         if meta or text.startswith('\1\n'):
-            text = "\1\n%s\1\n%s" % (_packmeta(meta), text)
+            text = packmeta(meta, text)
         return self.addrevision(text, transaction, link, p1, p2)
 
     def renamed(self, node):
         if self.parents(node)[0] != revlog.nullid:
             return False
         t = self.revision(node)
-        m = _parsemeta(t)[0]
+        m = parsemeta(t)[0]
         if m and "copy" in m:
             return (m["copy"], revlog.bin(m["copyrev"]))
         return False
@@ -62,6 +64,8 @@ class filelog(revlog.revlog):
         node = self.node(rev)
         if self.renamed(node):
             return len(self.read(node))
+        if self._iscensored(rev):
+            return 0
 
         # XXX if self.read(node).startswith("\1\n"), this returns (size+4)
         return super(filelog, self).size(rev)
@@ -80,6 +84,10 @@ class filelog(revlog.revlog):
         if samehashes:
             return False
 
+        # censored files compare against the empty file
+        if self._iscensored(node):
+            return text != ''
+
         # renaming a file produces a different hash, even if the data
         # remains unchanged. Check if it's the case (slow):
         if self.renamed(node):
@@ -88,5 +96,21 @@ class filelog(revlog.revlog):
 
         return True
 
+    def checkhash(self, text, p1, p2, node, rev=None):
+        try:
+            super(filelog, self).checkhash(text, p1, p2, node, rev=rev)
+        except error.RevlogError:
+            if _censoredtext(text):
+                raise error.CensoredNodeError(self.indexfile, node)
+            raise
+
     def _file(self, f):
         return filelog(self.opener, f)
+
+    def _iscensored(self, revornode):
+        """Check if a file revision is censored."""
+        try:
+            self.revision(revornode)
+            return False
+        except error.CensoredNodeError:
+            return True

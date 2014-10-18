@@ -1,4 +1,4 @@
-  $ "$TESTDIR/hghave" hardlink || exit 80
+#require hardlink
 
   $ cat > nlinks.py <<EOF
   > import sys
@@ -57,7 +57,6 @@ Create hardlinked clone r2:
 
   $ hg clone -U --debug r1 r2
   linked 7 files
-  listing keys for "bookmarks"
 
 Create non-hardlinked clone r3:
 

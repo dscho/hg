@@ -25,7 +25,7 @@ from mercurial.i18n import _
 from mercurial.node import nullid, nullrev, bin, hex
 from mercurial import changegroup, cmdutil, scmutil, phases, commands
 from mercurial import error, hg, mdiff, merge, patch, repair, util
-from mercurial import templatefilters, changegroup, exchange
+from mercurial import templatefilters, exchange, bundlerepo
 from mercurial import lock as lockmod
 from hgext import rebase
 import errno
@@ -37,7 +37,7 @@ testedwith = 'internal'
 class shelvedfile(object):
     """Helper for the file storing a single shelve
 
-    Handles common functions on shelve files (.hg/.files/.patch) using
+    Handles common functions on shelve files (.hg/.patch) using
     the vfs layer"""
     def __init__(self, repo, name, filetype=None):
         self.repo = repo
@@ -73,10 +73,14 @@ class shelvedfile(object):
         try:
             gen = exchange.readbundle(self.repo.ui, fp, self.fname, self.vfs)
             changegroup.addchangegroup(self.repo, gen, 'unshelve',
-                                       'bundle:' + self.vfs.join(self.fname))
+                                       'bundle:' + self.vfs.join(self.fname),
+                                       targetphase=phases.secret)
         finally:
             fp.close()
 
+    def bundlerepo(self):
+        return bundlerepo.bundlerepository(self.repo.baseui, self.repo.root,
+                                           self.vfs.join(self.fname))
     def writebundle(self, cg):
         changegroup.writebundle(cg, self.fname, 'HG10UN', self.vfs)
 
@@ -168,19 +172,18 @@ def createcmd(ui, repo, pats, opts):
         for i in xrange(1, 100):
             yield '%s-%02d' % (label, i)
 
-    shelvedfiles = []
-
     def commitfunc(ui, repo, message, match, opts):
-        # check modified, added, removed, deleted only
-        for flist in repo.status(match=match)[:4]:
-            shelvedfiles.extend(flist)
         hasmq = util.safehasattr(repo, 'mq')
         if hasmq:
             saved, repo.mq.checkapplied = repo.mq.checkapplied, False
+        backup = repo.ui.backupconfig('phases', 'new-commit')
         try:
+            repo.ui. setconfig('phases', 'new-commit', phases.secret)
+            editor = cmdutil.getcommiteditor(editform='shelve.shelve', **opts)
             return repo.commit(message, user, opts.get('date'), match,
-                               editor=cmdutil.getcommiteditor(**opts))
+                               editor=editor)
         finally:
+            repo.ui.restoreconfig(backup)
             if hasmq:
                 repo.mq.checkapplied = saved
 
@@ -227,17 +230,12 @@ def createcmd(ui, repo, pats, opts):
 
         if not node:
             stat = repo.status(match=scmutil.match(repo[None], pats, opts))
-            if stat[3]:
+            if stat.deleted:
                 ui.status(_("nothing changed (%d missing files, see "
-                            "'hg status')\n") % len(stat[3]))
+                            "'hg status')\n") % len(stat.deleted))
             else:
                 ui.status(_("nothing changed\n"))
             return 1
-
-        phases.retractboundary(repo, phases.secret, [node])
-
-        fp = shelvedfile(repo, name, 'files').opener('wb')
-        fp.write('\0'.join(shelvedfiles))
 
         bases = list(publicancestors(repo[node]))
         cg = changegroup.changegroupsubset(repo, bases, [node], 'shelve')
@@ -266,9 +264,9 @@ def cleanupcmd(ui, repo):
     wlock = None
     try:
         wlock = repo.wlock()
-        for (name, _) in repo.vfs.readdir('shelved'):
+        for (name, _type) in repo.vfs.readdir('shelved'):
             suffix = name.rsplit('.', 1)[-1]
-            if suffix in ('hg', 'files', 'patch'):
+            if suffix in ('hg', 'patch'):
                 shelvedfile(repo, name).unlink()
     finally:
         lockmod.release(wlock)
@@ -282,7 +280,7 @@ def deletecmd(ui, repo, pats):
         wlock = repo.wlock()
         try:
             for name in pats:
-                for suffix in 'hg files patch'.split():
+                for suffix in 'hg patch'.split():
                     shelvedfile(repo, name, suffix).unlink()
         except OSError, err:
             if err.errno != errno.ENOENT:
@@ -300,7 +298,7 @@ def listshelves(repo):
             raise
         return []
     info = []
-    for (name, _) in names:
+    for (name, _type) in names:
         pfx, sfx = name.rsplit('.', 1)
         if not pfx or sfx != 'patch':
             continue
@@ -388,7 +386,7 @@ def unshelveabort(ui, repo, state, opts):
 
         mergefiles(ui, repo, state.wctx, state.pendingctx)
 
-        repair.strip(ui, repo, state.stripnodes, backup='none', topic='shelve')
+        repair.strip(ui, repo, state.stripnodes, backup=False, topic='shelve')
         shelvedstate.clear(repo)
         ui.warn(_("unshelve of '%s' aborted\n") % state.name)
     finally:
@@ -406,20 +404,21 @@ def mergefiles(ui, repo, wctx, shelvectx):
         files.extend(shelvectx.parents()[0].files())
 
         # revert will overwrite unknown files, so move them out of the way
-        m, a, r, d, u = repo.status(unknown=True)[:5]
-        for file in u:
+        for file in repo.status(unknown=True).unknown:
             if file in files:
                 util.rename(file, file + ".orig")
+        ui.pushbuffer(True)
         cmdutil.revert(ui, repo, shelvectx, repo.dirstate.parents(),
                        *pathtofiles(repo, files),
                        **{'no_backup': True})
+        ui.popbuffer()
     finally:
         ui.quiet = oldquiet
 
 def unshelvecleanup(ui, repo, name, opts):
     """remove related files after an unshelve"""
     if not opts['keep']:
-        for filetype in 'hg files patch'.split():
+        for filetype in 'hg patch'.split():
             shelvedfile(repo, name, filetype).unlink()
 
 def unshelvecontinue(ui, repo, state, opts):
@@ -459,7 +458,7 @@ def unshelvecontinue(ui, repo, state, opts):
 
         mergefiles(ui, repo, state.wctx, shelvectx)
 
-        repair.strip(ui, repo, state.stripnodes, backup='none', topic='shelve')
+        repair.strip(ui, repo, state.stripnodes, backup=False, topic='shelve')
         shelvedstate.clear(repo)
         unshelvecleanup(ui, repo, state.name, opts)
         ui.status(_("unshelve of '%s' complete\n") % state.name)
@@ -530,7 +529,7 @@ def unshelve(ui, repo, *shelved, **opts):
     else:
         basename = shelved[0]
 
-    if not shelvedfile(repo, basename, 'files').exists():
+    if not shelvedfile(repo, basename, 'patch').exists():
         raise util.Abort(_("shelved change '%s' not found") % basename)
 
     oldquiet = ui.quiet
@@ -551,8 +550,8 @@ def unshelve(ui, repo, *shelved, **opts):
         # to the original pctx.
 
         # Store pending changes in a commit
-        m, a, r, d = repo.status()[:4]
-        if m or a or r or d:
+        s = repo.status()
+        if s.modified or s.added or s.removed or s.deleted:
             ui.status(_("temporarily committing pending changes "
                         "(restore with 'hg unshelve --abort')\n"))
             def commitfunc(ui, repo, message, match, opts):
@@ -560,10 +559,13 @@ def unshelve(ui, repo, *shelved, **opts):
                 if hasmq:
                     saved, repo.mq.checkapplied = repo.mq.checkapplied, False
 
+                backup = repo.ui.backupconfig('phases', 'new-commit')
                 try:
+                    repo.ui. setconfig('phases', 'new-commit', phases.secret)
                     return repo.commit(message, 'shelve@localhost',
                                        opts.get('date'), match)
                 finally:
+                    repo.ui.restoreconfig(backup)
                     if hasmq:
                         repo.mq.checkapplied = saved
 
@@ -576,8 +578,6 @@ def unshelve(ui, repo, *shelved, **opts):
 
         ui.quiet = True
         shelvedfile(repo, basename, 'hg').applybundle()
-        nodes = [ctx.node() for ctx in repo.set('%d:', oldtiprev)]
-        phases.retractboundary(repo, phases.secret, nodes)
 
         ui.quiet = oldquiet
 

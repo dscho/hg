@@ -23,7 +23,7 @@ Short help:
    summary       summarize working directory state
    update        update working directory (or switch revisions)
   
-  use "hg help" for the full list of commands or "hg -v" for details
+  (use "hg help" for the full list of commands or "hg -v" for details)
 
   $ hg -q
    add           add the specified files on the next commit
@@ -66,6 +66,7 @@ Short help:
    copy          mark files as copied for the next commit
    diff          diff repository (or selected files)
    export        dump the header and diffs for one or more changesets
+   files         list tracked files
    forget        forget the specified files on the next commit
    graft         copy changes from other branches onto the current branch
    grep          search for a pattern in specified files and revisions
@@ -75,12 +76,10 @@ Short help:
    import        import an ordered set of patches
    incoming      show new changesets found in source
    init          create a new repository in the given directory
-   locate        locate files matching specific patterns
    log           show revision history of entire repository or files
    manifest      output the current or given revision of the project manifest
    merge         merge working directory with another revision
    outgoing      show changesets not found in the destination
-   parents       show the parents of the working directory or revision
    paths         show aliases for remote repositories
    phase         set or show the current phase name
    pull          pull changes from the specified source
@@ -122,7 +121,7 @@ Short help:
    templating    Template Usage
    urls          URL Paths
   
-  use "hg -v help" to show builtin aliases and global options
+  (use "hg help -v" to show built-in aliases and global options)
 
   $ hg -q help
    add           add the specified files on the next commit
@@ -142,6 +141,7 @@ Short help:
    copy          mark files as copied for the next commit
    diff          diff repository (or selected files)
    export        dump the header and diffs for one or more changesets
+   files         list tracked files
    forget        forget the specified files on the next commit
    graft         copy changes from other branches onto the current branch
    grep          search for a pattern in specified files and revisions
@@ -151,12 +151,10 @@ Short help:
    import        import an ordered set of patches
    incoming      show new changesets found in source
    init          create a new repository in the given directory
-   locate        locate files matching specific patterns
    log           show revision history of entire repository or files
    manifest      output the current or given revision of the project manifest
    merge         merge working directory with another revision
    outgoing      show changesets not found in the destination
-   parents       show the parents of the working directory or revision
    paths         show aliases for remote repositories
    phase         set or show the current phase name
    pull          pull changes from the specified source
@@ -305,7 +303,7 @@ Test short command list with verbose option
    update, up, checkout, co
                  update working directory (or switch revisions)
   
-  global options:
+  global options ([+] can be repeated):
   
    -R --repository REPO   repository root directory or name of overlay bundle
                           file
@@ -326,9 +324,7 @@ Test short command list with verbose option
    -h --help              display help and exit
       --hidden            consider hidden changesets
   
-  [+] marked option can be specified multiple times
-  
-  use "hg help" for the full list of commands
+  (use "hg help" for the full list of commands)
 
   $ hg add -h
   hg add [OPTION]... [FILE]...
@@ -344,16 +340,14 @@ Test short command list with verbose option
   
       Returns 0 if all files are successfully added.
   
-  options:
+  options ([+] can be repeated):
   
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
    -S --subrepos            recurse into subrepositories
    -n --dry-run             do not perform actions, just print output
   
-  [+] marked option can be specified multiple times
-  
-  use "hg -v help add" to show more complete help and the global options
+  (some details hidden, use --verbose to show complete help)
 
 Verbose help for add
 
@@ -383,16 +377,14 @@ Verbose help for add
   
       Returns 0 if all files are successfully added.
   
-  options:
+  options ([+] can be repeated):
   
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
    -S --subrepos            recurse into subrepositories
    -n --dry-run             do not perform actions, just print output
   
-  [+] marked option can be specified multiple times
-  
-  global options:
+  global options ([+] can be repeated):
   
    -R --repository REPO   repository root directory or name of overlay bundle
                           file
@@ -412,8 +404,6 @@ Verbose help for add
       --version           output version information and exit
    -h --help              display help and exit
       --hidden            consider hidden changesets
-  
-  [+] marked option can be specified multiple times
 
 Test help option with version option
 
@@ -431,16 +421,14 @@ Test help option with version option
   
   add the specified files on the next commit
   
-  options:
+  options ([+] can be repeated):
   
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
    -S --subrepos            recurse into subrepositories
    -n --dry-run             do not perform actions, just print output
   
-  [+] marked option can be specified multiple times
-  
-  use "hg help add" to show the full help text
+  (use "hg add -h" to show more help)
   [255]
 
 Test ambiguous command help
@@ -451,7 +439,7 @@ Test ambiguous command help
    add           add the specified files on the next commit
    addremove     add all new files, delete all missing files
   
-  use "hg -v help ad" to show builtin aliases and global options
+  (use "hg help -v ad" to show built-in aliases and global options)
 
 Test command without options
 
@@ -472,7 +460,7 @@ Test command without options
   
       Returns 0 on success, 1 if errors are encountered.
   
-  use "hg -v help verify" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
   $ hg help diff
   hg diff [OPTION]... ([-c REV] | [-r REV1 [-r REV2]]) [FILE]...
@@ -505,7 +493,7 @@ Test command without options
   
       Returns 0 on success.
   
-  options:
+  options ([+] can be repeated):
   
    -r --rev REV [+]         revision
    -c --change REV          change made by revision
@@ -523,9 +511,7 @@ Test command without options
    -X --exclude PATTERN [+] exclude names matching the given patterns
    -S --subrepos            recurse into subrepositories
   
-  [+] marked option can be specified multiple times
-  
-  use "hg -v help diff" to show more complete help and the global options
+  (some details hidden, use --verbose to show complete help)
 
   $ hg help status
   hg status [OPTION]... [FILE]...
@@ -567,7 +553,7 @@ Test command without options
   
       Returns 0 on success.
   
-  options:
+  options ([+] can be repeated):
   
    -A --all                 show status of all files
    -m --modified            show only modified files
@@ -586,9 +572,7 @@ Test command without options
    -X --exclude PATTERN [+] exclude names matching the given patterns
    -S --subrepos            recurse into subrepositories
   
-  [+] marked option can be specified multiple times
-  
-  use "hg -v help status" to show more complete help and the global options
+  (some details hidden, use --verbose to show complete help)
 
   $ hg -q help status
   hg status [OPTION]... [FILE]...
@@ -624,7 +608,7 @@ Test command without options
    summary       summarize working directory state
    update        update working directory (or switch revisions)
   
-  use "hg help" for the full list of commands or "hg -v" for details
+  (use "hg help" for the full list of commands or "hg -v" for details)
   [255]
 
 
@@ -663,7 +647,7 @@ Test command with no help text
    -n --               normal desc
       --newline VALUE  line1 line2
   
-  use "hg -v help nohelp" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
   $ hg help -k nohelp
   Commands:
@@ -698,6 +682,7 @@ Test that default list of commands omits extension commands
    copy          mark files as copied for the next commit
    diff          diff repository (or selected files)
    export        dump the header and diffs for one or more changesets
+   files         list tracked files
    forget        forget the specified files on the next commit
    graft         copy changes from other branches onto the current branch
    grep          search for a pattern in specified files and revisions
@@ -707,12 +692,10 @@ Test that default list of commands omits extension commands
    import        import an ordered set of patches
    incoming      show new changesets found in source
    init          create a new repository in the given directory
-   locate        locate files matching specific patterns
    log           show revision history of entire repository or files
    manifest      output the current or given revision of the project manifest
    merge         merge working directory with another revision
    outgoing      show changesets not found in the destination
-   parents       show the parents of the working directory or revision
    paths         show aliases for remote repositories
    phase         set or show the current phase name
    pull          pull changes from the specified source
@@ -758,7 +741,7 @@ Test that default list of commands omits extension commands
    templating    Template Usage
    urls          URL Paths
   
-  use "hg -v help" to show builtin aliases and global options
+  (use "hg help -v" to show built-in aliases and global options)
 
 
 Test list of internal help commands
@@ -798,6 +781,7 @@ Test list of internal help commands
    debugknown    test whether node ids are known to a repo
    debuglabelcomplete
                  complete "labels" - tags, open branch names, bookmark names
+   debuglocks    show or modify state of locks
    debugobsolete
                  create arbitrary obsolete marker
    debugoptDEP   (no help text available)
@@ -820,7 +804,7 @@ Test list of internal help commands
    debugwireargs
                  (no help text available)
   
-  use "hg -v help debug" to show builtin aliases and global options
+  (use "hg help -v debug" to show built-in aliases and global options)
 
 
 Test list of commands with command with no help text
@@ -832,7 +816,7 @@ Test list of commands with command with no help text
   
    nohelp        (no help text available)
   
-  use "hg -v help helpext" to show builtin aliases and global options
+  (use "hg help -v helpext" to show built-in aliases and global options)
 
 
 test deprecated option is hidden in command help
@@ -843,7 +827,7 @@ test deprecated option is hidden in command help
   
   options:
   
-  use "hg -v help debugoptDEP" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
 test deprecated option is shown with -v
   $ hg help -v debugoptDEP | grep dopt
@@ -857,9 +841,9 @@ test deprecated option is hidden with translation with untranslated description
   
   (*) (glob)
   
-  flaggor:
+  options:
   
-  *"hg -v help debugoptDEP"* (glob)
+  (some details hidden, use --verbose to show complete help)
 #endif
 
 Test commands that collide with topics (issue4240)
@@ -1030,7 +1014,7 @@ Test omit indicating for help
   
   This paragraph is never omitted, too (for extension)
   
-  use "hg help -v addverboseitems" to show more complete help
+  (some details hidden, use --verbose to show complete help)
   
   no commands defined
   $ hg help -v addverboseitems
@@ -1051,7 +1035,7 @@ Test omit indicating for help
   
       This paragraph is never omitted, too (for topic)
   
-  use "hg help -v topic-containing-verbose" to show more complete help
+  (some details hidden, use --verbose to show complete help)
   $ hg help -v topic-containing-verbose
   This is the topic to test omit indicating.
   """"""""""""""""""""""""""""""""""""""""""
@@ -1061,6 +1045,54 @@ Test omit indicating for help
       This paragraph is omitted, if "hg help" is invoked witout "-v" (for topic)
   
       This paragraph is never omitted, too (for topic)
+
+Test section lookup
+
+  $ hg help revset.merge
+      "merge()"
+        Changeset is a merge changeset.
+  
+  $ hg help glossary.dag
+      DAG
+          The repository of changesets of a distributed version control system
+          (DVCS) can be described as a directed acyclic graph (DAG), consisting
+          of nodes and edges, where nodes correspond to changesets and edges
+          imply a parent -> child relation. This graph can be visualized by
+          graphical tools such as "hg log --graph". In Mercurial, the DAG is
+          limited by the requirement for children to have at most two parents.
+  
+
+  $ hg help hgrc.paths
+      "paths"
+      -------
+  
+      Assigns symbolic names to repositories. The left side is the symbolic
+      name, and the right gives the directory or URL that is the location of the
+      repository. Default paths can be declared by setting the following
+      entries.
+  
+      "default"
+          Directory or URL to use when pulling if no source is specified.
+          Default is set to repository from which the current repository was
+          cloned.
+  
+      "default-push"
+          Optional. Directory or URL to use when pushing if no destination is
+          specified.
+  
+      Custom paths can be defined by assigning the path to a name that later can
+      be used from the command line. Example:
+  
+        [paths]
+        my_path = http://example.com/path
+  
+      To push to the path defined in "my_path" run the command:
+  
+        hg push my_path
+  
+  $ hg help glossary.mcguffin
+  abort: help section not found
+  [255]
 
 Test usage of section marks in help documents
 
@@ -1458,6 +1490,13 @@ Dish up an empty repo; serve it cold.
   mark files as copied for the next commit
   </td></tr>
   <tr><td>
+  <a href="/help/files">
+  files
+  </a>
+  </td><td>
+  list tracked files
+  </td></tr>
+  <tr><td>
   <a href="/help/graft">
   graft
   </a>
@@ -1507,13 +1546,6 @@ Dish up an empty repo; serve it cold.
   show new changesets found in source
   </td></tr>
   <tr><td>
-  <a href="/help/locate">
-  locate
-  </a>
-  </td><td>
-  locate files matching specific patterns
-  </td></tr>
-  <tr><td>
   <a href="/help/manifest">
   manifest
   </a>
@@ -1533,13 +1565,6 @@ Dish up an empty repo; serve it cold.
   </a>
   </td><td>
   show changesets not found in the destination
-  </td></tr>
-  <tr><td>
-  <a href="/help/parents">
-  parents
-  </a>
-  </td><td>
-  show the parents of the working directory or revision
   </td></tr>
   <tr><td>
   <a href="/help/paths">
@@ -1715,7 +1740,7 @@ Dish up an empty repo; serve it cold.
   Returns 0 if all files are successfully added.
   </p>
   <p>
-  options:
+  options ([+] can be repeated):
   </p>
   <table>
   <tr><td>-I</td>
@@ -1732,10 +1757,7 @@ Dish up an empty repo; serve it cold.
   <td>do not perform actions, just print output</td></tr>
   </table>
   <p>
-  [+] marked option can be specified multiple times
-  </p>
-  <p>
-  global options:
+  global options ([+] can be repeated):
   </p>
   <table>
   <tr><td>-R</td>
@@ -1787,9 +1809,6 @@ Dish up an empty repo; serve it cold.
   <td>--hidden</td>
   <td>consider hidden changesets</td></tr>
   </table>
-  <p>
-  [+] marked option can be specified multiple times
-  </p>
   
   </div>
   </div>
@@ -1911,7 +1930,7 @@ Dish up an empty repo; serve it cold.
   Returns 0 on success, 1 if any warnings encountered.
   </p>
   <p>
-  options:
+  options ([+] can be repeated):
   </p>
   <table>
   <tr><td>-A</td>
@@ -1928,10 +1947,7 @@ Dish up an empty repo; serve it cold.
   <td>exclude names matching the given patterns</td></tr>
   </table>
   <p>
-  [+] marked option can be specified multiple times
-  </p>
-  <p>
-  global options:
+  global options ([+] can be repeated):
   </p>
   <table>
   <tr><td>-R</td>
@@ -1983,9 +1999,6 @@ Dish up an empty repo; serve it cold.
   <td>--hidden</td>
   <td>consider hidden changesets</td></tr>
   </table>
-  <p>
-  [+] marked option can be specified multiple times
-  </p>
   
   </div>
   </div>

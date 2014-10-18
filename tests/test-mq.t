@@ -95,7 +95,7 @@ help
    qtop          print the name of the current patch
    qunapplied    print the patches not yet applied
   
-  use "hg -v help mq" to show builtin aliases and global options
+  (use "hg help -v mq" to show built-in aliases and global options)
 
   $ hg init a
   $ cd a
@@ -1509,6 +1509,7 @@ Proper phase default with mq:
 
   $ rm .hg/store/phaseroots
   $ hg phase 'qparent::'
+  -1: public
   0: draft
   1: draft
   2: draft
@@ -1516,6 +1517,7 @@ Proper phase default with mq:
   $ echo 'secret=true' >> $HGRCPATH
   $ rm -f .hg/store/phaseroots
   $ hg phase 'qparent::'
+  -1: public
   0: secret
   1: secret
   2: secret

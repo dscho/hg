@@ -7,7 +7,7 @@
 
 from i18n import _
 import struct
-import sys, os
+import sys, os, errno, traceback, SocketServer
 import dispatch, encoding, util
 
 logfile = None
@@ -23,13 +23,12 @@ def log(*args):
 
 class channeledoutput(object):
     """
-    Write data from in_ to out in the following format:
+    Write data to out in the following format:
 
     data length (unsigned int),
     data
     """
-    def __init__(self, in_, out, channel):
-        self.in_ = in_
+    def __init__(self, out, channel):
         self.out = out
         self.channel = channel
 
@@ -43,7 +42,7 @@ class channeledoutput(object):
     def __getattr__(self, attr):
         if attr in ('isatty', 'fileno'):
             raise AttributeError(attr)
-        return getattr(self.in_, attr)
+        return getattr(self.out, attr)
 
 class channeledinput(object):
     """
@@ -127,10 +126,10 @@ class channeledinput(object):
 
 class server(object):
     """
-    Listens for commands on stdin, runs them and writes the output on a channel
-    based stream to stdout.
+    Listens for commands on fin, runs them and writes the output on a channel
+    based stream to fout.
     """
-    def __init__(self, ui, repo, mode):
+    def __init__(self, ui, repo, fin, fout):
         self.cwd = os.getcwd()
 
         logpath = ui.config("cmdserver", "log", None)
@@ -138,7 +137,7 @@ class server(object):
             global logfile
             if logpath == '-':
                 # write log on a special 'd' (debug) channel
-                logfile = channeledoutput(sys.stdout, sys.stdout, 'd')
+                logfile = channeledoutput(fout, 'd')
             else:
                 logfile = open(logpath, 'a')
 
@@ -152,15 +151,12 @@ class server(object):
             self.ui = ui
             self.repo = self.repoui = None
 
-        if mode == 'pipe':
-            self.cerr = channeledoutput(sys.stderr, sys.stdout, 'e')
-            self.cout = channeledoutput(sys.stdout, sys.stdout, 'o')
-            self.cin = channeledinput(sys.stdin, sys.stdout, 'I')
-            self.cresult = channeledoutput(sys.stdout, sys.stdout, 'r')
+        self.cerr = channeledoutput(fout, 'e')
+        self.cout = channeledoutput(fout, 'o')
+        self.cin = channeledinput(fin, fout, 'I')
+        self.cresult = channeledoutput(fout, 'r')
 
-            self.client = sys.stdin
-        else:
-            raise util.Abort(_('unknown mode %s') % mode)
+        self.client = fin
 
     def _read(self, size):
         if not size:
@@ -236,6 +232,8 @@ class server(object):
         hellomsg = 'capabilities: ' + ' '.join(sorted(self.capabilities))
         hellomsg += '\n'
         hellomsg += 'encoding: ' + encoding.encoding
+        hellomsg += '\n'
+        hellomsg += 'pid: %d' % os.getpid()
 
         # write the hello msg in -one- chunk
         self.cout.write(hellomsg)
@@ -249,3 +247,75 @@ class server(object):
             return 1
 
         return 0
+
+class pipeservice(object):
+    def __init__(self, ui, repo, opts):
+        self.server = server(ui, repo, sys.stdin, sys.stdout)
+
+    def init(self):
+        pass
+
+    def run(self):
+        return self.server.serve()
+
+class _requesthandler(SocketServer.StreamRequestHandler):
+    def handle(self):
+        ui = self.server.ui
+        repo = self.server.repo
+        sv = server(ui, repo, self.rfile, self.wfile)
+        try:
+            try:
+                sv.serve()
+            # handle exceptions that may be raised by command server. most of
+            # known exceptions are caught by dispatch.
+            except util.Abort, inst:
+                ui.warn(_('abort: %s\n') % inst)
+            except IOError, inst:
+                if inst.errno != errno.EPIPE:
+                    raise
+            except KeyboardInterrupt:
+                pass
+        except: # re-raises
+            # also write traceback to error channel. otherwise client cannot
+            # see it because it is written to server's stderr by default.
+            traceback.print_exc(file=sv.cerr)
+            raise
+
+class unixservice(object):
+    """
+    Listens on unix domain socket and forks server per connection
+    """
+    def __init__(self, ui, repo, opts):
+        self.ui = ui
+        self.repo = repo
+        self.address = opts['address']
+        if not util.safehasattr(SocketServer, 'UnixStreamServer'):
+            raise util.Abort(_('unsupported platform'))
+        if not self.address:
+            raise util.Abort(_('no socket path specified with --address'))
+
+    def init(self):
+        class cls(SocketServer.ForkingMixIn, SocketServer.UnixStreamServer):
+            ui = self.ui
+            repo = self.repo
+        self.server = cls(self.address, _requesthandler)
+        self.ui.status(_('listening at %s\n') % self.address)
+        self.ui.flush()  # avoid buffering of status message
+
+    def run(self):
+        try:
+            self.server.serve_forever()
+        finally:
+            os.unlink(self.address)
+
+_servicemap = {
+    'pipe': pipeservice,
+    'unix': unixservice,
+    }
+
+def createservice(ui, repo, opts):
+    mode = opts['cmdserver']
+    try:
+        return _servicemap[mode](ui, repo, opts)
+    except KeyError:
+        raise util.Abort(_('unknown mode %s') % mode)

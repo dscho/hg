@@ -4,7 +4,12 @@ commit date test
   $ cd test
   $ echo foo > foo
   $ hg add foo
-  $ HGEDITOR=true hg commit -m ""
+  $ cat > $TESTTMP/checkeditform.sh <<EOF
+  > env | grep HGEDITFORM
+  > true
+  > EOF
+  $ HGEDITOR="sh $TESTTMP/checkeditform.sh" hg commit -m ""
+  HGEDITFORM=commit.normal.normal
   abort: empty commit message
   [255]
   $ hg commit -d '0 0' -m commit-1
@@ -277,7 +282,8 @@ should fail because we are specifying a pattern
 
 should succeed
 
-  $ hg ci -mmerge
+  $ HGEDITOR="sh $TESTTMP/checkeditform.sh" hg ci -mmerge --edit
+  HGEDITFORM=commit.normal.merge
   $ cd ..
 
 
@@ -359,6 +365,20 @@ specific template keywords work well
 
   $ cat >> .hg/hgrc <<EOF
   > [committemplate]
+  > changeset.commit.normal = HG: this is "commit.normal" template
+  >     HG: {extramsg}
+  >     {if(currentbookmark,
+  >    "HG: bookmark '{currentbookmark}' is activated\n",
+  >    "HG: no bookmark is activated\n")}{subrepos %
+  >    "HG: subrepo '{subrepo}' is changed\n"}
+  > 
+  > changeset.commit = HG: this is "commit" template
+  >     HG: {extramsg}
+  >     {if(currentbookmark,
+  >    "HG: bookmark '{currentbookmark}' is activated\n",
+  >    "HG: no bookmark is activated\n")}{subrepos %
+  >    "HG: subrepo '{subrepo}' is changed\n"}
+  > 
   > changeset = HG: this is customized commit template
   >     HG: {extramsg}
   >     {if(currentbookmark,
@@ -373,7 +393,7 @@ specific template keywords work well
   $ echo 'sub2 = sub2' >> .hgsub
 
   $ HGEDITOR=cat hg commit -S -q
-  HG: this is customized commit template
+  HG: this is "commit.normal" template
   HG: Leave message empty to abort commit.
   HG: bookmark 'currentbookmark' is activated
   HG: subrepo 'sub' is changed
@@ -381,8 +401,27 @@ specific template keywords work well
   abort: empty commit message
   [255]
 
+  $ cat >> .hg/hgrc <<EOF
+  > [committemplate]
+  > changeset.commit.normal =
+  > # now, "changeset.commit" should be chosen for "hg commit"
+  > EOF
+
   $ hg bookmark --inactive currentbookmark
   $ hg forget .hgsub
+  $ HGEDITOR=cat hg commit -q
+  HG: this is "commit" template
+  HG: Leave message empty to abort commit.
+  HG: no bookmark is activated
+  abort: empty commit message
+  [255]
+
+  $ cat >> .hg/hgrc <<EOF
+  > [committemplate]
+  > changeset.commit =
+  > # now, "changeset" should be chosen for "hg commit"
+  > EOF
+
   $ HGEDITOR=cat hg commit -q
   HG: this is customized commit template
   HG: Leave message empty to abort commit.

@@ -134,13 +134,14 @@ def openlfdirstate(ui, repo, create=True):
             lfdirstate.normallookup(lfile)
     return lfdirstate
 
-def lfdirstatestatus(lfdirstate, repo, rev):
+def lfdirstatestatus(lfdirstate, repo):
+    wctx = repo['.']
     match = match_.always(repo.root, repo.getcwd())
-    s = lfdirstate.status(match, [], False, False, False)
-    unsure, modified, added, removed, missing, unknown, ignored, clean = s
+    unsure, s = lfdirstate.status(match, [], False, False, False)
+    modified, clean = s.modified, s.clean
     for lfile in unsure:
         try:
-            fctx = repo[rev][standin(lfile)]
+            fctx = wctx[standin(lfile)]
         except LookupError:
             fctx = None
         if not fctx or fctx.data().strip() != hashfile(repo.wjoin(lfile)):
@@ -148,7 +149,7 @@ def lfdirstatestatus(lfdirstate, repo, rev):
         else:
             clean.append(lfile)
             lfdirstate.normal(lfile)
-    return (modified, added, removed, missing, unknown, ignored, clean)
+    return s
 
 def listlfiles(repo, rev=None, matcher=None):
     '''return a list of largefiles in the working copy or the
@@ -362,6 +363,28 @@ def getstandinsstate(repo):
             hash = None
         standins.append((lfile, hash))
     return standins
+
+def synclfdirstate(repo, lfdirstate, lfile, normallookup):
+    lfstandin = standin(lfile)
+    if lfstandin in repo.dirstate:
+        stat = repo.dirstate._map[lfstandin]
+        state, mtime = stat[0], stat[3]
+    else:
+        state, mtime = '?', -1
+    if state == 'n':
+        if normallookup or mtime < 0:
+            # state 'n' doesn't ensure 'clean' in this case
+            lfdirstate.normallookup(lfile)
+        else:
+            lfdirstate.normal(lfile)
+    elif state == 'm':
+        lfdirstate.normallookup(lfile)
+    elif state == 'r':
+        lfdirstate.remove(lfile)
+    elif state == 'a':
+        lfdirstate.add(lfile)
+    elif state == '?':
+        lfdirstate.drop(lfile)
 
 def getlfilestoupdate(oldstandins, newstandins):
     changedstandins = set(oldstandins).symmetric_difference(set(newstandins))

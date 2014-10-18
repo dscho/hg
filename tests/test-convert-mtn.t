@@ -1,5 +1,4 @@
-
-  $ "$TESTDIR/hghave" mtn || exit 80
+#require mtn
 
 Monotone directory is called .monotone on *nix and monotone
 on Windows.
@@ -44,7 +43,7 @@ create monotone repository
   $ mkdir dir
   $ echo b > dir/b
   $ echo d > dir/d
-  $ python -c 'file("bin", "wb").write("a\\x00b")'
+  $ $PYTHON -c 'file("bin", "wb").write("a\\x00b")'
   $ echo c > c
   $ mtn add a dir/b dir/d c bin
   mtn: adding 'a' to workspace manifest
@@ -66,7 +65,7 @@ update monotone working directory
   $ echo b >> dir/b
   $ mtn drop c
   mtn: dropping 'c' from workspace manifest
-  $ python -c 'file("bin", "wb").write("b\\x00c")'
+  $ $PYTHON -c 'file("bin", "wb").write("b\\x00c")'
   $ mtn ci -m update1
   mtn: beginning commit on branch 'com.selenic.test'
   mtn: committed revision 51d0a982464573a2a2cf5ee2c9219c652aaebeff

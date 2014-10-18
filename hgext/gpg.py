@@ -253,12 +253,11 @@ def sign(ui, repo, *revs, **opts):
         repo.opener.append("localsigs", sigmessage)
         return
 
-    msigs = match.exact(repo.root, '', ['.hgsigs'])
-    s = repo.status(match=msigs, unknown=True, ignored=True)[:6]
-    if util.any(s) and not opts["force"]:
-        raise util.Abort(_("working copy of .hgsigs is changed "
-                           "(please commit .hgsigs manually "
-                           "or use --force)"))
+    if not opts["force"]:
+        msigs = match.exact(repo.root, '', ['.hgsigs'])
+        if util.any(repo.status(match=msigs, unknown=True, ignored=True)):
+            raise util.Abort(_("working copy of .hgsigs is changed "),
+                             hint=_("please commit .hgsigs manually"))
 
     sigsfile = repo.wfile(".hgsigs", "ab")
     sigsfile.write(sigmessage)
@@ -277,8 +276,9 @@ def sign(ui, repo, *revs, **opts):
                              % hgnode.short(n)
                              for n in nodes])
     try:
+        editor = cmdutil.getcommiteditor(editform='gpg.sign', **opts)
         repo.commit(message, opts['user'], opts['date'], match=msigs,
-                    editor=cmdutil.getcommiteditor(**opts))
+                    editor=editor)
     except ValueError, inst:
         raise util.Abort(str(inst))
 

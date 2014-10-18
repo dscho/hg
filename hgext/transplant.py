@@ -19,7 +19,7 @@ import os, tempfile
 from mercurial.node import short
 from mercurial import bundlerepo, hg, merge, match
 from mercurial import patch, revlog, scmutil, util, error, cmdutil
-from mercurial import revset, templatekw
+from mercurial import revset, templatekw, exchange
 
 class TransplantError(error.Abort):
     pass
@@ -86,7 +86,10 @@ class transplanter(object):
         self.opener = scmutil.opener(self.path)
         self.transplants = transplants(self.path, 'transplants',
                                        opener=self.opener)
-        self.editor = cmdutil.getcommiteditor(**opts)
+        def getcommiteditor():
+            editform = cmdutil.mergeeditform(repo[None], 'transplant')
+            return cmdutil.getcommiteditor(editform=editform, **opts)
+        self.getcommiteditor = getcommiteditor
 
     def applied(self, repo, node, parent):
         '''returns True if a node is already an ancestor of parent
@@ -142,7 +145,7 @@ class transplanter(object):
                         continue
                     if pulls:
                         if source != repo:
-                            repo.pull(source.peer(), heads=pulls)
+                            exchange.pull(repo, source.peer(), heads=pulls)
                         merge.update(repo, pulls[-1], False, False, None)
                         p1, p2 = repo.dirstate.parents()
                         pulls = []
@@ -154,7 +157,7 @@ class transplanter(object):
                     # transplants before them fail.
                     domerge = True
                     if not hasnode(repo, node):
-                        repo.pull(source.peer(), heads=[node])
+                        exchange.pull(repo, source.peer(), heads=[node])
 
                 skipmerge = False
                 if parents[1] != revlog.nullid:
@@ -206,7 +209,7 @@ class transplanter(object):
                             os.unlink(patchfile)
             tr.close()
             if pulls:
-                repo.pull(source.peer(), heads=pulls)
+                exchange.pull(repo, source.peer(), heads=pulls)
                 merge.update(repo, pulls[-1], False, False, None)
         finally:
             self.saveseries(revmap, merges)
@@ -286,7 +289,7 @@ class transplanter(object):
             m = match.exact(repo.root, '', files)
 
         n = repo.commit(message, user, date, extra=extra, match=m,
-                        editor=self.editor)
+                        editor=self.getcommiteditor())
         if not n:
             self.ui.warn(_('skipping emptied changeset %s\n') % short(node))
             return None
@@ -342,7 +345,7 @@ class transplanter(object):
             if merge:
                 repo.setparents(p1, parents[1])
             n = repo.commit(message, user, date, extra=extra,
-                            editor=self.editor)
+                            editor=self.getcommiteditor())
             if not n:
                 raise util.Abort(_('commit failed'))
             if not merge:

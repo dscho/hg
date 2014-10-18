@@ -224,7 +224,9 @@ class monotone_source(converter_source, commandline):
         else:
             return [self.rev]
 
-    def getchanges(self, rev):
+    def getchanges(self, rev, full):
+        if full:
+            raise util.Abort(_("convert from monotone do not support --full"))
         revision = self.mtnrun("get_revision", rev).split("\n\n")
         files = {}
         ignoremove = {}
@@ -282,11 +284,11 @@ class monotone_source(converter_source, commandline):
 
     def getfile(self, name, rev):
         if not self.mtnisfile(name, rev):
-            raise IOError # file was deleted or renamed
+            return None, None
         try:
             data = self.mtnrun("get_file_of", name, r=rev)
         except Exception:
-            raise IOError # file was deleted or renamed
+            return None, None
         self.mtnloadmanifest(rev)
         node, attr = self.files.get(name, (None, ""))
         return data, attr

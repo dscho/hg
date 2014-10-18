@@ -1,14 +1,57 @@
-#!/bin/bash
+#!/bin/bash -e
 
 BUILDDIR=$(dirname $0)
 ROOTDIR=$(cd $BUILDDIR/..; pwd)
 
-if which docker.io >> /dev/null ; then
+if which docker.io >> /dev/null 2>&1 ; then
   DOCKER=docker.io
-elif which docker >> /dev/null ; then
+elif which docker >> /dev/null 2>&1 ; then
   DOCKER=docker
+else
+  echo "Error: docker must be installed"
+  exit 1
 fi
 
-$DOCKER build --tag "hg-dockerrpm-$1" - < $BUILDDIR/docker/$1
-$DOCKER run --rm -v $ROOTDIR:/hg "hg-dockerrpm-$1" bash -c \
-    "cp -a hg hg-build; cd hg-build; make clean local $1; cp packages/$1/* /hg/packages/$1/"
+$DOCKER -h 2> /dev/null | grep -q Jansens && { echo "Error: $DOCKER is the Docking System Tray - install docker.io instead"; exit 1; }
+$DOCKER version | grep -q "^Client version:" || { echo "Error: unexpected output from \"$DOCKER version\""; exit 1; }
+$DOCKER version | grep -q "^Server version:" || { echo "Error: could not get docker server version - check it is running and your permissions"; exit 1; }
+
+PLATFORM="$1"
+[ "$PLATFORM" ] || { echo "Error: platform name must be specified"; exit 1; }
+shift # extra params are passed to buildrpm
+
+DFILE="$ROOTDIR/contrib/docker/$PLATFORM"
+[ -f "$DFILE" ] || { echo "Error: docker file $DFILE not found"; exit 1; }
+
+CONTAINER="hg-dockerrpm-$PLATFORM"
+
+DBUILDUSER=build
+(
+cat $DFILE
+echo RUN groupadd $DBUILDUSER -g `id -g`
+echo RUN useradd $DBUILDUSER -u `id -u` -g $DBUILDUSER
+) | $DOCKER build --tag $CONTAINER -
+
+RPMBUILDDIR=$ROOTDIR/packages/$PLATFORM
+contrib/buildrpm --rpmbuilddir $RPMBUILDDIR --prepare $*
+
+DSHARED=/mnt/shared
+$DOCKER run -u $DBUILDUSER --rm -v $RPMBUILDDIR:$DSHARED $CONTAINER \
+    rpmbuild --define "_topdir $DSHARED" -ba $DSHARED/SPECS/mercurial.spec --clean
+
+$DOCKER run -u $DBUILDUSER --rm -v $RPMBUILDDIR:$DSHARED $CONTAINER \
+    createrepo $DSHARED
+
+cat << EOF > $RPMBUILDDIR/mercurial.repo
+# Place this file in /etc/yum.repos.d/mercurial.repo
+[mercurial]
+name=Mercurial packages for $NAME
+# baseurl=file://$RPMBUILDDIR/
+baseurl=http://hg.example.com/build/$NAME/
+skip_if_unavailable=True
+gpgcheck=0
+enabled=1
+EOF
+
+echo
+echo "Build complete - results can be found in $RPMBUILDDIR"

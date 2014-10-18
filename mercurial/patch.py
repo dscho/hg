@@ -18,6 +18,7 @@ from node import hex, short
 import base85, mdiff, scmutil, util, diffhelpers, copies, encoding, error
 
 gitre = re.compile('diff --git a/(.*) b/(.*)')
+tabsplitter = re.compile(r'(\t+|[^\t]+)')
 
 class PatchError(Exception):
     pass
@@ -382,7 +383,7 @@ class abstractbackend(object):
 
     def getfile(self, fname):
         """Return target file data and flags as a (data, (islink,
-        isexec)) tuple.
+        isexec)) tuple. Data is None if file is missing/deleted.
         """
         raise NotImplementedError
 
@@ -426,7 +427,12 @@ class fsbackend(abstractbackend):
         except OSError, e:
             if e.errno != errno.ENOENT:
                 raise
-        return (self.opener.read(fname), (False, isexec))
+        try:
+            return (self.opener.read(fname), (False, isexec))
+        except IOError, e:
+            if e.errno != errno.ENOENT:
+                raise
+            return None, None
 
     def setfile(self, fname, data, mode, copysource):
         islink, isexec = mode
@@ -528,7 +534,7 @@ class filestore(object):
         if fname in self.data:
             return self.data[fname]
         if not self.opener or fname not in self.files:
-            raise IOError
+            return None, None, None
         fn, mode, copied = self.files[fname]
         return self.opener.read(fn), mode, copied
 
@@ -554,7 +560,7 @@ class repobackend(abstractbackend):
         try:
             fctx = self.ctx[fname]
         except error.LookupError:
-            raise IOError
+            return None, None
         flags = fctx.flags()
         return fctx.data(), ('l' in flags, 'x' in flags)
 
@@ -597,13 +603,12 @@ class patchfile(object):
         self.copysource = gp.oldpath
         self.create = gp.op in ('ADD', 'COPY', 'RENAME')
         self.remove = gp.op == 'DELETE'
-        try:
-            if self.copysource is None:
-                data, mode = backend.getfile(self.fname)
-                self.exists = True
-            else:
-                data, mode = store.getfile(self.copysource)[:2]
-                self.exists = backend.exists(self.fname)
+        if self.copysource is None:
+            data, mode = backend.getfile(self.fname)
+        else:
+            data, mode = store.getfile(self.copysource)[:2]
+        if data is not None:
+            self.exists = self.copysource is None or backend.exists(self.fname)
             self.missing = False
             if data:
                 self.lines = mdiff.splitnewlines(data)
@@ -622,7 +627,7 @@ class patchfile(object):
                             l = l[:-2] + '\n'
                         nlines.append(l)
                     self.lines = nlines
-        except IOError:
+        else:
             if self.create:
                 self.missing = False
             if self.mode is None:
@@ -1380,6 +1385,8 @@ def _applydiff(ui, fp, patcher, backend, store, strip=1,
                 data, mode = None, None
                 if gp.op in ('RENAME', 'COPY'):
                     data, mode = store.getfile(gp.oldpath)[:2]
+                    # FIXME: failing getfile has never been handled here
+                    assert data is not None
                 if gp.mode:
                     mode = gp.mode
                     if gp.op == 'ADD':
@@ -1404,15 +1411,13 @@ def _applydiff(ui, fp, patcher, backend, store, strip=1,
         elif state == 'git':
             for gp in values:
                 path = pstrip(gp.oldpath)
-                try:
-                    data, mode = backend.getfile(path)
-                except IOError, e:
-                    if e.errno != errno.ENOENT:
-                        raise
+                data, mode = backend.getfile(path)
+                if data is None:
                     # The error ignored here will trigger a getfile()
                     # error in a place more appropriate for error
                     # handling, and will not interrupt the patching
                     # process.
+                    pass
                 else:
                     store.setfile(path, data, mode)
         else:
@@ -1669,15 +1674,26 @@ def difflabel(func, *args, **kw):
                 if line and line[0] not in ' +-@\\':
                     head = True
             stripline = line
+            diffline = False
             if not head and line and line[0] in '+-':
-                # highlight trailing whitespace, but only in changed lines
+                # highlight tabs and trailing whitespace, but only in
+                # changed lines
                 stripline = line.rstrip()
+                diffline = True
+
             prefixes = textprefixes
             if head:
                 prefixes = headprefixes
             for prefix, label in prefixes:
                 if stripline.startswith(prefix):
-                    yield (stripline, label)
+                    if diffline:
+                        for token in tabsplitter.findall(stripline):
+                            if '\t' == token[0]:
+                                yield (token, 'diff.tab')
+                            else:
+                                yield (token, label)
+                    else:
+                        yield (stripline, label)
                     break
             else:
                 yield (line, '')

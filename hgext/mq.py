@@ -104,6 +104,52 @@ class statusentry(object):
     def __repr__(self):
         return hex(self.node) + ':' + self.name
 
+# The order of the headers in 'hg export' HG patches:
+HGHEADERS = [
+#   '# HG changeset patch',
+    '# User ',
+    '# Date ',
+    '#      ',
+    '# Branch ',
+    '# Node ID ',
+    '# Parent  ', # can occur twice for merges - but that is not relevant for mq
+    '', # all lines after headers 'has' this prefix - simplifies the algorithm
+    ]
+
+def inserthgheader(lines, header, value):
+    """Assuming lines contains a HG patch header, add a header line with value.
+    >>> try: inserthgheader([], '# Date ', 'z')
+    ... except ValueError, inst: print "oops"
+    oops
+    >>> inserthgheader(['# HG changeset patch'], '# Date ', 'z')
+    ['# HG changeset patch', '# Date z']
+    >>> inserthgheader(['# HG changeset patch', ''], '# Date ', 'z')
+    ['# HG changeset patch', '# Date z', '']
+    >>> inserthgheader(['# HG changeset patch', '# User y'], '# Date ', 'z')
+    ['# HG changeset patch', '# User y', '# Date z']
+    >>> inserthgheader(['# HG changeset patch', '# Date y'], '# Date ', 'z')
+    ['# HG changeset patch', '# Date z']
+    >>> inserthgheader(['# HG changeset patch', '', '# Date y'], '# Date ', 'z')
+    ['# HG changeset patch', '# Date z', '', '# Date y']
+    >>> inserthgheader(['# HG changeset patch', '# Parent  y'], '# Date ', 'z')
+    ['# HG changeset patch', '# Date z', '# Parent  y']
+    """
+    start = lines.index('# HG changeset patch') + 1
+    newindex = HGHEADERS.index(header)
+    for i in range(start, len(lines)):
+        line = lines[i]
+        for lineindex, h in enumerate(HGHEADERS):
+            if line.startswith(h):
+                if lineindex < newindex:
+                    break # next line
+                if lineindex == newindex:
+                    lines[i] = header + value
+                else:
+                    lines.insert(i, header + value)
+                return lines
+    lines.append(header + value)
+    return lines
+
 class patchheader(object):
     def __init__(self, pf, plainmode=False):
         def eatdiff(lines):
@@ -150,7 +196,7 @@ class patchheader(object):
                 elif line.startswith("# Date "):
                     date = line[7:]
                 elif line.startswith("# Parent "):
-                    parent = line[9:].lstrip()
+                    parent = line[9:].lstrip() # handle double trailing space
                 elif line.startswith("# Branch "):
                     branch = line[9:]
                 elif line.startswith("# Node ID "):
@@ -191,7 +237,6 @@ class patchheader(object):
 
         # make sure message isn't empty
         if format and format.startswith("tag") and subject:
-            message.insert(0, "")
             message.insert(0, subject)
 
         self.message = message
@@ -203,41 +248,45 @@ class patchheader(object):
         self.nodeid = nodeid
         self.branch = branch
         self.haspatch = diffstart > 1
-        self.plainmode = plainmode
+        self.plainmode = (plainmode or
+                          '# HG changeset patch' not in self.comments and
+                          util.any(c.startswith('Date: ') or
+                                   c.startswith('From: ')
+                                   for c in self.comments))
 
     def setuser(self, user):
         if not self.updateheader(['From: ', '# User '], user):
             try:
-                patchheaderat = self.comments.index('# HG changeset patch')
-                self.comments.insert(patchheaderat + 1, '# User ' + user)
+                inserthgheader(self.comments, '# User ', user)
             except ValueError:
-                if self.plainmode or self._hasheader(['Date: ']):
+                if self.plainmode:
                     self.comments = ['From: ' + user] + self.comments
                 else:
-                    tmp = ['# HG changeset patch', '# User ' + user, '']
+                    tmp = ['# HG changeset patch', '# User ' + user]
                     self.comments = tmp + self.comments
         self.user = user
 
     def setdate(self, date):
         if not self.updateheader(['Date: ', '# Date '], date):
             try:
-                patchheaderat = self.comments.index('# HG changeset patch')
-                self.comments.insert(patchheaderat + 1, '# Date ' + date)
+                inserthgheader(self.comments, '# Date ', date)
             except ValueError:
-                if self.plainmode or self._hasheader(['From: ']):
+                if self.plainmode:
                     self.comments = ['Date: ' + date] + self.comments
                 else:
-                    tmp = ['# HG changeset patch', '# Date ' + date, '']
+                    tmp = ['# HG changeset patch', '# Date ' + date]
                     self.comments = tmp + self.comments
         self.date = date
 
     def setparent(self, parent):
-        if not self.updateheader(['# Parent '], parent):
+        if not (self.updateheader(['# Parent  '], parent) or
+                self.updateheader(['# Parent '], parent)):
             try:
-                patchheaderat = self.comments.index('# HG changeset patch')
-                self.comments.insert(patchheaderat + 1, '# Parent ' + parent)
+                inserthgheader(self.comments, '# Parent  ', parent)
             except ValueError:
-                pass
+                if not self.plainmode:
+                    tmp = ['# HG changeset patch', '# Parent  ' + parent]
+                    self.comments = tmp + self.comments
         self.parent = parent
 
     def setmessage(self, message):
@@ -258,18 +307,11 @@ class patchheader(object):
                     break
         return res
 
-    def _hasheader(self, prefixes):
-        '''Check if a header starts with any of the given prefixes.'''
-        for prefix in prefixes:
-            for comment in self.comments:
-                if comment.startswith(prefix):
-                    return True
-        return False
-
     def __str__(self):
-        if not self.comments:
+        s = '\n'.join(self.comments).rstrip()
+        if not s:
             return ''
-        return '\n'.join(self.comments) + '\n\n'
+        return s + '\n\n'
 
     def _delmsg(self):
         '''Remove existing message, keeping the rest of the comments fields.
@@ -621,7 +663,7 @@ class queue(object):
 
         # apply failed, strip away that rev and merge.
         hg.clean(repo, head)
-        strip(self.ui, repo, [n], update=False, backup='strip')
+        strip(self.ui, repo, [n], update=False, backup=False)
 
         ctx = repo[rev]
         ret = hg.merge(repo, rev)
@@ -816,12 +858,14 @@ class queue(object):
                         merged.append(f)
                     else:
                         removed.append(f)
+                repo.dirstate.beginparentchange()
                 for f in removed:
                     repo.dirstate.remove(f)
                 for f in merged:
                     repo.dirstate.merge(f)
                 p1, p2 = repo.dirstate.parents()
                 repo.setparents(p1, merge)
+                repo.dirstate.endparentchange()
 
             if all_files and '.hgsubstate' in all_files:
                 wctx = repo[None]
@@ -930,7 +974,12 @@ class queue(object):
             oldqbase = repo[qfinished[0]]
             tphase = repo.ui.config('phases', 'new-commit', phases.draft)
             if oldqbase.phase() > tphase and oldqbase.p1().phase() <= tphase:
-                phases.advanceboundary(repo, tphase, qfinished)
+                tr = repo.transaction('qfinish')
+                try:
+                    phases.advanceboundary(repo, tr, tphase, qfinished)
+                    tr.close()
+                finally:
+                    tr.release()
 
     def delete(self, repo, patches, opts):
         if not patches and not opts.get('rev'):
@@ -953,8 +1002,7 @@ class queue(object):
             if not self.applied:
                 raise util.Abort(_('no patches applied'))
             revs = scmutil.revrange(repo, opts.get('rev'))
-            if len(revs) > 1 and revs[0] > revs[1]:
-                revs.reverse()
+            revs.sort()
             revpatches = self._revpatches(repo, revs)
             realpatches += revpatches
             numrevs = len(revpatches)
@@ -1025,6 +1073,7 @@ class queue(object):
         """
         msg = opts.get('msg')
         edit = opts.get('edit')
+        editform = opts.get('editform', 'mq.qnew')
         user = opts.get('user')
         date = opts.get('date')
         if date:
@@ -1062,24 +1111,8 @@ class queue(object):
                 raise util.Abort(_('cannot write patch "%s": %s')
                                  % (patchfn, e.strerror))
             try:
-                if self.plainmode:
-                    if user:
-                        p.write("From: " + user + "\n")
-                        if not date:
-                            p.write("\n")
-                    if date:
-                        p.write("Date: %d %d\n\n" % date)
-                else:
-                    p.write("# HG changeset patch\n")
-                    p.write("# Parent "
-                            + hex(repo[None].p1().node()) + "\n")
-                    if user:
-                        p.write("# User " + user + "\n")
-                    if date:
-                        p.write("# Date %s %s\n\n" % date)
-
                 defaultmsg = "[mq]: %s" % patchfn
-                editor = cmdutil.getcommiteditor()
+                editor = cmdutil.getcommiteditor(editform=editform)
                 if edit:
                     def finishdesc(desc):
                         if desc.rstrip():
@@ -1089,7 +1122,8 @@ class queue(object):
                     # i18n: this message is shown in editor with "HG: " prefix
                     extramsg = _('Leave message empty to use default message.')
                     editor = cmdutil.getcommiteditor(finishdesc=finishdesc,
-                                                     extramsg=extramsg)
+                                                     extramsg=extramsg,
+                                                     editform=editform)
                     commitmsg = msg
                 else:
                     commitmsg = msg or defaultmsg
@@ -1105,9 +1139,17 @@ class queue(object):
                     self.seriesdirty = True
                     self.applieddirty = True
                     nctx = repo[n]
-                    if nctx.description() != defaultmsg.rstrip():
-                        msg = nctx.description() + "\n\n"
-                        p.write(msg)
+                    ph = patchheader(self.join(patchfn), self.plainmode)
+                    if user:
+                        ph.setuser(user)
+                    if date:
+                        ph.setdate('%s %s' % date)
+                    ph.setparent(hex(nctx.p1().node()))
+                    msg = nctx.description().strip()
+                    if msg == defaultmsg.strip():
+                        msg = ''
+                    ph.setmessage(msg)
+                    p.write(str(ph))
                     if commitfiles:
                         parent = self.qparents(repo, n)
                         if inclsubs:
@@ -1317,11 +1359,12 @@ class queue(object):
 
             tobackup = set()
             if (not nobackup and force) or keepchanges:
-                m, a, r, d = self.checklocalchanges(repo, force=True)
+                status = self.checklocalchanges(repo, force=True)
                 if keepchanges:
-                    tobackup.update(m + a + r + d)
+                    tobackup.update(status.modified + status.added +
+                                    status.removed + status.deleted)
                 else:
-                    tobackup.update(m + a)
+                    tobackup.update(status.modified + status.added)
 
             s = self.series[start:end]
             all_files = set()
@@ -1405,13 +1448,13 @@ class queue(object):
 
             tobackup = set()
             if update:
-                m, a, r, d = self.checklocalchanges(
-                    repo, force=force or keepchanges)
+                s = self.checklocalchanges(repo, force=force or keepchanges)
                 if force:
                     if not nobackup:
-                        tobackup.update(m + a)
+                        tobackup.update(s.modified + s.added)
                 elif keepchanges:
-                    tobackup.update(m + a + r + d)
+                    tobackup.update(s.modified + s.added +
+                                    s.removed + s.deleted)
 
             self.applieddirty = True
             end = len(self.applied)
@@ -1444,7 +1487,7 @@ class queue(object):
                 if keepchanges and tobackup:
                     raise util.Abort(_("local changes found, refresh first"))
                 self.backup(repo, tobackup)
-
+                repo.dirstate.beginparentchange()
                 for f in a:
                     util.unlinkpath(repo.wjoin(f), ignoremissing=True)
                     repo.dirstate.drop(f)
@@ -1453,10 +1496,11 @@ class queue(object):
                     repo.wwrite(f, fctx.data(), fctx.flags())
                     repo.dirstate.normal(f)
                 repo.setparents(qp, nullid)
+                repo.dirstate.endparentchange()
             for patch in reversed(self.applied[start:end]):
                 self.ui.status(_("popping %s\n") % patch.name)
             del self.applied[start:end]
-            strip(self.ui, repo, [rev], update=False, backup='strip')
+            strip(self.ui, repo, [rev], update=False, backup=False)
             for s, state in repo['.'].substate.items():
                 repo['.'].sub(s).get(state)
             if self.applied:
@@ -1485,6 +1529,7 @@ class queue(object):
             return 1
         msg = opts.get('msg', '').rstrip()
         edit = opts.get('edit')
+        editform = opts.get('editform', 'mq.qrefresh')
         newuser = opts.get('user')
         newdate = opts.get('date')
         if newdate:
@@ -1591,6 +1636,7 @@ class queue(object):
             bmlist = repo[top].bookmarks()
 
             try:
+                repo.dirstate.beginparentchange()
                 if diffopts.git or diffopts.upgrade:
                     copies = {}
                     for dst in a:
@@ -1643,9 +1689,10 @@ class queue(object):
 
                 # assumes strip can roll itself back if interrupted
                 repo.setparents(*cparents)
+                repo.dirstate.endparentchange()
                 self.applied.pop()
                 self.applieddirty = True
-                strip(self.ui, repo, [top], update=False, backup='strip')
+                strip(self.ui, repo, [top], update=False, backup=False)
             except: # re-raises
                 repo.dirstate.invalidate()
                 raise
@@ -1654,7 +1701,7 @@ class queue(object):
                 # might be nice to attempt to roll back strip after this
 
                 defaultmsg = "[mq]: %s" % patchfn
-                editor = cmdutil.getcommiteditor()
+                editor = cmdutil.getcommiteditor(editform=editform)
                 if edit:
                     def finishdesc(desc):
                         if desc.rstrip():
@@ -1664,7 +1711,8 @@ class queue(object):
                     # i18n: this message is shown in editor with "HG: " prefix
                     extramsg = _('Leave message empty to use default message.')
                     editor = cmdutil.getcommiteditor(finishdesc=finishdesc,
-                                                     extramsg=extramsg)
+                                                     extramsg=extramsg,
+                                                     editform=editform)
                     message = msg or "\n".join(ph.message)
                 elif not msg:
                     if not ph.message:
@@ -1842,7 +1890,7 @@ class queue(object):
                     update = True
                 else:
                     update = False
-                strip(self.ui, repo, [rev], update=update, backup='strip')
+                strip(self.ui, repo, [rev], update=update, backup=False)
         if qpp:
             self.ui.warn(_("saved queue repository parents: %s %s\n") %
                          (short(qpp[0]), short(qpp[1])))
@@ -1945,62 +1993,70 @@ class queue(object):
             # If mq patches are applied, we can only import revisions
             # that form a linear path to qbase.
             # Otherwise, they should form a linear path to a head.
-            heads = repo.changelog.heads(repo.changelog.node(rev[-1]))
+            heads = repo.changelog.heads(repo.changelog.node(rev.first()))
             if len(heads) > 1:
                 raise util.Abort(_('revision %d is the root of more than one '
-                                   'branch') % rev[-1])
+                                   'branch') % rev.last())
             if self.applied:
-                base = repo.changelog.node(rev[0])
+                base = repo.changelog.node(rev.first())
                 if base in [n.node for n in self.applied]:
                     raise util.Abort(_('revision %d is already managed')
                                      % rev[0])
                 if heads != [self.applied[-1].node]:
                     raise util.Abort(_('revision %d is not the parent of '
-                                       'the queue') % rev[0])
+                                       'the queue') % rev.first())
                 base = repo.changelog.rev(self.applied[0].node)
                 lastparent = repo.changelog.parentrevs(base)[0]
             else:
-                if heads != [repo.changelog.node(rev[0])]:
+                if heads != [repo.changelog.node(rev.first())]:
                     raise util.Abort(_('revision %d has unmanaged children')
-                                     % rev[0])
+                                     % rev.first())
                 lastparent = None
 
             diffopts = self.diffopts({'git': git})
-            for r in rev:
-                if not repo[r].mutable():
-                    raise util.Abort(_('revision %d is not mutable') % r,
-                                     hint=_('see "hg help phases" for details'))
-                p1, p2 = repo.changelog.parentrevs(r)
-                n = repo.changelog.node(r)
-                if p2 != nullrev:
-                    raise util.Abort(_('cannot import merge revision %d') % r)
-                if lastparent and lastparent != r:
-                    raise util.Abort(_('revision %d is not the parent of %d')
-                                     % (r, lastparent))
-                lastparent = p1
+            tr = repo.transaction('qimport')
+            try:
+                for r in rev:
+                    if not repo[r].mutable():
+                        raise util.Abort(_('revision %d is not mutable') % r,
+                                         hint=_('see "hg help phases" '
+                                                'for details'))
+                    p1, p2 = repo.changelog.parentrevs(r)
+                    n = repo.changelog.node(r)
+                    if p2 != nullrev:
+                        raise util.Abort(_('cannot import merge revision %d')
+                                         % r)
+                    if lastparent and lastparent != r:
+                        raise util.Abort(_('revision %d is not the parent of '
+                                           '%d')
+                                         % (r, lastparent))
+                    lastparent = p1
 
-                if not patchname:
-                    patchname = normname('%d.diff' % r)
-                checkseries(patchname)
-                self.checkpatchname(patchname, force)
-                self.fullseries.insert(0, patchname)
+                    if not patchname:
+                        patchname = normname('%d.diff' % r)
+                    checkseries(patchname)
+                    self.checkpatchname(patchname, force)
+                    self.fullseries.insert(0, patchname)
 
-                patchf = self.opener(patchname, "w")
-                cmdutil.export(repo, [n], fp=patchf, opts=diffopts)
-                patchf.close()
+                    patchf = self.opener(patchname, "w")
+                    cmdutil.export(repo, [n], fp=patchf, opts=diffopts)
+                    patchf.close()
 
-                se = statusentry(n, patchname)
-                self.applied.insert(0, se)
+                    se = statusentry(n, patchname)
+                    self.applied.insert(0, se)
 
-                self.added.append(patchname)
-                imported.append(patchname)
-                patchname = None
-                if rev and repo.ui.configbool('mq', 'secret', False):
-                    # if we added anything with --rev, move the secret root
-                    phases.retractboundary(repo, phases.secret, [n])
-                self.parseseries()
-                self.applieddirty = True
-                self.seriesdirty = True
+                    self.added.append(patchname)
+                    imported.append(patchname)
+                    patchname = None
+                    if rev and repo.ui.configbool('mq', 'secret', False):
+                        # if we added anything with --rev, move the secret root
+                        phases.retractboundary(repo, tr, phases.secret, [n])
+                    self.parseseries()
+                    self.applieddirty = True
+                    self.seriesdirty = True
+                tr.close()
+            finally:
+                tr.release()
 
         for i, filename in enumerate(files):
             if existing:
@@ -2585,7 +2641,8 @@ def fold(ui, repo, *files, **opts):
     diffopts = q.patchopts(q.diffopts(), *patches)
     wlock = repo.wlock()
     try:
-        q.refresh(repo, msg=message, git=diffopts.git, edit=opts.get('edit'))
+        q.refresh(repo, msg=message, git=diffopts.git, edit=opts.get('edit'),
+                  editform='mq.qfold')
         q.delete(repo, patches, opts)
         q.savedirty()
     finally:

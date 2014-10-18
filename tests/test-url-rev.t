@@ -41,8 +41,20 @@ Test basic functionality of url#rev syntax
   summary:     change a
   
   $ cat clone/.hg/hgrc
+  # example repository config (see "hg help config" for more info)
   [paths]
-  default = $TESTTMP/repo#foo (glob)
+  default = $TESTTMP/repo#foo
+  
+  # path aliases to other clones of this repo in URLs or filesystem paths
+  # (see "hg help config.paths" for more info)
+  #
+  # default-push = ssh://jdoe@example.net/hg/jdoes-fork
+  # my-fork      = ssh://jdoe@example.net/hg/jdoes-fork
+  # my-clone     = /home/jdoe/jdoes-clone
+  
+  [ui]
+  # name and email (local to this repository, optional), e.g.
+  # username = Jane Doe <jdoe@example.com>
 
 Changing original repo:
 

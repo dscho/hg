@@ -164,6 +164,8 @@ class p4_source(converter_source):
                 raise IOError(d["generic"], data)
 
             elif code == "stat":
+                if d.get("action") == "purge":
+                    return None, None
                 p4type = self.re_type.match(d["type"])
                 if p4type:
                     mode = ""
@@ -181,7 +183,7 @@ class p4_source(converter_source):
                 contents += data
 
         if mode is None:
-            raise IOError(0, "bad stat")
+            return None, None
 
         if keywords:
             contents = keywords.sub("$\\1$", contents)
@@ -190,7 +192,9 @@ class p4_source(converter_source):
 
         return contents, mode
 
-    def getchanges(self, rev):
+    def getchanges(self, rev, full):
+        if full:
+            raise util.Abort(_("convert from p4 do not support --full"))
         return self.files[rev], {}
 
     def getcommit(self, rev):

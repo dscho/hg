@@ -1,5 +1,4 @@
-
-  $ "$TESTDIR/hghave" svn svn-bindings || exit 80
+#require svn svn-bindings
 
   $ cat >> $HGRCPATH <<EOF
   > [extensions]
@@ -10,9 +9,9 @@
   $ svnadmin load -q svn-repo < "$TESTDIR/svn/move.svndump"
   $ SVNREPOPATH=`pwd`/svn-repo
 #if windows
-  $ SVNREPOURL=file:///`python -c "import urllib, sys; sys.stdout.write(urllib.quote(sys.argv[1]))" "$SVNREPOPATH"`
+  $ SVNREPOURL=file:///`$PYTHON -c "import urllib, sys; sys.stdout.write(urllib.quote(sys.argv[1]))" "$SVNREPOPATH"`
 #else
-  $ SVNREPOURL=file://`python -c "import urllib, sys; sys.stdout.write(urllib.quote(sys.argv[1]))" "$SVNREPOPATH"`
+  $ SVNREPOURL=file://`$PYTHON -c "import urllib, sys; sys.stdout.write(urllib.quote(sys.argv[1]))" "$SVNREPOPATH"`
 #endif
 
 Convert trunk and branches
@@ -150,7 +149,7 @@ Try updating
   $ hg up -qC default
   $ cd ..
 
-Test convert progress bar'
+Test convert progress bar
 
   $ cat >> $HGRCPATH <<EOF
   > [extensions]
@@ -166,13 +165,13 @@ Test convert progress bar'
 
   $ hg convert svn-repo hg-progress
   \r (no-eol) (esc)
-  scanning [ <=>                                          ] 1\r (no-eol) (esc)
-  scanning [  <=>                                         ] 2\r (no-eol) (esc)
-  scanning [   <=>                                        ] 3\r (no-eol) (esc)
-  scanning [    <=>                                       ] 4\r (no-eol) (esc)
-  scanning [     <=>                                      ] 5\r (no-eol) (esc)
-  scanning [      <=>                                     ] 6\r (no-eol) (esc)
-  scanning [       <=>                                    ] 7\r (no-eol) (esc)
+  scanning [=====>                                      ] 1/7\r (no-eol) (esc)
+  scanning [===========>                                ] 2/7\r (no-eol) (esc)
+  scanning [=================>                          ] 3/7\r (no-eol) (esc)
+  scanning [========================>                   ] 4/7\r (no-eol) (esc)
+  scanning [==============================>             ] 5/7\r (no-eol) (esc)
+  scanning [====================================>       ] 6/7\r (no-eol) (esc)
+  scanning [===========================================>] 7/7\r (no-eol) (esc)
                                                               \r (no-eol) (esc)
   \r (no-eol) (esc)
   converting [                                          ] 0/7\r (no-eol) (esc)

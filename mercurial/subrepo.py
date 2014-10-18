@@ -9,9 +9,10 @@ import errno, os, re, shutil, posixpath, sys
 import xml.dom.minidom
 import stat, subprocess, tarfile
 from i18n import _
-import config, util, node, error, cmdutil, bookmarks, match as matchmod
+import config, util, node, error, cmdutil, scmutil, match as matchmod
 import phases
 import pathutil
+import exchange
 hg = None
 propertycache = util.propertycache
 
@@ -263,13 +264,13 @@ def submerge(repo, wctx, mctx, actx, overwrite):
 def _updateprompt(ui, sub, dirty, local, remote):
     if dirty:
         msg = (_(' subrepository sources for %s differ\n'
-                 'use (l)ocal source (%s) or (r)emote source (%s)?\n'
+                 'use (l)ocal source (%s) or (r)emote source (%s)?'
                  '$$ &Local $$ &Remote')
                % (subrelpath(sub), local, remote))
     else:
         msg = (_(' subrepository sources for %s differ (in checked out '
                  'version)\n'
-                 'use (l)ocal source (%s) or (r)emote source (%s)?\n'
+                 'use (l)ocal source (%s) or (r)emote source (%s)?'
                  '$$ &Local $$ &Remote')
                % (subrelpath(sub), local, remote))
     return ui.promptchoice(msg, 0)
@@ -447,7 +448,7 @@ class abstractsubrepo(object):
         return 1
 
     def status(self, rev2, **opts):
-        return [], [], [], [], [], [], []
+        return scmutil.status([], [], [], [], [], [], [])
 
     def diff(self, ui, diffopts, node2, match, prefix, **opts):
         pass
@@ -649,7 +650,7 @@ class hgsubrepo(abstractsubrepo):
         except error.RepoLookupError, inst:
             self._repo.ui.warn(_('warning: error "%s" in subrepository "%s"\n')
                                % (inst, subrelpath(self)))
-            return [], [], [], [], [], [], []
+            return scmutil.status([], [], [], [], [], [], [])
 
     @annotatesubrepoerror
     def diff(self, ui, diffopts, node2, match, prefix, **opts):
@@ -742,10 +743,7 @@ class hgsubrepo(abstractsubrepo):
             self._repo.ui.status(_('pulling subrepo %s from %s\n')
                                  % (subrelpath(self), srcurl))
             cleansub = self.storeclean(srcurl)
-            remotebookmarks = other.listkeys('bookmarks')
-            self._repo.pull(other)
-            bookmarks.updatefromremote(self._repo.ui, self._repo,
-                                       remotebookmarks, srcurl)
+            exchange.pull(self._repo, other)
             if cleansub:
                 # keep the repo clean after pull
                 self._cachestorehash(srcurl)
@@ -817,11 +815,11 @@ class hgsubrepo(abstractsubrepo):
         self._repo.ui.status(_('pushing subrepo %s to %s\n') %
             (subrelpath(self), dsturl))
         other = hg.peer(self._repo, {'ssh': ssh}, dsturl)
-        res = self._repo.push(other, force, newbranch=newbranch)
+        res = exchange.push(self._repo, other, force, newbranch=newbranch)
 
         # the repo is now clean
         self._cachestorehash(dsturl)
-        return res
+        return res.cgresult
 
     @annotatesubrepoerror
     def outgoing(self, ui, dest, opts):
@@ -1584,8 +1582,9 @@ class gitsubrepo(abstractsubrepo):
             elif status == 'D':
                 removed.append(f)
 
-        deleted = unknown = ignored = clean = []
-        return modified, added, removed, deleted, unknown, ignored, clean
+        deleted, unknown, ignored, clean = [], [], [], []
+        return scmutil.status(modified, added, removed, deleted,
+                              unknown, ignored, clean)
 
     def shortid(self, revid):
         return revid[:7]

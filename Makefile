@@ -56,7 +56,8 @@ clean:
 	find contrib doc hgext i18n mercurial tests \
 		\( -name '*.py[cdo]' -o -name '*.so' \) -exec rm -f '{}' ';'
 	rm -f $(addprefix mercurial/,$(notdir $(wildcard mercurial/pure/[a-z]*.py)))
-	rm -f MANIFEST MANIFEST.in mercurial/__version__.py hgext/__index__.py tests/*.err
+	rm -f MANIFEST MANIFEST.in hgext/__index__.py tests/*.err
+	if test -d .hg; then rm -f mercurial/__version__.py; fi
 	rm -rf build mercurial/locale
 	$(MAKE) -C doc clean
 
@@ -135,23 +136,34 @@ i18n/hg.pot: $(PYFILES) $(DOCFILES) i18n/posplit i18n/hggettext
 # Packaging targets
 
 osx:
-	@which -s bdist_mpkg || \
+	@which bdist_mpkg >/dev/null || \
 	   (echo "Missing bdist_mpkg (easy_install bdist_mpkg)"; false)
+	rm -rf dist/mercurial-*.mpkg
 	bdist_mpkg setup.py
 	mkdir -p packages/osx
+	N=`cd dist && echo mercurial-*.mpkg | sed 's,\.mpkg$$,,'` && hdiutil create -srcfolder dist/$$N.mpkg/ -scrub -volname "$$N" -ov packages/osx/$$N.dmg
 	rm -rf dist/mercurial-*.mpkg
-	mv dist/mercurial*macosx*.zip packages/osx
 
-fedora:
-	mkdir -p packages/fedora
+fedora20:
+	mkdir -p packages/fedora20
 	contrib/buildrpm
-	cp rpmbuild/RPMS/*/* packages/fedora
-	cp rpmbuild/SRPMS/* packages/fedora
+	cp rpmbuild/RPMS/*/* packages/fedora20
+	cp rpmbuild/SRPMS/* packages/fedora20
 	rm -rf rpmbuild
 
-docker-fedora:
-	mkdir -p packages/fedora
-	contrib/dockerrpm fedora
+docker-fedora20:
+	mkdir -p packages/fedora20
+	contrib/dockerrpm fedora20
+
+centos5:
+	mkdir -p packages/centos5
+	contrib/buildrpm --withpython
+	cp rpmbuild/RPMS/*/* packages/centos5
+	cp rpmbuild/SRPMS/* packages/centos5
+
+docker-centos5:
+	mkdir -p packages/centos5
+	contrib/dockerrpm centos5 --withpython
 
 centos6:
 	mkdir -p packages/centos6
@@ -163,6 +175,16 @@ docker-centos6:
 	mkdir -p packages/centos6
 	contrib/dockerrpm centos6
 
+centos7:
+	mkdir -p packages/centos7
+	contrib/buildrpm
+	cp rpmbuild/RPMS/*/* packages/centos7
+	cp rpmbuild/SRPMS/* packages/centos7
+
+docker-centos7:
+	mkdir -p packages/centos7
+	contrib/dockerrpm centos7
+
 .PHONY: help all local build doc clean install install-bin install-doc \
 	install-home install-home-bin install-home-doc dist dist-notests tests \
-	update-pot fedora docker-fedora
+	update-pot fedora20 docker-fedora20

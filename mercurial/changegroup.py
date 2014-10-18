@@ -12,7 +12,7 @@ import mdiff, util, dagutil
 import struct, os, bz2, zlib, tempfile
 import discovery, error, phases, branchmap
 
-_BUNDLE10_DELTA_HEADER = "20s20s20s20s"
+_CHANGEGROUPV1_DELTA_HEADER = "20s20s20s20s"
 
 def readexactly(stream, n):
     '''read n bytes from stream.read and abort if less was available'''
@@ -123,8 +123,8 @@ def decompressor(fh, alg):
         raise util.Abort("unknown bundle compression '%s'" % alg)
     return util.chunkbuffer(generator(fh))
 
-class unbundle10(object):
-    deltaheader = _BUNDLE10_DELTA_HEADER
+class cg1unpacker(object):
+    deltaheader = _CHANGEGROUPV1_DELTA_HEADER
     deltaheadersize = struct.calcsize(deltaheader)
     def __init__(self, fh, alg):
         self._stream = decompressor(fh, alg)
@@ -227,8 +227,8 @@ class headerlessfixup(object):
             return d
         return readexactly(self._fh, n)
 
-class bundle10(object):
-    deltaheader = _BUNDLE10_DELTA_HEADER
+class cg1packer(object):
+    deltaheader = _CHANGEGROUPV1_DELTA_HEADER
     def __init__(self, repo, bundlecaps=None):
         """Given a source repo, construct a bundler.
 
@@ -456,7 +456,7 @@ def getsubset(repo, outgoing, bundler, source, fastpath=False):
     repo.hook('preoutgoing', throw=True, source=source)
     _changegroupinfo(repo, csets, source)
     gengroup = bundler.generate(commonrevs, csets, fastpathlinkrev, source)
-    return unbundle10(util.chunkbuffer(gengroup), 'UN')
+    return cg1unpacker(util.chunkbuffer(gengroup), 'UN')
 
 def changegroupsubset(repo, roots, heads, source):
     """Compute a changegroup consisting of all the nodes that are
@@ -480,17 +480,17 @@ def changegroupsubset(repo, roots, heads, source):
     for n in roots:
         discbases.extend([p for p in cl.parents(n) if p != nullid])
     outgoing = discovery.outgoing(cl, discbases, heads)
-    bundler = bundle10(repo)
+    bundler = cg1packer(repo)
     return getsubset(repo, outgoing, bundler, source)
 
-def getlocalbundle(repo, source, outgoing, bundlecaps=None):
+def getlocalchangegroup(repo, source, outgoing, bundlecaps=None):
     """Like getbundle, but taking a discovery.outgoing as an argument.
 
     This is only implemented for local repos and reuses potentially
     precomputed sets in outgoing."""
     if not outgoing.missing:
         return None
-    bundler = bundle10(repo, bundlecaps)
+    bundler = cg1packer(repo, bundlecaps)
     return getsubset(repo, outgoing, bundler, source)
 
 def _computeoutgoing(repo, heads, common):
@@ -512,7 +512,7 @@ def _computeoutgoing(repo, heads, common):
         heads = cl.heads()
     return discovery.outgoing(cl, common, heads)
 
-def getbundle(repo, source, heads=None, common=None, bundlecaps=None):
+def getchangegroup(repo, source, heads=None, common=None, bundlecaps=None):
     """Like changegroupsubset, but returns the set difference between the
     ancestors of heads and the ancestors common.
 
@@ -522,7 +522,7 @@ def getbundle(repo, source, heads=None, common=None, bundlecaps=None):
     current discovery protocol works.
     """
     outgoing = _computeoutgoing(repo, heads, common)
-    return getlocalbundle(repo, source, outgoing, bundlecaps=bundlecaps)
+    return getlocalchangegroup(repo, source, outgoing, bundlecaps=bundlecaps)
 
 def changegroup(repo, basenodes, source):
     # to avoid a race we use changegroupsubset() (issue1320)
@@ -569,7 +569,8 @@ def addchangegroupfiles(repo, source, revmap, trp, pr, needfiles):
 
     return revisions, files
 
-def addchangegroup(repo, source, srctype, url, emptyok=False):
+def addchangegroup(repo, source, srctype, url, emptyok=False,
+                   targetphase=phases.draft):
     """Add the changegroup returned by source.read() to this repo.
     srctype is a string like 'push', 'pull', or 'unbundle'.  url is
     the URL of the repo where this changegroup is coming from.
@@ -591,8 +592,6 @@ def addchangegroup(repo, source, srctype, url, emptyok=False):
     if not source:
         return 0
 
-    repo.hook('prechangegroup', throw=True, source=srctype, url=url)
-
     changesets = files = revisions = 0
     efiles = set()
 
@@ -603,7 +602,15 @@ def addchangegroup(repo, source, srctype, url, emptyok=False):
     oldheads = cl.heads()
 
     tr = repo.transaction("\n".join([srctype, util.hidepassword(url)]))
+    # The transaction could have been created before and already carries source
+    # information. In this case we use the top level data. We overwrite the
+    # argument because we need to use the top level value (if they exist) in
+    # this function.
+    srctype = tr.hookargs.setdefault('source', srctype)
+    url = tr.hookargs.setdefault('url', url)
     try:
+        repo.hook('prechangegroup', throw=True, **tr.hookargs)
+
         trp = weakref.proxy(tr)
         # pull off the changeset group
         repo.ui.status(_("adding changesets\n"))
@@ -686,8 +693,11 @@ def addchangegroup(repo, source, srctype, url, emptyok=False):
             p = lambda: cl.writepending() and repo.root or ""
             if 'node' not in tr.hookargs:
                 tr.hookargs['node'] = hex(cl.node(clstart))
-            repo.hook('pretxnchangegroup', throw=True, source=srctype,
-                      url=url, pending=p, **tr.hookargs)
+                hookargs = dict(tr.hookargs)
+            else:
+                hookargs = dict(tr.hookargs)
+                hookargs['node'] = hex(cl.node(clstart))
+            repo.hook('pretxnchangegroup', throw=True, pending=p, **hookargs)
 
         added = [cl.node(r) for r in xrange(clstart, clend)]
         publishing = repo.ui.configbool('phases', 'publish', True)
@@ -699,15 +709,18 @@ def addchangegroup(repo, source, srctype, url, emptyok=False):
             # We should not use added here but the list of all change in
             # the bundle
             if publishing:
-                phases.advanceboundary(repo, phases.public, srccontent)
+                phases.advanceboundary(repo, tr, phases.public, srccontent)
             else:
-                phases.advanceboundary(repo, phases.draft, srccontent)
-                phases.retractboundary(repo, phases.draft, added)
+                # Those changesets have been pushed from the outside, their
+                # phases are going to be pushed alongside. Therefor
+                # `targetphase` is ignored.
+                phases.advanceboundary(repo, tr, phases.draft, srccontent)
+                phases.retractboundary(repo, tr, phases.draft, added)
         elif srctype != 'strip':
             # publishing only alter behavior during push
             #
             # strip should not touch boundary at all
-            phases.retractboundary(repo, phases.draft, added)
+            phases.retractboundary(repo, tr, targetphase, added)
 
         # make changelog see real files again
         cl.finalize(trp)
@@ -720,6 +733,7 @@ def addchangegroup(repo, source, srctype, url, emptyok=False):
                 # `destroyed` will repair it.
                 # In other case we can safely update cache on disk.
                 branchmap.updatecache(repo.filtered('served'))
+
             def runhooks():
                 # These hooks run when the lock releases, not when the
                 # transaction closes. So it's possible for the changelog
@@ -729,12 +743,12 @@ def addchangegroup(repo, source, srctype, url, emptyok=False):
 
                 # forcefully update the on-disk branch cache
                 repo.ui.debug("updating the branch cache\n")
-                repo.hook("changegroup", source=srctype, url=url,
-                          **tr.hookargs)
+                repo.hook("changegroup", **hookargs)
 
                 for n in added:
-                    repo.hook("incoming", node=hex(n), source=srctype,
-                              url=url)
+                    args = hookargs.copy()
+                    args['node'] = hex(n)
+                    repo.hook("incoming", **args)
 
                 newheads = [h for h in repo.heads() if h not in oldheads]
                 repo.ui.log("incoming",

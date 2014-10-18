@@ -301,7 +301,7 @@ hide outer repo
   
    foo           yet another foo command
   
-  global options:
+  global options ([+] can be repeated):
   
    -R --repository REPO   repository root directory or name of overlay bundle
                           file
@@ -321,8 +321,6 @@ hide outer repo
       --version           output version information and exit
    -h --help              display help and exit
       --hidden            consider hidden changesets
-  
-  [+] marked option can be specified multiple times
 
 
 
@@ -337,7 +335,7 @@ hide outer repo
    debugfoobar   yet another debug command
    foo           yet another foo command
   
-  global options:
+  global options ([+] can be repeated):
   
    -R --repository REPO   repository root directory or name of overlay bundle
                           file
@@ -357,8 +355,6 @@ hide outer repo
       --version           output version information and exit
    -h --help              display help and exit
       --hidden            consider hidden changesets
-  
-  [+] marked option can be specified multiple times
 
 
 
@@ -388,9 +384,9 @@ Extension module help vs command help:
       compared to the working directory, and, when no revisions are specified,
       the working directory files are compared to its parent.
   
-  use "hg help -e extdiff" to show help for the extdiff extension
+  (use "hg help -e extdiff" to show help for the extdiff extension)
   
-  options:
+  options ([+] can be repeated):
   
    -p --program CMD         comparison program to run
    -o --option OPT [+]      pass option to comparison program
@@ -399,9 +395,7 @@ Extension module help vs command help:
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
   
-  [+] marked option can be specified multiple times
-  
-  use "hg -v help extdiff" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
 
 
@@ -469,7 +463,7 @@ Extension module help vs command help:
   
    extdiff       use external program to diff repository (or selected files)
   
-  use "hg -v help extdiff" to show builtin aliases and global options
+  (use "hg help -v extdiff" to show built-in aliases and global options)
 
 
 
@@ -533,7 +527,7 @@ Test help topic with same name as extension
   
   multirevs command
   
-  use "hg -v help multirevs" to show the global options
+  (some details hidden, use --verbose to show complete help)
 
 
 
@@ -543,7 +537,7 @@ Test help topic with same name as extension
   
   multirevs command
   
-  use "hg help multirevs" to show the full help text
+  (use "hg multirevs -h" to show more help)
   [255]
 
 
@@ -588,7 +582,7 @@ Disabled extension commands:
   
       patchbomb     command to send changesets as (a series of) patch emails
   
-  use "hg help extensions" for information on enabling extensions
+  (use "hg help extensions" for information on enabling extensions)
 
 
   $ hg qdel
@@ -597,7 +591,7 @@ Disabled extension commands:
   
       mq            manage a stack of patches
   
-  use "hg help extensions" for information on enabling extensions
+  (use "hg help extensions" for information on enabling extensions)
   [255]
 
 
@@ -607,7 +601,7 @@ Disabled extension commands:
   
       churn         command to display statistics about repository history
   
-  use "hg help extensions" for information on enabling extensions
+  (use "hg help extensions" for information on enabling extensions)
   [255]
 
 
@@ -617,12 +611,12 @@ Disabled extensions:
   $ hg help churn
   churn extension - command to display statistics about repository history
   
-  use "hg help extensions" for information on enabling extensions
+  (use "hg help extensions" for information on enabling extensions)
 
   $ hg help patchbomb
   patchbomb extension - command to send changesets as (a series of) patch emails
   
-  use "hg help extensions" for information on enabling extensions
+  (use "hg help extensions" for information on enabling extensions)
 
 
 Broken disabled extension and command:
@@ -642,7 +636,7 @@ Broken disabled extension and command:
   $ hg --config extensions.path=./path.py help broken
   broken extension - (no help text available)
   
-  use "hg help extensions" for information on enabling extensions
+  (use "hg help extensions" for information on enabling extensions)
 
 
   $ cat > hgext/forest.py <<EOF
@@ -735,7 +729,7 @@ Older extension is tested with current version, the other only with newer:
   ** Extensions loaded: throw, older
 
 Declare the version as supporting this hg version, show regular bts link:
-  $ hgver=`python -c 'from mercurial import util; print util.version().split("+")[0]'`
+  $ hgver=`$PYTHON -c 'from mercurial import util; print util.version().split("+")[0]'`
   $ echo 'testedwith = """'"$hgver"'"""' >> throw.py
   $ rm -f throw.pyc throw.pyo
   $ hg --config extensions.throw=throw.py throw 2>&1 | egrep '^\*\*'

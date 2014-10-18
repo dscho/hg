@@ -261,7 +261,10 @@ def prunecontainers(blocks, keep):
             indent = blocks[i]['indent']
             adjustment = blocks[i + 1]['indent'] - indent
             containertype = blocks[i]['lines'][0][15:]
-            prune = containertype not in keep
+            prune = True
+            for c in keep:
+                if c in containertype.split('.'):
+                    prune = False
             if prune:
                 pruned.append(containertype)
 
@@ -645,9 +648,24 @@ def formatblocks(blocks, width):
     text = ''.join(formatblock(b, width) for b in blocks)
     return text
 
-def format(text, width=80, indent=0, keep=None, style='plain'):
+def format(text, width=80, indent=0, keep=None, style='plain', section=None):
     """Parse and format the text according to width."""
     blocks, pruned = parse(text, indent, keep or [])
+    if section:
+        sections = getsections(blocks)
+        blocks = []
+        i = 0
+        while i < len(sections):
+            name, nest, b = sections[i]
+            if name == section:
+                blocks.extend(b)
+
+                ## Also show all subnested sections
+                while i + 1 < len(sections) and sections[i + 1][1] > nest:
+                    i += 1
+                    blocks.extend(sections[i][2])
+            i += 1
+
     if style == 'html':
         text = formathtml(blocks)
     else:
@@ -662,6 +680,14 @@ def getsections(blocks):
     nest = ""
     level = 0
     secs = []
+
+    def getname(b):
+        x = b['lines'][0]
+        x = x.lower().strip('"')
+        if '(' in x:
+            x = x.split('(')[0]
+        return x
+
     for b in blocks:
         if b['type'] == 'section':
             i = b['underline']
@@ -669,7 +695,14 @@ def getsections(blocks):
                 nest += i
             level = nest.index(i) + 1
             nest = nest[:level]
-            secs.append((b['lines'][0], level, [b]))
+            secs.append((getname(b), level, [b]))
+        elif b['type'] == 'definition':
+            i = ' '
+            if i not in nest:
+                nest += i
+            level = nest.index(i) + 1
+            nest = nest[:level]
+            secs.append((getname(b), level, [b]))
         else:
             if not secs:
                 # add an initial empty section

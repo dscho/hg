@@ -25,9 +25,10 @@ internals = {}
 def internaltool(name, trymerge, onfailure=None):
     '''return a decorator for populating internal merge tool table'''
     def decorator(func):
-        fullname = 'internal:' + name
+        fullname = ':' + name
         func.__doc__ = "``%s``\n" % fullname + func.__doc__.strip()
         internals[fullname] = func
+        internals['internal:' + name] = func
         func.trymerge = trymerge
         func.onfailure = onfailure
         return func
@@ -111,8 +112,8 @@ def _picktool(repo, ui, path, binary, symlink):
 
     # internal merge or prompt as last resort
     if symlink or binary:
-        return "internal:prompt", None
-    return "internal:merge", None
+        return ":prompt", None
+    return ":merge", None
 
 def _eoltype(data):
     "Guess the EOL type of a file"
@@ -178,24 +179,30 @@ def _premerge(repo, toolconf, files, labels=None):
 
     ui = repo.ui
 
+    validkeep = ['keep', 'keep-merge3']
+
     # do we attempt to simplemerge first?
     try:
         premerge = _toolbool(ui, tool, "premerge", not binary)
     except error.ConfigError:
         premerge = _toolstr(ui, tool, "premerge").lower()
-        valid = 'keep'.split()
-        if premerge not in valid:
-            _valid = ', '.join(["'" + v + "'" for v in valid])
+        if premerge not in validkeep:
+            _valid = ', '.join(["'" + v + "'" for v in validkeep])
             raise error.ConfigError(_("%s.premerge not valid "
                                       "('%s' is neither boolean nor %s)") %
                                     (tool, premerge, _valid))
 
     if premerge:
+        if premerge == 'keep-merge3':
+            if not labels:
+                labels = _defaultconflictlabels
+            if len(labels) < 3:
+                labels.append('base')
         r = simplemerge.simplemerge(ui, a, b, c, quiet=True, label=labels)
         if not r:
             ui.debug(" premerge successful\n")
             return 0
-        if premerge != 'keep':
+        if premerge not in validkeep:
             util.copyfile(back, a) # restore from backup and try again
     return 1 # continue merging
 
@@ -206,10 +213,11 @@ def _imerge(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels=None):
     """
     Uses the internal non-interactive simple merge algorithm for merging
     files. It will fail if there are any conflicts and leave markers in
-    the partially merged file."""
+    the partially merged file. Markers will have two sections, one for each side
+    of merge."""
     tool, toolpath, binary, symlink = toolconf
     if symlink:
-        repo.ui.warn(_('warning: internal:merge cannot merge symlinks '
+        repo.ui.warn(_('warning: internal :merge cannot merge symlinks '
                        'for %s\n') % fcd.path())
         return False, 1
     r = _premerge(repo, toolconf, files, labels=labels)
@@ -218,13 +226,28 @@ def _imerge(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels=None):
 
         ui = repo.ui
 
-        r = simplemerge.simplemerge(ui, a, b, c, label=labels, no_minimal=True)
+        r = simplemerge.simplemerge(ui, a, b, c, label=labels)
         return True, r
     return False, 0
 
+@internaltool('merge3', True,
+              _("merging %s incomplete! "
+                "(edit conflicts, then use 'hg resolve --mark')\n"))
+def _imerge3(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels=None):
+    """
+    Uses the internal non-interactive simple merge algorithm for merging
+    files. It will fail if there are any conflicts and leave markers in
+    the partially merged file. Marker will have three sections, one from each
+    side of the merge and one for the base content."""
+    if not labels:
+        labels = _defaultconflictlabels
+    if len(labels) < 3:
+        labels.append('base')
+    return _imerge(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels)
+
 @internaltool('tagmerge', True,
               _("automatic tag merging of %s failed! "
-                "(use 'hg resolve --tool internal:merge' or another merge "
+                "(use 'hg resolve --tool :merge' or another merge "
                 "tool of your choice)\n"))
 def _itagmerge(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels=None):
     """
@@ -312,23 +335,27 @@ _defaultconflictmarker = ('{node|short} ' +
 
 _defaultconflictlabels = ['local', 'other']
 
-def _formatlabels(repo, fcd, fco, labels):
+def _formatlabels(repo, fcd, fco, fca, labels):
     """Formats the given labels using the conflict marker template.
 
     Returns a list of formatted labels.
     """
     cd = fcd.changectx()
     co = fco.changectx()
+    ca = fca.changectx()
 
     ui = repo.ui
     template = ui.config('ui', 'mergemarkertemplate', _defaultconflictmarker)
     template = templater.parsestring(template, quoted=False)
-    tmpl = templater.templater(None, cache={ 'conflictmarker' : template })
+    tmpl = templater.templater(None, cache={'conflictmarker': template})
 
-    pad = max(len(labels[0]), len(labels[1]))
+    pad = max(len(l) for l in labels)
 
-    return [_formatconflictmarker(repo, cd, tmpl, labels[0], pad),
-            _formatconflictmarker(repo, co, tmpl, labels[1], pad)]
+    newlabels = [_formatconflictmarker(repo, cd, tmpl, labels[0], pad),
+                 _formatconflictmarker(repo, co, tmpl, labels[1], pad)]
+    if len(labels) > 2:
+        newlabels.append(_formatconflictmarker(repo, ca, tmpl, labels[2], pad))
+    return newlabels
 
 def filemerge(repo, mynode, orig, fcd, fco, fca, labels=None):
     """perform a 3-way merge in the working directory
@@ -388,16 +415,13 @@ def filemerge(repo, mynode, orig, fcd, fco, fca, labels=None):
     ui.debug("my %s other %s ancestor %s\n" % (fcd, fco, fca))
 
     markerstyle = ui.config('ui', 'mergemarkers', 'basic')
-    if markerstyle == 'basic':
-        formattedlabels = _defaultconflictlabels
-    else:
-        if not labels:
-            labels = _defaultconflictlabels
-
-        formattedlabels = _formatlabels(repo, fcd, fco, labels)
+    if not labels:
+        labels = _defaultconflictlabels
+    if markerstyle != 'basic':
+        labels = _formatlabels(repo, fcd, fco, fca, labels)
 
     needcheck, r = func(repo, mynode, orig, fcd, fco, fca, toolconf,
-                        (a, b, c, back), labels=formattedlabels)
+                        (a, b, c, back), labels=labels)
     if not needcheck:
         if r:
             if onfailure:

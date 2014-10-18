@@ -82,8 +82,7 @@ class Merge3Text(object):
                     start_marker='<<<<<<<',
                     mid_marker='=======',
                     end_marker='>>>>>>>',
-                    base_marker=None,
-                    reprocess=False):
+                    base_marker=None):
         """Return merge in cvs-like form.
         """
         self.conflicts = False
@@ -93,8 +92,6 @@ class Merge3Text(object):
                 newline = '\r\n'
             elif self.a[0].endswith('\r'):
                 newline = '\r'
-        if base_marker and reprocess:
-            raise CantReprocessAndShowBase
         if name_a:
             start_marker = start_marker + ' ' + name_a
         if name_b:
@@ -102,8 +99,6 @@ class Merge3Text(object):
         if name_base and base_marker:
             base_marker = base_marker + ' ' + name_base
         merge_regions = self.merge_regions()
-        if reprocess is True:
-            merge_regions = self.reprocess_merge_regions(merge_regions)
         for t in merge_regions:
             what = t[0]
             if what == 'unchanged':
@@ -128,33 +123,6 @@ class Merge3Text(object):
                 for i in range(t[5], t[6]):
                     yield self.b[i]
                 yield end_marker + newline
-            else:
-                raise ValueError(what)
-
-    def merge_annotated(self):
-        """Return merge with conflicts, showing origin of lines.
-
-        Most useful for debugging merge.
-        """
-        for t in self.merge_regions():
-            what = t[0]
-            if what == 'unchanged':
-                for i in range(t[1], t[2]):
-                    yield 'u | ' + self.base[i]
-            elif what == 'a' or what == 'same':
-                for i in range(t[1], t[2]):
-                    yield what[0] + ' | ' + self.a[i]
-            elif what == 'b':
-                for i in range(t[1], t[2]):
-                    yield 'b | ' + self.b[i]
-            elif what == 'conflict':
-                yield '<<<<\n'
-                for i in range(t[3], t[4]):
-                    yield 'A | ' + self.a[i]
-                yield '----\n'
-                for i in range(t[5], t[6]):
-                    yield 'B | ' + self.b[i]
-                yield '>>>>\n'
             else:
                 raise ValueError(what)
 
@@ -278,42 +246,6 @@ class Merge3Text(object):
                 ia = aend
                 ib = bend
 
-    def reprocess_merge_regions(self, merge_regions):
-        """Where there are conflict regions, remove the agreed lines.
-
-        Lines where both A and B have made the same changes are
-        eliminated.
-        """
-        for region in merge_regions:
-            if region[0] != "conflict":
-                yield region
-                continue
-            type, iz, zmatch, ia, amatch, ib, bmatch = region
-            a_region = self.a[ia:amatch]
-            b_region = self.b[ib:bmatch]
-            matches = mdiff.get_matching_blocks(''.join(a_region),
-                                                ''.join(b_region))
-            next_a = ia
-            next_b = ib
-            for region_ia, region_ib, region_len in matches[:-1]:
-                region_ia += ia
-                region_ib += ib
-                reg = self.mismatch_region(next_a, region_ia, next_b,
-                                           region_ib)
-                if reg is not None:
-                    yield reg
-                yield 'same', region_ia, region_len + region_ia
-                next_a = region_ia + region_len
-                next_b = region_ib + region_len
-            reg = self.mismatch_region(next_a, amatch, next_b, bmatch)
-            if reg is not None:
-                yield reg
-
-    def mismatch_region(next_a, region_ia,  next_b, region_ib):
-        if next_a < region_ia or next_b < region_ib:
-            return 'conflict', None, None, next_a, region_ia, next_b, region_ib
-    mismatch_region = staticmethod(mismatch_region)
-
     def find_sync_regions(self):
         """Return a list of sync regions, where both descendants match the base.
 
@@ -415,13 +347,16 @@ def simplemerge(ui, local, base, other, **opts):
 
     name_a = local
     name_b = other
+    name_base = None
     labels = opts.get('label', [])
     if len(labels) > 0:
         name_a = labels[0]
     if len(labels) > 1:
         name_b = labels[1]
     if len(labels) > 2:
-        raise util.Abort(_("can only specify two labels."))
+        name_base = labels[2]
+    if len(labels) > 3:
+        raise util.Abort(_("can only specify three labels."))
 
     try:
         localtext = readfile(local)
@@ -437,11 +372,12 @@ def simplemerge(ui, local, base, other, **opts):
     else:
         out = sys.stdout
 
-    reprocess = not opts.get('no_minimal')
-
     m3 = Merge3Text(basetext, localtext, othertext)
-    for line in m3.merge_lines(name_a=name_a, name_b=name_b,
-                               reprocess=reprocess):
+    extrakwargs = {}
+    if name_base is not None:
+        extrakwargs['base_marker'] = '|||||||'
+        extrakwargs['name_base'] = name_base
+    for line in m3.merge_lines(name_a=name_a, name_b=name_b, **extrakwargs):
         out.write(line)
 
     if not opts.get('print'):

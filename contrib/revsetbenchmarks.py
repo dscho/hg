@@ -19,8 +19,6 @@ from subprocess import check_call, Popen, CalledProcessError, STDOUT, PIPE
 # cannot use argparse, python 2.7 only
 from optparse import OptionParser
 
-
-
 def check_output(*args, **kwargs):
     kwargs.setdefault('stderr', PIPE)
     kwargs.setdefault('stdout', PIPE)
@@ -76,7 +74,8 @@ def getrevs(spec):
 
 parser = OptionParser(usage="usage: %prog [options] <revs>")
 parser.add_option("-f", "--file",
-                  help="read revset from FILE", metavar="FILE")
+                  help="read revset from FILE (stdin if omited)",
+                  metavar="FILE")
 parser.add_option("-R", "--repo",
                   help="run benchmark on REPO", metavar="REPO")
 
@@ -95,7 +94,7 @@ revsetsfile = sys.stdin
 if options.file:
     revsetsfile = open(options.file)
 
-revsets = [l.strip() for l in revsetsfile]
+revsets = [l.strip() for l in revsetsfile if not l.startswith('#')]
 
 print "Revsets to benchmark"
 print "----------------------------"

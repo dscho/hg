@@ -6,7 +6,7 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import gettext, _
-import itertools, sys, os
+import itertools, os
 import error
 import extensions, revset, fileset, templatekw, templatefilters, filemerge
 import encoding, util, minirst
@@ -31,7 +31,7 @@ def extshelp():
     doc = ''.join(rst)
     return doc
 
-def optrst(options, verbose):
+def optrst(header, options, verbose):
     data = []
     multioccur = False
     for option in options:
@@ -59,10 +59,11 @@ def optrst(options, verbose):
 
         data.append((so, lo, desc))
 
-    rst = minirst.maketable(data, 1)
-
     if multioccur:
-        rst.append(_("\n[+] marked option can be specified multiple times\n"))
+        header += (_(" ([+] can be repeated)"))
+
+    rst = ['\n%s:\n\n' % header]
+    rst.extend(minirst.maketable(data, 1))
 
     return ''.join(rst)
 
@@ -128,17 +129,7 @@ def loaddoc(topic):
     """Return a delayed loader for help/topic.txt."""
 
     def loader():
-        if util.mainfrozen():
-            module = sys.executable
-        else:
-            module = __file__
-        base = os.path.dirname(module)
-
-        for dir in ('.', '..'):
-            docdir = os.path.join(base, dir, 'help')
-            if os.path.isdir(docdir):
-                break
-
+        docdir = os.path.join(util.datapath, 'help')
         path = os.path.join(docdir, topic + ".txt")
         doc = gettext(util.readfile(path))
         for rewriter in helphooks.get(topic, []):
@@ -235,11 +226,13 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
         rst = []
 
         # check if it's an invalid alias and display its error if it is
-        if getattr(entry[0], 'badalias', False):
-            if not unknowncmd:
-                ui.pushbuffer()
-                entry[0](ui)
-                rst.append(ui.popbuffer())
+        if getattr(entry[0], 'badalias', None):
+            rst.append(entry[0].badalias + '\n')
+            if entry[0].unknowncmd:
+                try:
+                    rst.extend(helpextcmd(entry[0].cmdname))
+                except error.UnknownCommand:
+                    pass
             return rst
 
         # synopsis
@@ -277,31 +270,27 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
             mod = extensions.find(name)
             doc = gettext(mod.__doc__) or ''
             if '\n' in doc.strip():
-                msg = _('use "hg help -e %s" to show help for '
-                        'the %s extension') % (name, name)
+                msg = _('(use "hg help -e %s" to show help for '
+                        'the %s extension)') % (name, name)
                 rst.append('\n%s\n' % msg)
         except KeyError:
             pass
 
         # options
         if not ui.quiet and entry[1]:
-            rst.append('\n%s\n\n' % _("options:"))
-            rst.append(optrst(entry[1], ui.verbose))
+            rst.append(optrst(_("options"), entry[1], ui.verbose))
 
         if ui.verbose:
-            rst.append('\n%s\n\n' % _("global options:"))
-            rst.append(optrst(commands.globalopts, ui.verbose))
+            rst.append(optrst(_("global options"),
+                              commands.globalopts, ui.verbose))
 
         if not ui.verbose:
             if not full:
-                rst.append(_('\nuse "hg help %s" to show the full help text\n')
+                rst.append(_('\n(use "hg %s -h" to show more help)\n')
                            % name)
             elif not ui.quiet:
-                omitted = _('use "hg -v help %s" to show more complete'
-                            ' help and the global options') % name
-                notomitted = _('use "hg -v help %s" to show'
-                               ' the global options') % name
-                indicateomitted(rst, omitted, notomitted)
+                rst.append(_('\n(some details hidden, use --verbose '
+                               'to show complete help)'))
 
         return rst
 
@@ -367,30 +356,25 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
             for t, desc in topics:
                 rst.append(" :%s: %s\n" % (t, desc))
 
-        optlist = []
-        if not ui.quiet:
-            if ui.verbose:
-                optlist.append((_("global options:"), commands.globalopts))
-                if name == 'shortlist':
-                    optlist.append((_('use "hg help" for the full list '
-                                           'of commands'), ()))
+        if ui.quiet:
+            pass
+        elif ui.verbose:
+            rst.append('\n%s\n' % optrst(_("global options"),
+                                         commands.globalopts, ui.verbose))
+            if name == 'shortlist':
+                rst.append(_('\n(use "hg help" for the full list '
+                             'of commands)\n'))
+        else:
+            if name == 'shortlist':
+                rst.append(_('\n(use "hg help" for the full list of commands '
+                             'or "hg -v" for details)\n'))
+            elif name and not full:
+                rst.append(_('\n(use "hg help %s" to show the full help '
+                             'text)\n') % name)
             else:
-                if name == 'shortlist':
-                    msg = _('use "hg help" for the full list of commands '
-                            'or "hg -v" for details')
-                elif name and not full:
-                    msg = _('use "hg help %s" to show the full help '
-                            'text') % name
-                else:
-                    msg = _('use "hg -v help%s" to show builtin aliases and '
-                            'global options') % (name and " " + name or "")
-                optlist.append((msg, ()))
-
-        if optlist:
-            for title, options in optlist:
-                rst.append('\n%s\n' % title)
-                if options:
-                    rst.append('\n%s\n' % optrst(options, ui.verbose))
+                rst.append(_('\n(use "hg help -v%s" to show built-in aliases '
+                             'and global options)\n')
+                           % (name and " " + name or ""))
         return rst
 
     def helptopic(name):
@@ -409,8 +393,8 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
             rst += ["    %s\n" % l for l in doc().splitlines()]
 
         if not ui.verbose:
-            omitted = (_('use "hg help -v %s" to show more complete help') %
-                       name)
+            omitted = _('(some details hidden, use --verbose'
+                         ' to show complete help)')
             indicateomitted(rst, omitted)
 
         try:
@@ -441,8 +425,8 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
             rst.append('\n')
 
         if not ui.verbose:
-            omitted = (_('use "hg help -v %s" to show more complete help') %
-                       name)
+            omitted = _('(some details hidden, use --verbose'
+                         ' to show complete help)')
             indicateomitted(rst, omitted)
 
         if mod:
@@ -453,8 +437,8 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
             modcmds = set([c.split('|', 1)[0] for c in ct])
             rst.extend(helplist(modcmds.__contains__))
         else:
-            rst.append(_('use "hg help extensions" for information on enabling '
-                       'extensions\n'))
+            rst.append(_('(use "hg help extensions" for information on enabling'
+                       ' extensions)\n'))
         return rst
 
     def helpextcmd(name):
@@ -465,8 +449,8 @@ def help_(ui, name, unknowncmd=False, full=True, **opts):
         rst = listexts(_("'%s' is provided by the following "
                               "extension:") % cmd, {ext: doc}, indent=4)
         rst.append('\n')
-        rst.append(_('use "hg help extensions" for information on enabling '
-                   'extensions\n'))
+        rst.append(_('(use "hg help extensions" for information on enabling '
+                   'extensions)\n'))
         return rst
 
 

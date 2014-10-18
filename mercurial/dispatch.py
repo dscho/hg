@@ -58,6 +58,8 @@ def dispatch(req):
         if len(inst.args) > 1:
             ferr.write(_("hg: parse error at %s: %s\n") %
                              (inst.args[1], inst.args[0]))
+            if (inst.args[0][0] == ' '):
+                ferr.write(_("unexpected leading whitespace\n"))
         else:
             ferr.write(_("hg: parse error: %s\n") % inst.args[0])
         return -1
@@ -155,6 +157,8 @@ def _runcatch(req):
         if len(inst.args) > 1:
             ui.warn(_("hg: parse error at %s: %s\n") %
                              (inst.args[1], inst.args[0]))
+            if (inst.args[0][0] == ' '):
+                ui.warn(_("unexpected leading whitespace\n"))
         else:
             ui.warn(_("hg: parse error: %s\n") % inst.args[0])
         return -1
@@ -189,6 +193,8 @@ def _runcatch(req):
             ui.warn(_(" empty string\n"))
         else:
             ui.warn("\n%r\n" % util.ellipsis(inst.args[1]))
+    except error.CensoredNodeError, inst:
+        ui.warn(_("abort: file censored %s!\n") % inst)
     except error.RevlogError, inst:
         ui.warn(_("abort: %s!\n") % inst)
     except error.SignalInterrupt:
@@ -331,17 +337,40 @@ def aliasargs(fn, givenargs):
         args = shlex.split(cmd)
     return args + givenargs
 
+def aliasinterpolate(name, args, cmd):
+    '''interpolate args into cmd for shell aliases
+
+    This also handles $0, $@ and "$@".
+    '''
+    # util.interpolate can't deal with "$@" (with quotes) because it's only
+    # built to match prefix + patterns.
+    replacemap = dict(('$%d' % (i + 1), arg) for i, arg in enumerate(args))
+    replacemap['$0'] = name
+    replacemap['$$'] = '$'
+    replacemap['$@'] = ' '.join(args)
+    # Typical Unix shells interpolate "$@" (with quotes) as all the positional
+    # parameters, separated out into words. Emulate the same behavior here by
+    # quoting the arguments individually. POSIX shells will then typically
+    # tokenize each argument into exactly one word.
+    replacemap['"$@"'] = ' '.join(util.shellquote(arg) for arg in args)
+    # escape '\$' for regex
+    regex = '|'.join(replacemap.keys()).replace('$', r'\$')
+    r = re.compile(regex)
+    return r.sub(lambda x: replacemap[x.group()], cmd)
+
 class cmdalias(object):
     def __init__(self, name, definition, cmdtable):
         self.name = self.cmd = name
         self.cmdname = ''
         self.definition = definition
+        self.fn = None
         self.args = []
         self.opts = []
         self.help = ''
         self.norepo = True
         self.optionalrepo = False
-        self.badalias = False
+        self.badalias = None
+        self.unknowncmd = False
 
         try:
             aliases, entry = cmdutil.findcmd(self.name, cmdtable)
@@ -354,11 +383,7 @@ class cmdalias(object):
             self.shadows = False
 
         if not self.definition:
-            def fn(ui, *args):
-                ui.warn(_("no definition for alias '%s'\n") % self.name)
-                return -1
-            self.fn = fn
-            self.badalias = True
+            self.badalias = _("no definition for alias '%s'") % self.name
             return
 
         if self.definition.startswith('!'):
@@ -376,10 +401,7 @@ class cmdalias(object):
                                  % (int(m.groups()[0]), self.name))
                         return ''
                 cmd = re.sub(r'\$(\d+|\$)', _checkvar, self.definition[1:])
-                replace = dict((str(i + 1), arg) for i, arg in enumerate(args))
-                replace['0'] = self.name
-                replace['@'] = ' '.join(args)
-                cmd = util.interpolate(r'\$', replace, cmd, escape_prefix=True)
+                cmd = aliasinterpolate(self.name, args, cmd)
                 return util.system(cmd, environ=env, out=ui.fout)
             self.fn = fn
             return
@@ -387,26 +409,17 @@ class cmdalias(object):
         try:
             args = shlex.split(self.definition)
         except ValueError, inst:
-            def fn(ui, *args):
-                ui.warn(_("error in definition for alias '%s': %s\n")
-                        % (self.name, inst))
-                return -1
-            self.fn = fn
-            self.badalias = True
+            self.badalias = (_("error in definition for alias '%s': %s")
+                             % (self.name, inst))
             return
         self.cmdname = cmd = args.pop(0)
         args = map(util.expandpath, args)
 
         for invalidarg in ("--cwd", "-R", "--repository", "--repo", "--config"):
             if _earlygetopt([invalidarg], args):
-                def fn(ui, *args):
-                    ui.warn(_("error in definition for alias '%s': %s may only "
-                              "be given on the command line\n")
-                            % (self.name, invalidarg))
-                    return -1
-
-                self.fn = fn
-                self.badalias = True
+                self.badalias = (_("error in definition for alias '%s': %s may "
+                                   "only be given on the command line")
+                                 % (self.name, invalidarg))
                 return
 
         try:
@@ -427,26 +440,24 @@ class cmdalias(object):
             self.__doc__ = self.fn.__doc__
 
         except error.UnknownCommand:
-            def fn(ui, *args):
-                ui.warn(_("alias '%s' resolves to unknown command '%s'\n") \
-                            % (self.name, cmd))
-                try:
-                    # check if the command is in a disabled extension
-                    commands.help_(ui, cmd, unknowncmd=True)
-                except error.UnknownCommand:
-                    pass
-                return -1
-            self.fn = fn
-            self.badalias = True
+            self.badalias = (_("alias '%s' resolves to unknown command '%s'")
+                             % (self.name, cmd))
+            self.unknowncmd = True
         except error.AmbiguousCommand:
-            def fn(ui, *args):
-                ui.warn(_("alias '%s' resolves to ambiguous command '%s'\n") \
-                            % (self.name, cmd))
-                return -1
-            self.fn = fn
-            self.badalias = True
+            self.badalias = (_("alias '%s' resolves to ambiguous command '%s'")
+                             % (self.name, cmd))
 
     def __call__(self, ui, *args, **opts):
+        if self.badalias:
+            hint = None
+            if self.unknowncmd:
+                try:
+                    # check if the command is in a disabled extension
+                    cmd, ext = extensions.disabledcmd(ui, self.cmdname)[:2]
+                    hint = _("'%s' is provided by '%s' extension") % (cmd, ext)
+                except error.UnknownCommand:
+                    pass
+            raise util.Abort(self.badalias, hint=hint)
         if self.shadows:
             ui.debug("alias '%s' shadows command '%s'\n" %
                      (self.name, self.cmdname))

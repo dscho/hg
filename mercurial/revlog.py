@@ -42,6 +42,7 @@ _chunksize = 1048576
 
 RevlogError = error.RevlogError
 LookupError = error.LookupError
+CensoredNodeError = error.CensoredNodeError
 
 def getoffset(q):
     return int(q >> 16)
@@ -52,7 +53,7 @@ def gettype(q):
 def offset_type(offset, type):
     return long(long(offset) << 16 | type)
 
-nullhash = _sha(nullid)
+_nullhash = _sha(nullid)
 
 def hash(text, p1, p2):
     """generate a hash from the given text and its parent hashes
@@ -64,7 +65,7 @@ def hash(text, p1, p2):
     # As of now, if one of the parent node is null, p2 is null
     if p2 == nullid:
         # deep copy of a hash is faster than creating one
-        s = nullhash.copy()
+        s = _nullhash.copy()
         s.update(p1)
     else:
         # none of the parent nodes are nullid
@@ -306,6 +307,8 @@ class revlog(object):
     def rev(self, node):
         try:
             return self._nodecache[node]
+        except TypeError:
+            raise
         except RevlogError:
             # parsers.c radix tree lookup failed
             raise LookupError(node, self.indexfile, _('no node'))
@@ -743,8 +746,15 @@ class revlog(object):
             ancs = ancestor.commonancestorsheads(self.parentrevs, a, b)
         return map(self.node, ancs)
 
+    def isancestor(self, a, b):
+        """return True if node a is an ancestor of node b
+
+        The implementation of this is trivial but the use of
+        commonancestorsheads is not."""
+        return a in self.commonancestorsheads(a, b)
+
     def ancestor(self, a, b):
-        """calculate the least common ancestor of nodes a and b"""
+        """calculate the "best" common ancestor of nodes a and b"""
 
         a, b = self.rev(a), self.rev(b)
         try:
@@ -1027,13 +1037,21 @@ class revlog(object):
         self._cache = (node, rev, text)
         return text
 
+    def hash(self, text, p1, p2):
+        """Compute a node hash.
+
+        Available as a function so that subclasses can replace the hash
+        as needed.
+        """
+        return hash(text, p1, p2)
+
     def _checkhash(self, text, node, rev):
         p1, p2 = self.parents(node)
         self.checkhash(text, p1, p2, node, rev)
         return text
 
     def checkhash(self, text, p1, p2, node, rev=None):
-        if node != hash(text, p1, p2):
+        if node != self.hash(text, p1, p2):
             revornode = rev
             if revornode is None:
                 revornode = templatefilters.short(hex(node))
@@ -1095,7 +1113,7 @@ class revlog(object):
         if link == nullrev:
             raise RevlogError(_("attempted to add linkrev -1 to %s")
                               % self.indexfile)
-        node = node or hash(text, p1, p2)
+        node = node or self.hash(text, p1, p2)
         if node in self.nodemap:
             return node
 
@@ -1159,7 +1177,10 @@ class revlog(object):
             ifh.flush()
             basetext = self.revision(self.node(cachedelta[0]))
             btext[0] = mdiff.patch(basetext, cachedelta[1])
-            self.checkhash(btext[0], p1, p2, node)
+            try:
+                self.checkhash(btext[0], p1, p2, node)
+            except CensoredNodeError:
+                pass # always import a censor tombstone.
             return btext[0]
 
         def builddelta(rev):

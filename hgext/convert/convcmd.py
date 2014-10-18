@@ -171,6 +171,7 @@ class converter(object):
         visit = heads
         known = set()
         parents = {}
+        numcommits = self.source.numcommits()
         while visit:
             n = visit.pop(0)
             if n in known:
@@ -180,7 +181,8 @@ class converter(object):
                 if m == SKIPREV or self.dest.hascommitfrommap(m):
                     continue
             known.add(n)
-            self.ui.progress(_('scanning'), len(known), unit=_('revisions'))
+            self.ui.progress(_('scanning'), len(known), unit=_('revisions'),
+                             total=numcommits)
             commit = self.cachecommit(n)
             parents[n] = []
             for p in commit.parents:
@@ -386,8 +388,8 @@ class converter(object):
 
     def copy(self, rev):
         commit = self.commitcache[rev]
-
-        changes = self.source.getchanges(rev)
+        full = self.opts.get('full')
+        changes = self.source.getchanges(rev, full)
         if isinstance(changes, basestring):
             if changes == SKIPREV:
                 dest = SKIPREV
@@ -413,7 +415,7 @@ class converter(object):
             parents = [b[0] for b in pbranches]
         source = progresssource(self.ui, self.source, len(files))
         newnode = self.dest.putcommit(files, copies, parents, commit,
-                                      source, self.map)
+                                      source, self.map, full)
         source.close()
         self.source.converted(rev, newnode)
         self.map[rev] = newnode

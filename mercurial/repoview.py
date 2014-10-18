@@ -7,11 +7,12 @@
 # GNU General Public License version 2 or any later version.
 
 import copy
+import error
 import phases
 import util
 import obsolete
+import struct
 import tags as tagsmod
-
 
 def hideablerevs(repo):
     """Revisions candidates to be hidden
@@ -19,13 +20,14 @@ def hideablerevs(repo):
     This is a standalone function to help extensions to wrap it."""
     return obsolete.getrevs(repo, 'obsolete')
 
-def _gethiddenblockers(repo):
-    """Get revisions that will block hidden changesets from being filtered
+def _getstaticblockers(repo):
+    """Cacheable revisions blocking hidden changesets from being filtered.
 
+    Additional non-cached hidden blockers are computed in _getdynamicblockers.
     This is a standalone function to help extensions to wrap it."""
     assert not repo.changelog.filteredrevs
     hideable = hideablerevs(repo)
-    blockers = []
+    blockers = set()
     if hideable:
         # We use cl to avoid recursive lookup from repo[xxx]
         cl = repo.changelog
@@ -33,29 +35,116 @@ def _gethiddenblockers(repo):
         revs = cl.revs(start=firsthideable)
         tofilter = repo.revs(
             '(%ld) and children(%ld)', list(revs), list(hideable))
-        blockers = [r for r in tofilter if r not in hideable]
-        for par in repo[None].parents():
-            blockers.append(par.rev())
-        for bm in repo._bookmarks.values():
-            blockers.append(cl.rev(bm))
-        tags = {}
-        tagsmod.readlocaltags(repo.ui, repo, tags, {})
-        if tags:
-            rev, nodemap = cl.rev, cl.nodemap
-            blockers.extend(rev(t[0]) for t in tags.values() if t[0] in nodemap)
+        blockers.update([r for r in tofilter if r not in hideable])
     return blockers
+
+def _getdynamicblockers(repo):
+    """Non-cacheable revisions blocking hidden changesets from being filtered.
+
+    Get revisions that will block hidden changesets and are likely to change,
+    but unlikely to create hidden blockers. They won't be cached, so be careful
+    with adding additional computation."""
+
+    cl = repo.changelog
+    blockers = set()
+    blockers.update([par.rev() for par in repo[None].parents()])
+    blockers.update([cl.rev(bm) for bm in repo._bookmarks.values()])
+
+    tags = {}
+    tagsmod.readlocaltags(repo.ui, repo, tags, {})
+    if tags:
+        rev, nodemap = cl.rev, cl.nodemap
+        blockers.update(rev(t[0]) for t in tags.values() if t[0] in nodemap)
+    return blockers
+
+cacheversion = 1
+cachefile = 'cache/hidden'
+
+def cachehash(repo, hideable):
+    """return sha1 hash of repository data to identify a valid cache.
+
+    We calculate a sha1 of repo heads and the content of the obsstore and write
+    it to the cache. Upon reading we can easily validate by checking the hash
+    against the stored one and discard the cache in case the hashes don't match.
+    """
+    h = util.sha1()
+    h.update(''.join(repo.heads()))
+    h.update(str(hash(frozenset(hideable))))
+    return h.digest()
+
+def trywritehiddencache(repo, hideable, hidden):
+    """write cache of hidden changesets to disk
+
+    Will not write the cache if a wlock cannot be obtained lazily.
+    The cache consists of a head of 22byte:
+       2 byte    version number of the cache
+      20 byte    sha1 to validate the cache
+     n*4 byte    hidden revs
+    """
+    wlock = fh = None
+    try:
+        try:
+            wlock = repo.wlock(wait=False)
+            # write cache to file
+            newhash = cachehash(repo, hideable)
+            sortedset = sorted(hidden)
+            data = struct.pack('>%ii' % len(sortedset), *sortedset)
+            fh = repo.vfs.open(cachefile, 'w+b', atomictemp=True)
+            fh.write(struct.pack(">H", cacheversion))
+            fh.write(newhash)
+            fh.write(data)
+        except (IOError, OSError):
+            repo.ui.debug('error writing hidden changesets cache')
+        except error.LockHeld:
+            repo.ui.debug('cannot obtain lock to write hidden changesets cache')
+    finally:
+        if fh:
+            fh.close()
+        if wlock:
+            wlock.release()
+
+def tryreadcache(repo, hideable):
+    """read a cache if the cache exists and is valid, otherwise returns None."""
+    hidden = fh = None
+    try:
+        if repo.vfs.exists(cachefile):
+            fh = repo.vfs.open(cachefile, 'rb')
+            version, = struct.unpack(">H", fh.read(2))
+            oldhash = fh.read(20)
+            newhash = cachehash(repo, hideable)
+            if (cacheversion, oldhash) == (version, newhash):
+                # cache is valid, so we can start reading the hidden revs
+                data = fh.read()
+                count = len(data) / 4
+                hidden = frozenset(struct.unpack('>%ii' % count, data))
+        return hidden
+    finally:
+        if fh:
+            fh.close()
 
 def computehidden(repo):
     """compute the set of hidden revision to filter
 
     During most operation hidden should be filtered."""
     assert not repo.changelog.filteredrevs
+
+    hidden = frozenset()
     hideable = hideablerevs(repo)
     if hideable:
         cl = repo.changelog
-        blocked = cl.ancestors(_gethiddenblockers(repo), inclusive=True)
-        return frozenset(r for r in hideable if r not in blocked)
-    return frozenset()
+        hidden = tryreadcache(repo, hideable)
+        if hidden is None:
+            blocked = cl.ancestors(_getstaticblockers(repo), inclusive=True)
+            hidden = frozenset(r for r in hideable if r not in blocked)
+            trywritehiddencache(repo, hideable, hidden)
+
+        # check if we have wd parents, bookmarks or tags pointing to hidden
+        # changesets and remove those.
+        dynamic = hidden & _getdynamicblockers(repo)
+        if dynamic:
+            blocked = cl.ancestors(dynamic, inclusive=True)
+            hidden = frozenset(r for r in hidden if r not in blocked)
+    return hidden
 
 def computeunserved(repo):
     """compute the set of revision that should be filtered when used a server

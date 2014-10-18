@@ -20,6 +20,59 @@ else:
 systemrcpath = scmplatform.systemrcpath
 userrcpath = scmplatform.userrcpath
 
+class status(tuple):
+    '''Named tuple with a list of files per status. The 'deleted', 'unknown'
+       and 'ignored' properties are only relevant to the working copy.
+    '''
+
+    __slots__ = ()
+
+    def __new__(cls, modified, added, removed, deleted, unknown, ignored,
+                clean):
+        return tuple.__new__(cls, (modified, added, removed, deleted, unknown,
+                                   ignored, clean))
+
+    @property
+    def modified(self):
+        '''files that have been modified'''
+        return self[0]
+
+    @property
+    def added(self):
+        '''files that have been added'''
+        return self[1]
+
+    @property
+    def removed(self):
+        '''files that have been removed'''
+        return self[2]
+
+    @property
+    def deleted(self):
+        '''files that are in the dirstate, but have been deleted from the
+           working copy (aka "missing")
+        '''
+        return self[3]
+
+    @property
+    def unknown(self):
+        '''files not in the dirstate that are not ignored'''
+        return self[4]
+
+    @property
+    def ignored(self):
+        '''files not in the dirstate that are ignored (by _dirignore())'''
+        return self[5]
+
+    @property
+    def clean(self):
+        '''files that have not been modified'''
+        return self[6]
+
+    def __repr__(self, *args, **kwargs):
+        return (('<status modified=%r, added=%r, removed=%r, deleted=%r, '
+                 'unknown=%r, ignored=%r, clean=%r>') % self)
+
 def itersubrepos(ctx1, ctx2):
     """find subrepos in ctx1 or ctx2"""
     # Create a (subpath, ctx) mapping where we prefer subpaths from
@@ -478,9 +531,9 @@ def revsingle(repo, revspec, default='.'):
         return repo[default]
 
     l = revrange(repo, [revspec])
-    if len(l) < 1:
+    if not l:
         raise util.Abort(_('empty revision set'))
-    return repo[l[-1]]
+    return repo[l.last()]
 
 def revpair(repo, revs):
     if not revs:
@@ -497,9 +550,8 @@ def revpair(repo, revs):
         first = l.max()
         second = l.min()
     else:
-        l = list(l)
-        first = l[0]
-        second = l[-1]
+        first = l.first()
+        second = l.last()
 
     if first is None:
         raise util.Abort(_('empty revision range'))

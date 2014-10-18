@@ -10,6 +10,7 @@
   > unknown = bargle
   > ambiguous = s
   > recursive = recursive
+  > disabled = email
   > nodefinition =
   > noclosingquotation = '
   > no--cwd = status --cwd elsewhere
@@ -30,6 +31,7 @@
   > echo1 = !printf '\$1\n'
   > echo2 = !printf '\$2\n'
   > echo13 = !printf '\$1 \$3\n'
+  > echotokens = !printf "%s\n" "\$@"
   > count = !hg log -r "\$@" --template=. | wc -c | sed -e 's/ //g'
   > mcount = !hg log \$@ --template=. | wc -c | sed -e 's/ //g'
   > rt = root
@@ -60,7 +62,7 @@ basic
 unknown
 
   $ hg unknown
-  alias 'unknown' resolves to unknown command 'bargle'
+  abort: alias 'unknown' resolves to unknown command 'bargle'
   [255]
   $ hg help unknown
   alias 'unknown' resolves to unknown command 'bargle'
@@ -69,7 +71,7 @@ unknown
 ambiguous
 
   $ hg ambiguous
-  alias 'ambiguous' resolves to ambiguous command 's'
+  abort: alias 'ambiguous' resolves to ambiguous command 's'
   [255]
   $ hg help ambiguous
   alias 'ambiguous' resolves to ambiguous command 's'
@@ -78,16 +80,32 @@ ambiguous
 recursive
 
   $ hg recursive
-  alias 'recursive' resolves to unknown command 'recursive'
+  abort: alias 'recursive' resolves to unknown command 'recursive'
   [255]
   $ hg help recursive
   alias 'recursive' resolves to unknown command 'recursive'
 
 
+disabled
+
+  $ hg disabled
+  abort: alias 'disabled' resolves to unknown command 'email'
+  ('email' is provided by 'patchbomb' extension)
+  [255]
+  $ hg help disabled
+  alias 'disabled' resolves to unknown command 'email'
+  
+  'email' is provided by the following extension:
+  
+      patchbomb     command to send changesets as (a series of) patch emails
+  
+  (use "hg help extensions" for information on enabling extensions)
+
+
 no definition
 
   $ hg nodef
-  no definition for alias 'nodefinition'
+  abort: no definition for alias 'nodefinition'
   [255]
   $ hg help nodef
   no definition for alias 'nodefinition'
@@ -96,7 +114,7 @@ no definition
 no closing quotation
 
   $ hg noclosing
-  error in definition for alias 'noclosingquotation': No closing quotation
+  abort: error in definition for alias 'noclosingquotation': No closing quotation
   [255]
   $ hg help noclosing
   error in definition for alias 'noclosingquotation': No closing quotation
@@ -105,27 +123,30 @@ no closing quotation
 invalid options
 
   $ hg no--cwd
-  error in definition for alias 'no--cwd': --cwd may only be given on the command line
+  abort: error in definition for alias 'no--cwd': --cwd may only be given on the command line
   [255]
   $ hg help no--cwd
-  error in definition for alias 'no--cwd': --cwd may only be given on the command line
+  error in definition for alias 'no--cwd': --cwd may only be given on the
+  command line
   $ hg no-R
-  error in definition for alias 'no-R': -R may only be given on the command line
+  abort: error in definition for alias 'no-R': -R may only be given on the command line
   [255]
   $ hg help no-R
   error in definition for alias 'no-R': -R may only be given on the command line
   $ hg no--repo
-  error in definition for alias 'no--repo': --repo may only be given on the command line
+  abort: error in definition for alias 'no--repo': --repo may only be given on the command line
   [255]
   $ hg help no--repo
-  error in definition for alias 'no--repo': --repo may only be given on the command line
+  error in definition for alias 'no--repo': --repo may only be given on the
+  command line
   $ hg no--repository
-  error in definition for alias 'no--repository': --repository may only be given on the command line
+  abort: error in definition for alias 'no--repository': --repository may only be given on the command line
   [255]
   $ hg help no--repository
-  error in definition for alias 'no--repository': --repository may only be given on the command line
+  error in definition for alias 'no--repository': --repository may only be given
+  on the command line
   $ hg no--config
-  error in definition for alias 'no--config': --config may only be given on the command line
+  abort: error in definition for alias 'no--config': --config may only be given on the command line
   [255]
 
 optional repository
@@ -187,6 +208,7 @@ properly recursive
 
   $ hg dln
   changeset:   -1:0000000000000000000000000000000000000000
+  phase:       public
   parent:      -1:0000000000000000000000000000000000000000
   parent:      -1:0000000000000000000000000000000000000000
   manifest:    -1:0000000000000000000000000000000000000000
@@ -229,6 +251,10 @@ simple shell aliases
   foo
   $ hg echoall 'test $2' foo
   test $2 foo
+  $ hg echoall 'test $@' foo '$@'
+  test $@ foo $@
+  $ hg echoall 'test "$@"' foo '"$@"'
+  test "$@" foo "$@"
   $ hg echo1 foo bar baz
   foo
   $ hg echo2 foo bar baz
@@ -237,6 +263,22 @@ simple shell aliases
   foo baz
   $ hg echo2 foo
   
+  $ hg echotokens
+  
+  $ hg echotokens foo 'bar $1 baz'
+  foo
+  bar $1 baz
+  $ hg echotokens 'test $2' foo
+  test $2
+  foo
+  $ hg echotokens 'test $@' foo '$@'
+  test $@
+  foo
+  $@
+  $ hg echotokens 'test "$@"' foo '"$@"'
+  test "$@"
+  foo
+  "$@"
   $ echo bar > bar
   $ hg commit -qA -m bar
   $ hg count .
@@ -372,7 +414,7 @@ invalid arguments
   
   alias for: hg root
   
-  use "hg help rt" to show the full help text
+  (use "hg rt -h" to show more help)
   [255]
 
 invalid global arguments for normal commands, aliases, and shell aliases
@@ -401,7 +443,7 @@ invalid global arguments for normal commands, aliases, and shell aliases
    summary       summarize working directory state
    update        update working directory (or switch revisions)
   
-  use "hg help" for the full list of commands or "hg -v" for details
+  (use "hg help" for the full list of commands or "hg -v" for details)
   [255]
   $ hg --invalid mylog
   hg: option --invalid not recognized
@@ -427,7 +469,7 @@ invalid global arguments for normal commands, aliases, and shell aliases
    summary       summarize working directory state
    update        update working directory (or switch revisions)
   
-  use "hg help" for the full list of commands or "hg -v" for details
+  (use "hg help" for the full list of commands or "hg -v" for details)
   [255]
   $ hg --invalid blank
   hg: option --invalid not recognized
@@ -453,7 +495,7 @@ invalid global arguments for normal commands, aliases, and shell aliases
    summary       summarize working directory state
    update        update working directory (or switch revisions)
   
-  use "hg help" for the full list of commands or "hg -v" for details
+  (use "hg help" for the full list of commands or "hg -v" for details)
   [255]
 
 This should show id:

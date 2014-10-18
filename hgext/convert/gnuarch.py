@@ -137,13 +137,14 @@ class gnuarch_source(converter_source, commandline):
         if rev != self.lastrev:
             raise util.Abort(_('internal calling inconsistency'))
 
-        # Raise IOError if necessary (i.e. deleted files).
         if not os.path.lexists(os.path.join(self.tmppath, name)):
-            raise IOError
+            return None, None
 
         return self._getfile(name, rev)
 
-    def getchanges(self, rev):
+    def getchanges(self, rev, full):
+        if full:
+            raise util.Abort(_("convert from arch do not support --full"))
         self._update(rev)
         changes = []
         copies = {}

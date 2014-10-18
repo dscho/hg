@@ -26,7 +26,7 @@
 
 from mercurial import util, commands, cmdutil, scmutil
 from mercurial.i18n import _
-import os, stat
+import os
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
@@ -95,27 +95,17 @@ def purge(ui, repo, *dirs, **opts):
         else:
             ui.write('%s%s' % (name, eol))
 
-    def removefile(path):
-        try:
-            os.remove(path)
-        except OSError:
-            # read-only files cannot be unlinked under Windows
-            s = os.stat(path)
-            if (s.st_mode & stat.S_IWRITE) != 0:
-                raise
-            os.chmod(path, stat.S_IMODE(s.st_mode) | stat.S_IWRITE)
-            os.remove(path)
-
-    directories = []
     match = scmutil.match(repo[None], dirs, opts)
-    match.explicitdir = match.traversedir = directories.append
+    if removedirs:
+        directories = []
+        match.explicitdir = match.traversedir = directories.append
     status = repo.status(match=match, ignored=opts['all'], unknown=True)
 
     if removefiles:
-        for f in sorted(status[4] + status[5]):
+        for f in sorted(status.unknown + status.ignored):
             if act:
                 ui.note(_('removing file %s\n') % f)
-            remove(removefile, f)
+            remove(util.unlink, f)
 
     if removedirs:
         for f in sorted(directories, reverse=True):

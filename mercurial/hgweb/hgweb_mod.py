@@ -113,7 +113,7 @@ class hgweb(object):
         # we need to compare file size in addition to mtime to catch
         # changes made less than a second ago
         if repostate != self.repostate:
-            r = hg.repository(self.repo.baseui, self.repo.root)
+            r = hg.repository(self.repo.baseui, self.repo.url())
             self.repo = self._getview(r)
             self.maxchanges = int(self.config("web", "maxchanges", 10))
             self.stripecount = int(self.config("web", "stripes", 1))
@@ -394,5 +394,5 @@ class hgweb(object):
         }
 
     def check_perm(self, req, op):
-        for hook in permhooks:
-            hook(self, req, op)
+        for permhook in permhooks:
+            permhook(self, req, op)

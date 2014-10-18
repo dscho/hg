@@ -165,6 +165,48 @@ hg status -A:
   C .hgignore
   C modified
 
+  $ hg status -A -Tjson
+  [
+   {
+    "path": "added",
+    "status": "A"
+   },
+   {
+    "copy": "modified",
+    "path": "copied",
+    "status": "A"
+   },
+   {
+    "path": "removed",
+    "status": "R"
+   },
+   {
+    "path": "deleted",
+    "status": "!"
+   },
+   {
+    "path": "unknown",
+    "status": "?"
+   },
+   {
+    "path": "ignored",
+    "status": "I"
+   },
+   {
+    "path": ".hgignore",
+    "status": "C"
+   },
+   {
+    "path": "modified",
+    "status": "C"
+   }
+  ]
+
+  $ hg status -A -Tpickle > pickle
+  >>> import pickle
+  >>> print sorted((x['status'], x['path']) for x in pickle.load(open("pickle")))
+  [('!', 'deleted'), ('?', 'pickle'), ('?', 'unknown'), ('A', 'added'), ('A', 'copied'), ('C', '.hgignore'), ('C', 'modified'), ('I', 'ignored'), ('R', 'removed')]
+  $ rm pickle
 
   $ echo "^ignoreddir$" > .hgignore
   $ mkdir ignoreddir
@@ -280,19 +322,6 @@ hg status -A --change 1 and revset:
   R removed
   C deleted
 
-status against non-parent with unknown file (issue4321)
-
-  $ touch unknown
-  $ hg status --rev 0 unknown
-  ? unknown
-
-status of removed but existing in working directory.  "? removed" should
-not be included:
-
-  $ touch removed
-  $ hg status --rev 0 removed
-  R removed
-
   $ cd ..
 
 hg status of binary file starting with '\1\n', a separator for metadata:
@@ -349,6 +378,11 @@ warning message about such pattern.
   R 1/2/3/4/5/b.txt
   $ hg status -A --rev 1 1
   R 1/2/3/4/5/b.txt
+
+  $ hg status --config ui.formatdebug=True --rev 1 1
+  status = [
+      {*'path': '1/2/3/4/5/b.txt'*}, (glob)
+  ]
 
 #if windows
   $ hg --config ui.slash=false status -A --rev 1 1

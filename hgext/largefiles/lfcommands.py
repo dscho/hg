@@ -146,7 +146,7 @@ def _addchangeset(ui, rsrc, rdst, ctx, revmap):
             try:
                 fctx = ctx.filectx(lfutil.standin(f))
             except error.LookupError:
-                raise IOError
+                return None
             renamed = fctx.renamed()
             if renamed:
                 renamed = lfutil.splitstandin(renamed[0])
@@ -248,7 +248,7 @@ def _lfconvert_addchangeset(rsrc, rdst, ctx, revmap, lfiles, normalfiles,
             try:
                 fctx = ctx.filectx(srcfname)
             except error.LookupError:
-                raise IOError
+                return None
             renamed = fctx.renamed()
             if renamed:
                 # standin is always a largefile because largefile-ness
@@ -298,7 +298,7 @@ def _getnormalcontext(repo, ctx, f, revmap):
     try:
         fctx = ctx.filectx(f)
     except error.LookupError:
-        raise IOError
+        return None
     renamed = fctx.renamed()
     if renamed:
         renamed = renamed[0]
@@ -443,6 +443,7 @@ def updatelfiles(ui, repo, filelist=None, printmessage=True,
         lfiles = set(lfutil.listlfiles(repo)) | set(lfdirstate)
 
         if filelist is not None:
+            filelist = set(filelist)
             lfiles = [f for f in lfiles if f in filelist]
 
         update = {}
@@ -510,26 +511,20 @@ def updatelfiles(ui, repo, filelist=None, printmessage=True,
 
             updated += update1
 
-            standin = lfutil.standin(lfile)
-            if standin in repo.dirstate:
-                stat = repo.dirstate._map[standin]
-                state, mtime = stat[0], stat[3]
-            else:
-                state, mtime = '?', -1
-            if state == 'n':
-                if normallookup or mtime < 0:
-                    # state 'n' doesn't ensure 'clean' in this case
-                    lfdirstate.normallookup(lfile)
-                else:
-                    lfdirstate.normal(lfile)
-            elif state == 'm':
-                lfdirstate.normallookup(lfile)
-            elif state == 'r':
-                lfdirstate.remove(lfile)
-            elif state == 'a':
-                lfdirstate.add(lfile)
-            elif state == '?':
-                lfdirstate.drop(lfile)
+            lfutil.synclfdirstate(repo, lfdirstate, lfile, normallookup)
+
+        if filelist is not None:
+            # If "local largefile" is chosen at file merging, it is
+            # not listed in "filelist" (= dirstate syncing is
+            # omitted), because the standin file is not changed before and
+            # after merging.
+            # But the status of such files may have to be changed by
+            # merging. For example, locally modified ("M") largefile
+            # has to become re-added("A"), if it is "normal" file in
+            # the target revision of linear-merging.
+            for lfile in lfdirstate:
+                if lfile not in filelist:
+                    lfutil.synclfdirstate(repo, lfdirstate, lfile, True)
 
         lfdirstate.write()
         if printmessage and lfiles:

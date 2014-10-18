@@ -1,4 +1,4 @@
-  $ "$TESTDIR/hghave" p4 execbit symlink || exit 80
+#require p4 execbit symlink
 
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "convert = " >> $HGRCPATH
@@ -8,7 +8,7 @@ create p4 depot
   $ P4AUDIT=$P4ROOT/audit; export P4AUDIT
   $ P4JOURNAL=$P4ROOT/journal; export P4JOURNAL
   $ P4LOG=$P4ROOT/log; export P4LOG
-  $ P4PORT=localhost:16661; export P4PORT
+  $ P4PORT=localhost:$HGPORT; export P4PORT
   $ P4DEBUG=1; export P4DEBUG
   $ P4CHARSET=utf8; export P4CHARSET
 
@@ -52,7 +52,7 @@ not testing these
   >          p4 add -t $T file_$T2
   >          ;;
   >       binary*)
-  >          python -c "file('file_$T2', 'wb').write('this is $T')"
+  >          $PYTHON -c "file('file_$T2', 'wb').write('this is $T')"
   >          p4 add -t $T file_$T2
   >          ;;
   >       *)

@@ -13,7 +13,8 @@ This contains helper routines that are independent of the SCM core and
 hide platform-specific details from the core.
 """
 
-from i18n import _
+import i18n
+_ = i18n._
 import error, osutil, encoding
 import errno, shutil, sys, tempfile, traceback
 import re as remod
@@ -53,6 +54,7 @@ pconvert = platform.pconvert
 popen = platform.popen
 posixfile = platform.posixfile
 quotecommand = platform.quotecommand
+readpipe = platform.readpipe
 rename = platform.rename
 samedevice = platform.samedevice
 samefile = platform.samefile
@@ -105,6 +107,112 @@ def _fastsha1(s=''):
     global _fastsha1, sha1
     _fastsha1 = sha1 = _sha1
     return _sha1(s)
+
+def md5(s=''):
+    try:
+        from hashlib import md5 as _md5
+    except ImportError:
+        from md5 import md5 as _md5
+    global md5
+    md5 = _md5
+    return _md5(s)
+
+DIGESTS = {
+    'md5': md5,
+    'sha1': sha1,
+}
+# List of digest types from strongest to weakest
+DIGESTS_BY_STRENGTH = ['sha1', 'md5']
+
+try:
+    import hashlib
+    DIGESTS.update({
+        'sha512': hashlib.sha512,
+    })
+    DIGESTS_BY_STRENGTH.insert(0, 'sha512')
+except ImportError:
+    pass
+
+for k in DIGESTS_BY_STRENGTH:
+    assert k in DIGESTS
+
+class digester(object):
+    """helper to compute digests.
+
+    This helper can be used to compute one or more digests given their name.
+
+    >>> d = digester(['md5', 'sha1'])
+    >>> d.update('foo')
+    >>> [k for k in sorted(d)]
+    ['md5', 'sha1']
+    >>> d['md5']
+    'acbd18db4cc2f85cedef654fccc4a4d8'
+    >>> d['sha1']
+    '0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33'
+    >>> digester.preferred(['md5', 'sha1'])
+    'sha1'
+    """
+
+    def __init__(self, digests, s=''):
+        self._hashes = {}
+        for k in digests:
+            if k not in DIGESTS:
+                raise Abort(_('unknown digest type: %s') % k)
+            self._hashes[k] = DIGESTS[k]()
+        if s:
+            self.update(s)
+
+    def update(self, data):
+        for h in self._hashes.values():
+            h.update(data)
+
+    def __getitem__(self, key):
+        if key not in DIGESTS:
+            raise Abort(_('unknown digest type: %s') % k)
+        return self._hashes[key].hexdigest()
+
+    def __iter__(self):
+        return iter(self._hashes)
+
+    @staticmethod
+    def preferred(supported):
+        """returns the strongest digest type in both supported and DIGESTS."""
+
+        for k in DIGESTS_BY_STRENGTH:
+            if k in supported:
+                return k
+        return None
+
+class digestchecker(object):
+    """file handle wrapper that additionally checks content against a given
+    size and digests.
+
+        d = digestchecker(fh, size, {'md5': '...'})
+
+    When multiple digests are given, all of them are validated.
+    """
+
+    def __init__(self, fh, size, digests):
+        self._fh = fh
+        self._size = size
+        self._got = 0
+        self._digests = dict(digests)
+        self._digester = digester(self._digests.keys())
+
+    def read(self, length=-1):
+        content = self._fh.read(length)
+        self._digester.update(content)
+        self._got += len(content)
+        return content
+
+    def validate(self):
+        if self._size != self._got:
+            raise Abort(_('size mismatch: expected %d, got %d') %
+                (self._size, self._got))
+        for k, v in self._digests.items():
+            if v != self._digester[k]:
+                raise Abort(_('%s mismatch: expected %s, got %s') %
+                    (k, v, self._digester[k]))
 
 try:
     buffer = buffer
@@ -250,6 +358,12 @@ class sortdict(dict):
     def __delitem__(self, key):
         dict.__delitem__(self, key)
         self._list.remove(key)
+    def pop(self, key, *args, **kwargs):
+        dict.pop(self, key, *args, **kwargs)
+        try:
+            self._list.remove(key)
+        except ValueError:
+            pass
     def keys(self):
         return self._list
     def iterkeys(self):
@@ -449,8 +563,6 @@ def pathto(root, n1, n2):
     b.reverse()
     return os.sep.join((['..'] * len(a)) + b) or '.'
 
-_hgexecutable = None
-
 def mainfrozen():
     """return True if we are a frozen executable.
 
@@ -460,6 +572,17 @@ def mainfrozen():
     return (safehasattr(sys, "frozen") or # new py2exe
             safehasattr(sys, "importers") or # old py2exe
             imp.is_frozen("__main__")) # tools/freeze
+
+# the location of data files matching the source code
+if mainfrozen():
+    # executable version (py2exe) doesn't support __file__
+    datapath = os.path.dirname(sys.executable)
+else:
+    datapath = os.path.dirname(__file__)
+
+i18n.setdatapath(datapath)
+
+_hgexecutable = None
 
 def hgexecutable():
     """return location of the 'hg' executable.
@@ -526,7 +649,10 @@ def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None, out=None):
             proc = subprocess.Popen(cmd, shell=True, close_fds=closefds,
                                     env=env, cwd=cwd, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT)
-            for line in proc.stdout:
+            while True:
+                line = proc.stdout.readline()
+                if not line:
+                    break
                 out.write(line)
             proc.wait()
             rc = proc.returncode

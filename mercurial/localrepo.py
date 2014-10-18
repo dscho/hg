@@ -109,7 +109,7 @@ class localpeer(peer.peerrepository):
                   format='HG10', **kwargs):
         cg = exchange.getbundle(self._repo, source, heads=heads,
                                 common=common, bundlecaps=bundlecaps, **kwargs)
-        if bundlecaps is not None and 'HG2X' in bundlecaps:
+        if bundlecaps is not None and 'HG2Y' in bundlecaps:
             # When requesting a bundle2, getbundle returns a stream to make the
             # wire level function happier. We need to build a proper object
             # from it in local peer.
@@ -179,10 +179,6 @@ class localrepository(object):
     openerreqs = set(('revlogv1', 'generaldelta'))
     requirements = ['revlogv1']
     filtername = None
-
-    bundle2caps = {'HG2X': (),
-                   'b2x:listkeys': (),
-                   'b2x:pushkey': ()}
 
     # a list of (ui, featureset) functions.
     # only functions defined in module of enabled extensions are invoked
@@ -309,7 +305,7 @@ class localrepository(object):
         # required by the tests (or some brave tester)
         if self.ui.configbool('experimental', 'bundle2-exp', False):
             caps = set(caps)
-            capsblob = bundle2.encodecaps(self.bundle2caps)
+            capsblob = bundle2.encodecaps(bundle2.getrepocaps(self))
             caps.add('bundle2-exp=' + urllib.quote(capsblob))
         return caps
 
@@ -404,8 +400,16 @@ class localrepository(object):
 
     @storecache('obsstore')
     def obsstore(self):
-        store = obsolete.obsstore(self.sopener)
-        if store and not obsolete._enabled:
+        # read default format for new obsstore.
+        defaultformat = self.ui.configint('format', 'obsstore-version', None)
+        # rely on obsstore class default when possible.
+        kwargs = {}
+        if defaultformat is not None:
+            kwargs['defaultformat'] = defaultformat
+        readonly = not obsolete.isenabled(self, obsolete.createmarkersopt)
+        store = obsolete.obsstore(self.sopener, readonly=readonly,
+                                  **kwargs)
+        if store and readonly:
             # message is rare enough to not be translated
             msg = 'obsolete feature not enabled but %i markers found!\n'
             self.ui.warn(msg % len(list(store)))
@@ -578,10 +582,10 @@ class localrepository(object):
         date: date tuple to use if committing'''
 
         if not local:
-            for x in self.status()[:5]:
-                if '.hgtags' in x:
-                    raise util.Abort(_('working copy of .hgtags is changed '
-                                       '(please commit .hgtags manually)'))
+            m = matchmod.exact(self.root, '', ['.hgtags'])
+            if util.any(self.status(match=m, unknown=True, ignored=True)):
+                raise util.Abort(_('working copy of .hgtags is changed'),
+                                 hint=_('please commit .hgtags manually'))
 
         self.tags() # instantiate the cache
         self._tag(names, node, message, local, user, date, editor=editor)
@@ -674,8 +678,7 @@ class localrepository(object):
         if not self._tagscache.tagslist:
             l = []
             for t, n in self.tags().iteritems():
-                r = self.changelog.rev(n)
-                l.append((r, t, n))
+                l.append((self.changelog.rev(n), t, n))
             self._tagscache.tagslist = [(t, n) for r, t, n in sorted(l)]
 
         return self._tagscache.tagslist
@@ -744,11 +747,11 @@ class localrepository(object):
         # if publishing we can't copy if there is filtered content
         return not self.filtered('visible').changelog.filteredrevs
 
-    def join(self, f):
-        return os.path.join(self.path, f)
+    def join(self, f, *insidef):
+        return os.path.join(self.path, f, *insidef)
 
-    def wjoin(self, f):
-        return os.path.join(self.root, f)
+    def wjoin(self, f, *insidef):
+        return os.path.join(self.root, f, *insidef)
 
     def file(self, f):
         if f[0] == '/':
@@ -763,6 +766,7 @@ class localrepository(object):
         return self[changeid].parents()
 
     def setparents(self, p1, p2=nullid):
+        self.dirstate.beginparentchange()
         copies = self.dirstate.setparents(p1, p2)
         pctx = self[p1]
         if copies:
@@ -776,6 +780,7 @@ class localrepository(object):
             for f, s in sorted(self.dirstate.copies().items()):
                 if f not in pctx and s not in pctx:
                     self.dirstate.copy(None, f)
+        self.dirstate.endparentchange()
 
     def filectx(self, path, changeid=None, fileid=None):
         """changeid can be a changeset revision, node, or tag.
@@ -1087,8 +1092,6 @@ class localrepository(object):
             return l
 
         def unlock():
-            if hasunfilteredcache(self, '_phasecache'):
-                self._phasecache.write()
             for k, ce in self._filecache.items():
                 if k == 'dirstate' or k not in self.__dict__:
                     continue
@@ -1109,7 +1112,11 @@ class localrepository(object):
             return l
 
         def unlock():
-            self.dirstate.write()
+            if self.dirstate.pendingparentchange():
+                self.dirstate.invalidate()
+            else:
+                self.dirstate.write()
+
             self._filecache['dirstate'].refresh()
 
         l = self._lock(self.vfs, "wlock", wait, unlock,
@@ -1230,9 +1237,9 @@ class localrepository(object):
                 raise util.Abort(_('cannot partially commit a merge '
                                    '(do not specify files or patterns)'))
 
-            changes = self.status(match=match, clean=force)
+            status = self.status(match=match, clean=force)
             if force:
-                changes[0].extend(changes[6]) # mq may commit unchanged files
+                status.modified.extend(status.clean) # mq may commit clean files
 
             # check subrepos
             subs = []
@@ -1241,7 +1248,7 @@ class localrepository(object):
             # only manage subrepos and .hgsubstate if .hgsub is present
             if '.hgsub' in wctx:
                 # we'll decide whether to track this ourselves, thanks
-                for c in changes[:3]:
+                for c in status.modified, status.added, status.removed:
                     if '.hgsubstate' in c:
                         c.remove('.hgsubstate')
 
@@ -1279,23 +1286,24 @@ class localrepository(object):
                         '.hgsub' in (wctx.modified() + wctx.added())):
                         raise util.Abort(
                             _("can't commit subrepos without .hgsub"))
-                    changes[0].insert(0, '.hgsubstate')
+                    status.modified.insert(0, '.hgsubstate')
 
-            elif '.hgsub' in changes[2]:
+            elif '.hgsub' in status.removed:
                 # clean up .hgsubstate when .hgsub is removed
                 if ('.hgsubstate' in wctx and
-                    '.hgsubstate' not in changes[0] + changes[1] + changes[2]):
-                    changes[2].insert(0, '.hgsubstate')
+                    '.hgsubstate' not in (status.modified + status.added +
+                                          status.removed)):
+                    status.removed.insert(0, '.hgsubstate')
 
             # make sure all explicit patterns are matched
             if not force and match.files():
-                matched = set(changes[0] + changes[1] + changes[2])
+                matched = set(status.modified + status.added + status.removed)
 
                 for f in match.files():
                     f = self.dirstate.normalize(f)
                     if f == '.' or f in matched or f in wctx.substate:
                         continue
-                    if f in changes[3]: # missing
+                    if f in status.deleted:
                         fail(f, _('file not found!'))
                     if f in vdirs: # visited directory
                         d = f + '/'
@@ -1307,7 +1315,7 @@ class localrepository(object):
                     elif f not in self.dirstate:
                         fail(f, _("file not tracked!"))
 
-            cctx = context.workingctx(self, text, user, date, extra, changes)
+            cctx = context.workingctx(self, text, user, date, extra, status)
 
             if (not force and not extra.get("close") and not merge
                 and not cctx.files()
@@ -1318,7 +1326,7 @@ class localrepository(object):
                 raise util.Abort(_("cannot commit merge with missing files"))
 
             ms = mergemod.mergestate(self)
-            for f in changes[0]:
+            for f in status.modified:
                 if f in ms and ms[f] == 'u':
                     raise util.Abort(_("unresolved merge conflicts "
                                        "(see hg help resolve)"))
@@ -1372,8 +1380,7 @@ class localrepository(object):
         Revision information is passed via the context argument.
         """
 
-        tr = lock = None
-        removed = list(ctx.removed())
+        tr = None
         p1, p2 = ctx.p1(), ctx.p2()
         user = ctx.user()
 
@@ -1383,20 +1390,26 @@ class localrepository(object):
             trp = weakref.proxy(tr)
 
             if ctx.files():
-                m1 = p1.manifest().copy()
+                m1 = p1.manifest()
                 m2 = p2.manifest()
+                m = m1.copy()
 
                 # check in files
-                new = {}
+                added = []
                 changed = []
+                removed = list(ctx.removed())
                 linkrev = len(self)
                 for f in sorted(ctx.modified() + ctx.added()):
                     self.ui.note(f + "\n")
                     try:
                         fctx = ctx[f]
-                        new[f] = self._filecommit(fctx, m1, m2, linkrev, trp,
-                                                  changed)
-                        m1.set(f, fctx.flags())
+                        if fctx is None:
+                            removed.append(f)
+                        else:
+                            added.append(f)
+                            m[f] = self._filecommit(fctx, m1, m2, linkrev,
+                                                    trp, changed)
+                            m.setflag(f, fctx.flags())
                     except OSError, inst:
                         self.ui.warn(_("trouble committing %s!\n") % f)
                         raise
@@ -1404,18 +1417,16 @@ class localrepository(object):
                         errcode = getattr(inst, 'errno', errno.ENOENT)
                         if error or errcode and errcode != errno.ENOENT:
                             self.ui.warn(_("trouble committing %s!\n") % f)
-                            raise
-                        else:
-                            removed.append(f)
+                        raise
 
                 # update manifest
-                m1.update(new)
                 removed = [f for f in sorted(removed) if f in m1 or f in m2]
-                drop = [f for f in removed if f in m1]
+                drop = [f for f in removed if f in m]
                 for f in drop:
-                    del m1[f]
-                mn = self.manifest.add(m1, trp, linkrev, p1.manifestnode(),
-                                       p2.manifestnode(), (new, drop))
+                    del m[f]
+                mn = self.manifest.add(m, trp, linkrev,
+                                       p1.manifestnode(), p2.manifestnode(),
+                                       added, drop)
                 files = changed + removed
             else:
                 mn = p1.manifestnode()
@@ -1439,7 +1450,7 @@ class localrepository(object):
                 # be compliant anyway
                 #
                 # if minimal phase was 0 we don't need to retract anything
-                phases.retractboundary(self, targetphase, [n])
+                phases.retractboundary(self, tr, targetphase, [n])
             tr.close()
             branchmap.updatecache(self.filtered('served'))
             return n
@@ -1574,9 +1585,6 @@ class localrepository(object):
 
         return r
 
-    def pull(self, remote, heads=None, force=False):
-        return exchange.pull (self, remote, heads, force)
-
     def checkpush(self, pushop):
         """Extensions can override this function if additional checks have
         to be performed before pushing, or call it if they override push
@@ -1590,9 +1598,6 @@ class localrepository(object):
         functions, which are called before pushing changesets.
         """
         return util.hooks()
-
-    def push(self, remote, force=False, revs=None, newbranch=False):
-        return exchange.push(self, remote, force, revs, newbranch)
 
     def stream_in(self, remote, requirements):
         lock = self.lock()
@@ -1727,7 +1732,14 @@ class localrepository(object):
                 # if we support it, stream in and adjust our requirements
                 if not streamreqs - self.supportedformats:
                     return self.stream_in(remote, streamreqs)
-        return self.pull(remote, heads)
+
+        quiet = self.ui.backupconfig('ui', 'quietbookmarkmove')
+        try:
+            self.ui.setconfig('ui', 'quietbookmarkmove', True, 'clone')
+            ret = exchange.pull(self, remote, heads).cgresult
+        finally:
+            self.ui.restoreconfig(quiet)
+        return ret
 
     def pushkey(self, namespace, key, old, new):
         self.hook('prepushkey', throw=True, namespace=namespace, key=key,

@@ -17,6 +17,7 @@ Show all commands except debug commands
   copy
   diff
   export
+  files
   forget
   graft
   grep
@@ -88,6 +89,7 @@ Show debug commands if there are no other candidates
   debuginstall
   debugknown
   debuglabelcomplete
+  debuglocks
   debugobsolete
   debugpathcomplete
   debugpushkey
@@ -197,7 +199,7 @@ Show an error if we use --options with an ambiguous abbreviation
 Show all commands + options
   $ hg debugcommands
   add: include, exclude, subrepos, dry-run
-  annotate: rev, follow, no-follow, text, user, file, date, number, changeset, line-number, ignore-all-space, ignore-space-change, ignore-blank-lines, include, exclude
+  annotate: rev, follow, no-follow, text, user, file, date, number, changeset, line-number, ignore-all-space, ignore-space-change, ignore-blank-lines, include, exclude, template
   clone: noupdate, updaterev, rev, branch, pull, uncompressed, ssh, remotecmd, insecure
   commit: addremove, close-branch, amend, secret, edit, include, exclude, message, logfile, date, user, subrepos
   diff: rev, change, text, git, nodates, show-function, reverse, ignore-all-space, ignore-space-change, ignore-blank-lines, unified, stat, include, exclude, subrepos
@@ -210,16 +212,16 @@ Show all commands + options
   push: force, rev, bookmark, branch, new-branch, ssh, remotecmd, insecure
   remove: after, force, include, exclude
   serve: accesslog, daemon, daemon-pipefds, errorlog, port, address, prefix, name, web-conf, webdir-conf, pid-file, stdio, cmdserver, templates, style, ipv6, certificate
-  status: all, modified, added, removed, deleted, clean, unknown, ignored, no-status, copies, print0, rev, change, include, exclude, subrepos
+  status: all, modified, added, removed, deleted, clean, unknown, ignored, no-status, copies, print0, rev, change, include, exclude, subrepos, template
   summary: remote
   update: clean, check, date, rev, tool
   addremove: similarity, include, exclude, dry-run
   archive: no-decode, prefix, rev, type, subrepos, include, exclude
   backout: merge, parent, rev, edit, tool, include, exclude, message, logfile, date, user
   bisect: reset, good, bad, skip, extend, command, noupdate
-  bookmarks: force, rev, delete, rename, inactive
+  bookmarks: force, rev, delete, rename, inactive, template
   branch: force, clean
-  branches: active, closed
+  branches: active, closed, template
   bundle: force, rev, branch, base, all, type, ssh, remotecmd, insecure
   cat: output, rev, decode, include, exclude
   config: untrusted, edit, local, global
@@ -244,7 +246,8 @@ Show all commands + options
   debuginstall: 
   debugknown: 
   debuglabelcomplete: 
-  debugobsolete: flags, date, user
+  debuglocks: force-lock, force-wlock
+  debugobsolete: flags, record-parents, rev, date, user
   debugpathcomplete: full, normal, added, removed
   debugpushkey: 
   debugpvec: 
@@ -257,7 +260,8 @@ Show all commands + options
   debugsuccessorssets: 
   debugwalk: include, exclude
   debugwireargs: three, four, five, ssh, remotecmd, insecure
-  graft: rev, continue, edit, log, currentdate, currentuser, date, user, tool, dry-run
+  files: rev, print0, include, exclude, template
+  graft: rev, continue, edit, log, force, currentdate, currentuser, date, user, tool, dry-run
   grep: print0, all, text, follow, ignore-case, files-with-matches, line-number, rev, user, date, include, exclude
   heads: rev, topo, active, closed, style, template
   help: extension, command, keyword
@@ -265,7 +269,7 @@ Show all commands + options
   import: strip, base, edit, force, no-commit, bypass, partial, exact, import-branch, message, logfile, date, user, similarity
   incoming: force, newest-first, bundle, rev, bookmarks, branch, patch, git, limit, no-merges, stat, graph, style, template, ssh, remotecmd, insecure, subrepos
   locate: rev, print0, fullpath, include, exclude
-  manifest: rev, all
+  manifest: rev, all, template
   outgoing: force, rev, newest-first, bookmarks, branch, patch, git, limit, no-merges, stat, graph, style, template, ssh, remotecmd, insecure, subrepos
   parents: rev, style, template
   paths: 
@@ -277,7 +281,7 @@ Show all commands + options
   rollback: dry-run, force
   root: 
   tag: force, local, rev, remove, edit, message, date, user
-  tags: 
+  tags: template
   tip: patch, git, style, template
   unbundle: update
   verify: 

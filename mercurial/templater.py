@@ -6,8 +6,9 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-import sys, os, re
+import os, re
 import util, config, templatefilters, templatekw, parser, error
+import revset as revsetmod
 import types
 import minirst
 
@@ -224,6 +225,23 @@ def date(context, mapping, args):
         return util.datestr(date, fmt)
     return util.datestr(date)
 
+def diff(context, mapping, args):
+    if len(args) > 2:
+        # i18n: "diff" is a keyword
+        raise error.ParseError(_("diff expects one, two or no arguments"))
+
+    def getpatterns(i):
+        if i < len(args):
+            s = args[i][1].strip()
+            if s:
+                return [s]
+        return []
+
+    ctx = mapping['ctx']
+    chunks = ctx.diff(match=ctx.match([], getpatterns(0), getpatterns(1)))
+
+    return ''.join(chunks)
+
 def fill(context, mapping, args):
     if not (1 <= len(args) <= 4):
         raise error.ParseError(_("fill expects one to four arguments"))
@@ -371,16 +389,20 @@ def revset(context, mapping, args):
     ctx = mapping['ctx']
     repo = ctx._repo
 
+    def query(expr):
+        m = revsetmod.match(repo.ui, expr)
+        return m(repo, revsetmod.spanset(repo))
+
     if len(args) > 1:
         formatargs = list([a[0](context, mapping, a[1]) for a in args[1:]])
-        revs = repo.revs(raw, *formatargs)
+        revs = query(revsetmod.formatspec(raw, *formatargs))
         revs = list([str(r) for r in revs])
     else:
         revsetcache = mapping['cache'].setdefault("revsetcache", {})
         if raw in revsetcache:
             revs = revsetcache[raw]
         else:
-            revs = repo.revs(raw)
+            revs = query(raw)
             revs = list([str(r) for r in revs])
             revsetcache[raw] = revs
 
@@ -512,6 +534,7 @@ methods = {
 
 funcs = {
     "date": date,
+    "diff": diff,
     "fill": fill,
     "get": get,
     "if": if_,
@@ -531,7 +554,6 @@ funcs = {
 
 # template engine
 
-path = ['templates', '../templates']
 stringify = templatefilters.stringify
 
 def _flatten(thing):
@@ -603,7 +625,7 @@ class engine(object):
 engines = {'default': engine}
 
 def stylelist():
-    paths = templatepath()
+    paths = templatepaths()
     if not paths:
         return _('no templates found, try `hg debuginstall` for more info')
     dirlist =  os.listdir(paths[0])
@@ -688,30 +710,20 @@ class templater(object):
                                            max=self.maxchunk)
         return stream
 
-def templatepath(name=None):
-    '''return location of template file or directory (if no name).
-    returns None if not found.'''
-    normpaths = []
+def templatepaths():
+    '''return locations used for template files.'''
+    pathsrel = ['templates']
+    paths = [os.path.normpath(os.path.join(util.datapath, f))
+             for f in pathsrel]
+    return [p for p in paths if os.path.isdir(p)]
 
-    # executable version (py2exe) doesn't support __file__
-    if util.mainfrozen():
-        module = sys.executable
-    else:
-        module = __file__
-    for f in path:
-        if f.startswith('/'):
-            p = f
-        else:
-            fl = f.split('/')
-            p = os.path.join(os.path.dirname(module), *fl)
-        if name:
-            p = os.path.join(p, name)
-        if name and os.path.exists(p):
-            return os.path.normpath(p)
-        elif os.path.isdir(p):
-            normpaths.append(os.path.normpath(p))
-
-    return normpaths
+def templatepath(name):
+    '''return location of template file. returns None if not found.'''
+    for p in templatepaths():
+        f = os.path.join(p, name)
+        if os.path.exists(f):
+            return f
+    return None
 
 def stylemap(styles, paths=None):
     """Return path to mapfile for a given style.
@@ -723,7 +735,7 @@ def stylemap(styles, paths=None):
     """
 
     if paths is None:
-        paths = templatepath()
+        paths = templatepaths()
     elif isinstance(paths, str):
         paths = [paths]
 

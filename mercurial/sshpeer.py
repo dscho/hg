@@ -52,7 +52,7 @@ class sshpeer(wireproto.wirepeer):
                 util.shellquote("%s init %s" %
                     (_serverquote(remotecmd), _serverquote(self.path))))
             ui.debug('running %s\n' % cmd)
-            res = util.system(cmd)
+            res = util.system(cmd, out=ui.fout)
             if res != 0:
                 self._abort(error.RepoError(_("could not create remote repo")))
 
@@ -103,13 +103,8 @@ class sshpeer(wireproto.wirepeer):
         return self._caps
 
     def readerr(self):
-        while True:
-            size = util.fstat(self.pipee).st_size
-            if size == 0:
-                break
-            s = self.pipee.read(size)
-            if not s:
-                break
+        s = util.readpipe(self.pipee)
+        if s:
             for l in s.splitlines():
                 self.ui.status(_("remote: "), l, '\n')
 

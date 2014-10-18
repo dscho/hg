@@ -62,8 +62,6 @@ def read(repo):
         partial = None
     return partial
 
-
-
 ### Nearest subset relation
 # Nearest subset of filter X is a filter Y so that:
 # * Y is included in X,
@@ -241,6 +239,10 @@ class branchcache(dict):
             newbranches.setdefault(branch, []).append(r)
             if closesbranch:
                 self._closednodes.add(cl.node(r))
+
+        # fetch current topological heads to speed up filtering
+        topoheads = set(cl.headrevs())
+
         # if older branchheads are reachable from new ones, they aren't
         # really branchheads. Note checking parents is insufficient:
         # 1 (branch a) -> 2 (branch b) -> 3 (branch a)
@@ -254,14 +256,13 @@ class branchcache(dict):
             newheadrevs.sort()
             bheadset.update(newheadrevs)
 
-            # This loop prunes out two kinds of heads - heads that are
-            # superseded by a head in newheadrevs, and newheadrevs that are not
-            # heads because an existing head is their descendant.
-            while newheadrevs:
-                latest = newheadrevs.pop()
-                if latest not in bheadset:
-                    continue
-                ancestors = set(cl.ancestors([latest], min(bheadset)))
+            # This prunes out two kinds of heads - heads that are superseded by
+            # a head in newheadrevs, and newheadrevs that are not heads because
+            # an existing head is their descendant.
+            uncertain = bheadset - topoheads
+            if uncertain:
+                floorrev = min(uncertain)
+                ancestors = set(cl.ancestors(newheadrevs, floorrev))
                 bheadset -= ancestors
             bheadrevs = sorted(bheadset)
             self[branch] = [cl.node(rev) for rev in bheadrevs]

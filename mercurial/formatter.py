@@ -5,6 +5,11 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+import cPickle
+from node import hex, short
+from i18n import _
+import encoding, util
+
 class baseformatter(object):
     def __init__(self, ui, topic, opts):
         self._ui = ui
@@ -12,7 +17,9 @@ class baseformatter(object):
         self._style = opts.get("style")
         self._template = opts.get("template")
         self._item = None
-    def __bool__(self):
+        # function to convert node to string suitable for this output
+        self.hexfunc = hex
+    def __nonzero__(self):
         '''return False if we're not doing real templating so we can
         skip extra work'''
         return True
@@ -47,7 +54,11 @@ class plainformatter(baseformatter):
     '''the default text output scheme'''
     def __init__(self, ui, topic, opts):
         baseformatter.__init__(self, ui, topic, opts)
-    def __bool__(self):
+        if ui.debugflag:
+            self.hexfunc = hex
+        else:
+            self.hexfunc = short
+    def __nonzero__(self):
         return False
     def startitem(self):
         pass
@@ -67,14 +78,71 @@ class plainformatter(baseformatter):
 class debugformatter(baseformatter):
     def __init__(self, ui, topic, opts):
         baseformatter.__init__(self, ui, topic, opts)
-        self._ui.write("%s = {\n" % self._topic)
+        self._ui.write("%s = [\n" % self._topic)
     def _showitem(self):
         self._ui.write("    " + repr(self._item) + ",\n")
     def end(self):
         baseformatter.end(self)
-        self._ui.write("}\n")
+        self._ui.write("]\n")
+
+class pickleformatter(baseformatter):
+    def __init__(self, ui, topic, opts):
+        baseformatter.__init__(self, ui, topic, opts)
+        self._data = []
+    def _showitem(self):
+        self._data.append(self._item)
+    def end(self):
+        baseformatter.end(self)
+        self._ui.write(cPickle.dumps(self._data))
+
+def _jsonifyobj(v):
+    if isinstance(v, tuple):
+        return '[' + ', '.join(_jsonifyobj(e) for e in v) + ']'
+    elif v is True:
+        return 'true'
+    elif v is False:
+        return 'false'
+    elif isinstance(v, (int, float)):
+        return str(v)
+    else:
+        return '"%s"' % encoding.jsonescape(v)
+
+class jsonformatter(baseformatter):
+    def __init__(self, ui, topic, opts):
+        baseformatter.__init__(self, ui, topic, opts)
+        self._ui.write("[")
+        self._ui._first = True
+    def _showitem(self):
+        if self._ui._first:
+            self._ui._first = False
+        else:
+            self._ui.write(",")
+
+        self._ui.write("\n {\n")
+        first = True
+        for k, v in sorted(self._item.items()):
+            if first:
+                first = False
+            else:
+                self._ui.write(",\n")
+            self._ui.write('  "%s": %s' % (k, _jsonifyobj(v)))
+        self._ui.write("\n }")
+    def end(self):
+        baseformatter.end(self)
+        self._ui.write("\n]\n")
 
 def formatter(ui, topic, opts):
-    if ui.configbool('ui', 'formatdebug'):
+    template = opts.get("template", "")
+    if template == "json":
+        return jsonformatter(ui, topic, opts)
+    elif template == "pickle":
+        return pickleformatter(ui, topic, opts)
+    elif template == "debug":
         return debugformatter(ui, topic, opts)
+    elif template != "":
+        raise util.Abort(_("custom templates not yet supported"))
+    elif ui.configbool('ui', 'formatdebug'):
+        return debugformatter(ui, topic, opts)
+    elif ui.configbool('ui', 'formatjson'):
+        return jsonformatter(ui, topic, opts)
     return plainformatter(ui, topic, opts)

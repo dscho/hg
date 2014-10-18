@@ -176,7 +176,6 @@
   0: [mq]: 1.patch - mary
   ==== qnew -U -m
   From: test
-  
   Three
   
   2: Three - test
@@ -185,7 +184,6 @@
   ==== qref
   adding 3
   From: test
-  
   Three
   
   diff -r ... 3
@@ -198,7 +196,6 @@
   0: [mq]: 1.patch - mary
   ==== qref -m
   From: test
-  
   Drei
   
   diff -r ... 3
@@ -211,7 +208,6 @@
   0: [mq]: 1.patch - mary
   ==== qref -u
   From: mary
-  
   Drei
   
   diff -r ... 3
@@ -224,7 +220,6 @@
   0: [mq]: 1.patch - mary
   ==== qref -u -m
   From: maria
-  
   Three (again)
   
   diff -r ... 3
@@ -275,8 +270,8 @@
   ==== hg qref
   adding 5
   # HG changeset patch
-  # Parent 
   # User johndoe
+  # Parent 
   
   diff -r ... 5
   --- /dev/null
@@ -290,8 +285,8 @@
   0: [mq]: 1.patch - mary
   ==== hg qref -U
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
   
   diff -r ... 5
   --- /dev/null
@@ -305,8 +300,8 @@
   0: [mq]: 1.patch - mary
   ==== hg qref -u
   # HG changeset patch
-  # Parent 
   # User johndeere
+  # Parent 
   
   diff -r ... 5
   --- /dev/null
@@ -404,14 +399,15 @@
   ==== init
   ==== qnew -U
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
+  
   0: [mq]: 1.patch - test
   ==== qref
   adding 1
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
   
   diff -r ... 1
   --- /dev/null
@@ -421,8 +417,8 @@
   0: [mq]: 1.patch - test
   ==== qref -u
   # HG changeset patch
-  # Parent 
   # User mary
+  # Parent 
   
   diff -r ... 1
   --- /dev/null
@@ -456,8 +452,8 @@
   0: [mq]: 1.patch - mary
   ==== qnew -U -m
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
   Three
   
   2: Three - test
@@ -466,8 +462,8 @@
   ==== qref
   adding 3
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
   Three
   
   diff -r ... 3
@@ -480,8 +476,8 @@
   0: [mq]: 1.patch - mary
   ==== qref -m
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
   Drei
   
   diff -r ... 3
@@ -494,8 +490,8 @@
   0: [mq]: 1.patch - mary
   ==== qref -u
   # HG changeset patch
-  # Parent 
   # User mary
+  # Parent 
   Drei
   
   diff -r ... 3
@@ -508,8 +504,8 @@
   0: [mq]: 1.patch - mary
   ==== qref -u -m
   # HG changeset patch
-  # Parent 
   # User maria
+  # Parent 
   Three (again)
   
   diff -r ... 3
@@ -564,8 +560,8 @@
   ==== hg qref
   adding 5
   # HG changeset patch
-  # Parent 
   # User johndoe
+  # Parent 
   
   diff -r ... 5
   --- /dev/null
@@ -579,8 +575,8 @@
   0: [mq]: 1.patch - mary
   ==== hg qref -U
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
   
   diff -r ... 5
   --- /dev/null
@@ -594,8 +590,8 @@
   0: [mq]: 1.patch - mary
   ==== hg qref -u
   # HG changeset patch
-  # Parent 
   # User johndeere
+  # Parent 
   
   diff -r ... 5
   --- /dev/null
@@ -688,14 +684,15 @@
   ==== init
   ==== qnew -U
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
+  
   0: [mq]: 1.patch - test
   ==== qref
   adding 1
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
   
   diff -r ... 1
   --- /dev/null
@@ -705,8 +702,8 @@
   0: [mq]: 1.patch - test
   ==== qref -u
   # HG changeset patch
-  # Parent 
   # User mary
+  # Parent 
   
   diff -r ... 1
   --- /dev/null
@@ -740,8 +737,8 @@
   0: [mq]: 1.patch - mary
   ==== qnew -U -m
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
   Three
   
   2: Three - test
@@ -750,8 +747,8 @@
   ==== qref
   adding 3
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
   Three
   
   diff -r ... 3
@@ -764,8 +761,8 @@
   0: [mq]: 1.patch - mary
   ==== qref -m
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
   Drei
   
   diff -r ... 3
@@ -778,8 +775,8 @@
   0: [mq]: 1.patch - mary
   ==== qref -u
   # HG changeset patch
-  # Parent 
   # User mary
+  # Parent 
   Drei
   
   diff -r ... 3
@@ -792,8 +789,8 @@
   0: [mq]: 1.patch - mary
   ==== qref -u -m
   # HG changeset patch
-  # Parent 
   # User maria
+  # Parent 
   Three (again)
   
   diff -r ... 3
@@ -848,8 +845,8 @@
   ==== hg qref
   adding 5
   # HG changeset patch
-  # Parent 
   # User johndoe
+  # Parent 
   
   diff -r ... 5
   --- /dev/null
@@ -863,8 +860,8 @@
   0: [mq]: 1.patch - mary
   ==== hg qref -U
   # HG changeset patch
-  # Parent 
   # User test
+  # Parent 
   
   diff -r ... 5
   --- /dev/null
@@ -878,8 +875,8 @@
   0: [mq]: 1.patch - mary
   ==== hg qref -u
   # HG changeset patch
-  # Parent 
   # User johndeere
+  # Parent 
   
   diff -r ... 5
   --- /dev/null

@@ -78,11 +78,51 @@ log on directory
   summary:     c
   
 
--f, directory
+-f, non-existent directory
 
   $ hg log -f dir
   abort: cannot follow file not in parent revision: "dir"
   [255]
+
+-f, directory
+
+  $ hg up -q 3
+  $ hg log -f dir
+  changeset:   2:f8954cd4dc1f
+  user:        test
+  date:        Thu Jan 01 00:00:03 1970 +0000
+  summary:     c
+  
+-f, directory with --patch
+
+  $ hg log -f dir -p
+  changeset:   2:f8954cd4dc1f
+  user:        test
+  date:        Thu Jan 01 00:00:03 1970 +0000
+  summary:     c
+  
+  diff -r d89b0a12d229 -r f8954cd4dc1f dir/b
+  --- /dev/null* (glob)
+  +++ b/dir/b* (glob)
+  @@ -0,0 +1,1 @@
+  +a
+  
+
+-f, pattern
+
+  $ hg log -f -I 'dir**' -p
+  changeset:   2:f8954cd4dc1f
+  user:        test
+  date:        Thu Jan 01 00:00:03 1970 +0000
+  summary:     c
+  
+  diff -r d89b0a12d229 -r f8954cd4dc1f dir/b
+  --- /dev/null* (glob)
+  +++ b/dir/b* (glob)
+  @@ -0,0 +1,1 @@
+  +a
+  
+  $ hg up -q 4
 
 -f, a wrong style
 
@@ -1337,12 +1377,10 @@ Diff here should be the same:
   
 enable obsolete to test hidden feature
 
-  $ cat > ${TESTTMP}/obs.py << EOF
-  > import mercurial.obsolete
-  > mercurial.obsolete._enabled = True
+  $ cat >> $HGRCPATH << EOF
+  > [experimental]
+  > evolution=createmarkers
   > EOF
-  $ echo '[extensions]' >> $HGRCPATH
-  $ echo "obs=${TESTTMP}/obs.py" >> $HGRCPATH
 
   $ hg log --template='{rev}:{node}\n'
   1:a765632148dc55d38c35c4f247c618701886cb2f
@@ -1355,7 +1393,8 @@ enable obsolete to test hidden feature
   1:a765632148dc55d38c35c4f247c618701886cb2f
   0:9f758d63dcde62d547ebfb08e1e7ee96535f2b05
   $ hg log -r a
-  abort: unknown revision 'a'!
+  abort: hidden revision 'a'!
+  (use --hidden to access hidden revisions)
   [255]
 
 test that parent prevent a changeset to be hidden

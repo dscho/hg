@@ -16,6 +16,9 @@ imports.
 class RevlogError(Exception):
     pass
 
+class FilteredIndexError(IndexError):
+    pass
+
 class LookupError(RevlogError, KeyError):
     def __init__(self, name, index, message):
         self.name = name
@@ -26,6 +29,9 @@ class LookupError(RevlogError, KeyError):
 
     def __str__(self):
         return RevlogError.__str__(self)
+
+class FilteredLookupError(LookupError):
+    pass
 
 class ManifestLookupError(LookupError):
     pass
@@ -43,13 +49,13 @@ class Abort(Exception):
         self.hint = kw.get('hint')
 
 class ConfigError(Abort):
-    'Exception raised when parsing config files'
+    """Exception raised when parsing config files"""
 
 class OutOfBandError(Exception):
-    'Exception raised when a remote repo reports failure'
+    """Exception raised when a remote repo reports failure"""
 
 class ParseError(Exception):
-    'Exception raised when parsing config files (msg[, pos])'
+    """Exception raised when parsing config files (msg[, pos])"""
 
 class RepoError(Exception):
     def __init__(self, *args, **kw):
@@ -57,6 +63,9 @@ class RepoError(Exception):
         self.hint = kw.get('hint')
 
 class RepoLookupError(RepoError):
+    pass
+
+class FilteredRepoLookupError(RepoLookupError):
     pass
 
 class CapabilityError(RepoError):
@@ -102,6 +111,7 @@ class PushRaced(RuntimeError):
 class BundleValueError(ValueError):
     """error raised when bundle2 cannot be processed"""
 
+class UnsupportedPartError(BundleValueError):
     def __init__(self, parttype=None, params=()):
         self.parttype = parttype
         self.params = params
@@ -117,3 +127,9 @@ class ReadOnlyPartError(RuntimeError):
     """error raised when code tries to alter a part being generated"""
     pass
 
+class CensoredNodeError(RevlogError):
+    """error raised when content verification fails on a censored node"""
+
+    def __init__(self, filename, node):
+        from node import short
+        RevlogError.__init__(self, '%s:%s' % (filename, short(node)))

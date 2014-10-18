@@ -23,6 +23,7 @@ Properties that are analyzed and synthesized include the following:
 - Probability of a commit being a merge
 - Probability of a newly added file being added to a new directory
 - Interarrival time, and time zone, of commits
+- Number of files in each directory
 
 A few obvious properties that are not currently handled realistically:
 
@@ -35,10 +36,10 @@ A few obvious properties that are not currently handled realistically:
 - Symlinks and binary files are ignored
 '''
 
-import bisect, collections, json, os, random, time, sys
+import bisect, collections, itertools, json, os, random, time, sys
 from mercurial import cmdutil, context, patch, scmutil, util, hg
 from mercurial.i18n import _
-from mercurial.node import nullrev, nullid
+from mercurial.node import nullrev, nullid, short
 
 testedwith = 'internal'
 
@@ -81,21 +82,25 @@ def parsegitdiff(lines):
         yield filename, mar, lineadd, lineremove, binary
 
 @command('analyze',
-         [('o', 'output', [], _('write output to given file'), _('FILE')),
+         [('o', 'output', '', _('write output to given file'), _('FILE')),
           ('r', 'rev', [], _('analyze specified revisions'), _('REV'))],
-         _('hg analyze'))
+         _('hg analyze'), optionalrepo=True)
 def analyze(ui, repo, *revs, **opts):
     '''create a simple model of a repository to use for later synthesis
 
     This command examines every changeset in the given range (or all
     of history if none are specified) and creates a simple statistical
-    model of the history of the repository.
+    model of the history of the repository. It also measures the directory
+    structure of the repository as checked out.
 
     The model is written out to a JSON file, and can be used by
     :hg:`synthesize` to create or augment a repository with synthetic
     commits that have a structure that is statistically similar to the
     analyzed repository.
     '''
+    root = repo.root
+    if not root.endswith(os.path.sep):
+        root += os.path.sep
 
     revs = list(revs)
     revs.extend(opts['rev'])
@@ -104,15 +109,24 @@ def analyze(ui, repo, *revs, **opts):
 
     output = opts['output']
     if not output:
-        output = os.path.basename(repo.root) + '.json'
+        output = os.path.basename(root) + '.json'
 
     if output == '-':
         fp = sys.stdout
     else:
         fp = open(output, 'w')
 
-    revs = scmutil.revrange(repo, revs)
-    revs.sort()
+    # Always obtain file counts of each directory in the given root directory.
+    def onerror(e):
+        ui.warn(_('error walking directory structure: %s\n') % e)
+
+    dirs = {}
+    rootprefixlen = len(root)
+    for dirpath, dirnames, filenames in os.walk(root, onerror=onerror):
+        dirpathfromroot = dirpath[rootprefixlen:]
+        dirs[dirpathfromroot] = len(filenames)
+        if '.hg' in dirnames:
+            dirnames.remove('.hg')
 
     lineschanged = zerodict()
     children = zerodict()
@@ -128,55 +142,61 @@ def analyze(ui, repo, *revs, **opts):
     dirsadded = zerodict()
     tzoffset = zerodict()
 
-    progress = ui.progress
-    _analyzing = _('analyzing')
-    _changesets = _('changesets')
-    _total = len(revs)
+    # If a mercurial repo is available, also model the commit history.
+    if repo:
+        revs = scmutil.revrange(repo, revs)
+        revs.sort()
 
-    for i, rev in enumerate(revs):
-        progress(_analyzing, i, unit=_changesets, total=_total)
-        ctx = repo[rev]
-        pl = ctx.parents()
-        pctx = pl[0]
-        prev = pctx.rev()
-        children[prev] += 1
-        p1distance[rev - prev] += 1
-        parents[len(pl)] += 1
-        tzoffset[ctx.date()[1]] += 1
-        if len(pl) > 1:
-            p2distance[rev - pl[1].rev()] += 1
-        if prev == rev - 1:
-            lastctx = pctx
-        else:
-            lastctx = repo[rev - 1]
-        if lastctx.rev() != nullrev:
-            interarrival[roundto(ctx.date()[0] - lastctx.date()[0], 300)] += 1
-        diff = sum((d.splitlines()
-                    for d in ctx.diff(pctx, opts={'git': True})), [])
-        fileadds, diradds, fileremoves, filechanges = 0, 0, 0, 0
-        for filename, mar, lineadd, lineremove, binary in parsegitdiff(diff):
-            if binary:
-                continue
-            added = sum(lineadd.itervalues(), 0)
-            if mar == 'm':
-                if added and lineremove:
-                    lineschanged[roundto(added, 5), roundto(lineremove, 5)] += 1
-                    filechanges += 1
-            elif mar == 'a':
-                fileadds += 1
-                if '/' in filename:
-                    filedir = filename.rsplit('/', 1)[0]
-                    if filedir not in pctx.dirs():
-                        diradds += 1
-                linesinfilesadded[roundto(added, 5)] += 1
-            elif mar == 'r':
-                fileremoves += 1
-            for length, count in lineadd.iteritems():
-                linelengths[length] += count
-        fileschanged[filechanges] += 1
-        filesadded[fileadds] += 1
-        dirsadded[diradds] += 1
-        filesremoved[fileremoves] += 1
+        progress = ui.progress
+        _analyzing = _('analyzing')
+        _changesets = _('changesets')
+        _total = len(revs)
+
+        for i, rev in enumerate(revs):
+            progress(_analyzing, i, unit=_changesets, total=_total)
+            ctx = repo[rev]
+            pl = ctx.parents()
+            pctx = pl[0]
+            prev = pctx.rev()
+            children[prev] += 1
+            p1distance[rev - prev] += 1
+            parents[len(pl)] += 1
+            tzoffset[ctx.date()[1]] += 1
+            if len(pl) > 1:
+                p2distance[rev - pl[1].rev()] += 1
+            if prev == rev - 1:
+                lastctx = pctx
+            else:
+                lastctx = repo[rev - 1]
+            if lastctx.rev() != nullrev:
+                timedelta = ctx.date()[0] - lastctx.date()[0]
+                interarrival[roundto(timedelta, 300)] += 1
+            diff = sum((d.splitlines() for d in ctx.diff(pctx, git=True)), [])
+            fileadds, diradds, fileremoves, filechanges = 0, 0, 0, 0
+            for filename, mar, lineadd, lineremove, isbin in parsegitdiff(diff):
+                if isbin:
+                    continue
+                added = sum(lineadd.itervalues(), 0)
+                if mar == 'm':
+                    if added and lineremove:
+                        lineschanged[roundto(added, 5),
+                                     roundto(lineremove, 5)] += 1
+                        filechanges += 1
+                elif mar == 'a':
+                    fileadds += 1
+                    if '/' in filename:
+                        filedir = filename.rsplit('/', 1)[0]
+                        if filedir not in pctx.dirs():
+                            diradds += 1
+                    linesinfilesadded[roundto(added, 5)] += 1
+                elif mar == 'r':
+                    fileremoves += 1
+                for length, count in lineadd.iteritems():
+                    linelengths[length] += count
+            fileschanged[filechanges] += 1
+            filesadded[fileadds] += 1
+            dirsadded[diradds] += 1
+            filesremoved[fileremoves] += 1
 
     invchildren = zerodict()
 
@@ -190,6 +210,7 @@ def analyze(ui, repo, *revs, **opts):
         return sorted(d.iteritems(), key=lambda x: x[1], reverse=True)
 
     json.dump({'revs': len(revs),
+               'initdirs': pronk(dirs),
                'lineschanged': pronk(lineschanged),
                'children': pronk(invchildren),
                'fileschanged': pronk(fileschanged),
@@ -209,14 +230,17 @@ def analyze(ui, repo, *revs, **opts):
 
 @command('synthesize',
          [('c', 'count', 0, _('create given number of commits'), _('COUNT')),
-          ('', 'dict', '', _('path to a dictionary of words'), _('FILE'))],
+          ('', 'dict', '', _('path to a dictionary of words'), _('FILE')),
+          ('', 'initfiles', 0, _('initial file count to create'), _('COUNT'))],
          _('hg synthesize [OPTION].. DESCFILE'))
 def synthesize(ui, repo, descpath, **opts):
     '''synthesize commits based on a model of an existing repository
 
     The model must have been generated by :hg:`analyze`. Commits will
     be generated randomly according to the probabilities described in
-    the model.
+    the model. If --initfiles is set, the repository will be seeded with
+    the given number files following the modeled repository's directory
+    structure.
 
     When synthesizing new content, commit descriptions, and user
     names, words will be chosen randomly from a dictionary that is
@@ -262,8 +286,18 @@ def synthesize(ui, repo, descpath, **opts):
     words = fp.read().splitlines()
     fp.close()
 
+    initdirs = {}
+    if desc['initdirs']:
+        for k, v in desc['initdirs']:
+            initdirs[k.encode('utf-8').replace('.hg', '_hg')] = v
+        initdirs = renamedirs(initdirs, words)
+    initdirscdf = cdf(initdirs)
+
     def pick(cdf):
         return cdf[0][bisect.bisect_left(cdf[1], random.random())]
+
+    def pickpath():
+        return os.path.join(pick(initdirscdf), random.choice(words))
 
     def makeline(minimum=0):
         total = max(minimum, pick(linelengths))
@@ -281,8 +315,38 @@ def synthesize(ui, repo, descpath, **opts):
 
     progress = ui.progress
     _synthesizing = _('synthesizing')
+    _files = _('initial files')
     _changesets = _('changesets')
 
+    # Synthesize a single initial revision adding files to the repo according
+    # to the modeled directory structure.
+    initcount = int(opts['initfiles'])
+    if initcount and initdirs:
+        pctx = repo[None].parents()[0]
+        files = {}
+        for i in xrange(0, initcount):
+            ui.progress(_synthesizing, i, unit=_files, total=initcount)
+
+            path = pickpath()
+            while path in pctx.dirs():
+                path = pickpath()
+            data = '%s contents\n' % path
+            files[path] = context.memfilectx(repo, path, data)
+
+        def filectxfn(repo, memctx, path):
+            return files[path]
+
+        ui.progress(_synthesizing, None)
+        message = 'synthesized wide repo with %d files' % (len(files),)
+        mc = context.memctx(repo, [pctx.node(), nullid], message,
+                            files.iterkeys(), filectxfn, ui.username(),
+                            '%d %d' % util.makedate())
+        initnode = mc.commit()
+        hexfn = ui.debugflag and hex or short
+        ui.status(_('added commit %s with %d files\n')
+                  % (hexfn(initnode), len(files)))
+
+    # Synthesize incremental revisions to the repository, adding repo depth.
     count = int(opts['count'])
     heads = set(map(repo.changelog.rev, repo.heads()))
     for i in xrange(count):
@@ -307,7 +371,8 @@ def synthesize(ui, repo, descpath, **opts):
 
         # the number of heads will grow without bound if we use a pure
         # model, so artificially constrain their proliferation
-        if pick(parents) == 2 or len(heads) > random.randint(1, 20):
+        toomanyheads = len(heads) > random.randint(1, 20)
+        if p2distance[0] and (pick(parents) == 2 or toomanyheads):
             r2, p2 = pickhead(heads.difference([r1]), p2distance)
         else:
             r2, p2 = nullrev, nullid
@@ -356,10 +421,7 @@ def synthesize(ui, repo, descpath, **opts):
                              for __ in xrange(pick(linesinfilesadded))) + '\n'
             changes[path] = context.memfilectx(repo, path, data)
         def filectxfn(repo, memctx, path):
-            data = changes[path]
-            if data is None:
-                raise IOError
-            return data
+            return changes[path]
         if not changes:
             continue
         if revs:
@@ -377,3 +439,26 @@ def synthesize(ui, repo, descpath, **opts):
 
     lock.release()
     wlock.release()
+
+def renamedirs(dirs, words):
+    '''Randomly rename the directory names in the per-dir file count dict.'''
+    wordgen = itertools.cycle(words)
+    replacements = {'': ''}
+    def rename(dirpath):
+        '''Recursively rename the directory and all path prefixes.
+
+        The mapping from path to renamed path is stored for all path prefixes
+        as in dynamic programming, ensuring linear runtime and consistent
+        renaming regardless of iteration order through the model.
+        '''
+        if dirpath in replacements:
+            return replacements[dirpath]
+        head, _ = os.path.split(dirpath)
+        head = head and rename(head) or ''
+        renamed = os.path.join(head, wordgen.next())
+        replacements[dirpath] = renamed
+        return renamed
+    result = []
+    for dirpath, count in dirs.iteritems():
+        result.append([rename(dirpath.lstrip(os.sep)), count])
+    return result

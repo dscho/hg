@@ -347,7 +347,7 @@ class svn_source(converter_source):
                              % self.module)
         self.last_changed = self.revnum(self.head)
 
-        self._changescache = None
+        self._changescache = (None, None)
 
         if os.path.exists(os.path.join(url, '.svn/entries')):
             self.wc = url
@@ -444,34 +444,39 @@ class svn_source(converter_source):
 
         return self.heads
 
-    def getchanges(self, rev):
-        if self._changescache and self._changescache[0] == rev:
-            return self._changescache[1]
-        self._changescache = None
+    def _getchanges(self, rev, full):
         (paths, parents) = self.paths[rev]
+        copies = {}
         if parents:
             files, self.removed, copies = self.expandpaths(rev, paths, parents)
-        else:
+        if full or not parents:
             # Perform a full checkout on roots
             uuid, module, revnum = revsplit(rev)
             entries = svn.client.ls(self.baseurl + quote(module),
                                     optrev(revnum), True, self.ctx)
             files = [n for n, e in entries.iteritems()
                      if e.kind == svn.core.svn_node_file]
-            copies = {}
             self.removed = set()
 
         files.sort()
         files = zip(files, [rev] * len(files))
+        return (files, copies)
 
-        # caller caches the result, so free it here to release memory
-        del self.paths[rev]
+    def getchanges(self, rev, full):
+        # reuse cache from getchangedfiles
+        if self._changescache[0] == rev and not full:
+            (files, copies) = self._changescache[1]
+        else:
+            (files, copies) = self._getchanges(rev, full)
+            # caller caches the result, so free it here to release memory
+            del self.paths[rev]
         return (files, copies)
 
     def getchangedfiles(self, rev, i):
-        changes = self.getchanges(rev)
-        self._changescache = (rev, changes)
-        return [f[0] for f in changes[0]]
+        # called from filemap - cache computed values for reuse in getchanges
+        (files, copies) = self._getchanges(rev, False)
+        self._changescache = (rev, (files, copies))
+        return [f[0] for f in files]
 
     def getcommit(self, rev):
         if rev not in self.commits:
@@ -490,10 +495,10 @@ class svn_source(converter_source):
             self._fetch_revisions(revnum, stop)
             if rev not in self.commits:
                 raise util.Abort(_('svn: revision %s not found') % revnum)
-        commit = self.commits[rev]
+        revcommit = self.commits[rev]
         # caller caches the result, so free it here to release memory
         del self.commits[rev]
-        return commit
+        return revcommit
 
     def checkrevformat(self, revstr, mapname='splicemap'):
         """ fails if revision format does not match the correct format"""
@@ -502,6 +507,9 @@ class svn_source(converter_source):
                               '{12,12}(.*)\@[0-9]+$',revstr):
             raise util.Abort(_('%s entry %s is not a valid revision'
                                ' identifier') % (mapname, revstr))
+
+    def numcommits(self):
+        return int(self.head.rsplit('@', 1)[1]) - self.startrev
 
     def gettags(self):
         tags = {}
@@ -933,7 +941,7 @@ class svn_source(converter_source):
     def getfile(self, file, rev):
         # TODO: ra.get_file transmits the whole file instead of diffs.
         if file in self.removed:
-            raise IOError
+            return None, None
         mode = ''
         try:
             new_module, revnum = revsplit(rev)[1:]
@@ -954,7 +962,7 @@ class svn_source(converter_source):
             notfound = (svn.core.SVN_ERR_FS_NOT_FOUND,
                 svn.core.SVN_ERR_RA_DAV_PATH_NOT_FOUND)
             if e.apr_err in notfound: # File not found
-                raise IOError
+                return None, None
             raise
         if mode == 'l':
             link_prefix = "link "
@@ -1211,23 +1219,13 @@ class svn_sink(converter_sink, commandline):
             self.xargs(files, 'add', quiet=True)
         return files
 
-    def tidy_dirs(self, names):
-        deleted = []
-        for d in sorted(self.dirs_of(names), reverse=True):
-            wd = self.wjoin(d)
-            if os.listdir(wd) == '.svn':
-                self.run0('delete', d)
-                self.manifest.remove(d)
-                deleted.append(d)
-        return deleted
-
     def addchild(self, parent, child):
         self.childmap[parent] = child
 
     def revid(self, rev):
         return u"svn:%s@%s" % (self.uuid, rev)
 
-    def putcommit(self, files, copies, parents, commit, source, revmap):
+    def putcommit(self, files, copies, parents, commit, source, revmap, full):
         for parent in parents:
             try:
                 return self.revid(self.childmap[parent])
@@ -1236,14 +1234,15 @@ class svn_sink(converter_sink, commandline):
 
         # Apply changes to working copy
         for f, v in files:
-            try:
-                data, mode = source.getfile(f, v)
-            except IOError:
+            data, mode = source.getfile(f, v)
+            if data is None:
                 self.delete.append(f)
             else:
                 self.putfile(f, mode, data)
                 if f in copies:
                     self.copies.append([copies[f], f])
+        if full:
+            self.delete.extend(sorted(self.manifest.difference(files)))
         files = [f[0] for f in files]
 
         entries = set(self.delete)
@@ -1259,7 +1258,6 @@ class svn_sink(converter_sink, commandline):
                 self.manifest.remove(f)
             self.delete = []
         entries.update(self.add_files(files.difference(entries)))
-        entries.update(self.tidy_dirs(entries))
         if self.delexec:
             self.xargs(self.delexec, 'propdel', 'svn:executable')
             self.delexec = []

@@ -72,7 +72,7 @@ Criss cross merging
      summary:     0 base
   
 
-  $ hg merge -v --debug --tool internal:dump 5
+  $ hg merge -v --debug --tool internal:dump 5 --config merge.preferancestor='!'
   note: using 0f6b37dbe527 as ancestor of 3b08d01b0ab5 and adfe50279922
         alternatively, use --config merge.preferancestor=40663881a6dd
     searching for copies back to rev 3
@@ -209,13 +209,12 @@ The other way around:
 Verify how the output looks and and how verbose it is:
 
   $ hg up -qC
-  $ hg merge --config merge.preferancestor="*"
-  note: merging 3b08d01b0ab5+ and adfe50279922 using bids from ancestors 0f6b37dbe527 and 40663881a6dd
+  $ hg merge
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
 
   $ hg up -qC
-  $ hg merge -v --config merge.preferancestor="*"
+  $ hg merge -v
   note: merging 3b08d01b0ab5+ and adfe50279922 using bids from ancestors 0f6b37dbe527 and 40663881a6dd
   
   calculating bids for ancestor 0f6b37dbe527
@@ -288,7 +287,7 @@ http://stackoverflow.com/questions/9350005/how-do-i-specify-a-merge-base-to-use-
   $ echo b >> x
   $ hg commit -qm cb
 
-  $ hg merge
+  $ hg merge --config merge.preferancestor='!'
   note: using 70008a2163f6 as ancestor of 0d355fdef312 and 4b8b546a3eef
         alternatively, use --config merge.preferancestor=b211bbc6eb3c
   merging x
@@ -349,7 +348,7 @@ Verify that the old context ancestor works with / despite preferancestor:
   2
   $ hg log -r 'ancestor(head())' --config merge.preferancestor=3 -T '{rev}\n'
   1
-  $ hg log -r 'ancestor(head())' --config merge.preferancestor='*' -T '{rev}\n'
-  1
+  $ hg log -r 'ancestor(head())' --config merge.preferancestor='1337 * - 2' -T '{rev}\n'
+  2
 
   $ cd ..

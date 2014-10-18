@@ -1,4 +1,4 @@
-  $ "$TESTDIR/hghave" serve || exit 80
+#require serve
 
 An attempt at more fully testing the hgweb web interface.
 The following things are tested elsewhere and are therefore omitted:
@@ -2034,7 +2034,7 @@ Stop and restart with HGENCODING=cp932 and preferuncompressed
 commit message with Japanese Kanji 'Noh', which ends with '\x5c'
 
   $ echo foo >> foo
-  $ HGENCODING=cp932 hg ci -m `python -c 'print("\x94\x5c")'`
+  $ HGENCODING=cp932 hg ci -m `$PYTHON -c 'print("\x94\x5c")'`
 
 Graph json escape of multibyte character
 
@@ -2175,7 +2175,7 @@ proper status for filtered revision
   Content-Type: text/plain; charset=ascii\r (esc)
   \r (esc)
   
-  error: unknown revision '5'
+  error: filtered revision '5' (not in 'served' subset)
 
 
 
@@ -2189,7 +2189,7 @@ proper status for filtered revision
   Content-Type: text/plain; charset=ascii\r (esc)
   \r (esc)
   
-  error: unknown revision '4'
+  error: filtered revision '4' (not in 'served' subset)
 
 filtered '0' changeset
 

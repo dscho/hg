@@ -36,7 +36,8 @@ specified)
 
   $ echo foo >> .hgtags
   $ hg tag "bleah2"
-  abort: working copy of .hgtags is changed (please commit .hgtags manually)
+  abort: working copy of .hgtags is changed
+  (please commit .hgtags manually)
   [255]
 
   $ hg revert .hgtags
@@ -516,7 +517,7 @@ detect merge tag conflicts
   merging .hgtags
   automatic .hgtags merge failed
   the following 1 tags are in conflict: t7
-  automatic tag merging of .hgtags failed! (use 'hg resolve --tool internal:merge' or another merge tool of your choice)
+  automatic tag merging of .hgtags failed! (use 'hg resolve --tool :merge' or another merge tool of your choice)
   2 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]
@@ -551,6 +552,12 @@ handle the loss of tags
   $ printf '' > .hgtags
   $ hg commit -m 'delete all tags'
   created new head
+  $ hg log -r 'max(t7::)'
+  changeset:   17:ffe462b50880
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     Added tag t7 for changeset fd3a9e394ce3
+  
   $ hg update -r 'max(t7::)'
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg merge -r tip --tool internal:tagmerge

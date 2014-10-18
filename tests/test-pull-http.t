@@ -1,4 +1,4 @@
-  $ "$TESTDIR/hghave" killdaemons || exit 80
+#require killdaemons
 
   $ hg init test
   $ cd test
@@ -26,8 +26,20 @@ Cloning with a password in the URL should not save the password in .hg/hgrc:
   updating to branch default
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cat test3/.hg/hgrc
+  # example repository config (see "hg help config" for more info)
   [paths]
   default = http://foo@localhost:$HGPORT/
+  
+  # path aliases to other clones of this repo in URLs or filesystem paths
+  # (see "hg help config.paths" for more info)
+  #
+  # default-push = ssh://jdoe@example.net/hg/jdoes-fork
+  # my-fork      = ssh://jdoe@example.net/hg/jdoes-fork
+  # my-clone     = /home/jdoe/jdoes-clone
+  
+  [ui]
+  # name and email (local to this repository, optional), e.g.
+  # username = Jane Doe <jdoe@example.com>
   $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
 
 expect error, cloning not allowed
@@ -37,7 +49,6 @@ expect error, cloning not allowed
   $ hg serve -p $HGPORT -d --pid-file=hg.pid -E errors.log
   $ cat hg.pid >> $DAEMON_PIDS
   $ hg clone http://localhost:$HGPORT/ test4
-  requesting all changes
   abort: authorization failed
   [255]
   $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS

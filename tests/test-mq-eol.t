@@ -42,7 +42,7 @@ Test interactions between mq and patch.eol
 
 Test different --eol values
 
-  $ python -c 'file("a", "wb").write("a\nb\nc\nd\ne")'
+  $ $PYTHON -c 'file("a", "wb").write("a\nb\nc\nd\ne")'
   $ hg ci -Am adda
   adding .hgignore
   adding a
@@ -84,6 +84,8 @@ force LF
   now at: eol.diff
   $ hg qrefresh
   $ python ../cateol.py .hg/patches/eol.diff
+  # HG changeset patch<LF>
+  # Parent  0d0bf99a8b7a3842c6f8ef09e34f69156c4bd9d0<LF>
   test message<LF>
   <LF>
   diff -r 0d0bf99a8b7a a<LF>
@@ -148,15 +150,15 @@ Test .rej file EOL are left unchanged
 
   $ hg init testeol
   $ cd testeol
-  $ python -c "file('a', 'wb').write('1\r\n2\r\n3\r\n4')"
+  $ $PYTHON -c "file('a', 'wb').write('1\r\n2\r\n3\r\n4')"
   $ hg ci -Am adda
   adding a
-  $ python -c "file('a', 'wb').write('1\r\n2\r\n33\r\n4')"
+  $ $PYTHON -c "file('a', 'wb').write('1\r\n2\r\n33\r\n4')"
   $ hg qnew patch1
   $ hg qpop
   popping patch1
   patch queue now empty
-  $ python -c "file('a', 'wb').write('1\r\n22\r\n33\r\n4')"
+  $ $PYTHON -c "file('a', 'wb').write('1\r\n22\r\n33\r\n4')"
   $ hg ci -m changea
 
   $ hg --config 'patch.eol=LF' qpush

@@ -88,17 +88,18 @@ class converter_source(object):
     def getfile(self, name, rev):
         """Return a pair (data, mode) where data is the file content
         as a string and mode one of '', 'x' or 'l'. rev is the
-        identifier returned by a previous call to getchanges(). Raise
-        IOError to indicate that name was deleted in rev.
+        identifier returned by a previous call to getchanges().
+        Data is None if file is missing/deleted in rev.
         """
         raise NotImplementedError
 
-    def getchanges(self, version):
+    def getchanges(self, version, full):
         """Returns a tuple of (files, copies).
 
         files is a sorted list of (filename, id) tuples for all files
         changed between version and its first parent returned by
-        getcommit(). id is the source revision id of the file.
+        getcommit(). If full, all files in that revision is returned.
+        id is the source revision id of the file.
 
         copies is a dictionary of dest: source
         """
@@ -107,6 +108,13 @@ class converter_source(object):
     def getcommit(self, version):
         """Return the commit object for version"""
         raise NotImplementedError
+
+    def numcommits(self):
+        """Return the number of commits in this source.
+
+        If unknown, return None.
+        """
+        return None
 
     def gettags(self):
         """Return the tags as a dictionary of name: revision
@@ -204,7 +212,7 @@ class converter_sink(object):
         mapping equivalent authors identifiers for each system."""
         return None
 
-    def putcommit(self, files, copies, parents, commit, source, revmap):
+    def putcommit(self, files, copies, parents, commit, source, revmap, full):
         """Create a revision with all changed files listed in 'files'
         and having listed parents. 'commit' is a commit object
         containing at a minimum the author, date, and message for this
@@ -212,7 +220,8 @@ class converter_sink(object):
         'copies' is a dictionary mapping destinations to sources,
         'source' is the source repository, and 'revmap' is a mapfile
         of source revisions to converted revisions. Only getfile() and
-        lookuprev() should be called on 'source'.
+        lookuprev() should be called on 'source'. 'full' means that 'files'
+        is complete and all other files should be removed.
 
         Note that the sink repository is not told to update itself to
         a particular revision (or even what that revision would be)
