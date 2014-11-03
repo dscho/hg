@@ -116,8 +116,13 @@ Test that "hg rollback" restores status of largefiles correctly
   $ hg commit -m 'will be rollback-ed soon'
   $ echo largeY > largeY
   $ hg add --large largeY
+#if windows
+  $ hg status -A large1
+  large1: * (glob)
+#else
   $ hg status -A large1
   large1: No such file or directory
+#endif
   $ hg status -A large2
   ? large2
   $ hg status -A largeX
@@ -202,24 +207,39 @@ automated commit like rebase/transplant
   $ hg commit -m '#4'
 
   $ hg rebase -s 1 -d 2 --keep
+#if windows
+  $ hg status -A large1
+  large1: * (glob)
+#else
   $ hg status -A large1
   large1: No such file or directory
+#endif
   $ hg status -A largeX
   C largeX
   $ hg strip -q 5
 
   $ hg update -q -C 2
   $ hg transplant -q 1 4
+#if windows
+  $ hg status -A large1
+  large1: * (glob)
+#else
   $ hg status -A large1
   large1: No such file or directory
+#endif
   $ hg status -A largeX
   C largeX
   $ hg strip -q 5
 
   $ hg update -q -C 2
   $ hg transplant -q --merge 1 --merge 4
+#if windows
+  $ hg status -A large1
+  large1: * (glob)
+#else
   $ hg status -A large1
   large1: No such file or directory
+#endif
   $ hg status -A largeX
   C largeX
   $ hg strip -q 5
@@ -522,5 +542,41 @@ changed, even if it is aborted by conflict of other.
   fa44618ea25181aff4f48b70428294790cec9f61
   $ cat largeX
   largeX
+
+Test that "hg status" doesn't show removal of largefiles not managed
+in the target context.
+
+  $ hg update -q -C 4
+  $ hg remove largeX
+  $ hg status -A largeX
+  R largeX
+  $ hg status -A --rev '.^1' largeX
+
+#if execbit
+
+Test that "hg status" against revisions other than parent notices exec
+bit changes of largefiles.
+
+  $ hg update -q -C 4
+
+(the case that large2 doesn't have exec bit in the target context but
+in the working context)
+
+  $ chmod +x large2
+  $ hg status -A --rev 0 large2
+  M large2
+  $ hg commit -m 'chmod +x large2'
+
+(the case that large2 has exec bit in the target context but not in
+the working context)
+
+  $ echo dummy > dummy
+  $ hg add dummy
+  $ hg commit -m 'revision for separation'
+  $ chmod -x large2
+  $ hg status -A --rev '.^1' large2
+  M large2
+
+#endif
 
   $ cd ..

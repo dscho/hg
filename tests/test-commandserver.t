@@ -5,6 +5,11 @@
 #endif
   $ export PYTHONPATH
 
+typical client does not want echo-back messages, so test without it:
+
+  $ grep -v '^promptecho ' < $HGRCPATH >> $HGRCPATH.new
+  $ mv $HGRCPATH.new $HGRCPATH
+
   $ hg init repo
   $ cd repo
 
@@ -552,7 +557,7 @@ unix domain socket:
   $ cd repo
   $ hg update -q
 
-#if unix-socket
+#if unix-socket unix-permissions
 
   >>> import cStringIO
   >>> from hgclient import unixserver, readchannel, runcommand, check
@@ -597,8 +602,8 @@ unix domain socket:
   listening at .hg/server.sock
   abort: unknown command unknowncommand
   killed!
-
-#else
+#endif
+#if no-unix-socket
 
   $ hg serve --cmdserver unix -a .hg/server.sock
   abort: unsupported platform

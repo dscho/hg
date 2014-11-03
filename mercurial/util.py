@@ -211,6 +211,7 @@ class digestchecker(object):
                 (self._size, self._got))
         for k, v in self._digests.items():
             if v != self._digester[k]:
+                # i18n: first parameter is a digest name
                 raise Abort(_('%s mismatch: expected %s, got %s') %
                     (k, v, self._digester[k]))
 
@@ -898,11 +899,8 @@ def fspath(name, root):
 
     The root should be normcase-ed, too.
     '''
-    def find(p, contents):
-        for n in contents:
-            if normcase(n) == p:
-                return n
-        return None
+    def _makefspathcacheentry(dir):
+        return dict((normcase(n), n) for n in os.listdir(dir))
 
     seps = os.sep
     if os.altsep:
@@ -918,16 +916,15 @@ def fspath(name, root):
             continue
 
         if dir not in _fspathcache:
-            _fspathcache[dir] = os.listdir(dir)
+            _fspathcache[dir] = _makefspathcacheentry(dir)
         contents = _fspathcache[dir]
 
-        found = find(part, contents)
+        found = contents.get(part)
         if not found:
             # retry "once per directory" per "dirstate.walk" which
             # may take place for each patches of "hg qpush", for example
-            contents = os.listdir(dir)
-            _fspathcache[dir] = contents
-            found = find(part, contents)
+            _fspathcache[dir] = contents = _makefspathcacheentry(dir)
+            found = contents.get(part)
 
         result.append(found or part)
         dir = os.path.join(dir, part)

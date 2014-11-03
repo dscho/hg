@@ -174,13 +174,23 @@ def reposetup(ui, repo):
                         for lfile in tocheck:
                             standin = lfutil.standin(lfile)
                             if standin in ctx1:
-                                if ctx1[standin].data().strip() != \
-                                        lfutil.hashfile(self.wjoin(lfile)):
+                                abslfile = self.wjoin(lfile)
+                                if ((ctx1[standin].data().strip() !=
+                                     lfutil.hashfile(abslfile)) or
+                                    (('x' in ctx1.flags(standin)) !=
+                                     bool(lfutil.getexecutable(abslfile)))):
                                     modified.append(lfile)
                                 elif listclean:
                                     clean.append(lfile)
                             else:
                                 added.append(lfile)
+
+                        # at this point, 'removed' contains largefiles
+                        # marked as 'R' in the working context.
+                        # then, largefiles not managed also in the target
+                        # context should be excluded from 'removed'.
+                        removed = [lfile for lfile in removed
+                                   if lfutil.standin(lfile) in ctx1]
 
                     # Standins no longer found in lfdirstate has been
                     # removed

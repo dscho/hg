@@ -1370,7 +1370,11 @@ class localrepository(object):
             wlock.release()
 
         def commithook(node=hex(ret), parent1=hookp1, parent2=hookp2):
-            self.hook("commit", node=node, parent1=parent1, parent2=parent2)
+            # hack for command that use a temporary commit (eg: histedit)
+            # temporary commit got stripped before hook release
+            if node in self:
+                self.hook("commit", node=node, parent1=parent1,
+                          parent2=parent2)
         self._afterlock(commithook)
         return ret
 
@@ -1680,15 +1684,22 @@ class localrepository(object):
 
             if rbranchmap:
                 rbheads = []
+                closed = []
                 for bheads in rbranchmap.itervalues():
                     rbheads.extend(bheads)
+                    for h in bheads:
+                        r = self.changelog.rev(h)
+                        b, c = self.changelog.branchinfo(r)
+                        if c:
+                            closed.append(h)
 
                 if rbheads:
                     rtiprev = max((int(self.changelog.rev(node))
                             for node in rbheads))
                     cache = branchmap.branchcache(rbranchmap,
                                                   self[rtiprev].node(),
-                                                  rtiprev)
+                                                  rtiprev,
+                                                  closednodes=closed)
                     # Try to stick it as low as possible
                     # filter above served are unlikely to be fetch from a clone
                     for candidate in ('base', 'immutable', 'served'):
@@ -1724,14 +1735,15 @@ class localrepository(object):
         if stream and not heads:
             # 'stream' means remote revlog format is revlogv1 only
             if remote.capable('stream'):
-                return self.stream_in(remote, set(('revlogv1',)))
-            # otherwise, 'streamreqs' contains the remote revlog format
-            streamreqs = remote.capable('streamreqs')
-            if streamreqs:
-                streamreqs = set(streamreqs.split(','))
-                # if we support it, stream in and adjust our requirements
-                if not streamreqs - self.supportedformats:
-                    return self.stream_in(remote, streamreqs)
+                self.stream_in(remote, set(('revlogv1',)))
+            else:
+                # otherwise, 'streamreqs' contains the remote revlog format
+                streamreqs = remote.capable('streamreqs')
+                if streamreqs:
+                    streamreqs = set(streamreqs.split(','))
+                    # if we support it, stream in and adjust our requirements
+                    if not streamreqs - self.supportedformats:
+                        self.stream_in(remote, streamreqs)
 
         quiet = self.ui.backupconfig('ui', 'quietbookmarkmove')
         try:

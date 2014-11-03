@@ -298,6 +298,7 @@ def getdiff(expected, output, ref, err):
     lines = []
     for line in difflib.unified_diff(expected, output, ref, err):
         if line.startswith('+++') or line.startswith('---'):
+            line = line.replace('\\', '/')
             if line.endswith(' \n'):
                 line = line[:-2] + '\n'
         lines.append(line)
@@ -681,6 +682,7 @@ class Test(unittest.TestCase):
         hgrc.write('slash = True\n')
         hgrc.write('interactive = False\n')
         hgrc.write('mergemarkers = detailed\n')
+        hgrc.write('promptecho = True\n')
         hgrc.write('[defaults]\n')
         hgrc.write('backout = -d "0 0"\n')
         hgrc.write('commit = -d "0 0"\n')

@@ -853,7 +853,7 @@ def bookmark(ui, repo, *names, **opts):
     Bookmarks can be pushed and pulled between repositories (see
     :hg:`help push` and :hg:`help pull`). If a shared bookmark has
     diverged, a new 'divergent bookmark' of the form 'name@path' will
-    be created. Using :hg:'merge' will resolve the divergence.
+    be created. Using :hg:`merge` will resolve the divergence.
 
     A bookmark named '@' has the special property that :hg:`clone` will
     check it out by default if it exists.
@@ -2352,7 +2352,7 @@ def debuglabelcomplete(ui, repo, *args):
          [('L', 'force-lock', None, _('free the store lock (DANGEROUS)')),
           ('W', 'force-wlock', None,
            _('free the working state lock (DANGEROUS)'))],
-         _(''))
+         _('[OPTION]...'))
 def debuglocks(ui, repo, **opts):
     """show or modify state of locks
 
@@ -3204,7 +3204,7 @@ def files(ui, repo, *pats, **opts):
 
           hg files "set:binary()"
 
-      - find files containing a regular expression:
+      - find files containing a regular expression::
 
           hg files "set:grep('bob')"
 
@@ -3212,7 +3212,7 @@ def files(ui, repo, *pats, **opts):
 
           hg files -0 | xargs -0 grep foo
 
-    See :hg:'help pattern' and :hg:'help revsets' for more information
+    See :hg:`help pattern` and :hg:`help filesets` for more information
     on specifying file patterns.
 
     Returns 0 if a match is found, 1 otherwise.
@@ -3837,7 +3837,7 @@ def help_(ui, name=None, **opts):
 
     section = None
     if name and '.' in name:
-        name, section = name.split('.')
+        name, section = name.split('.', 1)
 
     text = help.help_(ui, name, **opts)
 
@@ -4322,7 +4322,7 @@ def locate(ui, repo, *pats, **opts):
     ('C', 'copies', None, _('show copied files')),
     ('k', 'keyword', [],
      _('do case-insensitive search for a given text'), _('TEXT')),
-    ('r', 'rev', [], _('show the specified revision or range'), _('REV')),
+    ('r', 'rev', [], _('show the specified revision or revset'), _('REV')),
     ('', 'removed', None, _('include revisions where files were removed')),
     ('m', 'only-merges', None, _('show only merges (DEPRECATED)')),
     ('u', 'user', [], _('revisions committed by user'), _('USER')),

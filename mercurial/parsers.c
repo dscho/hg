@@ -873,12 +873,13 @@ static PyObject *list_copy(PyObject *list)
 	return newlist;
 }
 
-static int check_filter(PyObject *filter, Py_ssize_t arg) {
+/* arg should be Py_ssize_t but Python 2.4 do not support the n format */
+static int check_filter(PyObject *filter, unsigned long arg) {
 	if (filter) {
 		PyObject *arglist, *result;
 		int isfiltered;
 
-		arglist = Py_BuildValue("(n)", arg);
+		arglist = Py_BuildValue("(k)", arg);
 		if (!arglist) {
 			return -1;
 		}
@@ -2108,7 +2109,9 @@ static PyMethodDef index_methods[] = {
 	{"get", (PyCFunction)index_m_get, METH_VARARGS,
 	 "get an index entry"},
 	{"headrevs", (PyCFunction)index_headrevs, METH_VARARGS,
-	 "get head revisions"},
+	 "get head revisions"}, /* Can do filtering since 3.2 */
+	{"headrevsfiltered", (PyCFunction)index_headrevs, METH_VARARGS,
+	 "get filtered head revisions"}, /* Can always do filtering */
 	{"insert", (PyCFunction)index_insert, METH_VARARGS,
 	 "insert an index entry"},
 	{"partialmatch", (PyCFunction)index_partialmatch, METH_VARARGS,

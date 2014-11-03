@@ -403,7 +403,7 @@ required):
 
 Configuring items below instead of ``changeset`` allows showing
 customized message only for specific actions, or showing different
-messages for each actions.
+messages for each action.
 
 - ``changeset.backout`` for :hg:`backout`
 - ``changeset.commit.amend.merge`` for :hg:`commit --amend` on merges
@@ -982,7 +982,8 @@ Supported arguments:
   launching external tool.  Options are ``true``, ``false``, ``keep`` or
   ``keep-merge3``. The ``keep`` option will leave markers in the file if the
   premerge fails. The ``keep-merge3`` will do the same but include information
-  about the base of the merge in the marker (see internal:merge3).
+  about the base of the merge in the marker (see internal :merge3 in
+  :hg:`help merge-tools`).
   Default: True
 
 ``binary``
@@ -1381,7 +1382,7 @@ User interface controls.
     remote command to use for clone/push/pull operations. Default is ``hg``.
 
 ``reportoldssl``
-    Warn if an SSL certificate is unable to be due to using Python
+    Warn if an SSL certificate is unable to be used due to using Python
     2.5 or earlier. True or False. Default is True.
 
 ``report_untrusted``

@@ -333,7 +333,7 @@ def _pushdiscoverybookmarks(pushop):
     explicit = set(pushop.bookmarks)
 
     comp = bookmod.compare(repo, repo._bookmarks, remotebookmark, srchex=hex)
-    addsrc, adddst, advsrc, advdst, diverge, differ, invalid = comp
+    addsrc, adddst, advsrc, advdst, diverge, differ, invalid, same = comp
     for b, scid, dcid in advsrc:
         if b in explicit:
             explicit.remove(b)
@@ -355,6 +355,10 @@ def _pushdiscoverybookmarks(pushop):
             explicit.remove(b)
             # treat as "deleted locally"
             pushop.outbookmarks.append((b, dcid, ''))
+    # identical bookmarks shouldn't get reported
+    for b, scid, dcid in same:
+        if b in explicit:
+            explicit.remove(b)
 
     if explicit:
         explicit = sorted(explicit)

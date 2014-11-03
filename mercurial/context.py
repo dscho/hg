@@ -121,10 +121,11 @@ class basectx(object):
 
         modified, added, clean = [], [], []
         deleted, unknown, ignored = s[3], s[4], s[5]
+        deletedset = set(deleted)
         withflags = mf1.withflags() | mf2.withflags()
         for fn, mf2node in mf2.iteritems():
             if fn in mf1:
-                if (fn not in deleted and
+                if (fn not in deletedset and
                     ((fn in withflags and mf1.flags(fn) != mf2.flags(fn)) or
                      (mf1[fn] != mf2node and
                       (mf2node or self[fn].cmp(other[fn]))))):
@@ -132,7 +133,7 @@ class basectx(object):
                 elif listclean:
                     clean.append(fn)
                 del mf1[fn]
-            elif fn not in deleted:
+            elif fn not in deletedset:
                 added.append(fn)
         removed = mf1.keys()
         if removed:
@@ -952,7 +953,7 @@ class filectx(basefilectx):
             if self._repo.ui.config("censor", "policy", "abort") == "ignore":
                 return ""
             raise util.Abort(_("censored node: %s") % short(self._filenode),
-                             hint="set censor.policy to ignore errors")
+                             hint=_("set censor.policy to ignore errors"))
 
     def size(self):
         return self._filelog.size(self._filerev)
@@ -1499,13 +1500,9 @@ class workingctx(committablectx):
                listclean=False, listunknown=False, listsubrepos=False):
         # yet to be determined: what to do if 'other' is a 'workingctx' or a
         # 'memctx'?
-        s = super(workingctx, self).status(other, match, listignored, listclean,
-                                           listunknown, listsubrepos)
-        # calling 'super' subtly reveresed the contexts, so we flip the results
-        # (s[1] is 'added' and s[2] is 'removed')
-        s = list(s)
-        s[1], s[2] = s[2], s[1]
-        return scmutil.status(*s)
+        return super(workingctx, self).status(other, match, listignored,
+                                              listclean, listunknown,
+                                              listsubrepos)
 
 class committablefilectx(basefilectx):
     """A committablefilectx provides common functionality for a file context

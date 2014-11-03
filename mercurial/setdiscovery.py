@@ -105,12 +105,17 @@ def _takefullsample(dag, nodes, size):
     # update from roots
     _updatesample(dag.inverse(), nodes, sample, always)
     assert sample
-    if len(sample) > desiredlen:
-        sample = set(random.sample(sample, desiredlen))
-    elif len(sample) < desiredlen:
+    sample = _limitsample(sample, desiredlen)
+    if len(sample) < desiredlen:
         more = desiredlen - len(sample)
         sample.update(random.sample(list(nodes - sample - always), more))
     sample.update(always)
+    return sample
+
+def _limitsample(sample, desiredlen):
+    """return a random subset of sample of at most desiredlen item"""
+    if len(sample) > desiredlen:
+        sample = set(random.sample(sample, desiredlen))
     return sample
 
 def findcommonheads(ui, local, remote,
@@ -128,7 +133,7 @@ def findcommonheads(ui, local, remote,
     ui.debug("query 1; heads\n")
     roundtrips += 1
     ownheads = dag.heads()
-    sample = ownheads
+    sample = _limitsample(ownheads, initialsamplesize)
     if remote.local():
         # stopgap until we have a proper localpeer that supports batch()
         srvheadhashes = remote.heads()
@@ -198,15 +203,19 @@ def findcommonheads(ui, local, remote,
         if full:
             ui.note(_("sampling from both directions\n"))
             sample = _takefullsample(dag, undecided, size=fullsamplesize)
+            targetsize = fullsamplesize
         elif common:
             # use cheapish initial sample
             ui.debug("taking initial sample\n")
             sample = _takefullsample(dag, undecided, size=fullsamplesize)
+            targetsize = fullsamplesize
         else:
             # use even cheaper initial sample
             ui.debug("taking quick initial sample\n")
             sample = _takequicksample(dag, undecided, size=initialsamplesize,
                                       initial=True)
+            targetsize = initialsamplesize
+        sample = _limitsample(sample, targetsize)
 
         roundtrips += 1
         ui.progress(_('searching'), roundtrips, unit=_('queries'))

@@ -15,6 +15,8 @@ from i18n import _
 import errno
 import error, util
 
+version = 1
+
 def active(func):
     def _active(self, *args, **kwds):
         if self.count == 0:
@@ -92,6 +94,7 @@ class transaction(object):
         self.backupjournal = "%s.backupfiles" % journal
         self.file = opener.open(self.journal, "w")
         self.backupsfile = opener.open(self.backupjournal, 'w')
+        self.backupsfile.write('%d\n' % version)
         if createmode is not None:
             opener.chmod(self.journal, createmode & 0666)
             opener.chmod(self.backupjournal, createmode & 0666)
@@ -125,7 +128,7 @@ class transaction(object):
         self.file.write(d)
         self.file.flush()
 
-        d = ''.join(['%s\0%s\0' % (f, b) for f, b in backups])
+        d = ''.join(['%s\0%s\n' % (f, b) for f, b in backups])
         self.backupsfile.write(d)
         self.backupsfile.flush()
 
@@ -174,7 +177,7 @@ class transaction(object):
 
         self.backupentries.append((file, backupfile, None))
         self.backupmap[file] = len(self.backupentries) - 1
-        self.backupsfile.write("%s\0%s\0" % (file, backupfile))
+        self.backupsfile.write("%s\0%s\n" % (file, backupfile))
         self.backupsfile.flush()
 
     @active
@@ -201,6 +204,26 @@ class transaction(object):
         # but for bookmarks that are handled outside this mechanism.
         assert vfs is None or filenames == ('bookmarks',)
         self._filegenerators[genid] = (order, filenames, genfunc, vfs)
+
+    def _generatefiles(self):
+        # write files registered for generation
+        for entry in sorted(self._filegenerators.values()):
+            order, filenames, genfunc, vfs = entry
+            if vfs is None:
+                vfs = self.opener
+            files = []
+            try:
+                for name in filenames:
+                    # Some files are already backed up when creating the
+                    # localrepo. Until this is properly fixed we disable the
+                    # backup for them.
+                    if name not in ('phaseroots', 'bookmarks'):
+                        self.addbackup(name)
+                    files.append(vfs(name, 'w', atomictemp=True))
+                genfunc(*files)
+            finally:
+                for f in files:
+                    f.close()
 
     @active
     def find(self, file):
@@ -243,26 +266,8 @@ class transaction(object):
     @active
     def close(self):
         '''commit the transaction'''
-        # write files registered for generation
-        for entry in sorted(self._filegenerators.values()):
-            order, filenames, genfunc, vfs = entry
-            if vfs is None:
-                vfs = self.opener
-            files = []
-            try:
-                for name in filenames:
-                    # Some files are already backed up when creating the
-                    # localrepo. Until this is properly fixed we disable the
-                    # backup for them.
-                    if name not in ('phaseroots', 'bookmarks'):
-                        self.addbackup(name)
-                    files.append(vfs(name, 'w', atomictemp=True))
-                genfunc(*files)
-            finally:
-                for f in files:
-                    f.close()
-
         if self.count == 1 and self.onclose is not None:
+            self._generatefiles()
             self.onclose()
 
         self.count -= 1
@@ -346,11 +351,18 @@ def rollback(opener, file, report):
     backupjournal = "%s.backupfiles" % file
     if opener.exists(backupjournal):
         fp = opener.open(backupjournal)
-        data = fp.read()
-        if len(data) > 0:
-            parts = data.split('\0')
-            for i in xrange(0, len(parts), 2):
-                f, b = parts[i:i + 1]
-                backupentries.append((f, b, None))
+        lines = fp.readlines()
+        if lines:
+            ver = lines[0][:-1]
+            if ver == str(version):
+                for line in lines[1:]:
+                    if line:
+                        # Shave off the trailing newline
+                        line = line[:-1]
+                        f, b = line.split('\0')
+                        backupentries.append((f, b, None))
+            else:
+                report(_("journal was created by a newer version of "
+                         "Mercurial"))
 
     _playback(file, report, opener, entries, backupentries)
