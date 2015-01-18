@@ -1,4 +1,4 @@
-This test is decicated to test the bundle2 container format
+This test is dedicated to test the bundle2 container format
 
 It test multiple existing parts to test different feature of the container. You
 probably do not need to touch this test unless you change the binary encoding
@@ -55,7 +55,8 @@ Create an extension to test bundle2 API
   >     op.ui.write('received ping request (id %i)\n' % part.id)
   >     if op.reply is not None and 'ping-pong' in op.reply.capabilities:
   >         op.ui.write_err('replying to ping request (id %i)\n' % part.id)
-  >         op.reply.newpart('test:pong', [('in-reply-to', str(part.id))])
+  >         op.reply.newpart('test:pong', [('in-reply-to', str(part.id))],
+  >                          mandatory=False)
   > 
   > @bundle2.parthandler('test:debugreply')
   > def debugreply(op, part):
@@ -80,7 +81,7 @@ Create an extension to test bundle2 API
   >           ('r', 'rev', [], 'includes those changeset in the bundle'),],
   >          '[OUTPUTFILE]')
   > def cmdbundle2(ui, repo, path=None, **opts):
-  >     """write a bundle2 container on standard ouput"""
+  >     """write a bundle2 container on standard output"""
   >     bundler = bundle2.bundle20(ui)
   >     for p in opts['param']:
   >         p = p.split('=', 1)
@@ -108,32 +109,34 @@ Create an extension to test bundle2 API
   >             headcommon  = [c.node() for c in repo.set('parents(%ld) - %ld', revs, revs)]
   >             outgoing = discovery.outgoing(repo.changelog, headcommon, headmissing)
   >             cg = changegroup.getlocalchangegroup(repo, 'test:bundle2', outgoing, None)
-  >             bundler.newpart('b2x:changegroup', data=cg.getchunks())
+  >             bundler.newpart('b2x:changegroup', data=cg.getchunks(),
+  >                             mandatory=False)
   > 
   >     if opts['parts']:
-  >        bundler.newpart('test:empty')
+  >        bundler.newpart('test:empty', mandatory=False)
   >        # add a second one to make sure we handle multiple parts
-  >        bundler.newpart('test:empty')
-  >        bundler.newpart('test:song', data=ELEPHANTSSONG)
-  >        bundler.newpart('test:debugreply')
+  >        bundler.newpart('test:empty', mandatory=False)
+  >        bundler.newpart('test:song', data=ELEPHANTSSONG, mandatory=False)
+  >        bundler.newpart('test:debugreply', mandatory=False)
   >        mathpart = bundler.newpart('test:math')
   >        mathpart.addparam('pi', '3.14')
   >        mathpart.addparam('e', '2.72')
   >        mathpart.addparam('cooking', 'raw', mandatory=False)
   >        mathpart.data = '42'
+  >        mathpart.mandatory = False
   >        # advisory known part with unknown mandatory param
-  >        bundler.newpart('test:song', [('randomparam','')])
+  >        bundler.newpart('test:song', [('randomparam','')], mandatory=False)
   >     if opts['unknown']:
-  >        bundler.newpart('test:UNKNOWN', data='some random content')
+  >        bundler.newpart('test:unknown', data='some random content')
   >     if opts['unknownparams']:
-  >        bundler.newpart('test:SONG', [('randomparams', '')])
+  >        bundler.newpart('test:song', [('randomparams', '')])
   >     if opts['parts']:
-  >        bundler.newpart('test:ping')
+  >        bundler.newpart('test:ping', mandatory=False)
   >     if opts['genraise']:
   >        def genraise():
   >            yield 'first line\n'
   >            raise RuntimeError('Someone set up us the bomb!')
-  >        bundler.newpart('b2x:output', data=genraise())
+  >        bundler.newpart('b2x:output', data=genraise(), mandatory=False)
   > 
   >     if path is None:
   >        file = sys.stdout
@@ -752,13 +755,18 @@ Support for changegroup
   \x87\xcd\xc9n\x8e\xaa\xb6\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02H (esc)
   \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 (no-eol) (esc)
 
-  $ hg unbundle2 < ../rev.hg2
+  $ hg debugbundle ../rev.hg2
+  Stream params: {}
+  b2x:changegroup -- '{}'
+      32af7686d403cf45b5d95f2d70cebea587ac806a
+      9520eea781bcca16c1e15acc0ba14335a0e8e5ba
+      eea13746799a9e0bfd88f29d3c2e9dc9389f524f
+      02de42196ebee42ef284b6780a87cdc96e8eaab6
+  $ hg unbundle ../rev.hg2
   adding changesets
   adding manifests
   adding file changes
   added 0 changesets with 0 changes to 3 files
-  0 unread bytes
-  addchangegroup return: 1
 
 with reply
 

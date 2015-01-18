@@ -178,6 +178,7 @@ check that local configs for the cached repo aren't inherited when -R is used:
   defaults.commit=-d "0 0"
   defaults.shelve=--date "0 0"
   defaults.tag=-d "0 0"
+  largefiles.usercache=$TESTTMP/.cache/largefiles
   ui.slash=True
   ui.interactive=False
   ui.mergemarkers=detailed
@@ -492,6 +493,7 @@ check that local configs for the cached repo aren't inherited when -R is used:
   foo
 
   $ cat <<EOF > dbgui.py
+  > import os, sys
   > from mercurial import cmdutil, commands
   > cmdtable = {}
   > command = cmdutil.command(cmdtable)
@@ -501,6 +503,14 @@ check that local configs for the cached repo aren't inherited when -R is used:
   > @command("debugprompt", norepo=True)
   > def debugprompt(ui):
   >     ui.write("%s\\n" % ui.prompt("prompt:"))
+  > @command("debugreadstdin", norepo=True)
+  > def debugreadstdin(ui):
+  >     ui.write("read: %r\n" % sys.stdin.read(1))
+  > @command("debugwritestdout", norepo=True)
+  > def debugwritestdout(ui):
+  >     os.write(1, "low-level stdout fd and\n")
+  >     sys.stdout.write("stdout should be redirected to /dev/null\n")
+  >     sys.stdout.flush()
   > EOF
   $ cat <<EOF >> .hg/hgrc
   > [extensions]
@@ -518,10 +528,36 @@ check that local configs for the cached repo aren't inherited when -R is used:
   ...     runcommand(server, ['debugprompt', '--config',
   ...                         'ui.interactive=True'],
   ...                input=cStringIO.StringIO('5678\n'))
+  ...     runcommand(server, ['debugreadstdin'])
+  ...     runcommand(server, ['debugwritestdout'])
   *** runcommand debuggetpass --config ui.interactive=True
   password: 1234
   *** runcommand debugprompt --config ui.interactive=True
   prompt: 5678
+  *** runcommand debugreadstdin
+  read: ''
+  *** runcommand debugwritestdout
+
+
+run commandserver in commandserver, which is silly but should work:
+
+  >>> import cStringIO
+  >>> from hgclient import readchannel, runcommand, check
+  >>> @check
+  ... def nested(server):
+  ...     print '%c, %r' % readchannel(server)
+  ...     class nestedserver(object):
+  ...         stdin = cStringIO.StringIO('getencoding\n')
+  ...         stdout = cStringIO.StringIO()
+  ...     runcommand(server, ['serve', '--cmdserver', 'pipe'],
+  ...                output=nestedserver.stdout, input=nestedserver.stdin)
+  ...     nestedserver.stdout.seek(0)
+  ...     print '%c, %r' % readchannel(nestedserver)  # hello
+  ...     print '%c, %r' % readchannel(nestedserver)  # getencoding
+  o, 'capabilities: getencoding runcommand\nencoding: *\npid: *' (glob)
+  *** runcommand serve --cmdserver pipe
+  o, 'capabilities: getencoding runcommand\nencoding: *\npid: *' (glob)
+  r, '*' (glob)
 
 
 start without repository:

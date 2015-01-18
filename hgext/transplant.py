@@ -118,7 +118,7 @@ class transplanter(object):
         revs = sorted(revmap)
         p1, p2 = repo.dirstate.parents()
         pulls = []
-        diffopts = patch.diffopts(self.ui, opts)
+        diffopts = patch.difffeatureopts(self.ui, opts)
         diffopts.git = True
 
         lock = wlock = tr = None
@@ -233,13 +233,12 @@ class transplanter(object):
         fp.close()
 
         try:
-            util.system('%s %s %s' % (filter, util.shellquote(headerfile),
-                                   util.shellquote(patchfile)),
-                        environ={'HGUSER': changelog[1],
-                                 'HGREVISION': revlog.hex(node),
-                                 },
-                        onerr=util.Abort, errprefix=_('filter failed'),
-                        out=self.ui.fout)
+            self.ui.system('%s %s %s' % (filter, util.shellquote(headerfile),
+                                         util.shellquote(patchfile)),
+                           environ={'HGUSER': changelog[1],
+                                    'HGREVISION': revlog.hex(node),
+                                    },
+                           onerr=util.Abort, errprefix=_('filter failed'))
             user, date, msg = self.parselog(file(headerfile))[1:4]
         finally:
             os.unlink(headerfile)
@@ -302,8 +301,12 @@ class transplanter(object):
         '''recover last transaction and apply remaining changesets'''
         if os.path.exists(os.path.join(self.path, 'journal')):
             n, node = self.recover(repo, source, opts)
-            self.ui.status(_('%s transplanted as %s\n') % (short(node),
-                                                           short(n)))
+            if n:
+                self.ui.status(_('%s transplanted as %s\n') % (short(node),
+                                                               short(n)))
+            else:
+                self.ui.status(_('%s skipped due to empty diff\n')
+                               % (short(node),))
         seriespath = os.path.join(self.path, 'series')
         if not os.path.exists(seriespath):
             self.transplants.write()
@@ -344,12 +347,16 @@ class transplanter(object):
                                  revlog.hex(parent))
             if merge:
                 repo.setparents(p1, parents[1])
-            n = repo.commit(message, user, date, extra=extra,
-                            editor=self.getcommiteditor())
-            if not n:
-                raise util.Abort(_('commit failed'))
-            if not merge:
-                self.transplants.set(n, node)
+            modified, added, removed, deleted = repo.status()[:4]
+            if merge or modified or added or removed or deleted:
+                n = repo.commit(message, user, date, extra=extra,
+                                editor=self.getcommiteditor())
+                if not n:
+                    raise util.Abort(_('commit failed'))
+                if not merge:
+                    self.transplants.set(n, node)
+            else:
+                n = None
             self.unlog()
 
             return n, node

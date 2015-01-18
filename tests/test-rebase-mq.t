@@ -24,13 +24,13 @@
 
   $ hg up -q 0
 
-  $ hg qnew f.patch
+  $ hg qnew f.patch -d '1 0'
   $ echo mq1 > f
   $ hg qref -m P0
 
   $ hg qnew f2.patch
   $ echo mq2 > f
-  $ hg qref -m P1
+  $ hg qref -m P1 -d '2 0'
 
   $ hg tglog
   @  3: 'P1' tags: f2.patch qtip tip
@@ -59,6 +59,7 @@ Rebase - same thing, but mq patch is default dest:
 Rebase - generate a conflict:
 
   $ hg rebase -s 2 -d 1
+  rebasing 2:3504f44bffc0 "P0" (f.patch qbase)
   merging f
   warning: conflicts during merge.
   merging f incomplete! (edit conflicts, then use 'hg resolve --mark')
@@ -71,6 +72,8 @@ Fix the 1st conflict:
   $ hg resolve -m f
   (no more unresolved files)
   $ hg rebase -c
+  rebasing 2:3504f44bffc0 "P0" (f.patch qbase)
+  rebasing 3:929394423cd3 "P1" (f2.patch qtip tip)
   merging f
   warning: conflicts during merge.
   merging f incomplete! (edit conflicts, then use 'hg resolve --mark')
@@ -83,7 +86,9 @@ Fix the 2nd conflict:
   $ hg resolve -m f
   (no more unresolved files)
   $ hg rebase -c
-  saved backup bundle to $TESTTMP/a/.hg/strip-backup/*-backup.hg (glob)
+  already rebased 2:3504f44bffc0 "P0" (f.patch qbase) as ebe9914c0d1c
+  rebasing 3:929394423cd3 "P1" (f2.patch qtip)
+  saved backup bundle to $TESTTMP/a/.hg/strip-backup/3504f44bffc0-30595b40-backup.hg (glob)
 
   $ hg tglog
   @  3: 'P1' tags: f2.patch qtip tip
@@ -102,15 +107,15 @@ Fix the 2nd conflict:
   $ cat .hg/patches/f.patch
   # HG changeset patch
   # User test
-  # Date ?????????? ? (glob)
-  #      * (glob)
-  # Node ID ???????????????????????????????????????? (glob)
+  # Date 1 0
+  #      Thu Jan 01 00:00:01 1970 +0000
+  # Node ID ebe9914c0d1c3f60096e952fa4dbb3d377dea3ab
   # Parent  bac9ed9960d8992bcad75864a879fa76cadaf1b0
   P0
   
-  diff -r bac9ed9960d8 -r ???????????? f (glob)
+  diff -r bac9ed9960d8 -r ebe9914c0d1c f
   --- a/f	Thu Jan 01 00:00:00 1970 +0000
-  +++ b/f	??? ??? ?? ??:??:?? ???? ????? (glob)
+  +++ b/f	Thu Jan 01 00:00:01 1970 +0000
   @@ -1,1 +1,1 @@
   -r1
   +mq1r1
@@ -125,15 +130,15 @@ Update to qtip:
   $ cat .hg/patches/f2.patch
   # HG changeset patch
   # User test
-  # Date ?????????? ? (glob)
-  #      * (glob)
-  # Node ID ???????????????????????????????????????? (glob)
-  # Parent  ???????????????????????????????????????? (glob)
+  # Date 2 0
+  #      Thu Jan 01 00:00:02 1970 +0000
+  # Node ID 462012cf340c97d44d62377c985a423f6bb82f07
+  # Parent  ebe9914c0d1c3f60096e952fa4dbb3d377dea3ab
   P1
   
-  diff -r ???????????? -r ???????????? f (glob)
-  --- a/f	??? ??? ?? ??:??:?? ???? ????? (glob)
-  +++ b/f	??? ??? ?? ??:??:?? ???? ????? (glob)
+  diff -r ebe9914c0d1c -r 462012cf340c f
+  --- a/f	Thu Jan 01 00:00:01 1970 +0000
+  +++ b/f	Thu Jan 01 00:00:02 1970 +0000
   @@ -1,1 +1,1 @@
   -mq1r1
   +mq1r1mq2
@@ -150,12 +155,12 @@ Adding one git-style patch and one normal:
 
   $ hg up -q 0
 
-  $ hg qnew --git f_git.patch
+  $ hg qnew --git f_git.patch -d '3 0'
   $ echo mq1 > p
   $ hg add p
   $ hg qref --git -m 'P0 (git)'
 
-  $ hg qnew f.patch
+  $ hg qnew f.patch -d '4 0'
   $ echo mq2 > p
   $ hg qref -m P1
   $ hg qci -m 'save patch state'
@@ -171,6 +176,8 @@ Adding one git-style patch and one normal:
   series
 
   $ cat .hg/patches/f_git.patch
+  Date: 3 0
+  
   P0 (git)
   
   diff --git a/p b/p
@@ -181,6 +188,8 @@ Adding one git-style patch and one normal:
   +mq1
 
   $ cat .hg/patches/f.patch
+  Date: 4 0
+  
   P1
   
   diff -r ???????????? p (glob)
@@ -194,7 +203,9 @@ Adding one git-style patch and one normal:
 Rebase the applied mq patches:
 
   $ hg rebase -s 2 -d 1
-  saved backup bundle to $TESTTMP/a/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 2:0c587ffcb480 "P0 (git)" (f_git.patch qbase)
+  rebasing 3:c7f18665e4bc "P1" (f.patch qtip tip)
+  saved backup bundle to $TESTTMP/a/.hg/strip-backup/0c587ffcb480-0ea5695f-backup.hg (glob)
 
   $ hg qci -m 'save patch state'
 
@@ -211,9 +222,9 @@ Rebase the applied mq patches:
   $ cat .hg/patches/f_git.patch
   # HG changeset patch
   # User test
-  # Date ?????????? ? (glob)
-  #      * (glob)
-  # Node ID ???????????????????????????????????????? (glob)
+  # Date 3 0
+  #      Thu Jan 01 00:00:03 1970 +0000
+  # Node ID 12d9f6a3bbe560dee50c7c454d434add7fb8e837
   # Parent  bac9ed9960d8992bcad75864a879fa76cadaf1b0
   P0 (git)
   
@@ -227,15 +238,15 @@ Rebase the applied mq patches:
   $ cat .hg/patches/f.patch
   # HG changeset patch
   # User test
-  # Date ?????????? ? (glob)
-  #      * (glob)
-  # Node ID ???????????????????????????????????????? (glob)
-  # Parent  ???????????????????????????????????????? (glob)
+  # Date 4 0
+  #      Thu Jan 01 00:00:04 1970 +0000
+  # Node ID c77a2661c64c60d82f63c4f7aefd95b3a948a557
+  # Parent  12d9f6a3bbe560dee50c7c454d434add7fb8e837
   P1
   
-  diff -r ???????????? -r ???????????? p (glob)
-  --- a/p	??? ??? ?? ??:??:?? ???? ????? (glob)
-  +++ b/p	??? ??? ?? ??:??:?? ???? ????? (glob)
+  diff -r 12d9f6a3bbe5 -r c77a2661c64c p
+  --- a/p	Thu Jan 01 00:00:03 1970 +0000
+  +++ b/p	Thu Jan 01 00:00:04 1970 +0000
   @@ -1,1 +1,1 @@
   -mq1
   +mq2
@@ -256,10 +267,10 @@ Create mq repo with guarded patches foo and bar and empty patch:
   $ echo guarded > guarded
   $ hg add guarded
   $ hg qnew guarded
-  $ hg qnew empty-important -m 'important commit message'
+  $ hg qnew empty-important -m 'important commit message' -d '1 0'
   $ echo bar > bar
   $ hg add bar
-  $ hg qnew bar
+  $ hg qnew bar -d '2 0'
   $ echo foo > foo
   $ hg add foo
   $ hg qnew foo
@@ -326,6 +337,7 @@ removed from the series):
   foo
   $ [ -f .hg/patches/empty-important ]
   $ hg -q rebase -d 2
+  note: rebase of 1:0aaf4c3af7eb created no changes to commit
   $ hg qseries
   guarded
   bar
@@ -339,10 +351,10 @@ removed from the series):
   foo: +baz
 
   $ hg tglog
-  @  2:* '[mq]: bar' tags: bar qbase qtip tip (glob)
+  @  2: '[mq]: bar' tags: bar qbase qtip tip
   |
-  o  1:* 'b' tags: qparent (glob)
+  o  1: 'b' tags: qparent
   |
-  o  0:* 'a' tags: (glob)
+  o  0: 'a' tags:
   
   $ cd ..

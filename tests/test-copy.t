@@ -20,8 +20,11 @@
   commit: 1 copied
   update: (current)
   $ hg --debug commit -m "2"
+  committing files:
   b
    b: copy a:b789fdd96dc2f3bd229c1dd8eedf0fc60e2b68e3
+  committing manifest
+  committing changelog
   committed changeset 1:93580a2c28a50a56f63526fb305067e6fbf739c4
 
 we should see two history entries
@@ -184,7 +187,7 @@ should show no parents for tip
      rev    offset  length  ..... linkrev nodeid       p1           p2 (re)
        0         0      69  .....       1 7711d36246cc 000000000000 000000000000 (re)
        1        69       6  .....       2 bdf70a2b8d03 7711d36246cc 000000000000 (re)
-       2        75      81  .....       3 b2558327ea8d 000000000000 000000000000 (re)
+       2        75      71  .....       3 b2558327ea8d 000000000000 000000000000 (re)
 should match
   $ hg debugindex foo
      rev    offset  length  ..... linkrev nodeid       p1           p2 (re)

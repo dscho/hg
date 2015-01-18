@@ -81,6 +81,12 @@ Interaction with Mercurial Commands
     Git and Subversion subrepositories are currently silently
     ignored.
 
+:addremove: addremove does not recurse into subrepos unless
+    -S/--subrepos is specified.  However, if you specify the full
+    path of a directory in a subrepo, addremove will be performed on
+    it even without -S/--subrepos being specified.  Git and
+    Subversion subrepositories will print a warning and continue.
+
 :archive: archive does not recurse in subrepositories unless
     -S/--subrepos is specified.
 
@@ -94,12 +100,14 @@ Interaction with Mercurial Commands
     -S/--subrepos, or setting "ui.commitsubrepos=True" in a
     configuration file (see :hg:`help config`).  After there are no
     longer any modified subrepositories, it records their state and
-    finally commits it in the parent repository.
+    finally commits it in the parent repository.  The --addremove
+    option also honors the -S/--subrepos option.  However, Git and
+    Subversion subrepositories will print a warning and abort.
 
 :diff: diff does not recurse in subrepos unless -S/--subrepos is
     specified. Changes are displayed as usual, on the subrepositories
-    elements. Git and Subversion subrepositories are currently
-    silently ignored.
+    elements. Git subrepositories do not support --include/--exclude.
+    Subversion subrepositories are currently silently ignored.
 
 :forget: forget currently only handles exact file matches in subrepos.
     Git and Subversion subrepositories are currently silently ignored.
@@ -128,6 +136,12 @@ Interaction with Mercurial Commands
     regular Mercurial changes on the subrepository
     elements. Subversion subrepositories are currently silently
     ignored.
+
+:remove: remove does not recurse into subrepositories unless
+    -S/--subrepos is specified.  However, if you specify a file or
+    directory path in a subrepo, it will be removed even without
+    -S/--subrepos.  Git and Subversion subrepositories are currently
+    silently ignored.
 
 :update: update restores the subrepos in the state they were
     originally committed in target changeset. If the recorded

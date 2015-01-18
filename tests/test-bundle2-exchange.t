@@ -7,6 +7,11 @@ Test exchange of common information using bundle2
 
 enable obsolescence
 
+  $ cat > $TESTTMP/bundle2-pushkey-hook.sh << EOF
+  > echo pushkey: lock state after \"\$HG_NAMESPACE\"
+  > hg debuglock
+  > EOF
+
   $ cat >> $HGRCPATH << EOF
   > [experimental]
   > evolution=createmarkers,exchange
@@ -21,7 +26,10 @@ enable obsolescence
   > publish=False
   > [hooks]
   > changegroup = sh -c  "HG_LOCAL= python \"$TESTDIR/printenv.py\" changegroup"
-  > b2x-transactionclose = sh -c  "HG_LOCAL= python \"$TESTDIR/printenv.py\" b2x-transactionclose"
+  > b2x-pretransactionclose.tip = hg log -r tip -T "pre-close-tip:{node|short} {phase} {bookmarks}\n"
+  > b2x-transactionclose.tip = hg log -r tip -T "postclose-tip:{node|short} {phase} {bookmarks}\n"
+  > b2x-transactionclose.env = sh -c  "HG_LOCAL= python \"$TESTDIR/printenv.py\" b2x-transactionclose"
+  > pushkey= sh "$TESTTMP/bundle2-pushkey-hook.sh"
   > EOF
 
 The extension requires a repo (currently unused)
@@ -59,8 +67,10 @@ clone --pull
   adding file changes
   added 2 changesets with 2 changes to 2 files
   1 new obsolescence markers
-  changegroup hook: HG_NODE=cd010b8cd998f3981a5a8115f94f8da4ab506089 HG_SOURCE=pull HG_URL=file:$TESTTMP/main
+  pre-close-tip:9520eea781bc draft 
+  postclose-tip:9520eea781bc draft 
   b2x-transactionclose hook: HG_NEW_OBSMARKERS=1 HG_NODE=cd010b8cd998f3981a5a8115f94f8da4ab506089 HG_PHASES_MOVED=1 HG_SOURCE=pull HG_URL=file:$TESTTMP/main
+  changegroup hook: HG_NODE=cd010b8cd998f3981a5a8115f94f8da4ab506089 HG_SOURCE=pull HG_URL=file:$TESTTMP/main
   updating to branch default
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg -R other log -G
@@ -82,8 +92,10 @@ pull
   adding file changes
   added 1 changesets with 1 changes to 1 files (+1 heads)
   1 new obsolescence markers
-  changegroup hook: HG_NODE=24b6387c8c8cae37178880f3fa95ded3cb1cf785 HG_SOURCE=pull HG_URL=file:$TESTTMP/main
+  pre-close-tip:24b6387c8c8c draft 
+  postclose-tip:24b6387c8c8c draft 
   b2x-transactionclose hook: HG_NEW_OBSMARKERS=1 HG_NODE=24b6387c8c8cae37178880f3fa95ded3cb1cf785 HG_PHASES_MOVED=1 HG_SOURCE=pull HG_URL=file:$TESTTMP/main
+  changegroup hook: HG_NODE=24b6387c8c8cae37178880f3fa95ded3cb1cf785 HG_SOURCE=pull HG_URL=file:$TESTTMP/main
   (run 'hg heads' to see heads, 'hg merge' to merge)
   $ hg -R other log -G
   o  2:24b6387c8c8c draft Nicolas Dumazet <nicdumz.commits@gmail.com>  F
@@ -102,6 +114,8 @@ pull empty (with phase movement)
   $ hg -R other pull -r 24b6387c8c8c
   pulling from $TESTTMP/main (glob)
   no changes found
+  pre-close-tip:000000000000 public 
+  postclose-tip:24b6387c8c8c public 
   b2x-transactionclose hook: HG_NEW_OBSMARKERS=0 HG_PHASES_MOVED=1 HG_SOURCE=pull HG_URL=file:$TESTTMP/main
   $ hg -R other log -G
   o  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com>  F
@@ -119,6 +133,8 @@ pull empty
   $ hg -R other pull -r 24b6387c8c8c
   pulling from $TESTTMP/main (glob)
   no changes found
+  pre-close-tip:24b6387c8c8c public 
+  postclose-tip:24b6387c8c8c public 
   b2x-transactionclose hook: HG_NEW_OBSMARKERS=0 HG_SOURCE=pull HG_URL=file:$TESTTMP/main
   $ hg -R other log -G
   o  2:24b6387c8c8c public Nicolas Dumazet <nicdumz.commits@gmail.com>  F
@@ -156,14 +172,25 @@ push
   $ hg -R main push other --rev eea13746799a --bookmark book_eea1
   pushing to other
   searching for changes
-  changegroup hook: HG_BUNDLE2-EXP=1 HG_NODE=eea13746799a9e0bfd88f29d3c2e9dc9389f524f HG_SOURCE=push HG_URL=push
+  pre-close-tip:eea13746799a public book_eea1
+  pushkey: lock state after "phases"
+  lock:  free
+  wlock: free
+  pushkey: lock state after "bookmarks"
+  lock:  free
+  wlock: free
+  postclose-tip:eea13746799a public book_eea1
   b2x-transactionclose hook: HG_BOOKMARK_MOVED=1 HG_BUNDLE2-EXP=1 HG_NEW_OBSMARKERS=1 HG_NODE=eea13746799a9e0bfd88f29d3c2e9dc9389f524f HG_PHASES_MOVED=1 HG_SOURCE=push HG_URL=push
+  changegroup hook: HG_BUNDLE2-EXP=1 HG_NODE=eea13746799a9e0bfd88f29d3c2e9dc9389f524f HG_SOURCE=push HG_URL=push
   remote: adding changesets
   remote: adding manifests
   remote: adding file changes
   remote: added 1 changesets with 0 changes to 0 files (-1 heads)
   remote: 1 new obsolescence markers
   updating bookmark book_eea1
+  pre-close-tip:02de42196ebe draft book_02de
+  postclose-tip:02de42196ebe draft book_02de
+  b2x-transactionclose hook: HG_SOURCE=push-response HG_URL=file:$TESTTMP/other
   $ hg -R other log -G
   o    3:eea13746799a public Nicolas Dumazet <nicdumz.commits@gmail.com> book_eea1 G
   |\
@@ -189,8 +216,10 @@ pull over ssh
   added 1 changesets with 1 changes to 1 files (+1 heads)
   1 new obsolescence markers
   updating bookmark book_02de
-  changegroup hook: HG_NODE=02de42196ebee42ef284b6780a87cdc96e8eaab6 HG_SOURCE=pull HG_URL=ssh://user@dummy/main
+  pre-close-tip:02de42196ebe draft book_02de
+  postclose-tip:02de42196ebe draft book_02de
   b2x-transactionclose hook: HG_BOOKMARK_MOVED=1 HG_NEW_OBSMARKERS=1 HG_NODE=02de42196ebee42ef284b6780a87cdc96e8eaab6 HG_PHASES_MOVED=1 HG_SOURCE=pull HG_URL=ssh://user@dummy/main
+  changegroup hook: HG_NODE=02de42196ebee42ef284b6780a87cdc96e8eaab6 HG_SOURCE=pull HG_URL=ssh://user@dummy/main
   (run 'hg heads' to see heads, 'hg merge' to merge)
   $ hg -R other debugobsolete
   1111111111111111111111111111111111111111 9520eea781bcca16c1e15acc0ba14335a0e8e5ba 0 (Thu Jan 01 00:00:00 1970 +0000) {'user': 'test'}
@@ -212,8 +241,10 @@ pull over http
   added 1 changesets with 1 changes to 1 files (+1 heads)
   1 new obsolescence markers
   updating bookmark book_42cc
-  changegroup hook: HG_NODE=42ccdea3bb16d28e1848c95fe2e44c000f3f21b1 HG_SOURCE=pull HG_URL=http://localhost:$HGPORT/
+  pre-close-tip:42ccdea3bb16 draft book_42cc
+  postclose-tip:42ccdea3bb16 draft book_42cc
   b2x-transactionclose hook: HG_BOOKMARK_MOVED=1 HG_NEW_OBSMARKERS=1 HG_NODE=42ccdea3bb16d28e1848c95fe2e44c000f3f21b1 HG_PHASES_MOVED=1 HG_SOURCE=pull HG_URL=http://localhost:$HGPORT/
+  changegroup hook: HG_NODE=42ccdea3bb16d28e1848c95fe2e44c000f3f21b1 HG_SOURCE=pull HG_URL=http://localhost:$HGPORT/
   (run 'hg heads .' to see heads, 'hg merge' to merge)
   $ cat main-error.log
   $ hg -R other debugobsolete
@@ -234,8 +265,16 @@ push over ssh
   remote: added 1 changesets with 1 changes to 1 files
   remote: 1 new obsolescence markers
   updating bookmark book_5fdd
-  remote: changegroup hook: HG_BUNDLE2-EXP=1 HG_NODE=5fddd98957c8a54a4d436dfe1da9d87f21a1b97b HG_SOURCE=serve HG_URL=remote:ssh:127.0.0.1
+  remote: pre-close-tip:5fddd98957c8 draft book_5fdd
+  remote: pushkey: lock state after "bookmarks"
+  remote: lock:  free
+  remote: wlock: free
+  remote: postclose-tip:5fddd98957c8 draft book_5fdd
   remote: b2x-transactionclose hook: HG_BOOKMARK_MOVED=1 HG_BUNDLE2-EXP=1 HG_NEW_OBSMARKERS=1 HG_NODE=5fddd98957c8a54a4d436dfe1da9d87f21a1b97b HG_SOURCE=serve HG_URL=remote:ssh:127.0.0.1
+  remote: changegroup hook: HG_BUNDLE2-EXP=1 HG_NODE=5fddd98957c8a54a4d436dfe1da9d87f21a1b97b HG_SOURCE=serve HG_URL=remote:ssh:127.0.0.1
+  pre-close-tip:02de42196ebe draft book_02de
+  postclose-tip:02de42196ebe draft book_02de
+  b2x-transactionclose hook: HG_SOURCE=push-response HG_URL=ssh://user@dummy/other
   $ hg -R other log -G
   o  6:5fddd98957c8 draft Nicolas Dumazet <nicdumz.commits@gmail.com> book_5fdd C
   |
@@ -274,6 +313,9 @@ push over http
   remote: added 1 changesets with 1 changes to 1 files
   remote: 1 new obsolescence markers
   updating bookmark book_32af
+  pre-close-tip:02de42196ebe draft book_02de
+  postclose-tip:02de42196ebe draft book_02de
+  b2x-transactionclose hook: HG_SOURCE=push-response HG_URL=http://localhost:$HGPORT2/
   $ cat other-error.log
 
 Check final content.
@@ -304,6 +346,15 @@ Check final content.
   6666666666666666666666666666666666666666 5fddd98957c8a54a4d436dfe1da9d87f21a1b97b 0 (Thu Jan 01 00:00:00 1970 +0000) {'user': 'test'}
   7777777777777777777777777777777777777777 32af7686d403cf45b5d95f2d70cebea587ac806a 0 (Thu Jan 01 00:00:00 1970 +0000) {'user': 'test'}
 
+(check that no 'pending' files remain)
+
+  $ ls -1 other/.hg/bookmarks*
+  other/.hg/bookmarks
+  $ ls -1 other/.hg/store/phaseroots*
+  other/.hg/store/phaseroots
+  $ ls -1 other/.hg/store/00changelog.i*
+  other/.hg/store/00changelog.i
+
 Error Handling
 ==============
 
@@ -328,7 +379,7 @@ Setting up
   >     if reason == 'abort':
   >         bundler.newpart('test:abort')
   >     if reason == 'unknown':
-  >         bundler.newpart('TEST:UNKNOWN')
+  >         bundler.newpart('test:unknown')
   >     if reason == 'race':
   >         # 20 Bytes of crap
   >         bundler.newpart('b2x:check:heads', data='01234567890123456789')
@@ -460,9 +511,9 @@ Doing the actual push: hook abort
   $ hg -R main push other -r e7ec4e813ba6
   pushing to other
   searching for changes
+  pre-close-tip:e7ec4e813ba6 draft 
   transaction abort!
   rollback completed
-  changegroup hook: HG_BUNDLE2-EXP=1 HG_NODE=e7ec4e813ba6b07be2a0516ce1a74bb4e503f91a HG_SOURCE=push HG_URL=push
   abort: b2x-pretransactionclose.failpush hook exited with status 1
   [255]
 
@@ -470,9 +521,9 @@ Doing the actual push: hook abort
   pushing to ssh://user@dummy/other
   searching for changes
   abort: b2x-pretransactionclose.failpush hook exited with status 1
+  remote: pre-close-tip:e7ec4e813ba6 draft 
   remote: transaction abort!
   remote: rollback completed
-  remote: changegroup hook: HG_BUNDLE2-EXP=1 HG_NODE=e7ec4e813ba6b07be2a0516ce1a74bb4e503f91a HG_SOURCE=serve HG_URL=remote:ssh:127.0.0.1
   [255]
 
   $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
@@ -481,4 +532,12 @@ Doing the actual push: hook abort
   abort: b2x-pretransactionclose.failpush hook exited with status 1
   [255]
 
+(check that no 'pending' files remain)
+
+  $ ls -1 other/.hg/bookmarks*
+  other/.hg/bookmarks
+  $ ls -1 other/.hg/store/phaseroots*
+  other/.hg/store/phaseroots
+  $ ls -1 other/.hg/store/00changelog.i*
+  other/.hg/store/00changelog.i
 

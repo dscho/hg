@@ -270,7 +270,10 @@ should push b.patch
   applying c.patch
   patching file c
   adding c
+  committing files:
   c
+  committing manifest
+  committing changelog
   now at: c.patch
 
 guards in series file: +1 +2 -3
@@ -568,7 +571,7 @@ guarded (= not yet applied) one.
   3 G b.patch
 
 test that "qselect --reapply" checks applied patches correctly when no
-applied patche becomes guarded but some of unapplied ones become
+applied patches becomes guarded but some of unapplied ones become
 unguarded.
 
   $ hg qpop -q -a

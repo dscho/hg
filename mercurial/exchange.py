@@ -49,7 +49,7 @@ def buildobsmarkerspart(bundler, markers):
         if version is None:
             raise ValueError('bundler do not support common obsmarker format')
         stream = obsolete.encodemarkers(markers, True, version=version)
-        return bundler.newpart('B2X:OBSMARKERS', data=stream)
+        return bundler.newpart('b2x:obsmarkers', data=stream)
     return None
 
 class pushoperation(object):
@@ -104,6 +104,8 @@ class pushoperation(object):
         self.outobsmarkers = set()
         # outgoing bookmarks
         self.outbookmarks = []
+        # transaction manager
+        self.trmanager = None
 
     @util.propertycache
     def futureheads(self):
@@ -204,6 +206,10 @@ def push(repo, remote, force=False, revs=None, newbranch=False, bookmarks=()):
         msg = 'cannot lock source repository: %s\n' % err
         pushop.ui.debug(msg)
     try:
+        if pushop.locallocked:
+            pushop.trmanager = transactionmanager(repo,
+                                                  'push-response',
+                                                  pushop.remote.url())
         pushop.repo.checkpush(pushop)
         lock = None
         unbundle = pushop.remote.capable('unbundle')
@@ -222,7 +228,11 @@ def push(repo, remote, force=False, revs=None, newbranch=False, bookmarks=()):
         finally:
             if lock is not None:
                 lock.release()
+        if pushop.trmanager:
+            pushop.trmanager.close()
     finally:
+        if pushop.trmanager:
+            pushop.trmanager.release()
         if locallock is not None:
             locallock.release()
 
@@ -261,12 +271,11 @@ def _pushdiscovery(pushop):
 @pushdiscovery('changeset')
 def _pushdiscoverychangeset(pushop):
     """discover the changeset that need to be pushed"""
-    unfi = pushop.repo.unfiltered()
     fci = discovery.findcommonincoming
-    commoninc = fci(unfi, pushop.remote, force=pushop.force)
+    commoninc = fci(pushop.repo, pushop.remote, force=pushop.force)
     common, inc, remoteheads = commoninc
     fco = discovery.findcommonoutgoing
-    outgoing = fco(unfi, pushop.remote, onlyheads=pushop.revs,
+    outgoing = fco(pushop.repo, pushop.remote, onlyheads=pushop.revs,
                    commoninc=commoninc, force=pushop.force)
     pushop.outgoing = outgoing
     pushop.remoteheads = remoteheads
@@ -298,7 +307,7 @@ def _pushdiscoveryphase(pushop):
     else:
         # adds changeset we are going to push as draft
         #
-        # should not be necessary for pushblishing server, but because of an
+        # should not be necessary for publishing server, but because of an
         # issue fixed in xxxxx we have to do it anyway.
         fdroots = list(unfi.set('roots(%ln  + %ln::)',
                        outgoing.missing, droots))
@@ -444,11 +453,26 @@ def _pushb2ctx(pushop, bundler):
                                      pushop.remote,
                                      pushop.outgoing)
     if not pushop.force:
-        bundler.newpart('B2X:CHECK:HEADS', data=iter(pushop.remoteheads))
-    cg = changegroup.getlocalchangegroup(pushop.repo, 'push', pushop.outgoing)
-    cgpart = bundler.newpart('B2X:CHANGEGROUP', data=cg.getchunks())
+        bundler.newpart('b2x:check:heads', data=iter(pushop.remoteheads))
+    b2caps = bundle2.bundle2caps(pushop.remote)
+    version = None
+    cgversions = b2caps.get('b2x:changegroup')
+    if not cgversions:  # 3.1 and 3.2 ship with an empty value
+        cg = changegroup.getlocalchangegroupraw(pushop.repo, 'push',
+                                                pushop.outgoing)
+    else:
+        cgversions = [v for v in cgversions if v in changegroup.packermap]
+        if not cgversions:
+            raise ValueError(_('no common changegroup version'))
+        version = max(cgversions)
+        cg = changegroup.getlocalchangegroupraw(pushop.repo, 'push',
+                                                pushop.outgoing,
+                                                version=version)
+    cgpart = bundler.newpart('b2x:changegroup', data=cg)
+    if version is not None:
+        cgpart.addparam('version', version)
     def handlereply(op):
-        """extract addchangroup returns from server reply"""
+        """extract addchangegroup returns from server reply"""
         cgreplies = op.records.getreplies(cgpart.id)
         assert len(cgreplies['changegroup']) == 1
         pushop.cgresult = cgreplies['changegroup'][0]['return']
@@ -547,8 +571,12 @@ def _pushbundle2(pushop):
     The only currently supported type of data is changegroup but this will
     evolve in the future."""
     bundler = bundle2.bundle20(pushop.ui, bundle2.bundle2caps(pushop.remote))
+    pushback = (pushop.trmanager
+                and pushop.ui.configbool('experimental', 'bundle2.pushback'))
+
     # create reply capability
-    capsblob = bundle2.encodecaps(bundle2.getrepocaps(pushop.repo))
+    capsblob = bundle2.encodecaps(bundle2.getrepocaps(pushop.repo,
+                                                      allowpushback=pushback))
     bundler.newpart('b2x:replycaps', data=capsblob)
     replyhandlers = []
     for partgenname in b2partsgenorder:
@@ -565,7 +593,10 @@ def _pushbundle2(pushop):
     except error.BundleValueError, exc:
         raise util.Abort('missing support for %s' % exc)
     try:
-        op = bundle2.processbundle(pushop.repo, reply)
+        trgetter = None
+        if pushback:
+            trgetter = pushop.trmanager.transaction
+        op = bundle2.processbundle(pushop.repo, reply, trgetter)
     except error.BundleValueError, exc:
         raise util.Abort('missing support for %s' % exc)
     for rephand in replyhandlers:
@@ -678,13 +709,11 @@ def _pushsyncphase(pushop):
 
 def _localphasemove(pushop, nodes, phase=phases.public):
     """move <nodes> to <phase> in the local source repo"""
-    if pushop.locallocked:
-        tr = pushop.repo.transaction('push-phase-sync')
-        try:
-            phases.advanceboundary(pushop.repo, tr, phase, nodes)
-            tr.close()
-        finally:
-            tr.release()
+    if pushop.trmanager:
+        phases.advanceboundary(pushop.repo,
+                               pushop.trmanager.transaction(),
+                               phase,
+                               nodes)
     else:
         # repo is not locked, do not change any phases!
         # Informs the user that phases should have been moved when
@@ -739,7 +768,7 @@ def _pushbookmark(pushop):
 class pulloperation(object):
     """A object that represent a single pull operation
 
-    It purpose is to carry push related state and very common operation.
+    It purpose is to carry pull related state and very common operation.
 
     A new should be created at the beginning of each pull and discarded
     afterward.
@@ -756,10 +785,8 @@ class pulloperation(object):
         self.explicitbookmarks = bookmarks
         # do we force pull?
         self.force = force
-        # the name the pull transaction
-        self._trname = 'pull\n' + util.hidepassword(remote.url())
-        # hold the transaction once created
-        self._tr = None
+        # transaction manager
+        self.trmanager = None
         # set of common changeset between local and remote before pull
         self.common = None
         # set of pulled head
@@ -792,29 +819,44 @@ class pulloperation(object):
             return self.heads
 
     def gettransaction(self):
-        """get appropriate pull transaction, creating it if needed"""
-        if self._tr is None:
-            self._tr = self.repo.transaction(self._trname)
-            self._tr.hookargs['source'] = 'pull'
-            self._tr.hookargs['url'] = self.remote.url()
+        # deprecated; talk to trmanager directly
+        return self.trmanager.transaction()
+
+class transactionmanager(object):
+    """An object to manage the life cycle of a transaction
+
+    It creates the transaction on demand and calls the appropriate hooks when
+    closing the transaction."""
+    def __init__(self, repo, source, url):
+        self.repo = repo
+        self.source = source
+        self.url = url
+        self._tr = None
+
+    def transaction(self):
+        """Return an open transaction object, constructing if necessary"""
+        if not self._tr:
+            trname = '%s\n%s' % (self.source, util.hidepassword(self.url))
+            self._tr = self.repo.transaction(trname)
+            self._tr.hookargs['source'] = self.source
+            self._tr.hookargs['url'] = self.url
         return self._tr
 
-    def closetransaction(self):
+    def close(self):
         """close transaction if created"""
         if self._tr is not None:
             repo = self.repo
-            cl = repo.unfiltered().changelog
-            p = cl.writepending() and repo.root or ""
-            p = cl.writepending() and repo.root or ""
+            p = lambda: self._tr.writepending() and repo.root or ""
             repo.hook('b2x-pretransactionclose', throw=True, pending=p,
                       **self._tr.hookargs)
-            self._tr.close()
             hookargs = dict(self._tr.hookargs)
             def runhooks():
                 repo.hook('b2x-transactionclose', **hookargs)
-            repo._afterlock(runhooks)
+            self._tr.addpostclose('b2x-hook-transactionclose',
+                                  lambda tr: repo._afterlock(runhooks))
+            self._tr.close()
 
-    def releasetransaction(self):
+    def release(self):
         """release transaction if created"""
         if self._tr is not None:
             self._tr.release()
@@ -832,6 +874,7 @@ def pull(repo, remote, heads=None, force=False, bookmarks=()):
     pullop.remotebookmarks = remote.listkeys('bookmarks')
     lock = pullop.repo.lock()
     try:
+        pullop.trmanager = transactionmanager(repo, 'pull', remote.url())
         _pulldiscovery(pullop)
         if (pullop.repo.ui.configbool('experimental', 'bundle2-exp', False)
             and pullop.remote.capable('bundle2-exp')):
@@ -840,9 +883,9 @@ def pull(repo, remote, heads=None, force=False, bookmarks=()):
         _pullphase(pullop)
         _pullbookmarks(pullop)
         _pullobsolete(pullop)
-        pullop.closetransaction()
+        pullop.trmanager.close()
     finally:
-        pullop.releasetransaction()
+        pullop.trmanager.release()
         lock.release()
 
     return pullop
@@ -883,11 +926,36 @@ def _pulldiscoverychangegroup(pullop):
 
     Current handle changeset discovery only, will change handle all discovery
     at some point."""
-    tmp = discovery.findcommonincoming(pullop.repo.unfiltered(),
+    tmp = discovery.findcommonincoming(pullop.repo,
                                        pullop.remote,
                                        heads=pullop.heads,
                                        force=pullop.force)
-    pullop.common, pullop.fetch, pullop.rheads = tmp
+    common, fetch, rheads = tmp
+    nm = pullop.repo.unfiltered().changelog.nodemap
+    if fetch and rheads:
+        # If a remote heads in filtered locally, lets drop it from the unknown
+        # remote heads and put in back in common.
+        #
+        # This is a hackish solution to catch most of "common but locally
+        # hidden situation".  We do not performs discovery on unfiltered
+        # repository because it end up doing a pathological amount of round
+        # trip for w huge amount of changeset we do not care about.
+        #
+        # If a set of such "common but filtered" changeset exist on the server
+        # but are not including a remote heads, we'll not be able to detect it,
+        scommon = set(common)
+        filteredrheads = []
+        for n in rheads:
+            if n in nm and n not in scommon:
+                common.append(n)
+            else:
+                filteredrheads.append(n)
+        if not filteredrheads:
+            fetch = []
+        rheads = filteredrheads
+    pullop.common = common
+    pullop.fetch = fetch
+    pullop.rheads = rheads
 
 def _pullbundle2(pullop):
     """pull data using bundle2
@@ -924,22 +992,8 @@ def _pullbundle2(pullop):
         raise util.Abort('missing support for %s' % exc)
 
     if pullop.fetch:
-        changedheads = 0
-        pullop.cgresult = 1
-        for cg in op.records['changegroup']:
-            ret = cg['return']
-            # If any changegroup result is 0, return 0
-            if ret == 0:
-                pullop.cgresult = 0
-                break
-            if ret < -1:
-                changedheads += ret + 1
-            elif ret > 1:
-                changedheads += ret - 1
-        if changedheads > 0:
-            pullop.cgresult = 1 + changedheads
-        elif changedheads < 0:
-            pullop.cgresult = -1 + changedheads
+        results = [cg['return'] for cg in op.records['changegroup']]
+        pullop.cgresult = changegroup.combineresults(results)
 
     # processing phases change
     for namespace, value in op.records['listkeys']:
@@ -965,9 +1019,9 @@ def _pullchangeset(pullop):
         return
     pullop.stepsdone.add('changegroup')
     if not pullop.fetch:
-            pullop.repo.ui.status(_("no changes found\n"))
-            pullop.cgresult = 0
-            return
+        pullop.repo.ui.status(_("no changes found\n"))
+        pullop.cgresult = 0
+        return
     pullop.gettransaction()
     if pullop.heads is None and list(pullop.common) == [nullid]:
         pullop.repo.ui.status(_("requesting all changes\n"))
@@ -1133,10 +1187,11 @@ def getbundle(repo, source, heads=None, common=None, bundlecaps=None,
             b2caps.update(bundle2.decodecaps(blob))
     bundler = bundle2.bundle20(repo.ui, b2caps)
 
+    kwargs['heads'] = heads
+    kwargs['common'] = common
+
     for name in getbundle2partsorder:
         func = getbundle2partsmapping[name]
-        kwargs['heads'] = heads
-        kwargs['common'] = common
         func(bundler, repo, source, bundlecaps=bundlecaps, b2caps=b2caps,
              **kwargs)
 
@@ -1149,11 +1204,26 @@ def _getbundlechangegrouppart(bundler, repo, source, bundlecaps=None,
     cg = None
     if kwargs.get('cg', True):
         # build changegroup bundle here.
-        cg = changegroup.getchangegroup(repo, source, heads=heads,
-                                        common=common, bundlecaps=bundlecaps)
+        version = None
+        cgversions = b2caps.get('b2x:changegroup')
+        if not cgversions:  # 3.1 and 3.2 ship with an empty value
+            cg = changegroup.getchangegroupraw(repo, source, heads=heads,
+                                               common=common,
+                                               bundlecaps=bundlecaps)
+        else:
+            cgversions = [v for v in cgversions if v in changegroup.packermap]
+            if not cgversions:
+                raise ValueError(_('no common changegroup version'))
+            version = max(cgversions)
+            cg = changegroup.getchangegroupraw(repo, source, heads=heads,
+                                               common=common,
+                                               bundlecaps=bundlecaps,
+                                               version=version)
 
     if cg:
-        bundler.newpart('b2x:changegroup', data=cg.getchunks())
+        part = bundler.newpart('b2x:changegroup', data=cg)
+        if version is not None:
+            part.addparam('version', version)
 
 @getbundle2partsgenerator('listkeys')
 def _getbundlelistkeysparts(bundler, repo, source, bundlecaps=None,
@@ -1213,15 +1283,15 @@ def unbundle(repo, cg, heads, source, url):
                 tr.hookargs['url'] = url
                 tr.hookargs['bundle2-exp'] = '1'
                 r = bundle2.processbundle(repo, cg, lambda: tr).reply
-                cl = repo.unfiltered().changelog
-                p = cl.writepending() and repo.root or ""
+                p = lambda: tr.writepending() and repo.root or ""
                 repo.hook('b2x-pretransactionclose', throw=True, pending=p,
                           **tr.hookargs)
-                tr.close()
                 hookargs = dict(tr.hookargs)
                 def runhooks():
                     repo.hook('b2x-transactionclose', **hookargs)
-                repo._afterlock(runhooks)
+                tr.addpostclose('b2x-hook-transactionclose',
+                                lambda tr: repo._afterlock(runhooks))
+                tr.close()
             except Exception, exc:
                 exc.duringunbundle2 = True
                 raise

@@ -86,6 +86,100 @@ Mercurial-patchbomb/.* -> Mercurial-patchbomb/* (glob)
   abort: patchbomb canceled
   [255]
 
+  $ hg --config ui.interactive=1 --config patchbomb.confirm=true email -n -f quux -t foo -c bar -r tip<<EOF
+  > n
+  > EOF
+  this patch series consists of 1 patches.
+  
+  
+  Final summary:
+  
+  From: quux
+  To: foo
+  Cc: bar
+  Subject: [PATCH] a
+   a |  1 +
+   1 files changed, 1 insertions(+), 0 deletions(-)
+  
+  are you sure you want to send (yn)? n
+  abort: patchbomb canceled
+  [255]
+
+
+Test diff.git is respected
+  $ hg --config diff.git=True email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -r tip
+  this patch series consists of 1 patches.
+  
+  
+  displaying [PATCH] a ...
+  Content-Type: text/plain; charset="us-ascii"
+  MIME-Version: 1.0
+  Content-Transfer-Encoding: 7bit
+  Subject: [PATCH] a
+  X-Mercurial-Node: 8580ff50825a50c8f716709acdf8de0deddcd6ab
+  X-Mercurial-Series-Index: 1
+  X-Mercurial-Series-Total: 1
+  Message-Id: <8580ff50825a50c8f716.60@*> (glob)
+  X-Mercurial-Series-Id: <8580ff50825a50c8f716.60@*> (glob)
+  User-Agent: Mercurial-patchbomb/* (glob)
+  Date: Thu, 01 Jan 1970 00:01:00 +0000
+  From: quux
+  To: foo
+  Cc: bar
+  
+  # HG changeset patch
+  # User test
+  # Date 1 0
+  #      Thu Jan 01 00:00:01 1970 +0000
+  # Node ID 8580ff50825a50c8f716709acdf8de0deddcd6ab
+  # Parent  0000000000000000000000000000000000000000
+  a
+  
+  diff --git a/a b/a
+  new file mode 100644
+  --- /dev/null
+  +++ b/a
+  @@ -0,0 +1,1 @@
+  +a
+  
+
+
+Test breaking format changes aren't
+  $ hg --config diff.noprefix=True email --date '1970-1-1 0:1' -n -f quux -t foo -c bar -r tip
+  this patch series consists of 1 patches.
+  
+  
+  displaying [PATCH] a ...
+  Content-Type: text/plain; charset="us-ascii"
+  MIME-Version: 1.0
+  Content-Transfer-Encoding: 7bit
+  Subject: [PATCH] a
+  X-Mercurial-Node: 8580ff50825a50c8f716709acdf8de0deddcd6ab
+  X-Mercurial-Series-Index: 1
+  X-Mercurial-Series-Total: 1
+  Message-Id: <8580ff50825a50c8f716.60@*> (glob)
+  X-Mercurial-Series-Id: <8580ff50825a50c8f716.60@*> (glob)
+  User-Agent: Mercurial-patchbomb/* (glob)
+  Date: Thu, 01 Jan 1970 00:01:00 +0000
+  From: quux
+  To: foo
+  Cc: bar
+  
+  # HG changeset patch
+  # User test
+  # Date 1 0
+  #      Thu Jan 01 00:00:01 1970 +0000
+  # Node ID 8580ff50825a50c8f716709acdf8de0deddcd6ab
+  # Parent  0000000000000000000000000000000000000000
+  a
+  
+  diff -r 000000000000 -r 8580ff50825a a
+  --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  +++ b/a	Thu Jan 01 00:00:01 1970 +0000
+  @@ -0,0 +1,1 @@
+  +a
+  
+
   $ echo b > b
   $ hg commit -Amb -d '2 0'
   adding b
@@ -2589,4 +2683,127 @@ dest#branch URIs:
   +d
   
 
-  $ cd ..
+Test introduction configuration
+=================================
+
+  $ echo '[patchbomb]' >> $HGRCPATH
+
+"auto" setting
+----------------
+
+  $ echo 'intro=auto' >> $HGRCPATH
+
+single rev
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' | grep "Write the introductory message for the patch series."
+  [1]
+
+single rev + flag
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' --intro | grep "Write the introductory message for the patch series."
+  Write the introductory message for the patch series.
+
+
+Multi rev
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '9::' | grep "Write the introductory message for the patch series."
+  Write the introductory message for the patch series.
+
+"never" setting
+-----------------
+
+  $ echo 'intro=never' >> $HGRCPATH
+
+single rev
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' | grep "Write the introductory message for the patch series."
+  [1]
+
+single rev + flag
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' --intro | grep "Write the introductory message for the patch series."
+  Write the introductory message for the patch series.
+
+
+Multi rev
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '9::' | grep "Write the introductory message for the patch series."
+  [1]
+
+Multi rev + flag
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '9::' --intro | grep "Write the introductory message for the patch series."
+  Write the introductory message for the patch series.
+
+"always" setting
+-----------------
+
+  $ echo 'intro=always' >> $HGRCPATH
+
+single rev
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' | grep "Write the introductory message for the patch series."
+  Write the introductory message for the patch series.
+
+single rev + flag
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' --intro | grep "Write the introductory message for the patch series."
+  Write the introductory message for the patch series.
+
+
+Multi rev
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '9::' | grep "Write the introductory message for the patch series."
+  Write the introductory message for the patch series.
+
+Multi rev + flag
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '9::' --intro | grep "Write the introductory message for the patch series."
+  Write the introductory message for the patch series.
+
+bad value setting
+-----------------
+
+  $ echo 'intro=mpmwearaclownnose' >> $HGRCPATH
+
+single rev
+
+  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10'
+  From [test]: test
+  this patch series consists of 1 patches.
+  
+  warning: invalid patchbomb.intro value "mpmwearaclownnose"
+  (should be one of always, never, auto)
+  Cc: 
+  
+  displaying [PATCH] test ...
+  Content-Type: text/plain; charset="us-ascii"
+  MIME-Version: 1.0
+  Content-Transfer-Encoding: 7bit
+  Subject: [PATCH] test
+  X-Mercurial-Node: 3b6f1ec9dde933a40a115a7990f8b320477231af
+  X-Mercurial-Series-Index: 1
+  X-Mercurial-Series-Total: 1
+  Message-Id: <3b6f1ec9dde933a40a11*> (glob)
+  X-Mercurial-Series-Id: <3b6f1ec9dde933a40a11.*> (glob)
+  User-Agent: Mercurial-patchbomb/* (glob)
+  Date: Tue, 01 Jan 1980 00:01:00 +0000
+  From: test
+  To: foo
+  
+  # HG changeset patch
+  # User test
+  # Date 5 0
+  #      Thu Jan 01 00:00:05 1970 +0000
+  # Branch test
+  # Node ID 3b6f1ec9dde933a40a115a7990f8b320477231af
+  # Parent  2f9fa9b998c5fe3ac2bd9a2b14bfcbeecbc7c268
+  dd
+  
+  diff -r 2f9fa9b998c5 -r 3b6f1ec9dde9 d
+  --- a/d	Thu Jan 01 00:00:04 1970 +0000
+  +++ b/d	Thu Jan 01 00:00:05 1970 +0000
+  @@ -1,1 +1,2 @@
+   d
+  +d
+  

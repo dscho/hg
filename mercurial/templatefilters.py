@@ -199,7 +199,7 @@ def json(obj):
         return '"%s"' % jsonescape(obj)
     elif util.safehasattr(obj, 'keys'):
         out = []
-        for k, v in obj.iteritems():
+        for k, v in sorted(obj.iteritems()):
             s = '%s: %s' % (json(k), json(v))
             out.append(s)
         return '{' + ', '.join(out) + '}'
@@ -208,6 +208,8 @@ def json(obj):
         for i in obj:
             out.append(json(i))
         return '[' + ', '.join(out) + ']'
+    elif util.safehasattr(obj, '__call__'):
+        return json(obj())
     else:
         raise TypeError('cannot encode type %s' % obj.__class__.__name__)
 

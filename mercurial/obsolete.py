@@ -74,6 +74,7 @@ from i18n import _
 
 _pack = struct.pack
 _unpack = struct.unpack
+_calcsize = struct.calcsize
 
 _SEEK_END = 2 # os.SEEK_END was introduced in Python 2.5
 
@@ -142,8 +143,8 @@ usingsha256 = 2
 _fm0version = 0
 _fm0fixed   = '>BIB20s'
 _fm0node = '20s'
-_fm0fsize = struct.calcsize(_fm0fixed)
-_fm0fnodesize = struct.calcsize(_fm0node)
+_fm0fsize = _calcsize(_fm0fixed)
+_fm0fnodesize = _calcsize(_fm0node)
 
 def _fm0readmarkers(data, off=0):
     # Loop on markers
@@ -275,66 +276,88 @@ _fm1version = 1
 _fm1fixed = '>IdhHBBB20s'
 _fm1nodesha1 = '20s'
 _fm1nodesha256 = '32s'
-_fm1fsize = struct.calcsize(_fm1fixed)
+_fm1nodesha1size = _calcsize(_fm1nodesha1)
+_fm1nodesha256size = _calcsize(_fm1nodesha256)
+_fm1fsize = _calcsize(_fm1fixed)
 _fm1parentnone = 3
 _fm1parentshift = 14
 _fm1parentmask = (_fm1parentnone << _fm1parentshift)
 _fm1metapair = 'BB'
-_fm1metapairsize = struct.calcsize('BB')
+_fm1metapairsize = _calcsize('BB')
 
 def _fm1readmarkers(data, off=0):
+    # make some global constants local for performance
+    noneflag = _fm1parentnone
+    sha2flag = usingsha256
+    sha1size = _fm1nodesha1size
+    sha2size = _fm1nodesha256size
+    sha1fmt = _fm1nodesha1
+    sha2fmt = _fm1nodesha256
+    metasize = _fm1metapairsize
+    metafmt = _fm1metapair
+    fsize = _fm1fsize
+    unpack = _unpack
+
     # Loop on markers
-    l = len(data)
-    while off + _fm1fsize <= l:
+    stop = len(data) - _fm1fsize
+    ufixed = util.unpacker(_fm1fixed)
+    while off <= stop:
         # read fixed part
-        cur = data[off:off + _fm1fsize]
-        off += _fm1fsize
-        fixeddata = _unpack(_fm1fixed, cur)
-        ttsize, seconds, tz, flags, numsuc, numpar, nummeta, prec = fixeddata
-        # extract the number of parents information
-        if numpar == _fm1parentnone:
-            numpar = None
-        # build the date tuple (upgrade tz minutes to seconds)
-        date = (seconds, tz * 60)
-        _fm1node = _fm1nodesha1
-        if flags & usingsha256:
-            _fm1node = _fm1nodesha256
-        fnodesize = struct.calcsize(_fm1node)
-        # read replacement
-        sucs = ()
-        if numsuc:
-            s = (fnodesize * numsuc)
-            cur = data[off:off + s]
-            sucs = _unpack(_fm1node * numsuc, cur)
-            off += s
-        # read parents
-        if numpar is None:
-            parents = None
-        elif numpar == 0:
-            parents = ()
-        elif numpar:  # neither None nor zero
-            s = (fnodesize * numpar)
-            cur = data[off:off + s]
-            parents = _unpack(_fm1node * numpar, cur)
-            off += s
+        o1 = off + fsize
+        t, secs, tz, flags, numsuc, numpar, nummeta, prec = ufixed(data[off:o1])
+
+        if flags & sha2flag:
+            # FIXME: prec was read as a SHA1, needs to be amended
+
+            # read 0 or more successors
+            if numsuc == 1:
+                o2 = o1 + sha2size
+                sucs = (data[o1:o2],)
+            else:
+                o2 = o1 + sha2size * numsuc
+                sucs = unpack(sha2fmt * numsuc, data[o1:o2])
+
+            # read parents
+            if numpar == noneflag:
+                o3 = o2
+                parents = None
+            elif numpar == 1:
+                o3 = o2 + sha2size
+                parents = (data[o2:o3],)
+            else:
+                o3 = o2 + sha2size * numpar
+                parents = unpack(sha2fmt * numpar, data[o2:o3])
+        else:
+            # read 0 or more successors
+            if numsuc == 1:
+                o2 = o1 + sha1size
+                sucs = (data[o1:o2],)
+            else:
+                o2 = o1 + sha1size * numsuc
+                sucs = unpack(sha1fmt * numsuc, data[o1:o2])
+
+            # read parents
+            if numpar == noneflag:
+                o3 = o2
+                parents = None
+            elif numpar == 1:
+                o3 = o2 + sha1size
+                parents = (data[o2:o3],)
+            else:
+                o3 = o2 + sha1size * numpar
+                parents = unpack(sha1fmt * numpar, data[o2:o3])
+
         # read metadata
-        metaformat = '>' + (_fm1metapair * nummeta)
-        s = _fm1metapairsize * nummeta
-        metapairsize = _unpack(metaformat, data[off:off + s])
-        off += s
+        off = o3 + metasize * nummeta
+        metapairsize = unpack('>' + (metafmt * nummeta), data[o3:off])
         metadata = []
         for idx in xrange(0, len(metapairsize), 2):
-            sk = metapairsize[idx]
-            sv = metapairsize[idx + 1]
-            key = data[off:off + sk]
-            value = data[off + sk:off + sk + sv]
-            assert len(key) == sk
-            assert len(value) == sv
-            metadata.append((key, value))
-            off += sk + sv
-        metadata = tuple(metadata)
+            o1 = off + metapairsize[idx]
+            o2 = o1 + metapairsize[idx + 1]
+            metadata.append((data[off:o1], data[o1:o2]))
+            off = o2
 
-        yield (prec, sucs, flags, metadata, date, parents)
+        yield (prec, sucs, flags, tuple(metadata), (secs, tz * 60), parents)
 
 def _fm1encodeonemarker(marker):
     pre, sucs, flags, metadata, date, parents = marker
@@ -358,7 +381,7 @@ def _fm1encodeonemarker(marker):
     data.extend(sucs)
     if parents is not None:
         data.extend(parents)
-    totalsize = struct.calcsize(format)
+    totalsize = _calcsize(format)
     for key, value in metadata:
         lk = len(key)
         lv = len(value)
@@ -377,6 +400,7 @@ def _fm1encodeonemarker(marker):
 formats = {_fm0version: (_fm0readmarkers, _fm0encodeonemarker),
            _fm1version: (_fm1readmarkers, _fm1encodeonemarker)}
 
+@util.nogc
 def _readmarkers(data):
     """Read and enumerate markers from raw data"""
     off = 0
@@ -562,6 +586,7 @@ class obsstore(object):
         version, markers = _readmarkers(data)
         return self.add(transaction, markers)
 
+    @util.nogc
     def _load(self, markers):
         for mark in markers:
             self._all.append(mark)

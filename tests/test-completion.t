@@ -90,6 +90,7 @@ Show debug commands if there are no other candidates
   debugknown
   debuglabelcomplete
   debuglocks
+  debugnamecomplete
   debugobsolete
   debugpathcomplete
   debugpushkey
@@ -202,7 +203,7 @@ Show all commands + options
   annotate: rev, follow, no-follow, text, user, file, date, number, changeset, line-number, ignore-all-space, ignore-space-change, ignore-blank-lines, include, exclude, template
   clone: noupdate, updaterev, rev, branch, pull, uncompressed, ssh, remotecmd, insecure
   commit: addremove, close-branch, amend, secret, edit, include, exclude, message, logfile, date, user, subrepos
-  diff: rev, change, text, git, nodates, show-function, reverse, ignore-all-space, ignore-space-change, ignore-blank-lines, unified, stat, include, exclude, subrepos
+  diff: rev, change, text, git, nodates, noprefix, show-function, reverse, ignore-all-space, ignore-space-change, ignore-blank-lines, unified, stat, include, exclude, subrepos
   export: output, switch-parent, rev, text, git, nodates
   forget: include, exclude
   init: ssh, remotecmd, insecure
@@ -210,14 +211,14 @@ Show all commands + options
   merge: force, rev, preview, tool
   pull: update, force, rev, bookmark, branch, ssh, remotecmd, insecure
   push: force, rev, bookmark, branch, new-branch, ssh, remotecmd, insecure
-  remove: after, force, include, exclude
+  remove: after, force, subrepos, include, exclude
   serve: accesslog, daemon, daemon-pipefds, errorlog, port, address, prefix, name, web-conf, webdir-conf, pid-file, stdio, cmdserver, templates, style, ipv6, certificate
   status: all, modified, added, removed, deleted, clean, unknown, ignored, no-status, copies, print0, rev, change, include, exclude, subrepos, template
   summary: remote
   update: clean, check, date, rev, tool
-  addremove: similarity, include, exclude, dry-run
+  addremove: similarity, subrepos, include, exclude, dry-run
   archive: no-decode, prefix, rev, type, subrepos, include, exclude
-  backout: merge, parent, rev, edit, tool, include, exclude, message, logfile, date, user
+  backout: merge, commit, parent, rev, edit, tool, include, exclude, message, logfile, date, user
   bisect: reset, good, bad, skip, extend, command, noupdate
   bookmarks: force, rev, delete, rename, inactive, template
   branch: force, clean
@@ -247,6 +248,7 @@ Show all commands + options
   debugknown: 
   debuglabelcomplete: 
   debuglocks: force-lock, force-wlock
+  debugnamecomplete: 
   debugobsolete: flags, record-parents, rev, date, user
   debugpathcomplete: full, normal, added, removed
   debugpushkey: 
@@ -321,16 +323,16 @@ Test debugpathcomplete
   $ hg debugpathcomplete -r F
   Fum
 
-Test debuglabelcomplete
+Test debugnamecomplete
 
-  $ hg debuglabelcomplete
+  $ hg debugnamecomplete
   Fum
   default
   fee
   fie
   fo
   tip
-  $ hg debuglabelcomplete f
+  $ hg debugnamecomplete f
   fee
   fie
   fo

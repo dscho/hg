@@ -8,7 +8,7 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-import changelog, byterange, url, error
+import changelog, byterange, url, error, namespaces
 import localrepo, manifest, util, scmutil, store
 import urllib, urllib2, errno, os
 
@@ -70,7 +70,7 @@ def build_opener(ui, authinfo):
         def __init__(self, base):
             self.base = base
 
-        def __call__(self, path, mode="r", atomictemp=None):
+        def __call__(self, path, mode='r', *args, **kw):
             if mode not in ('r', 'rb'):
                 raise IOError('Permission denied')
             f = "/".join((self.base, urllib.quote(path)))
@@ -106,8 +106,10 @@ class statichttprepository(localrepo.localrepository):
         self.vfs = self.opener
         self._phasedefaults = []
 
+        self.names = namespaces.namespaces()
+
         try:
-            requirements = scmutil.readrequires(self.opener, self.supported)
+            requirements = scmutil.readrequires(self.vfs, self.supported)
         except IOError, inst:
             if inst.errno != errno.ENOENT:
                 raise
@@ -115,7 +117,7 @@ class statichttprepository(localrepo.localrepository):
 
             # check if it is a non-empty old-style repository
             try:
-                fp = self.opener("00changelog.i")
+                fp = self.vfs("00changelog.i")
                 fp.read(1)
                 fp.close()
             except IOError, inst:
@@ -128,14 +130,14 @@ class statichttprepository(localrepo.localrepository):
         # setup store
         self.store = store.store(requirements, self.path, opener)
         self.spath = self.store.path
-        self.sopener = self.store.opener
-        self.svfs = self.sopener
+        self.svfs = self.store.opener
+        self.sopener = self.svfs
         self.sjoin = self.store.join
         self._filecache = {}
         self.requirements = requirements
 
-        self.manifest = manifest.manifest(self.sopener)
-        self.changelog = changelog.changelog(self.sopener)
+        self.manifest = manifest.manifest(self.svfs)
+        self.changelog = changelog.changelog(self.svfs)
         self._tags = None
         self.nodetagscache = None
         self._branchcaches = {}

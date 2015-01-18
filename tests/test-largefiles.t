@@ -44,13 +44,13 @@ Test status and dirstate of largefiles and that summary output is correct.
   $ sleep 1
   $ hg st
   $ hg debugstate --nodates
-  n 644         41 .hglf/large1
-  n 644         41 .hglf/sub/large2
-  n 644          8 normal1
-  n 644          8 sub/normal2
+  n 644         41 set                 .hglf/large1
+  n 644         41 set                 .hglf/sub/large2
+  n 644          8 set                 normal1
+  n 644          8 set                 sub/normal2
   $ hg debugstate --large --nodates
-  n 644          7 large1
-  n 644          7 sub/large2
+  n 644          7 set                 large1
+  n 644          7 set                 sub/large2
   $ echo normal11 > normal1
   $ echo normal22 > sub/normal2
   $ echo large11 > large1
@@ -491,9 +491,9 @@ Test addremove with -R
   $ echo "testing addremove with patterns" > testaddremove.dat
   $ echo "normaladdremove" > normaladdremove
   $ cd ..
-  $ hg -R a addremove
+  $ hg -R a -v addremove
   removing sub/large4
-  adding a/testaddremove.dat as a largefile (glob)
+  adding testaddremove.dat as a largefile
   removing normal3
   adding normaladdremove
   $ cd a
@@ -1097,6 +1097,17 @@ redo pull with --lfrev and check it pulls largefiles for the right revs
   all local heads known remotely
   6 changesets found
   adding changesets
+  uncompressed size of bundle content:
+      1213 (changelog)
+      1479 (manifests)
+       234  .hglf/large1
+       504  .hglf/large3
+       512  .hglf/sub/large4
+       162  .hglf/sub2/large6
+       162  .hglf/sub2/large7
+       192  normal1
+       397  normal3
+       405  sub/normal4
   adding manifests
   adding file changes
   added 6 changesets with 16 changes to 8 files
@@ -1172,12 +1183,12 @@ rebased or not.
   adding manifests
   adding file changes
   added 1 changesets with 2 changes to 2 files (+1 heads)
+  0 largefiles cached
+  rebasing 8:f574fb32bb45 "modify normal file largefile in repo d"
   Invoking status precommit hook
   M sub/normal4
   M sub2/large6
-  saved backup bundle to $TESTTMP/d/.hg/strip-backup/f574fb32bb45-backup.hg (glob)
-  0 largefiles cached
-  nothing to rebase - working directory parent is also destination
+  saved backup bundle to $TESTTMP/d/.hg/strip-backup/f574fb32bb45-dd1d9f80-backup.hg (glob)
   $ [ -f .hg/largefiles/e166e74c7303192238d60af5a9c4ce9bef0b7928 ]
   $ hg log --template '{rev}:{node|short}  {desc|firstline}\n'
   9:598410d3eb9a  modify normal file largefile in repo d
@@ -1231,10 +1242,11 @@ rebased or not.
   added 1 changesets with 2 changes to 2 files (+1 heads)
   (run 'hg heads' to see heads, 'hg merge' to merge)
   $ hg rebase
+  rebasing 8:f574fb32bb45 "modify normal file largefile in repo d"
   Invoking status precommit hook
   M sub/normal4
   M sub2/large6
-  saved backup bundle to $TESTTMP/e/.hg/strip-backup/f574fb32bb45-backup.hg (glob)
+  saved backup bundle to $TESTTMP/e/.hg/strip-backup/f574fb32bb45-dd1d9f80-backup.hg (glob)
   $ hg log --template '{rev}:{node|short}  {desc|firstline}\n'
   9:598410d3eb9a  modify normal file largefile in repo d
   8:a381d2c8c80e  modify normal file and largefile in repo b
@@ -1719,7 +1731,7 @@ coexist.
   $ rm sub2/large7
   $ echo "largeasnormal" > sub2/large7
   $ hg add sub2/large7
-  sub2/large7 already a largefile
+  sub2/large7 already a largefile (glob)
 
 Test that transplanting a largefile change works correctly.
 
@@ -1741,8 +1753,6 @@ Test that transplanting a largefile change works correctly.
   adding manifests
   adding file changes
   added 1 changesets with 2 changes to 2 files
-  getting changed largefiles
-  0 largefiles updated, 0 removed
   $ hg log --template '{rev}:{node|short}  {desc|firstline}\n'
   9:598410d3eb9a  modify normal file largefile in repo d
   8:a381d2c8c80e  modify normal file and largefile in repo b
@@ -1790,7 +1800,7 @@ Cat a standin
   $ hg cat .hglf/sub/large4
   e166e74c7303192238d60af5a9c4ce9bef0b7928
   $ hg cat .hglf/normal3
-  .hglf/normal3: no such file in rev 598410d3eb9a
+  .hglf/normal3: no such file in rev 598410d3eb9a (glob)
   [1]
 
 Test that renaming a largefile results in correct output for status

@@ -100,6 +100,7 @@ Note: old client behave as a publishing server with draft only content
 
 """
 
+import os
 import errno
 from node import nullid, nullrev, bin, hex, short
 from i18n import _
@@ -124,7 +125,15 @@ def _readroots(repo, phasedefaults=None):
     dirty = False
     roots = [set() for i in allphases]
     try:
-        f = repo.sopener('phaseroots')
+        f = None
+        if 'HG_PENDING' in os.environ:
+            try:
+                f = repo.svfs('phaseroots.pending')
+            except IOError, inst:
+                if inst.errno != errno.ENOENT:
+                    raise
+        if f is None:
+            f = repo.svfs('phaseroots')
         try:
             for line in f:
                 phase, nh = line.split()
@@ -147,12 +156,12 @@ class phasecache(object):
             self.phaseroots, self.dirty = _readroots(repo, phasedefaults)
             self._phaserevs = None
             self.filterunknown(repo)
-            self.opener = repo.sopener
+            self.opener = repo.svfs
 
     def copy(self):
         # Shallow copy meant to ensure isolation in
         # advance/retractboundary(), nothing more.
-        ph = phasecache(None, None, _load=False)
+        ph = self.__class__(None, None, _load=False)
         ph.phaseroots = self.phaseroots[:]
         ph.dirty = self.dirty
         ph.opener = self.opener

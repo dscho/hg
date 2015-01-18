@@ -76,7 +76,7 @@ from distutils.command.build_py import build_py
 from distutils.command.install_lib import install_lib
 from distutils.command.install_scripts import install_scripts
 from distutils.spawn import spawn, find_executable
-from distutils import cygwinccompiler, file_util
+from distutils import file_util
 from distutils.errors import CCompilerError, DistutilsExecError
 from distutils.sysconfig import get_python_inc, get_config_var
 from distutils.version import StrictVersion
@@ -141,7 +141,8 @@ except ImportError:
     py2exeloaded = False
 
 def runcmd(cmd, env):
-    if sys.platform == 'plan9':
+    if (sys.platform == 'plan9'
+       and (sys.version_info[0] == 2 and sys.version_info[1] < 7)):
         # subprocess kludge to work around issues in half-baked Python
         # ports, notably bichued/python:
         _, out, err = os.popen3(cmd)
@@ -195,9 +196,13 @@ if os.path.isdir('.hg'):
         if hgid.endswith('+'): # propagate the dirty status to the tag
             version += '+'
     else: # no tag found
-        cmd = [sys.executable, 'hg', 'parents', '--template',
-               '{latesttag}+{latesttagdistance}-']
-        version = runhg(cmd, env) + hgid
+        ltagcmd = [sys.executable, 'hg', 'parents', '--template',
+                   '{latesttag}']
+        ltag = runhg(ltagcmd, env)
+        changessincecmd = [sys.executable, 'hg', 'log', '-T', 'x\n', '-r',
+                           "only(.,'%s')" % ltag]
+        changessince = len(runhg(changessincecmd, env).splitlines())
+        version = '%s+%s-%s' % (ltag, changessince, hgid)
     if version.endswith('+'):
         version += time.strftime('%Y%m%d')
 elif os.path.exists('.hg_archival.txt'):
@@ -206,7 +211,10 @@ elif os.path.exists('.hg_archival.txt'):
     if 'tag' in kw:
         version =  kw['tag']
     elif 'latesttag' in kw:
-        version = '%(latesttag)s+%(latesttagdistance)s-%(node).12s' % kw
+        if 'changessincelatesttag' in kw:
+            version = '%(latesttag)s+%(changessincelatesttag)s-%(node).12s' % kw
+        else:
+            version = '%(latesttag)s+%(latesttagdistance)s-%(node).12s' % kw
     else:
         version = kw.get('node', '')[:12]
 
@@ -501,22 +509,32 @@ else:
                                 extra_link_args=osutil_ldflags,
                                 depends=common_depends))
 
-# the -mno-cygwin option has been deprecated for years
-Mingw32CCompiler = cygwinccompiler.Mingw32CCompiler
+try:
+    from distutils import cygwinccompiler
 
-class HackedMingw32CCompiler(cygwinccompiler.Mingw32CCompiler):
-    def __init__(self, *args, **kwargs):
-        Mingw32CCompiler.__init__(self, *args, **kwargs)
-        for i in 'compiler compiler_so linker_exe linker_so'.split():
-            try:
-                getattr(self, i).remove('-mno-cygwin')
-            except ValueError:
-                pass
+    # the -mno-cygwin option has been deprecated for years
+    compiler = cygwinccompiler.Mingw32CCompiler
 
-cygwinccompiler.Mingw32CCompiler = HackedMingw32CCompiler
+    class HackedMingw32CCompiler(cygwinccompiler.Mingw32CCompiler):
+        def __init__(self, *args, **kwargs):
+            compiler.__init__(self, *args, **kwargs)
+            for i in 'compiler compiler_so linker_exe linker_so'.split():
+                try:
+                    getattr(self, i).remove('-mno-cygwin')
+                except ValueError:
+                    pass
+
+    cygwinccompiler.Mingw32CCompiler = HackedMingw32CCompiler
+except ImportError:
+    # the cygwinccompiler package is not available on some Python
+    # distributions like the ones from the optware project for Synology
+    # DiskStation boxes
+    class HackedMingw32CCompiler(object):
+        pass
 
 packagedata = {'mercurial': ['locale/*/LC_MESSAGES/hg.mo',
                              'help/*.txt',
+                             'default.d/*.rc',
                              'dummycert.pem']}
 
 def ordinarypath(p):

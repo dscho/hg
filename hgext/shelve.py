@@ -43,6 +43,7 @@ class shelvedfile(object):
         self.repo = repo
         self.name = name
         self.vfs = scmutil.vfs(repo.join('shelved'))
+        self.ui = self.repo.ui
         if filetype:
             self.fname = name + '.' + filetype
         else:
@@ -82,7 +83,7 @@ class shelvedfile(object):
         return bundlerepo.bundlerepository(self.repo.baseui, self.repo.root,
                                            self.vfs.join(self.fname))
     def writebundle(self, cg):
-        changegroup.writebundle(cg, self.fname, 'HG10UN', self.vfs)
+        changegroup.writebundle(self.ui, cg, self.fname, 'HG10UN', self.vfs)
 
 class shelvedstate(object):
     """Handle persistence during unshelving operations.
@@ -95,7 +96,7 @@ class shelvedstate(object):
 
     @classmethod
     def load(cls, repo):
-        fp = repo.opener(cls._filename)
+        fp = repo.vfs(cls._filename)
         try:
             version = int(fp.readline().strip())
 
@@ -121,7 +122,7 @@ class shelvedstate(object):
 
     @classmethod
     def save(cls, repo, name, originalwctx, pendingctx, stripnodes):
-        fp = repo.opener(cls._filename, 'wb')
+        fp = repo.vfs(cls._filename, 'wb')
         fp.write('%i\n' % cls._version)
         fp.write('%s\n' % name)
         fp.write('%s\n' % hex(originalwctx.node()))

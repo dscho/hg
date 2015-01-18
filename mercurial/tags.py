@@ -62,7 +62,7 @@ def findglobaltags(ui, repo, alltags, tagtypes):
 def readlocaltags(ui, repo, alltags, tagtypes):
     '''Read local tags in repo.  Update alltags and tagtypes.'''
     try:
-        data = repo.opener.read("localtags")
+        data = repo.vfs.read("localtags")
     except IOError, inst:
         if inst.errno != errno.ENOENT:
             raise
@@ -87,7 +87,7 @@ def readlocaltags(ui, repo, alltags, tagtypes):
 def _readtaghist(ui, repo, lines, fn, recode=None, calcnodelines=False):
     '''Read tag definitions from a file (or any source of lines).
     This function returns two sortdicts with similar information:
-    - the first dict, bingtaglist, contains the tag information as expected by
+    - the first dict, bintaghist, contains the tag information as expected by
       the _readtags function, i.e. a mapping from tag name to (node, hist):
         - node is the node id from the last line read for that name,
         - hist is the list of node ids previously associated with it (in file
@@ -193,7 +193,7 @@ def _readtagcache(ui, repo):
     set, caller is responsible for reading tag info from each head.'''
 
     try:
-        cachefile = repo.opener('cache/tags', 'r')
+        cachefile = repo.vfs('cache/tags', 'r')
         # force reading the file for static-http
         cachelines = iter(cachefile)
     except IOError:
@@ -303,7 +303,7 @@ def _readtagcache(ui, repo):
 def _writetagcache(ui, repo, heads, tagfnode, cachetags):
 
     try:
-        cachefile = repo.opener('cache/tags', 'w', atomictemp=True)
+        cachefile = repo.vfs('cache/tags', 'w', atomictemp=True)
     except (OSError, IOError):
         return
 

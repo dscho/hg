@@ -6,24 +6,42 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from mercurial import changegroup, exchange
-from mercurial.node import short
+from mercurial import changegroup, exchange, util, bundle2
+from mercurial.node import short, hex
 from mercurial.i18n import _
 import errno
 
 def _bundle(repo, bases, heads, node, suffix, compress=True):
     """create a bundle with the specified revisions as a backup"""
-    cg = changegroup.changegroupsubset(repo, bases, heads, 'strip')
+    usebundle2 = (repo.ui.config('experimental', 'bundle2-exp') and
+                  repo.ui.config('experimental', 'strip-bundle2-version'))
+    if usebundle2:
+        cgversion = repo.ui.config('experimental', 'strip-bundle2-version')
+    else:
+        cgversion = '01'
+
+    cg = changegroup.changegroupsubset(repo, bases, heads, 'strip',
+                                       version=cgversion)
     backupdir = "strip-backup"
     vfs = repo.vfs
     if not vfs.isdir(backupdir):
         vfs.mkdir(backupdir)
-    name = "%s/%s-%s.hg" % (backupdir, short(node), suffix)
-    if compress:
+
+    # Include a hash of all the nodes in the filename for uniqueness
+    hexbases = (hex(n) for n in bases)
+    hexheads = (hex(n) for n in heads)
+    allcommits = repo.set('%ls::%ls', hexbases, hexheads)
+    allhashes = sorted(c.hex() for c in allcommits)
+    totalhash = util.sha1(''.join(allhashes)).hexdigest()
+    name = "%s/%s-%s-%s.hg" % (backupdir, short(node), totalhash[:8], suffix)
+
+    if usebundle2:
+        bundletype = "HG2Y"
+    elif compress:
         bundletype = "HG10BZ"
     else:
         bundletype = "HG10UN"
-    return changegroup.writebundle(cg, name, bundletype, vfs)
+    return changegroup.writebundle(repo.ui, cg, name, bundletype, vfs)
 
 def _collectfiles(repo, striprev):
     """find out the filelogs affected by the strip"""
@@ -140,7 +158,7 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
         try:
             for i in xrange(offset, len(tr.entries)):
                 file, troffset, ignore = tr.entries[i]
-                repo.sopener(file, 'a').truncate(troffset)
+                repo.svfs(file, 'a').truncate(troffset)
                 if troffset == 0:
                     repo.store.markremoved(file)
             tr.close()
@@ -155,8 +173,17 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
             if not repo.ui.verbose:
                 # silence internal shuffling chatter
                 repo.ui.pushbuffer()
-            changegroup.addchangegroup(repo, gen, 'strip',
-                                       'bundle:' + vfs.join(chgrpfile), True)
+            if isinstance(gen, bundle2.unbundle20):
+                tr = repo.transaction('strip')
+                try:
+                    bundle2.processbundle(repo, gen, lambda: tr)
+                    tr.close()
+                finally:
+                    tr.release()
+            else:
+                changegroup.addchangegroup(repo, gen, 'strip',
+                                           'bundle:' + vfs.join(chgrpfile),
+                                           True)
             if not repo.ui.verbose:
                 repo.ui.popbuffer()
             f.close()

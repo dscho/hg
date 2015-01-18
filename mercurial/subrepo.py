@@ -5,6 +5,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+import copy
 import errno, os, re, shutil, posixpath, sys
 import xml.dom.minidom
 import stat, subprocess, tarfile
@@ -31,16 +32,6 @@ def _expandedabspath(path):
 def _getstorehashcachename(remotepath):
     '''get a unique filename for the store hash cache of a remote repository'''
     return util.sha1(_expandedabspath(remotepath)).hexdigest()[0:12]
-
-def _calcfilehash(filename):
-    data = ''
-    if os.path.exists(filename):
-        fd = open(filename, 'rb')
-        try:
-            data = fd.read()
-        finally:
-            fd.close()
-    return util.sha1(data).hexdigest()
 
 class SubrepoAbort(error.Abort):
     """Exception class used to avoid handling a subrepo error more than once"""
@@ -311,7 +302,7 @@ def _abssource(repo, push=False, abort=True):
             return repo.ui.config('paths', 'default-push')
         if repo.ui.config('paths', 'default'):
             return repo.ui.config('paths', 'default')
-        if repo.sharedpath != repo.path:
+        if repo.shared():
             # chop off the .hg component to get the default path form
             return os.path.dirname(repo.sharedpath)
     if abort:
@@ -382,6 +373,9 @@ def newcommitphase(ui, ctx):
 
 class abstractsubrepo(object):
 
+    def __init__(self, ui):
+        self.ui = ui
+
     def storeclean(self, path):
         """
         returns true if the repository has not changed since it was last
@@ -444,7 +438,11 @@ class abstractsubrepo(object):
     def add(self, ui, match, dryrun, listsubrepos, prefix, explicitonly):
         return []
 
-    def cat(self, ui, match, prefix, **opts):
+    def addremove(self, matcher, prefix, opts, dry_run, similarity):
+        self.ui.warn("%s: %s" % (prefix, _("addremove is not supported")))
+        return 1
+
+    def cat(self, match, prefix, **opts):
         return 1
 
     def status(self, rev2, **opts):
@@ -471,24 +469,24 @@ class abstractsubrepo(object):
         """return file flags"""
         return ''
 
-    def archive(self, ui, archiver, prefix, match=None):
+    def archive(self, archiver, prefix, match=None):
         if match is not None:
             files = [f for f in self.files() if match(f)]
         else:
             files = self.files()
         total = len(files)
         relpath = subrelpath(self)
-        ui.progress(_('archiving (%s)') % relpath, 0,
-                    unit=_('files'), total=total)
+        self.ui.progress(_('archiving (%s)') % relpath, 0,
+                         unit=_('files'), total=total)
         for i, name in enumerate(files):
             flags = self.fileflags(name)
             mode = 'x' in flags and 0755 or 0644
             symlink = 'l' in flags
             archiver.addfile(os.path.join(prefix, self._path, name),
                              mode, symlink, self.filedata(name))
-            ui.progress(_('archiving (%s)') % relpath, i + 1,
-                        unit=_('files'), total=total)
-        ui.progress(_('archiving (%s)') % relpath, None)
+            self.ui.progress(_('archiving (%s)') % relpath, i + 1,
+                             unit=_('files'), total=total)
+        self.ui.progress(_('archiving (%s)') % relpath, None)
         return total
 
     def walk(self, match):
@@ -498,11 +496,18 @@ class abstractsubrepo(object):
         '''
         pass
 
-    def forget(self, ui, match, prefix):
+    def forget(self, match, prefix):
         return ([], [])
 
-    def revert(self, ui, substate, *pats, **opts):
-        ui.warn('%s: reverting %s subrepos is unsupported\n' \
+    def removefiles(self, matcher, prefix, after, force, subrepos):
+        """remove the matched files from the subrepository and the filesystem,
+        possibly by force and/or after the file has been removed from the
+        filesystem.  Return 0 on success, 1 on any warning.
+        """
+        return 1
+
+    def revert(self, substate, *pats, **opts):
+        self.ui.warn('%s: reverting %s subrepos is unsupported\n' \
             % (substate[0], substate[2]))
         return []
 
@@ -511,20 +516,19 @@ class abstractsubrepo(object):
 
 class hgsubrepo(abstractsubrepo):
     def __init__(self, ctx, path, state):
+        super(hgsubrepo, self).__init__(ctx._repo.ui)
         self._path = path
         self._state = state
         r = ctx._repo
         root = r.wjoin(path)
-        create = False
-        if not os.path.exists(os.path.join(root, '.hg')):
-            create = True
-            util.makedirs(root)
+        create = not r.wvfs.exists('%s/.hg' % path)
         self._repo = hg.repository(r.baseui, root, create=create)
+        self.ui = self._repo.ui
         for s, k in [('ui', 'commitsubrepos')]:
             v = r.ui.config(s, k)
             if v:
-                self._repo.ui.setconfig(s, k, v, 'subrepo')
-        self._repo.ui.setconfig('ui', '_usedassubrepo', 'True', 'subrepo')
+                self.ui.setconfig(s, k, v, 'subrepo')
+        self.ui.setconfig('ui', '_usedassubrepo', 'True', 'subrepo')
         self._initrepo(r, state[0], create)
 
     def storeclean(self, path):
@@ -562,26 +566,19 @@ class hgsubrepo(abstractsubrepo):
         # sort the files that will be hashed in increasing (likely) file size
         filelist = ('bookmarks', 'store/phaseroots', 'store/00changelog.i')
         yield '# %s\n' % _expandedabspath(remotepath)
+        vfs = self._repo.vfs
         for relname in filelist:
-            absname = os.path.normpath(self._repo.join(relname))
-            yield '%s = %s\n' % (relname, _calcfilehash(absname))
+            filehash = util.sha1(vfs.tryread(relname)).hexdigest()
+            yield '%s = %s\n' % (relname, filehash)
 
-    def _getstorehashcachepath(self, remotepath):
-        '''get a unique path for the store hash cache'''
-        return self._repo.join(os.path.join(
-            'cache', 'storehash', _getstorehashcachename(remotepath)))
+    @propertycache
+    def _cachestorehashvfs(self):
+        return scmutil.vfs(self._repo.join('cache/storehash'))
 
     def _readstorehashcache(self, remotepath):
         '''read the store hash cache for a given remote repository'''
-        cachefile = self._getstorehashcachepath(remotepath)
-        if not os.path.exists(cachefile):
-            return ''
-        fd = open(cachefile, 'r')
-        try:
-            pullstate = fd.readlines()
-        finally:
-            fd.close()
-        return pullstate
+        cachefile = _getstorehashcachename(remotepath)
+        return self._cachestorehashvfs.tryreadlines(cachefile, 'r')
 
     def _cachestorehash(self, remotepath):
         '''cache the current store hash
@@ -589,18 +586,12 @@ class hgsubrepo(abstractsubrepo):
         Each remote repo requires its own store hash cache, because a subrepo
         store may be "clean" versus a given remote repo, but not versus another
         '''
-        cachefile = self._getstorehashcachepath(remotepath)
+        cachefile = _getstorehashcachename(remotepath)
         lock = self._repo.lock()
         try:
             storehash = list(self._calcstorehash(remotepath))
-            cachedir = os.path.dirname(cachefile)
-            if not os.path.exists(cachedir):
-                util.makedirs(cachedir, notindexed=True)
-            fd = open(cachefile, 'w')
-            try:
-                fd.writelines(storehash)
-            finally:
-                fd.close()
+            vfs = self._cachestorehashvfs
+            vfs.writelines(cachefile, storehash, mode='w', notindexed=True)
         finally:
             lock.release()
 
@@ -615,7 +606,7 @@ class hgsubrepo(abstractsubrepo):
             def addpathconfig(key, value):
                 if value:
                     lines.append('%s = %s\n' % (key, value))
-                    self._repo.ui.setconfig('paths', key, value, 'subrepo')
+                    self.ui.setconfig('paths', key, value, 'subrepo')
 
             defpath = _abssource(self._repo, abort=False)
             defpushpath = _abssource(self._repo, True, abort=False)
@@ -623,22 +614,33 @@ class hgsubrepo(abstractsubrepo):
             if defpath != defpushpath:
                 addpathconfig('default-push', defpushpath)
 
-            fp = self._repo.opener("hgrc", "w", text=True)
+            fp = self._repo.vfs("hgrc", "w", text=True)
             try:
                 fp.write(''.join(lines))
             finally:
                 fp.close()
 
     @annotatesubrepoerror
-    def add(self, ui, match, dryrun, listsubrepos, prefix, explicitonly):
-        return cmdutil.add(ui, self._repo, match, dryrun, listsubrepos,
-                           os.path.join(prefix, self._path), explicitonly)
+    def add(self, ui, match, prefix, explicitonly, **opts):
+        return cmdutil.add(ui, self._repo, match,
+                           os.path.join(prefix, self._path), explicitonly,
+                           **opts)
+
+    def addremove(self, m, prefix, opts, dry_run, similarity):
+        # In the same way as sub directories are processed, once in a subrepo,
+        # always entry any of its subrepos.  Don't corrupt the options that will
+        # be used to process sibling subrepos however.
+        opts = copy.copy(opts)
+        opts['subrepos'] = True
+        return scmutil.addremove(self._repo, m,
+                                 os.path.join(prefix, self._path), opts,
+                                 dry_run, similarity)
 
     @annotatesubrepoerror
-    def cat(self, ui, match, prefix, **opts):
+    def cat(self, match, prefix, **opts):
         rev = self._state[1]
         ctx = self._repo[rev]
-        return cmdutil.cat(ui, self._repo, ctx, match, prefix, **opts)
+        return cmdutil.cat(self.ui, self._repo, ctx, match, prefix, **opts)
 
     @annotatesubrepoerror
     def status(self, rev2, **opts):
@@ -648,8 +650,8 @@ class hgsubrepo(abstractsubrepo):
             ctx2 = self._repo[rev2]
             return self._repo.status(ctx1, ctx2, **opts)
         except error.RepoLookupError, inst:
-            self._repo.ui.warn(_('warning: error "%s" in subrepository "%s"\n')
-                               % (inst, subrelpath(self)))
+            self.ui.warn(_('warning: error "%s" in subrepository "%s"\n')
+                         % (inst, subrelpath(self)))
             return scmutil.status([], [], [], [], [], [], [])
 
     @annotatesubrepoerror
@@ -665,20 +667,20 @@ class hgsubrepo(abstractsubrepo):
                                    prefix=posixpath.join(prefix, self._path),
                                    listsubrepos=True, **opts)
         except error.RepoLookupError, inst:
-            self._repo.ui.warn(_('warning: error "%s" in subrepository "%s"\n')
-                               % (inst, subrelpath(self)))
+            self.ui.warn(_('warning: error "%s" in subrepository "%s"\n')
+                          % (inst, subrelpath(self)))
 
     @annotatesubrepoerror
-    def archive(self, ui, archiver, prefix, match=None):
+    def archive(self, archiver, prefix, match=None):
         self._get(self._state + ('hg',))
-        total = abstractsubrepo.archive(self, ui, archiver, prefix, match)
+        total = abstractsubrepo.archive(self, archiver, prefix, match)
         rev = self._state[1]
         ctx = self._repo[rev]
         for subpath in ctx.substate:
             s = subrepo(ctx, subpath)
             submatch = matchmod.narrowmatcher(subpath, match)
             total += s.archive(
-                ui, archiver, os.path.join(prefix, self._path), submatch)
+                archiver, os.path.join(prefix, self._path), submatch)
         return total
 
     @annotatesubrepoerror
@@ -704,7 +706,7 @@ class hgsubrepo(abstractsubrepo):
         # updated
         if not self.dirty(True):
             return self._repo['.'].hex()
-        self._repo.ui.debug("committing subrepo %s\n" % subrelpath(self))
+        self.ui.debug("committing subrepo %s\n" % subrelpath(self))
         n = self._repo.commit(text, user, date)
         if not n:
             return self._repo['.'].hex() # different version checked out
@@ -718,7 +720,7 @@ class hgsubrepo(abstractsubrepo):
     def remove(self):
         # we can't fully delete the repository as it may contain
         # local-only history
-        self._repo.ui.note(_('removing subrepo %s\n') % subrelpath(self))
+        self.ui.note(_('removing subrepo %s\n') % subrelpath(self))
         hg.clean(self._repo, node.nullid, False)
 
     def _get(self, state):
@@ -729,8 +731,8 @@ class hgsubrepo(abstractsubrepo):
         srcurl = _abssource(self._repo)
         other = hg.peer(self._repo, {}, srcurl)
         if len(self._repo) == 0:
-            self._repo.ui.status(_('cloning subrepo %s from %s\n')
-                                 % (subrelpath(self), srcurl))
+            self.ui.status(_('cloning subrepo %s from %s\n')
+                           % (subrelpath(self), srcurl))
             parentrepo = self._repo._subparent
             shutil.rmtree(self._repo.path)
             other, cloned = hg.clone(self._repo._subparent.baseui, {},
@@ -740,8 +742,8 @@ class hgsubrepo(abstractsubrepo):
             self._initrepo(parentrepo, source, create=True)
             self._cachestorehash(srcurl)
         else:
-            self._repo.ui.status(_('pulling subrepo %s from %s\n')
-                                 % (subrelpath(self), srcurl))
+            self.ui.status(_('pulling subrepo %s from %s\n')
+                           % (subrelpath(self), srcurl))
             cleansub = self.storeclean(srcurl)
             exchange.pull(self._repo, other)
             if cleansub:
@@ -774,18 +776,18 @@ class hgsubrepo(abstractsubrepo):
 
         def mergefunc():
             if anc == cur and dst.branch() == cur.branch():
-                self._repo.ui.debug("updating subrepo %s\n" % subrelpath(self))
+                self.ui.debug("updating subrepo %s\n" % subrelpath(self))
                 hg.update(self._repo, state[1])
             elif anc == dst:
-                self._repo.ui.debug("skipping subrepo %s\n" % subrelpath(self))
+                self.ui.debug("skipping subrepo %s\n" % subrelpath(self))
             else:
-                self._repo.ui.debug("merging subrepo %s\n" % subrelpath(self))
+                self.ui.debug("merging subrepo %s\n" % subrelpath(self))
                 hg.merge(self._repo, state[1], remind=False)
 
         wctx = self._repo[None]
         if self.dirty():
             if anc != dst:
-                if _updateprompt(self._repo.ui, self, wctx.dirty(), cur, dst):
+                if _updateprompt(self.ui, self, wctx.dirty(), cur, dst):
                     mergefunc()
             else:
                 mergefunc()
@@ -808,11 +810,11 @@ class hgsubrepo(abstractsubrepo):
         dsturl = _abssource(self._repo, True)
         if not force:
             if self.storeclean(dsturl):
-                self._repo.ui.status(
+                self.ui.status(
                     _('no changes made to subrepo %s since last push to %s\n')
                     % (subrelpath(self), dsturl))
                 return None
-        self._repo.ui.status(_('pushing subrepo %s to %s\n') %
+        self.ui.status(_('pushing subrepo %s to %s\n') %
             (subrelpath(self), dsturl))
         other = hg.peer(self._repo, {'ssh': ssh}, dsturl)
         res = exchange.push(self._repo, other, force, newbranch=newbranch)
@@ -849,18 +851,24 @@ class hgsubrepo(abstractsubrepo):
         return ctx.walk(match)
 
     @annotatesubrepoerror
-    def forget(self, ui, match, prefix):
-        return cmdutil.forget(ui, self._repo, match,
+    def forget(self, match, prefix):
+        return cmdutil.forget(self.ui, self._repo, match,
                               os.path.join(prefix, self._path), True)
 
     @annotatesubrepoerror
-    def revert(self, ui, substate, *pats, **opts):
+    def removefiles(self, matcher, prefix, after, force, subrepos):
+        return cmdutil.remove(self.ui, self._repo, matcher,
+                              os.path.join(prefix, self._path), after, force,
+                              subrepos)
+
+    @annotatesubrepoerror
+    def revert(self, substate, *pats, **opts):
         # reverting a subrepo is a 2 step process:
         # 1. if the no_backup is not set, revert all modified
         #    files inside the subrepo
         # 2. update the subrepo to the revision specified in
         #    the corresponding substate dictionary
-        ui.status(_('reverting subrepo %s\n') % substate[0])
+        self.ui.status(_('reverting subrepo %s\n') % substate[0])
         if not opts.get('no_backup'):
             # Revert all files on the subrepo, creating backups
             # Note that this will not recursively revert subrepos
@@ -872,29 +880,29 @@ class hgsubrepo(abstractsubrepo):
             pats = []
             if not opts.get('all'):
                 pats = ['set:modified()']
-            self.filerevert(ui, *pats, **opts)
+            self.filerevert(*pats, **opts)
 
         # Update the repo to the revision specified in the given substate
         self.get(substate, overwrite=True)
 
-    def filerevert(self, ui, *pats, **opts):
+    def filerevert(self, *pats, **opts):
         ctx = self._repo[opts['rev']]
         parents = self._repo.dirstate.parents()
         if opts.get('all'):
             pats = ['set:modified()']
         else:
             pats = []
-        cmdutil.revert(ui, self._repo, ctx, parents, *pats, **opts)
+        cmdutil.revert(self.ui, self._repo, ctx, parents, *pats, **opts)
 
     def shortid(self, revid):
         return revid[:12]
 
 class svnsubrepo(abstractsubrepo):
     def __init__(self, ctx, path, state):
+        super(svnsubrepo, self).__init__(ctx._repo.ui)
         self._path = path
         self._state = state
         self._ctx = ctx
-        self._ui = ctx._repo.ui
         self._exe = util.findexe('svn')
         if not self._exe:
             raise util.Abort(_("'svn' executable not found for subrepo '%s'")
@@ -903,7 +911,7 @@ class svnsubrepo(abstractsubrepo):
     def _svncommand(self, commands, filename='', failok=False):
         cmd = [self._exe]
         extrakw = {}
-        if not self._ui.interactive():
+        if not self.ui.interactive():
             # Making stdin be a pipe should prevent svn from behaving
             # interactively even if we can't pass --non-interactive.
             extrakw['stdin'] = subprocess.PIPE
@@ -933,7 +941,7 @@ class svnsubrepo(abstractsubrepo):
             if p.returncode:
                 raise util.Abort(stderr or 'exited with code %d' % p.returncode)
             if stderr:
-                self._ui.warn(stderr + '\n')
+                self.ui.warn(stderr + '\n')
         return stdout, stderr
 
     @propertycache
@@ -1025,7 +1033,7 @@ class svnsubrepo(abstractsubrepo):
             # seems a better approach.
             raise util.Abort(_('cannot commit missing svn entries'))
         commitinfo, err = self._svncommand(['commit', '-m', text])
-        self._ui.status(commitinfo)
+        self.ui.status(commitinfo)
         newrev = re.search('Committed revision ([0-9]+).', commitinfo)
         if not newrev:
             if not commitinfo.strip():
@@ -1036,16 +1044,16 @@ class svnsubrepo(abstractsubrepo):
                 raise util.Abort(_('failed to commit svn changes'))
             raise util.Abort(commitinfo.splitlines()[-1])
         newrev = newrev.groups()[0]
-        self._ui.status(self._svncommand(['update', '-r', newrev])[0])
+        self.ui.status(self._svncommand(['update', '-r', newrev])[0])
         return newrev
 
     @annotatesubrepoerror
     def remove(self):
         if self.dirty():
-            self._ui.warn(_('not removing repo %s because '
-                            'it has changes.\n') % self._path)
+            self.ui.warn(_('not removing repo %s because '
+                           'it has changes.\n') % self._path)
             return
-        self._ui.note(_('removing subrepo %s\n') % self._path)
+        self.ui.note(_('removing subrepo %s\n') % self._path)
 
         def onerror(function, path, excinfo):
             if function is not os.remove:
@@ -1075,7 +1083,7 @@ class svnsubrepo(abstractsubrepo):
         # update to a directory which has since been deleted and recreated.
         args.append('%s@%s' % (state[0], state[1]))
         status, err = self._svncommand(args, failok=True)
-        _sanitize(self._ui, self._ctx._repo.wjoin(self._path), '.svn')
+        _sanitize(self.ui, self._ctx._repo.wjoin(self._path), '.svn')
         if not re.search('Checked out revision [0-9]+.', status):
             if ('is already a working copy for a different URL' in err
                 and (self._wcchanged()[:2] == (False, False))):
@@ -1084,7 +1092,7 @@ class svnsubrepo(abstractsubrepo):
                 self.get(state, overwrite=False)
                 return
             raise util.Abort((status or err).splitlines()[-1])
-        self._ui.status(status)
+        self.ui.status(status)
 
     @annotatesubrepoerror
     def merge(self, state):
@@ -1093,7 +1101,7 @@ class svnsubrepo(abstractsubrepo):
         wcrev = self._wcrev()
         if new != wcrev:
             dirty = old == wcrev or self._wcchanged()[0]
-            if _updateprompt(self._ui, self, dirty, wcrev, new):
+            if _updateprompt(self.ui, self, dirty, wcrev, new):
                 self.get(state, False)
 
     def push(self, opts):
@@ -1121,13 +1129,13 @@ class svnsubrepo(abstractsubrepo):
 
 class gitsubrepo(abstractsubrepo):
     def __init__(self, ctx, path, state):
+        super(gitsubrepo, self).__init__(ctx._repo.ui)
         self._state = state
         self._ctx = ctx
         self._path = path
         self._relpath = os.path.join(reporelpath(ctx._repo), path)
         self._abspath = ctx._repo.wjoin(path)
         self._subparent = ctx._repo
-        self._ui = ctx._repo.ui
         self._ensuregit()
 
     def _ensuregit(self):
@@ -1141,11 +1149,23 @@ class gitsubrepo(abstractsubrepo):
             out, err = self._gitnodir(['--version'])
         versionstatus = self._checkversion(out)
         if versionstatus == 'unknown':
-            self._ui.warn(_('cannot retrieve git version\n'))
+            self.ui.warn(_('cannot retrieve git version\n'))
         elif versionstatus == 'abort':
             raise util.Abort(_('git subrepo requires at least 1.6.0 or later'))
         elif versionstatus == 'warning':
-            self._ui.warn(_('git subrepo requires at least 1.6.0 or later\n'))
+            self.ui.warn(_('git subrepo requires at least 1.6.0 or later\n'))
+
+    @staticmethod
+    def _gitversion(out):
+        m = re.search(r'^git version (\d+)\.(\d+)\.(\d+)', out)
+        if m:
+            return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+        m = re.search(r'^git version (\d+)\.(\d+)', out)
+        if m:
+            return (int(m.group(1)), int(m.group(2)), 0)
+
+        return -1
 
     @staticmethod
     def _checkversion(out):
@@ -1171,16 +1191,15 @@ class gitsubrepo(abstractsubrepo):
         >>> _checkversion('no')
         'unknown'
         '''
-        m = re.search(r'^git version (\d+)\.(\d+)', out)
-        if not m:
-            return 'unknown'
-        version = (int(m.group(1)), int(m.group(2)))
+        version = gitsubrepo._gitversion(out)
         # git 1.4.0 can't work at all, but 1.5.X can in at least some cases,
         # despite the docstring comment.  For now, error on 1.4.0, warn on
         # 1.5.0 but attempt to continue.
-        if version < (1, 5):
+        if version == -1:
+            return 'unknown'
+        if version < (1, 5, 0):
             return 'abort'
-        elif version < (1, 6):
+        elif version < (1, 6, 0):
             return 'warning'
         return 'ok'
 
@@ -1197,11 +1216,11 @@ class gitsubrepo(abstractsubrepo):
         The methods tries to call the git command. versions prior to 1.6.0
         are not supported and very probably fail.
         """
-        self._ui.debug('%s: git %s\n' % (self._relpath, ' '.join(commands)))
+        self.ui.debug('%s: git %s\n' % (self._relpath, ' '.join(commands)))
         # unless ui.quiet is set, print git's stderr,
         # which is mostly progress and useful info
         errpipe = None
-        if self._ui.quiet:
+        if self.ui.quiet:
             errpipe = open(os.devnull, 'w')
         p = subprocess.Popen([self._gitexecutable] + commands, bufsize=-1,
                              cwd=cwd, env=env, close_fds=util.closefds,
@@ -1306,12 +1325,12 @@ class gitsubrepo(abstractsubrepo):
     def _fetch(self, source, revision):
         if self._gitmissing():
             source = self._abssource(source)
-            self._ui.status(_('cloning subrepo %s from %s\n') %
+            self.ui.status(_('cloning subrepo %s from %s\n') %
                             (self._relpath, source))
             self._gitnodir(['clone', source, self._abspath])
         if self._githavelocally(revision):
             return
-        self._ui.status(_('pulling subrepo %s from %s\n') %
+        self.ui.status(_('pulling subrepo %s from %s\n') %
                         (self._relpath, self._gitremote('origin')))
         # try only origin: the originally cloned repo
         self._gitcommand(['fetch'])
@@ -1368,13 +1387,13 @@ class gitsubrepo(abstractsubrepo):
                 self._gitcommand(['reset', 'HEAD'])
                 cmd.append('-f')
             self._gitcommand(cmd + args)
-            _sanitize(self._ui, self._abspath, '.git')
+            _sanitize(self.ui, self._abspath, '.git')
 
         def rawcheckout():
             # no branch to checkout, check it out with no branch
-            self._ui.warn(_('checking out detached HEAD in subrepo %s\n') %
+            self.ui.warn(_('checking out detached HEAD in subrepo %s\n') %
                           self._relpath)
-            self._ui.warn(_('check out a git branch if you intend '
+            self.ui.warn(_('check out a git branch if you intend '
                             'to make changes\n'))
             checkout(['-q', revision])
 
@@ -1417,7 +1436,7 @@ class gitsubrepo(abstractsubrepo):
             if tracking[remote] != self._gitcurrentbranch():
                 checkout([tracking[remote]])
             self._gitcommand(['merge', '--ff', remote])
-            _sanitize(self._ui, self._abspath, '.git')
+            _sanitize(self.ui, self._abspath, '.git')
         else:
             # a real merge would be required, just checkout the revision
             rawcheckout()
@@ -1453,12 +1472,12 @@ class gitsubrepo(abstractsubrepo):
                 self.get(state) # fast forward merge
             elif base != self._state[1]:
                 self._gitcommand(['merge', '--no-commit', revision])
-            _sanitize(self._ui, self._abspath, '.git')
+            _sanitize(self.ui, self._abspath, '.git')
 
         if self.dirty():
             if self._gitstate() != revision:
                 dirty = self._gitstate() == self._state[1] or code != 0
-                if _updateprompt(self._ui, self, dirty,
+                if _updateprompt(self.ui, self, dirty,
                                  self._state[1][:7], revision[:7]):
                     mergefunc()
         else:
@@ -1491,16 +1510,16 @@ class gitsubrepo(abstractsubrepo):
         if current:
             # determine if the current branch is even useful
             if not self._gitisancestor(self._state[1], current):
-                self._ui.warn(_('unrelated git branch checked out '
+                self.ui.warn(_('unrelated git branch checked out '
                                 'in subrepo %s\n') % self._relpath)
                 return False
-            self._ui.status(_('pushing branch %s of subrepo %s\n') %
-                            (current.split('/', 2)[2], self._relpath))
+            self.ui.status(_('pushing branch %s of subrepo %s\n') %
+                           (current.split('/', 2)[2], self._relpath))
             ret = self._gitdir(cmd + ['origin', current])
             return ret[1] == 0
         else:
-            self._ui.warn(_('no branch checked out in subrepo %s\n'
-                            'cannot push revision %s\n') %
+            self.ui.warn(_('no branch checked out in subrepo %s\n'
+                           'cannot push revision %s\n') %
                           (self._relpath, self._state[1]))
             return False
 
@@ -1509,12 +1528,12 @@ class gitsubrepo(abstractsubrepo):
         if self._gitmissing():
             return
         if self.dirty():
-            self._ui.warn(_('not removing repo %s because '
-                            'it has changes.\n') % self._relpath)
+            self.ui.warn(_('not removing repo %s because '
+                           'it has changes.\n') % self._relpath)
             return
         # we can't fully delete the repository as it may contain
         # local-only history
-        self._ui.note(_('removing subrepo %s\n') % self._relpath)
+        self.ui.note(_('removing subrepo %s\n') % self._relpath)
         self._gitcommand(['config', 'core.bare', 'true'])
         for f in os.listdir(self._abspath):
             if f == '.git':
@@ -1525,7 +1544,7 @@ class gitsubrepo(abstractsubrepo):
             else:
                 os.remove(path)
 
-    def archive(self, ui, archiver, prefix, match=None):
+    def archive(self, archiver, prefix, match=None):
         total = 0
         source, revision = self._state
         if not revision:
@@ -1538,7 +1557,7 @@ class gitsubrepo(abstractsubrepo):
         tarstream = self._gitcommand(['archive', revision], stream=True)
         tar = tarfile.open(fileobj=tarstream, mode='r|')
         relpath = subrelpath(self)
-        ui.progress(_('archiving (%s)') % relpath, 0, unit=_('files'))
+        self.ui.progress(_('archiving (%s)') % relpath, 0, unit=_('files'))
         for i, info in enumerate(tar):
             if info.isdir():
                 continue
@@ -1551,9 +1570,9 @@ class gitsubrepo(abstractsubrepo):
             archiver.addfile(os.path.join(prefix, self._path, info.name),
                              info.mode, info.issym(), data)
             total += 1
-            ui.progress(_('archiving (%s)') % relpath, i + 1,
-                        unit=_('files'))
-        ui.progress(_('archiving (%s)') % relpath, None)
+            self.ui.progress(_('archiving (%s)') % relpath, i + 1,
+                             unit=_('files'))
+        self.ui.progress(_('archiving (%s)') % relpath, None)
         return total
 
 
@@ -1583,8 +1602,75 @@ class gitsubrepo(abstractsubrepo):
                 removed.append(f)
 
         deleted, unknown, ignored, clean = [], [], [], []
+
+        if not rev2:
+            command = ['ls-files', '--others', '--exclude-standard']
+            out = self._gitcommand(command)
+            for line in out.split('\n'):
+                if len(line) == 0:
+                    continue
+                unknown.append(line)
+
         return scmutil.status(modified, added, removed, deleted,
                               unknown, ignored, clean)
+
+    @annotatesubrepoerror
+    def diff(self, ui, diffopts, node2, match, prefix, **opts):
+        node1 = self._state[1]
+        cmd = ['diff']
+        if opts['stat']:
+            cmd.append('--stat')
+        else:
+            # for Git, this also implies '-p'
+            cmd.append('-U%d' % diffopts.context)
+
+        gitprefix = os.path.join(prefix, self._path)
+
+        if diffopts.noprefix:
+            cmd.extend(['--src-prefix=%s/' % gitprefix,
+                        '--dst-prefix=%s/' % gitprefix])
+        else:
+            cmd.extend(['--src-prefix=a/%s/' % gitprefix,
+                        '--dst-prefix=b/%s/' % gitprefix])
+
+        if diffopts.ignorews:
+            cmd.append('--ignore-all-space')
+        if diffopts.ignorewsamount:
+            cmd.append('--ignore-space-change')
+        if self._gitversion(self._gitcommand(['--version'])) >= (1, 8, 4) \
+                and diffopts.ignoreblanklines:
+            cmd.append('--ignore-blank-lines')
+
+        cmd.append(node1)
+        if node2:
+            cmd.append(node2)
+
+        if match.anypats():
+            return #No support for include/exclude yet
+
+        if match.always():
+            ui.write(self._gitcommand(cmd))
+        elif match.files():
+            for f in match.files():
+                ui.write(self._gitcommand(cmd + [f]))
+        elif match(gitprefix): #Subrepo is matched
+            ui.write(self._gitcommand(cmd))
+
+    @annotatesubrepoerror
+    def revert(self, substate, *pats, **opts):
+        self.ui.status(_('reverting subrepo %s\n') % substate[0])
+        if not opts.get('no_backup'):
+            status = self.status(None)
+            names = status.modified
+            for name in names:
+                bakname = "%s.orig" % name
+                self.ui.note(_('saving current version of %s as %s\n') %
+                        (name, bakname))
+                util.rename(os.path.join(self._abspath, name),
+                            os.path.join(self._abspath, bakname))
+
+        self.get(substate, overwrite=True)
+        return []
 
     def shortid(self, revid):
         return revid[:7]

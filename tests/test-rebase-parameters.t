@@ -120,7 +120,10 @@ Rebase with no arguments (from 3 onto 8):
   $ hg up -q -C 3
 
   $ hg rebase
-  saved backup bundle to $TESTTMP/a1/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 1:42ccdea3bb16 "B"
+  rebasing 2:5fddd98957c8 "C"
+  rebasing 3:32af7686d403 "D"
+  saved backup bundle to $TESTTMP/a1/.hg/strip-backup/42ccdea3bb16-3cb021d3-backup.hg (glob)
 
   $ hg tglog
   @  8: 'D'
@@ -155,7 +158,10 @@ Rebase with base == '.' => same as no arguments (from 3 onto 8):
   $ cd a2
 
   $ hg rebase --base .
-  saved backup bundle to $TESTTMP/a2/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 1:42ccdea3bb16 "B"
+  rebasing 2:5fddd98957c8 "C"
+  rebasing 3:32af7686d403 "D"
+  saved backup bundle to $TESTTMP/a2/.hg/strip-backup/42ccdea3bb16-3cb021d3-backup.hg (glob)
 
   $ hg tglog
   @  8: 'D'
@@ -185,7 +191,10 @@ Rebase with dest == branch(.) => same as no arguments (from 3 onto 8):
   $ cd a3
 
   $ hg rebase --dest 'branch(.)'
-  saved backup bundle to $TESTTMP/a3/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 1:42ccdea3bb16 "B"
+  rebasing 2:5fddd98957c8 "C"
+  rebasing 3:32af7686d403 "D"
+  saved backup bundle to $TESTTMP/a3/.hg/strip-backup/42ccdea3bb16-3cb021d3-backup.hg (glob)
 
   $ hg tglog
   @  8: 'D'
@@ -215,7 +224,9 @@ Specify only source (from 2 onto 8):
   $ cd a4
 
   $ hg rebase --source 'desc("C")'
-  saved backup bundle to $TESTTMP/a4/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 2:5fddd98957c8 "C"
+  rebasing 3:32af7686d403 "D"
+  saved backup bundle to $TESTTMP/a4/.hg/strip-backup/5fddd98957c8-f9244fa1-backup.hg (glob)
 
   $ hg tglog
   o  8: 'D'
@@ -245,7 +256,10 @@ Specify only dest (from 3 onto 6):
   $ cd a5
 
   $ hg rebase --dest 6
-  saved backup bundle to $TESTTMP/a5/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 1:42ccdea3bb16 "B"
+  rebasing 2:5fddd98957c8 "C"
+  rebasing 3:32af7686d403 "D"
+  saved backup bundle to $TESTTMP/a5/.hg/strip-backup/42ccdea3bb16-3cb021d3-backup.hg (glob)
 
   $ hg tglog
   @  8: 'D'
@@ -275,7 +289,10 @@ Specify only base (from 1 onto 8):
   $ cd a6
 
   $ hg rebase --base 'desc("D")'
-  saved backup bundle to $TESTTMP/a6/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 1:42ccdea3bb16 "B"
+  rebasing 2:5fddd98957c8 "C"
+  rebasing 3:32af7686d403 "D"
+  saved backup bundle to $TESTTMP/a6/.hg/strip-backup/42ccdea3bb16-3cb021d3-backup.hg (glob)
 
   $ hg tglog
   o  8: 'D'
@@ -305,7 +322,9 @@ Specify source and dest (from 2 onto 7):
   $ cd a7
 
   $ hg rebase --source 2 --dest 7
-  saved backup bundle to $TESTTMP/a7/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 2:5fddd98957c8 "C"
+  rebasing 3:32af7686d403 "D"
+  saved backup bundle to $TESTTMP/a7/.hg/strip-backup/5fddd98957c8-f9244fa1-backup.hg (glob)
 
   $ hg tglog
   o  8: 'D'
@@ -335,7 +354,10 @@ Specify base and dest (from 1 onto 7):
   $ cd a8
 
   $ hg rebase --base 3 --dest 7
-  saved backup bundle to $TESTTMP/a8/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 1:42ccdea3bb16 "B"
+  rebasing 2:5fddd98957c8 "C"
+  rebasing 3:32af7686d403 "D"
+  saved backup bundle to $TESTTMP/a8/.hg/strip-backup/42ccdea3bb16-3cb021d3-backup.hg (glob)
 
   $ hg tglog
   o  8: 'D'
@@ -365,7 +387,9 @@ Specify only revs (from 2 onto 8)
   $ cd a9
 
   $ hg rebase --rev 'desc("C")::'
-  saved backup bundle to $TESTTMP/a9/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 2:5fddd98957c8 "C"
+  rebasing 3:32af7686d403 "D"
+  saved backup bundle to $TESTTMP/a9/.hg/strip-backup/5fddd98957c8-f9244fa1-backup.hg (glob)
 
   $ hg tglog
   o  8: 'D'
@@ -413,7 +437,9 @@ Test --tool parameter:
   $ cd b1
 
   $ hg rebase -s 2 -d 1 --tool internal:local
-  saved backup bundle to $TESTTMP/b1/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 2:e4e3f3546619 "c2b" (tip)
+  note: rebase of 2:e4e3f3546619 created no changes to commit
+  saved backup bundle to $TESTTMP/b1/.hg/strip-backup/e4e3f3546619-b0841178-backup.hg (glob)
 
   $ hg cat c2
   c2
@@ -425,7 +451,8 @@ Test --tool parameter:
   $ cd b2
 
   $ hg rebase -s 2 -d 1 --tool internal:other
-  saved backup bundle to $TESTTMP/b2/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 2:e4e3f3546619 "c2b" (tip)
+  saved backup bundle to $TESTTMP/b2/.hg/strip-backup/e4e3f3546619-b0841178-backup.hg (glob)
 
   $ hg cat c2
   c2b
@@ -437,6 +464,7 @@ Test --tool parameter:
   $ cd b3
 
   $ hg rebase -s 2 -d 1 --tool internal:fail
+  rebasing 2:e4e3f3546619 "c2b" (tip)
   unresolved conflicts (see hg resolve, then hg rebase --continue)
   [1]
 
@@ -457,14 +485,16 @@ Test --tool parameter:
   (no more unresolved files)
   $ hg rebase -c --tool internal:fail
   tool option will be ignored
-  saved backup bundle to $TESTTMP/b3/.hg/strip-backup/*-backup.hg (glob)
+  rebasing 2:e4e3f3546619 "c2b" (tip)
+  note: rebase of 2:e4e3f3546619 created no changes to commit
+  saved backup bundle to $TESTTMP/b3/.hg/strip-backup/e4e3f3546619-b0841178-backup.hg (glob)
 
   $ hg rebase -i
-  abort: interactive history editing is supported by the 'histedit' extension (see 'hg help histedit')
+  abort: interactive history editing is supported by the 'histedit' extension (see "hg help histedit")
   [255]
 
   $ hg rebase --interactive
-  abort: interactive history editing is supported by the 'histedit' extension (see 'hg help histedit')
+  abort: interactive history editing is supported by the 'histedit' extension (see "hg help histedit")
   [255]
 
   $ cd ..

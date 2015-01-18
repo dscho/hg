@@ -9,6 +9,8 @@ from node import bin, hex, nullid, nullrev
 import encoding
 import util
 import time
+from array import array
+from struct import calcsize, pack, unpack
 
 def _filename(repo):
     """name of a branchcache file for a given repo or repoview"""
@@ -19,7 +21,7 @@ def _filename(repo):
 
 def read(repo):
     try:
-        f = repo.opener(_filename(repo))
+        f = repo.vfs(_filename(repo))
         lines = f.read().split('\n')
         f.close()
     except (IOError, OSError):
@@ -132,6 +134,7 @@ class branchcache(dict):
             self._closednodes = set()
         else:
             self._closednodes = closednodes
+        self._revbranchcache = None
 
     def _hashfiltered(self, repo):
         """build hash of revision filtered in the current cache
@@ -200,7 +203,7 @@ class branchcache(dict):
 
     def write(self, repo):
         try:
-            f = repo.opener(_filename(repo), "w", atomictemp=True)
+            f = repo.vfs(_filename(repo), "w", atomictemp=True)
             cachekey = [hex(self.tipnode), str(self.tiprev)]
             if self.filteredhash is not None:
                 cachekey.append(hex(self.filteredhash))
@@ -223,6 +226,9 @@ class branchcache(dict):
             repo.ui.debug("couldn't write branch cache: %s\n" % inst)
             # Abort may be raise by read only opener
             pass
+        if self._revbranchcache:
+            self._revbranchcache.write(repo.unfiltered())
+            self._revbranchcache = None
 
     def update(self, repo, revgen):
         """Given a branchhead cache, self, that may have extra nodes or be
@@ -233,9 +239,12 @@ class branchcache(dict):
         cl = repo.changelog
         # collect new branch entries
         newbranches = {}
-        getbranchinfo = cl.branchinfo
+        urepo = repo.unfiltered()
+        self._revbranchcache = revbranchcache(urepo)
+        getbranchinfo = self._revbranchcache.branchinfo
+        ucl = urepo.changelog
         for r in revgen:
-            branch, closesbranch = getbranchinfo(r)
+            branch, closesbranch = getbranchinfo(ucl, r)
             newbranches.setdefault(branch, []).append(r)
             if closesbranch:
                 self._closednodes.add(cl.node(r))
@@ -285,3 +294,158 @@ class branchcache(dict):
         duration = time.time() - starttime
         repo.ui.log('branchcache', 'updated %s branch cache in %.4f seconds\n',
                     repo.filtername, duration)
+
+# Revision branch info cache
+
+_rbcversion = '-v1'
+_rbcnames = 'cache/rbc-names' + _rbcversion
+_rbcrevs = 'cache/rbc-revs' + _rbcversion
+# [4 byte hash prefix][4 byte branch name number with sign bit indicating open]
+_rbcrecfmt = '>4sI'
+_rbcrecsize = calcsize(_rbcrecfmt)
+_rbcnodelen = 4
+_rbcbranchidxmask = 0x7fffffff
+_rbccloseflag = 0x80000000
+
+class revbranchcache(object):
+    """Persistent cache, mapping from revision number to branch name and close.
+    This is a low level cache, independent of filtering.
+
+    Branch names are stored in rbc-names in internal encoding separated by 0.
+    rbc-names is append-only, and each branch name is only stored once and will
+    thus have a unique index.
+
+    The branch info for each revision is stored in rbc-revs as constant size
+    records. The whole file is read into memory, but it is only 'parsed' on
+    demand. The file is usually append-only but will be truncated if repo
+    modification is detected.
+    The record for each revision contains the first 4 bytes of the
+    corresponding node hash, and the record is only used if it still matches.
+    Even a completely trashed rbc-revs fill thus still give the right result
+    while converging towards full recovery ... assuming no incorrectly matching
+    node hashes.
+    The record also contains 4 bytes where 31 bits contains the index of the
+    branch and the last bit indicate that it is a branch close commit.
+    The usage pattern for rbc-revs is thus somewhat similar to 00changelog.i
+    and will grow with it but be 1/8th of its size.
+    """
+
+    def __init__(self, repo):
+        assert repo.filtername is None
+        self._names = [] # branch names in local encoding with static index
+        self._rbcrevs = array('c') # structs of type _rbcrecfmt
+        self._rbcsnameslen = 0
+        try:
+            bndata = repo.vfs.read(_rbcnames)
+            self._rbcsnameslen = len(bndata) # for verification before writing
+            self._names = [encoding.tolocal(bn) for bn in bndata.split('\0')]
+        except (IOError, OSError), inst:
+            repo.ui.debug("couldn't read revision branch cache names: %s\n" %
+                          inst)
+        if self._names:
+            try:
+                data = repo.vfs.read(_rbcrevs)
+                self._rbcrevs.fromstring(data)
+            except (IOError, OSError), inst:
+                repo.ui.debug("couldn't read revision branch cache: %s\n" %
+                              inst)
+        # remember number of good records on disk
+        self._rbcrevslen = min(len(self._rbcrevs) // _rbcrecsize,
+                               len(repo.changelog))
+        if self._rbcrevslen == 0:
+            self._names = []
+        self._rbcnamescount = len(self._names) # number of good names on disk
+        self._namesreverse = dict((b, r) for r, b in enumerate(self._names))
+
+    def branchinfo(self, changelog, rev):
+        """Return branch name and close flag for rev, using and updating
+        persistent cache."""
+        rbcrevidx = rev * _rbcrecsize
+
+        # if requested rev is missing, add and populate all missing revs
+        if len(self._rbcrevs) < rbcrevidx + _rbcrecsize:
+            first = len(self._rbcrevs) // _rbcrecsize
+            self._rbcrevs.extend('\0' * (len(changelog) * _rbcrecsize -
+                                         len(self._rbcrevs)))
+            for r in xrange(first, len(changelog)):
+                self._branchinfo(changelog, r)
+
+        # fast path: extract data from cache, use it if node is matching
+        reponode = changelog.node(rev)[:_rbcnodelen]
+        cachenode, branchidx = unpack(
+            _rbcrecfmt, buffer(self._rbcrevs, rbcrevidx, _rbcrecsize))
+        close = bool(branchidx & _rbccloseflag)
+        if close:
+            branchidx &= _rbcbranchidxmask
+        if cachenode == reponode:
+            return self._names[branchidx], close
+        # fall back to slow path and make sure it will be written to disk
+        self._rbcrevslen = min(self._rbcrevslen, rev)
+        return self._branchinfo(changelog, rev)
+
+    def _branchinfo(self, changelog, rev):
+        """Retrieve branch info from changelog and update _rbcrevs"""
+        b, close = changelog.branchinfo(rev)
+        if b in self._namesreverse:
+            branchidx = self._namesreverse[b]
+        else:
+            branchidx = len(self._names)
+            self._names.append(b)
+            self._namesreverse[b] = branchidx
+        reponode = changelog.node(rev)
+        if close:
+            branchidx |= _rbccloseflag
+        rbcrevidx = rev * _rbcrecsize
+        rec = array('c')
+        rec.fromstring(pack(_rbcrecfmt, reponode, branchidx))
+        self._rbcrevs[rbcrevidx:rbcrevidx + _rbcrecsize] = rec
+        return b, close
+
+    def write(self, repo):
+        """Save branch cache if it is dirty."""
+        if self._rbcnamescount < len(self._names):
+            try:
+                if self._rbcnamescount != 0:
+                    f = repo.vfs.open(_rbcnames, 'ab')
+                    # The position after open(x, 'a') is implementation defined-
+                    # see issue3543.  SEEK_END was added in 2.5
+                    f.seek(0, 2) #os.SEEK_END
+                    if f.tell() == self._rbcsnameslen:
+                        f.write('\0')
+                    else:
+                        f.close()
+                        repo.ui.debug("%s changed - rewriting it\n" % _rbcnames)
+                        self._rbcnamescount = 0
+                        self._rbcrevslen = 0
+                if self._rbcnamescount == 0:
+                    f = repo.vfs.open(_rbcnames, 'wb')
+                f.write('\0'.join(encoding.fromlocal(b)
+                                  for b in self._names[self._rbcnamescount:]))
+                self._rbcsnameslen = f.tell()
+                f.close()
+            except (IOError, OSError, util.Abort), inst:
+                repo.ui.debug("couldn't write revision branch cache names: "
+                              "%s\n" % inst)
+                return
+            self._rbcnamescount = len(self._names)
+
+        start = self._rbcrevslen * _rbcrecsize
+        if start != len(self._rbcrevs):
+            revs = min(len(repo.changelog), len(self._rbcrevs) // _rbcrecsize)
+            try:
+                f = repo.vfs.open(_rbcrevs, 'ab')
+                # The position after open(x, 'a') is implementation defined-
+                # see issue3543.  SEEK_END was added in 2.5
+                f.seek(0, 2) #os.SEEK_END
+                if f.tell() != start:
+                    repo.ui.debug("truncating %s to %s\n" % (_rbcrevs, start))
+                    f.seek(start)
+                    f.truncate()
+                end = revs * _rbcrecsize
+                f.write(self._rbcrevs[start:end])
+                f.close()
+            except (IOError, OSError, util.Abort), inst:
+                repo.ui.debug("couldn't write revision branch cache: %s\n" %
+                              inst)
+                return
+            self._rbcrevslen = revs

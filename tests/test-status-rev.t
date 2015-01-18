@@ -1,156 +1,162 @@
 Tests of 'hg status --rev <rev>' to make sure status between <rev> and '.' get
 combined correctly with the dirstate status.
 
-Sets up a history for a number of files where the filename describes the file's
-history. The first two letters of the filename describe the first two commits;
-the third letter describes the dirstate for the file. For example, a file called
-'amr' was added in the first commit, modified in the second and then removed in
-the dirstate.
-
-These codes are used for commits:
-x: does not exist
-a: added
-c: clean
-m: modified
-r: removed
-
-These codes are used for dirstate:
-d: in dirstate, but deleted from disk
-f: removed from dirstate, but file exists (forgotten)
-r: removed from dirstate and disk
-q: added, but deleted from disk (q for q-rious?)
-u: not in dirstate, but file exists (unknown)
-
   $ hg init
-  $ touch .hgignore
-  $ hg add .hgignore
-  $ hg commit -m initial
 
-First letter: first commit
+First commit
 
-  $ echo a >acc
-  $ echo a >acd
-  $ echo a >acf
-  $ echo a >acm
-  $ echo a >acr
-  $ echo a >amc
-  $ echo a >amd
-  $ echo a >amf
-  $ echo a >amm
-  $ echo a >amr
-  $ echo a >ara
-  $ echo a >arq
-  $ echo a >aru
-  $ hg commit -Aqm first
+  $ python $TESTDIR/generate-working-copy-states.py state 2 1
+  $ hg addremove --similarity 0
+  adding content1_content1_content1-tracked
+  adding content1_content1_content1-untracked
+  adding content1_content1_content3-tracked
+  adding content1_content1_content3-untracked
+  adding content1_content1_missing-tracked
+  adding content1_content1_missing-untracked
+  adding content1_content2_content1-tracked
+  adding content1_content2_content1-untracked
+  adding content1_content2_content2-tracked
+  adding content1_content2_content2-untracked
+  adding content1_content2_content3-tracked
+  adding content1_content2_content3-untracked
+  adding content1_content2_missing-tracked
+  adding content1_content2_missing-untracked
+  adding content1_missing_content1-tracked
+  adding content1_missing_content1-untracked
+  adding content1_missing_content3-tracked
+  adding content1_missing_content3-untracked
+  adding content1_missing_missing-tracked
+  adding content1_missing_missing-untracked
+  $ hg commit -m first
 
-Second letter: second commit
+Second commit
 
-  $ echo b >xad
-  $ echo b >xaf
-  $ echo b >xam
-  $ echo b >xar
-  $ echo b >amc
-  $ echo b >amd
-  $ echo b >amf
-  $ echo b >amm
-  $ echo b >amr
-  $ hg rm ara
-  $ hg rm arq
-  $ hg rm aru
-  $ hg commit -Aqm second
+  $ python $TESTDIR/generate-working-copy-states.py state 2 2
+  $ hg addremove --similarity 0
+  removing content1_missing_content1-tracked
+  removing content1_missing_content1-untracked
+  removing content1_missing_content3-tracked
+  removing content1_missing_content3-untracked
+  removing content1_missing_missing-tracked
+  removing content1_missing_missing-untracked
+  adding missing_content2_content2-tracked
+  adding missing_content2_content2-untracked
+  adding missing_content2_content3-tracked
+  adding missing_content2_content3-untracked
+  adding missing_content2_missing-tracked
+  adding missing_content2_missing-untracked
+  $ hg commit -m second
 
-Third letter: dirstate
+Working copy
 
-  $ echo c >acm
-  $ echo c >amm
-  $ echo c >xam
-  $ echo c >ara && hg add ara
-  $ echo c >arq && hg add arq && rm arq
-  $ echo c >aru
-  $ hg rm amr
-  $ hg rm acr
-  $ hg rm xar
-  $ rm acd
-  $ rm amd
-  $ rm xad
-  $ hg forget acf
-  $ hg forget amf
-  $ hg forget xaf
-  $ touch xxu
+  $ python $TESTDIR/generate-working-copy-states.py state 2 wc
+  $ hg addremove --similarity 0
+  adding content1_missing_content1-tracked
+  adding content1_missing_content1-untracked
+  adding content1_missing_content3-tracked
+  adding content1_missing_content3-untracked
+  adding content1_missing_missing-tracked
+  adding content1_missing_missing-untracked
+  adding missing_missing_content3-tracked
+  adding missing_missing_content3-untracked
+  adding missing_missing_missing-tracked
+  adding missing_missing_missing-untracked
+  $ hg forget *_*_*-untracked
+  $ rm *_*_missing-*
 
-Status compared to one revision back
+Status compared to parent of the working copy, i.e. the dirstate status
 
-  $ hg status -A --rev 1 acc
-  C acc
-BROKEN: file appears twice; should be '!'
-  $ hg status -A --rev 1 acd
-  ! acd
-  C acd
-  $ hg status -A --rev 1 acf
-  R acf
-  $ hg status -A --rev 1 acm
-  M acm
-  $ hg status -A --rev 1 acr
-  R acr
-  $ hg status -A --rev 1 amc
-  M amc
-BROKEN: file appears twice; should be '!'
-  $ hg status -A --rev 1 amd
-  ! amd
-  C amd
-  $ hg status -A --rev 1 amf
-  R amf
-  $ hg status -A --rev 1 amm
-  M amm
-  $ hg status -A --rev 1 amr
-  R amr
-  $ hg status -A --rev 1 ara
-  M ara
-BROKEN: file appears twice; should be '!'
-  $ hg status -A --rev 1 arq
-  R arq
-  ! arq
-  $ hg status -A --rev 1 aru
-  R aru
-  $ hg status -A --rev 1 xad
-  ! xad
-  $ hg status -A --rev 1 xaf
-  $ hg status -A --rev 1 xam
-  A xam
-  $ hg status -A --rev 1 xar
-  $ hg status -A --rev 1 xxu
-  ? xxu
+  $ hg status -A --rev 1 'glob:missing_content2_content3-tracked'
+  M missing_content2_content3-tracked
+  $ hg status -A --rev 1 'glob:missing_content2_content2-tracked'
+  C missing_content2_content2-tracked
+  $ hg status -A --rev 1 'glob:missing_missing_content3-tracked'
+  A missing_missing_content3-tracked
+  $ hg status -A --rev 1 'glob:missing_missing_content3-untracked'
+  ? missing_missing_content3-untracked
+  $ hg status -A --rev 1 'glob:missing_content2_*-untracked'
+  R missing_content2_content2-untracked
+  R missing_content2_content3-untracked
+  R missing_content2_missing-untracked
+  $ hg status -A --rev 1 'glob:missing_*_missing-tracked'
+  ! missing_content2_missing-tracked
+  ! missing_missing_missing-tracked
+#if windows
+  $ hg status -A --rev 1 'glob:missing_missing_missing-untracked'
+  missing_missing_missing-untracked: The system cannot find the file specified
+#else
+  $ hg status -A --rev 1 'glob:missing_missing_missing-untracked'
+  missing_missing_missing-untracked: No such file or directory
+#endif
 
-Status compared to two revisions back
+Status between first and second commit. Should ignore dirstate status.
 
-  $ hg status -A --rev 0 acc
-  A acc
-  $ hg status -A --rev 0 acd
-  ! acd
-BROKEN: file exists, so should be listed (as '?')
-  $ hg status -A --rev 0 acf
-  $ hg status -A --rev 0 acm
-  A acm
-  $ hg status -A --rev 0 acr
-  $ hg status -A --rev 0 amc
-  A amc
-  $ hg status -A --rev 0 amd
-  ! amd
-BROKEN: file exists, so should be listed (as '?')
-  $ hg status -A --rev 0 amf
-  $ hg status -A --rev 0 amm
-  A amm
-  $ hg status -A --rev 0 amr
-  $ hg status -A --rev 0 ara
-  A ara
-  $ hg status -A --rev 0 arq
-  ! arq
-  $ hg status -A --rev 0 aru
-  ? aru
-  $ hg status -A --rev 0 xad
-  ! xad
-BROKEN: file exists, so should be listed (as '?')
-  $ hg status -A --rev 0 xaf
-  $ hg status -A --rev 0 xam
-  A xam
-  $ hg status -A --rev 0 xar
+  $ hg status -A --rev 0:1 'glob:content1_content2_*'
+  M content1_content2_content1-tracked
+  M content1_content2_content1-untracked
+  M content1_content2_content2-tracked
+  M content1_content2_content2-untracked
+  M content1_content2_content3-tracked
+  M content1_content2_content3-untracked
+  M content1_content2_missing-tracked
+  M content1_content2_missing-untracked
+  $ hg status -A --rev 0:1 'glob:content1_content1_*'
+  C content1_content1_content1-tracked
+  C content1_content1_content1-untracked
+  C content1_content1_content3-tracked
+  C content1_content1_content3-untracked
+  C content1_content1_missing-tracked
+  C content1_content1_missing-untracked
+  $ hg status -A --rev 0:1 'glob:missing_content2_*'
+  A missing_content2_content2-tracked
+  A missing_content2_content2-untracked
+  A missing_content2_content3-tracked
+  A missing_content2_content3-untracked
+  A missing_content2_missing-tracked
+  A missing_content2_missing-untracked
+  $ hg status -A --rev 0:1 'glob:content1_missing_*'
+  R content1_missing_content1-tracked
+  R content1_missing_content1-untracked
+  R content1_missing_content3-tracked
+  R content1_missing_content3-untracked
+  R content1_missing_missing-tracked
+  R content1_missing_missing-untracked
+  $ hg status -A --rev 0:1 'glob:missing_missing_*'
+
+Status compared to one revision back, checking that the dirstate status
+is correctly combined with the inter-revision status
+
+  $ hg status -A --rev 0 'glob:content1_*_content[23]-tracked'
+  M content1_content1_content3-tracked
+  M content1_content2_content2-tracked
+  M content1_content2_content3-tracked
+  M content1_missing_content3-tracked
+  $ hg status -A --rev 0 'glob:content1_*_content1-tracked'
+  C content1_content1_content1-tracked
+  C content1_content2_content1-tracked
+  C content1_missing_content1-tracked
+  $ hg status -A --rev 0 'glob:missing_*_content?-tracked'
+  A missing_content2_content2-tracked
+  A missing_content2_content3-tracked
+  A missing_missing_content3-tracked
+BROKEN: missing_content2_content[23]-untracked exist, so should be listed
+  $ hg status -A --rev 0 'glob:missing_*_content?-untracked'
+  ? missing_missing_content3-untracked
+  $ hg status -A --rev 0 'glob:content1_*_*-untracked'
+  R content1_content1_content1-untracked
+  R content1_content1_content3-untracked
+  R content1_content1_missing-untracked
+  R content1_content2_content1-untracked
+  R content1_content2_content2-untracked
+  R content1_content2_content3-untracked
+  R content1_content2_missing-untracked
+  R content1_missing_content1-untracked
+  R content1_missing_content3-untracked
+  R content1_missing_missing-untracked
+  $ hg status -A --rev 0 'glob:*_*_missing-tracked'
+  ! content1_content1_missing-tracked
+  ! content1_content2_missing-tracked
+  ! content1_missing_missing-tracked
+  ! missing_content2_missing-tracked
+  ! missing_missing_missing-tracked
+  $ hg status -A --rev 0 'glob:missing_*_missing-untracked'

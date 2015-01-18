@@ -88,7 +88,7 @@ $4 = expected result
    ancestor: 924404dff337, local: e300d1c794ec+, remote: 4ce40f5aca24
    preserving a for resolve of b
    preserving rev for resolve of rev
-   a: keep -> k
+   a: remote unchanged -> k
    b: remote copied from a -> m
   updating: b 1/2 files (50.00%)
   picked tool 'python ../merge' for b (binary False symlink False)
@@ -343,7 +343,7 @@ $4 = expected result
    ancestor: 924404dff337, local: 62e7bf090eba+, remote: 49b6d8032493
    preserving b for resolve of b
    preserving rev for resolve of rev
-   b: versions differ -> m
+   b: both renamed from a -> m
   updating: b 1/2 files (50.00%)
   picked tool 'python ../merge' for b (binary False symlink False)
   merging b
@@ -382,14 +382,12 @@ m "um a c" "um x c" "      " "10 do merge with no ancestor"
    preserving rev for resolve of rev
    c: remote created -> g
   getting c
-  updating: c 1/3 files (33.33%)
+  updating: c 1/2 files (50.00%)
    rev: versions differ -> m
-  updating: rev 2/3 files (66.67%)
+  updating: rev 2/2 files (100.00%)
   picked tool 'python ../merge' for rev (binary False symlink False)
   merging rev
   my rev@02963e448370+ other rev@fe905ef2c33e ancestor rev@924404dff337
-   a: divergent renames -> dr
-  updating: a 3/3 files (100.00%)
   note: possible conflict - a was renamed multiple times to:
    b
    c
@@ -413,7 +411,7 @@ m "um a c" "um x c" "      " "10 do merge with no ancestor"
    ancestor: 924404dff337, local: 86a2aa42fc76+, remote: af30c7647fc7
    preserving b for resolve of b
    preserving rev for resolve of rev
-   b: versions differ -> m
+   b: both created -> m
   updating: b 1/2 files (50.00%)
   picked tool 'python ../merge' for b (binary False symlink False)
   merging b
@@ -446,7 +444,7 @@ m "um a c" "um x c" "      " "10 do merge with no ancestor"
    a: other deleted -> r
   removing a
   updating: a 1/3 files (33.33%)
-   b: versions differ -> m
+   b: both created -> m
   updating: b 2/3 files (66.67%)
   picked tool 'python ../merge' for b (binary False symlink False)
   merging b
@@ -478,7 +476,7 @@ m "um a c" "um x c" "      " "10 do merge with no ancestor"
    a: remote is newer -> g
   getting a
   updating: a 1/3 files (33.33%)
-   b: versions differ -> m
+   b: both created -> m
   updating: b 2/3 files (66.67%)
   picked tool 'python ../merge' for b (binary False symlink False)
   merging b
@@ -511,7 +509,7 @@ m "um a c" "um x c" "      " "10 do merge with no ancestor"
    a: other deleted -> r
   removing a
   updating: a 1/3 files (33.33%)
-   b: versions differ -> m
+   b: both created -> m
   updating: b 2/3 files (66.67%)
   picked tool 'python ../merge' for b (binary False symlink False)
   merging b
@@ -543,7 +541,7 @@ m "um a c" "um x c" "      " "10 do merge with no ancestor"
    a: remote is newer -> g
   getting a
   updating: a 1/3 files (33.33%)
-   b: versions differ -> m
+   b: both created -> m
   updating: b 2/3 files (66.67%)
   picked tool 'python ../merge' for b (binary False symlink False)
   merging b
@@ -573,8 +571,8 @@ m "um a c" "um x c" "      " "10 do merge with no ancestor"
    ancestor: 924404dff337, local: 0b76e65c8289+, remote: 4ce40f5aca24
    preserving b for resolve of b
    preserving rev for resolve of rev
-   a: keep -> k
-   b: versions differ -> m
+   a: remote unchanged -> k
+   b: both created -> m
   updating: b 1/2 files (50.00%)
   picked tool 'python ../merge' for b (binary False symlink False)
   merging b
@@ -609,7 +607,7 @@ m "um a c" "um x c" "      " "10 do merge with no ancestor"
    a: prompt recreating -> g
   getting a
   updating: a 1/3 files (33.33%)
-   b: versions differ -> m
+   b: both created -> m
   updating: b 2/3 files (66.67%)
   picked tool 'python ../merge' for b (binary False symlink False)
   merging b
@@ -643,7 +641,7 @@ m "um a c" "um x c" "      " "10 do merge with no ancestor"
    preserving rev for resolve of rev
    a: prompt keep -> a
   updating: a 1/3 files (33.33%)
-   b: versions differ -> m
+   b: both created -> m
   updating: b 2/3 files (66.67%)
   picked tool 'python ../merge' for b (binary False symlink False)
   merging b

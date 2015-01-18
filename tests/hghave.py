@@ -289,14 +289,17 @@ def has_python243():
 @check("json", "some json module available")
 def has_json():
     try:
-        if sys.version_info < (2, 7):
-            import simplejson as json
-        else:
-            import json
+        import json
         json.dumps
         return True
     except ImportError:
-        return False
+        try:
+            import simplejson as json
+            json.dumps
+            return True
+        except ImportError:
+            pass
+    return False
 
 @check("outer-repo", "outer repo")
 def has_outer_repo():
@@ -304,11 +307,13 @@ def has_outer_repo():
     return not matchoutput('hg root 2>&1',
                            r'abort: no repository found', True)
 
-@check("ssl", "python >= 2.6 ssl module and python OpenSSL")
+@check("ssl", ("(python >= 2.6 ssl module and python OpenSSL) "
+               "OR python >= 2.7.9 ssl"))
 def has_ssl():
     try:
         import ssl
-        ssl.wrap_socket # silence unused import warning
+        if getattr(ssl, 'create_default_context', False):
+            return True
         import OpenSSL
         OpenSSL.SSL.Context
         return True

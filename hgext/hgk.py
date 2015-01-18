@@ -35,7 +35,7 @@ vdiff on hovered and selected revisions.
 '''
 
 import os
-from mercurial import cmdutil, commands, util, patch, revlog, scmutil
+from mercurial import cmdutil, commands, patch, revlog, scmutil
 from mercurial.node import nullid, nullrev, short
 from mercurial.i18n import _
 
@@ -95,8 +95,10 @@ def difftree(ui, repo, node1=None, node2=None, *files, **opts):
             if opts['pretty']:
                 catcommit(ui, repo, node2, "")
             m = scmutil.match(repo[node1], files)
+            diffopts = patch.difffeatureopts(ui)
+            diffopts.git = True
             chunks = patch.diff(repo, node1, node2, match=m,
-                                opts=patch.diffopts(ui, {'git': True}))
+                                opts=diffopts)
             for chunk in chunks:
                 ui.write(chunk)
         else:
@@ -349,4 +351,4 @@ def view(ui, repo, *etc, **opts):
     optstr = ' '.join(['--%s %s' % (k, v) for k, v in opts.iteritems() if v])
     cmd = ui.config("hgk", "path", "hgk") + " %s %s" % (optstr, " ".join(etc))
     ui.debug("running %s\n" % cmd)
-    util.system(cmd)
+    ui.system(cmd)

@@ -374,9 +374,13 @@ def showsubrepos(**args):
             subrepos.append(sub) # removed in ctx
     return showlist('subrepo', sorted(subrepos), **args)
 
-def showtags(**args):
-    """:tags: List of strings. Any tags associated with the changeset."""
-    return showlist('tag', args['ctx'].tags(), **args)
+def shownames(namespace, **args):
+    """helper method to generate a template keyword for a namespace"""
+    ctx = args['ctx']
+    repo = ctx._repo
+    ns = repo.names[namespace]
+    names = ns.names(repo, ctx.node())
+    return showlist(ns.templatename, names, plural=namespace, **args)
 
 # keywords are callables like:
 # fn(repo, ctx, templ, cache, revcache, **args)
@@ -416,7 +420,6 @@ keywords = {
     'phaseidx': showphaseidx,
     'rev': showrev,
     'subrepos': showsubrepos,
-    'tags': showtags,
 }
 
 def _showparents(**args):

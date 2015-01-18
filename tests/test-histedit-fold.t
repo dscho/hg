@@ -172,11 +172,16 @@ check saving last-message.txt
   > EOF
 
   $ rm -f .hg/last-message.txt
-  $ HGEDITOR="sh $TESTTMP/editor.sh" hg histedit 8e03a72b6f83 --commands - 2>&1 <<EOF | fixbundle
+  $ hg status --rev '8e03a72b6f83^1::c4a9eb7989fc'
+  A c
+  A d
+  A f
+  $ HGEDITOR="sh $TESTTMP/editor.sh" hg histedit 8e03a72b6f83 --commands - 2>&1 <<EOF
   > pick 8e03a72b6f83 f
   > fold c4a9eb7989fc d
   > EOF
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  adding d
   allow non-folding commit
   0 files updated, 0 files merged, 3 files removed, 0 files unresolved
   ==== before editing
@@ -193,13 +198,14 @@ check saving last-message.txt
   HG: --
   HG: user: test
   HG: branch 'default'
-  HG: changed c
-  HG: changed d
-  HG: changed f
+  HG: added c
+  HG: added d
+  HG: added f
   ====
   transaction abort!
   rollback completed
   abort: pretxncommit.abortfolding hook failed
+  [255]
 
   $ cat .hg/last-message.txt
   f
@@ -381,7 +387,7 @@ dropped revision.
   HG: changed file
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  saved backup bundle to $TESTTMP/fold-with-dropped/.hg/strip-backup/617f94f13c0f-backup.hg (glob)
+  saved backup bundle to $TESTTMP/fold-with-dropped/.hg/strip-backup/617f94f13c0f-3d69522c-backup.hg (glob)
   $ hg logt -G
   @  1:10c647b2cdd5 +4
   |
@@ -470,7 +476,14 @@ This is an excuse to test hook with histedit temporary commit (issue4422)
   1:199b6bb90248 b
   0:6c795aa153cb a
 
-  $ hg histedit 6c795aa153cb --config hooks.commit="echo commit \$HG_NODE" --commands - 2>&1 << EOF | fixbundle
+Setup the proper environment variable symbol for the platform, to be subbed
+into the hook command.
+#if windows
+  $ NODE="%HG_NODE%"
+#else
+  $ NODE="\$HG_NODE"
+#endif
+  $ hg histedit 6c795aa153cb --config hooks.commit="echo commit $NODE" --commands - 2>&1 << EOF | fixbundle
   > pick 199b6bb90248 b
   > fold a1a953ffb4b0 c
   > pick 6c795aa153cb a

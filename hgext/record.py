@@ -328,10 +328,9 @@ the hunk is left unchanged.
                     f.close()
                     # Start the editor and wait for it to complete
                     editor = ui.geteditor()
-                    util.system("%s \"%s\"" % (editor, patchfn),
-                            environ={'HGUSER': ui.username()},
-                            onerr=util.Abort, errprefix=_("edit failed"),
-                            out=ui.fout)
+                    ui.system("%s \"%s\"" % (editor, patchfn),
+                              environ={'HGUSER': ui.username()},
+                              onerr=util.Abort, errprefix=_("edit failed"))
                     # Remove comment lines
                     patchfp = open(patchfn)
                     ncpatchfp = cStringIO.StringIO()
@@ -520,10 +519,9 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall, *pats, **opts):
                                '(use "hg commit" instead)'))
 
         status = repo.status(match=match)
-        diffopts = opts.copy()
-        diffopts['nodates'] = True
-        diffopts['git'] = True
-        diffopts = patch.diffopts(ui, opts=diffopts)
+        diffopts = patch.difffeatureopts(ui, opts=opts, whitespace=True)
+        diffopts.nodates = True
+        diffopts.git = True
         chunks = patch.diff(repo, changes=status, opts=diffopts)
         fp = cStringIO.StringIO()
         fp.write(''.join(chunks))

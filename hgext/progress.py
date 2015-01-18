@@ -37,6 +37,7 @@ characters.
 
 import sys
 import time
+import threading
 
 from mercurial.i18n import _
 testedwith = 'internal'
@@ -90,6 +91,7 @@ def fmtremaining(seconds):
 class progbar(object):
     def __init__(self, ui):
         self.ui = ui
+        self._refreshlock = threading.Lock()
         self.resetstate()
 
     def resetstate(self):
@@ -100,6 +102,7 @@ class progbar(object):
         self.printed = False
         self.lastprint = time.time() + float(self.ui.config(
             'progress', 'delay', default=3))
+        self.curtopic = None
         self.lasttopic = None
         self.indetcount = 0
         self.refresh = float(self.ui.config(
@@ -227,41 +230,53 @@ class progbar(object):
             return _('%d %s/sec') % (delta / elapsed, unit)
         return ''
 
+    def _oktoprint(self, now):
+        '''Check if conditions are met to print - e.g. changedelay elapsed'''
+        if (self.lasttopic is None # first time we printed
+            # not a topic change
+            or self.curtopic == self.lasttopic
+            # it's been long enough we should print anyway
+            or now - self.lastprint >= self.changedelay):
+            return True
+        else:
+            return False
+
     def progress(self, topic, pos, item='', unit='', total=None):
         now = time.time()
-        if pos is None:
-            self.starttimes.pop(topic, None)
-            self.startvals.pop(topic, None)
-            self.topicstates.pop(topic, None)
-            # reset the progress bar if this is the outermost topic
-            if self.topics and self.topics[0] == topic and self.printed:
-                self.complete()
-                self.resetstate()
-            # truncate the list of topics assuming all topics within
-            # this one are also closed
-            if topic in self.topics:
-                self.topics = self.topics[:self.topics.index(topic)]
-                # reset the last topic to the one we just unwound to,
-                # so that higher-level topics will be stickier than
-                # lower-level topics
-                if self.topics:
-                    self.lasttopic = self.topics[-1]
-                else:
-                    self.lasttopic = None
-        else:
-            if topic not in self.topics:
-                self.starttimes[topic] = now
-                self.startvals[topic] = pos
-                self.topics.append(topic)
-            self.topicstates[topic] = pos, item, unit, total
-            if now - self.lastprint >= self.refresh and self.topics:
-                if (self.lasttopic is None # first time we printed
-                    # not a topic change
-                    or topic == self.lasttopic
-                    # it's been long enough we should print anyway
-                    or now - self.lastprint >= self.changedelay):
-                    self.lastprint = now
-                    self.show(now, topic, *self.topicstates[topic])
+        self._refreshlock.acquire()
+        try:
+            if pos is None:
+                self.starttimes.pop(topic, None)
+                self.startvals.pop(topic, None)
+                self.topicstates.pop(topic, None)
+                # reset the progress bar if this is the outermost topic
+                if self.topics and self.topics[0] == topic and self.printed:
+                    self.complete()
+                    self.resetstate()
+                # truncate the list of topics assuming all topics within
+                # this one are also closed
+                if topic in self.topics:
+                    self.topics = self.topics[:self.topics.index(topic)]
+                    # reset the last topic to the one we just unwound to,
+                    # so that higher-level topics will be stickier than
+                    # lower-level topics
+                    if self.topics:
+                        self.lasttopic = self.topics[-1]
+                    else:
+                        self.lasttopic = None
+            else:
+                if topic not in self.topics:
+                    self.starttimes[topic] = now
+                    self.startvals[topic] = pos
+                    self.topics.append(topic)
+                self.topicstates[topic] = pos, item, unit, total
+                self.curtopic = topic
+                if now - self.lastprint >= self.refresh and self.topics:
+                    if self._oktoprint(now):
+                        self.lastprint = now
+                        self.show(now, topic, *self.topicstates[topic])
+        finally:
+            self._refreshlock.release()
 
 _singleton = None
 

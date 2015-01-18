@@ -158,7 +158,7 @@ def defaultdest(source):
         return ''
     return os.path.basename(os.path.normpath(path))
 
-def share(ui, source, dest=None, update=True):
+def share(ui, source, dest=None, update=True, bookmarks=True):
     '''create a shared repository'''
 
     if not islocal(source):
@@ -193,7 +193,7 @@ def share(ui, source, dest=None, update=True):
 
     requirements = ''
     try:
-        requirements = srcrepo.opener.read('requires')
+        requirements = srcrepo.vfs.read('requires')
     except IOError, inst:
         if inst.errno != errno.ENOENT:
             raise
@@ -206,7 +206,7 @@ def share(ui, source, dest=None, update=True):
 
     default = srcrepo.ui.config('paths', 'default')
     if default:
-        fp = r.opener("hgrc", "w", text=True)
+        fp = r.vfs("hgrc", "w", text=True)
         fp.write("[paths]\n")
         fp.write("default = %s\n" % default)
         fp.close()
@@ -224,6 +224,11 @@ def share(ui, source, dest=None, update=True):
             except error.RepoLookupError:
                 continue
         _update(r, uprev)
+
+    if bookmarks:
+        fp = r.vfs('shared', 'w')
+        fp.write('bookmarks\n')
+        fp.close()
 
 def copystore(ui, srcrepo, destpath):
     '''copy files from store of srcrepo in destpath
@@ -284,7 +289,8 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
     dest: URL of destination repository to create (defaults to base
     name of source repository)
 
-    pull: always pull from source repository, even in local case
+    pull: always pull from source repository, even in local case or if the
+    server prefers streaming
 
     stream: stream raw data uncompressed from repository (fast over
     LAN, slow over WAN)
@@ -390,7 +396,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
 
             dstcachedir = os.path.join(destpath, 'cache')
             # In local clones we're copying all nodes, not just served
-            # ones. Therefore copy all branchcaches over.
+            # ones. Therefore copy all branch caches over.
             copybranchcache('branch2')
             for cachename in repoview.filtertable:
                 copybranchcache('branch2-%s' % cachename)
@@ -420,6 +426,11 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
                 revs = [srcpeer.lookup(r) for r in rev]
                 checkout = revs[0]
             if destpeer.local():
+                if not stream:
+                    if pull:
+                        stream = False
+                    else:
+                        stream = None
                 destpeer.local().clone(srcpeer, heads=revs, stream=stream)
             elif srcrepo:
                 exchange.push(srcrepo, destpeer, revs=revs,
@@ -432,7 +443,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
         destrepo = destpeer.local()
         if destrepo:
             template = uimod.samplehgrcs['cloned']
-            fp = destrepo.opener("hgrc", "w", text=True)
+            fp = destrepo.vfs("hgrc", "w", text=True)
             u = util.url(abspath)
             u.passwd = None
             defaulturl = str(u)

@@ -108,15 +108,21 @@ class appender(object):
         self.data.append(str(s))
         self.offset += len(s)
 
-def delayopener(opener, target, divert, buf):
-    def o(name, mode='r'):
+def _divertopener(opener, target):
+    """build an opener that writes in 'target.a' instead of 'target'"""
+    def _divert(name, mode='r'):
         if name != target:
             return opener(name, mode)
-        if divert:
-            return opener(name + ".a", mode.replace('a', 'w'))
-        # otherwise, divert to memory
+        return opener(name + ".a", mode)
+    return _divert
+
+def _delayopener(opener, target, buf):
+    """build an opener that stores chunks in 'buf' instead of 'target'"""
+    def _delay(name, mode='r'):
+        if name != target:
+            return opener(name, mode)
         return appender(opener, name, mode, buf)
-    return o
+    return _delay
 
 class changelog(revlog.revlog):
     def __init__(self, opener):
@@ -127,7 +133,7 @@ class changelog(revlog.revlog):
             self._generaldelta = False
         self._realopener = opener
         self._delayed = False
-        self._delaybuf = []
+        self._delaybuf = None
         self._divert = False
         self.filteredrevs = frozenset()
 
@@ -218,20 +224,30 @@ class changelog(revlog.revlog):
             raise error.FilteredIndexError(rev)
         return super(changelog, self).flags(rev)
 
-    def delayupdate(self):
+    def delayupdate(self, tr):
         "delay visibility of index updates to other readers"
-        self._delayed = True
-        self._divert = (len(self) == 0)
-        self._delaybuf = []
-        self.opener = delayopener(self._realopener, self.indexfile,
-                                  self._divert, self._delaybuf)
 
-    def finalize(self, tr):
+        if not self._delayed:
+            if len(self) == 0:
+                self._divert = True
+                if self._realopener.exists(self.indexfile + '.a'):
+                    self._realopener.unlink(self.indexfile + '.a')
+                self.opener = _divertopener(self._realopener, self.indexfile)
+            else:
+                self._delaybuf = []
+                self.opener = _delayopener(self._realopener, self.indexfile,
+                                           self._delaybuf)
+        self._delayed = True
+        tr.addpending('cl-%i' % id(self), self._writepending)
+        tr.addfinalize('cl-%i' % id(self), self._finalize)
+
+    def _finalize(self, tr):
         "finalize index updates"
         self._delayed = False
         self.opener = self._realopener
         # move redirected index data back into place
         if self._divert:
+            assert not self._delaybuf
             tmpname = self.indexfile + ".a"
             nfile = self.opener.open(tmpname)
             nfile.close()
@@ -240,7 +256,8 @@ class changelog(revlog.revlog):
             fp = self.opener(self.indexfile, 'a')
             fp.write("".join(self._delaybuf))
             fp.close()
-            self._delaybuf = []
+            self._delaybuf = None
+        self._divert = False
         # split when we're done
         self.checkinlinesize(tr)
 
@@ -251,19 +268,24 @@ class changelog(revlog.revlog):
         self._nodecache = r._nodecache
         self._chunkcache = r._chunkcache
 
-    def writepending(self):
+    def _writepending(self, tr):
         "create a file containing the unfinalized state for pretxnchangegroup"
         if self._delaybuf:
             # make a temporary copy of the index
             fp1 = self._realopener(self.indexfile)
-            fp2 = self._realopener(self.indexfile + ".a", "w")
+            pendingfilename = self.indexfile + ".a"
+            # register as a temp file to ensure cleanup on failure
+            tr.registertmp(pendingfilename)
+            # write existing data
+            fp2 = self._realopener(pendingfilename, "w")
             fp2.write(fp1.read())
             # add pending data
             fp2.write("".join(self._delaybuf))
             fp2.close()
             # switch modes so finalize can simply rename
-            self._delaybuf = []
+            self._delaybuf = None
             self._divert = True
+            self.opener = _divertopener(self._realopener, self.indexfile)
 
         if self._divert:
             return True

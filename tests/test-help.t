@@ -272,7 +272,7 @@ Test extension help:
        schemes       extend schemes with shortcuts to repository swarms
        share         share a common history between several working directories
        shelve        save and restore changes to the working directory
-       strip         strip changesets and their descendents from history
+       strip         strip changesets and their descendants from history
        transplant    command to transplant changesets from another branch
        win32mbcs     allow the use of MBCS paths with problematic encodings
        zeroconf      discover and advertise repositories on the local network
@@ -500,6 +500,7 @@ Test command without options
    -a --text                treat all files as text
    -g --git                 use git extended diff format
       --nodates             omit dates from diff headers
+      --noprefix            omit a/ and b/ prefixes from filenames
    -p --show-function       show which function each change is in
       --reverse             produce a diff that undoes the changes
    -w --ignore-all-space    ignore white space when comparing lines
@@ -779,9 +780,9 @@ Test list of internal help commands
                  dump an index DAG as a graphviz dot file
    debuginstall  test Mercurial installation
    debugknown    test whether node ids are known to a repo
-   debuglabelcomplete
-                 complete "labels" - tags, open branch names, bookmark names
    debuglocks    show or modify state of locks
+   debugnamecomplete
+                 complete "names" - tags, open branch names, bookmark names
    debugobsolete
                  create arbitrary obsolete marker
    debugoptDEP   (no help text available)
@@ -985,7 +986,7 @@ Test omit indicating for help
   > .. container:: verbose
   > 
   >   This paragraph is omitted,
-  >   if :hg:\`help\` is invoked witout \`\`-v\`\` (for extension)
+  >   if :hg:\`help\` is invoked without \`\`-v\`\` (for extension)
   > 
   > This paragraph is never omitted, too (for extension)
   > '''
@@ -996,7 +997,7 @@ Test omit indicating for help
   > .. container:: verbose
   > 
   >   This paragraph is omitted,
-  >   if :hg:\`help\` is invoked witout \`\`-v\`\` (for topic)
+  >   if :hg:\`help\` is invoked without \`\`-v\`\` (for topic)
   > 
   > This paragraph is never omitted, too (for topic)
   > """
@@ -1022,7 +1023,8 @@ Test omit indicating for help
   
   This paragraph is never omitted (for extension)
   
-  This paragraph is omitted, if "hg help" is invoked witout "-v" (for extension)
+  This paragraph is omitted, if "hg help" is invoked without "-v" (for
+  extension)
   
   This paragraph is never omitted, too (for extension)
   
@@ -1042,7 +1044,8 @@ Test omit indicating for help
   
       This paragraph is never omitted (for topic).
   
-      This paragraph is omitted, if "hg help" is invoked witout "-v" (for topic)
+      This paragraph is omitted, if "hg help" is invoked without "-v" (for
+      topic)
   
       This paragraph is never omitted, too (for topic)
 
@@ -1943,6 +1946,9 @@ Dish up an empty repo; serve it cold.
   <tr><td>-f</td>
   <td>--force</td>
   <td>remove (and delete) file even if added or modified</td></tr>
+  <tr><td>-S</td>
+  <td>--subrepos</td>
+  <td>recurse into subrepositories</td></tr>
   <tr><td>-I</td>
   <td>--include PATTERN [+]</td>
   <td>include names matching the given patterns</td></tr>

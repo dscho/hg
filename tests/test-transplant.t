@@ -230,7 +230,8 @@ test same-parent transplant with --log
   (transplanted from e234d668f844e1b1a765f01db83a32c0c7bfa170)
   1  r2
   0  r1
-remote transplant
+remote transplant, and also test that transplant doesn't break with
+format-breaking diffopts
 
   $ hg clone -r 1 ../t ../remote
   adding changesets
@@ -240,7 +241,7 @@ remote transplant
   updating to branch default
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd ../remote
-  $ hg transplant --log -s ../t 2 4
+  $ hg --config diff.noprefix=True transplant --log -s ../t 2 4
   searching for changes
   applying 37a1297eb21b
   37a1297eb21b transplanted to c19cf0ccb069
@@ -767,6 +768,22 @@ test transplanting a patch turning into a no-op
   searching for changes
   applying 7a7d57e15850
   skipping emptied changeset 7a7d57e15850
+
+Test empty result in --continue
+
+  $ hg transplant -s ../binarysource 1
+  searching for changes
+  applying 645035761929
+  file b already exists
+  1 out of 1 hunks FAILED -- saving rejects to file b.rej
+  patch failed to apply
+  abort: fix up the merge and run hg transplant --continue
+  [255]
+  $ hg status
+  ? b.rej
+  $ hg transplant --continue
+  645035761929 skipped due to empty diff
+
   $ cd ..
 
 Explicitly kill daemons to let the test exit on Windows

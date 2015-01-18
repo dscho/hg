@@ -28,12 +28,12 @@ already has one local mq patch
 
   $ hg up -q 0
 
-  $ hg qnew p0.patch
+  $ hg qnew p0.patch -d '1 0'
   $ echo p0 > p0
   $ hg add p0
   $ hg qref -m P0
 
-  $ hg qnew p1.patch
+  $ hg qnew p1.patch -d '2 0'
   $ echo p1 > p1
   $ hg add p1
   $ hg qref -m P1
@@ -49,8 +49,43 @@ already has one local mq patch
 
   $ hg up -q -C qtip
 
-  $ hg rebase
-  saved backup bundle to $TESTTMP/a/.hg/strip-backup/*-backup.hg (glob)
+  $ hg rebase -v
+  rebasing 2:13a46ce44f60 "P0" (p0.patch qbase)
+  resolving manifests
+  removing p0
+  getting r1
+  resolving manifests
+  getting p0
+  committing files:
+  p0
+  committing manifest
+  committing changelog
+  rebasing 3:148775c71080 "P1" (p1.patch qtip)
+  resolving manifests
+  note: rebase of 3:148775c71080 created no changes to commit
+  rebase merging completed
+  updating mq patch p0.patch to 5:9ecc820b1737
+  $TESTTMP/a/.hg/patches/p0.patch (glob)
+  2 changesets found
+  uncompressed size of bundle content:
+       344 (changelog)
+       284 (manifests)
+       109  p0
+       109  p1
+  saved backup bundle to $TESTTMP/a/.hg/strip-backup/13a46ce44f60-5da6ecfb-backup.hg (glob)
+  2 changesets found
+  uncompressed size of bundle content:
+       399 (changelog)
+       284 (manifests)
+       109  p0
+       109  p1
+  adding branch
+  adding changesets
+  adding manifests
+  adding file changes
+  added 2 changesets with 2 changes to 2 files
+  rebase completed
+  1 revisions have been skipped
 
   $ hg tglog
   @  3: 'P0' tags: p0.patch qbase qtip tip
@@ -107,6 +142,12 @@ already has one local mq patch
   $ hg up -q qtip
 
   $ HGMERGE=internal:fail hg rebase
+  rebasing 1:b4bffa6e4776 "r1" (1.diff qbase)
+  note: rebase of 1:b4bffa6e4776 created no changes to commit
+  rebasing 2:c0fd129beb01 "r2" (2.diff)
+  rebasing 3:6ff5b8feed8e "r3" (3.diff)
+  note: rebase of 3:6ff5b8feed8e created no changes to commit
+  rebasing 4:094320fec554 "r4" (4.diff)
   unresolved conflicts (see hg resolve, then hg rebase --continue)
   [1]
 
@@ -114,7 +155,15 @@ already has one local mq patch
   (no more unresolved files)
 
   $ hg rebase --continue
-  saved backup bundle to $TESTTMP/b/.hg/strip-backup/*-backup.hg (glob)
+  already rebased 1:b4bffa6e4776 "r1" (1.diff qbase) as 057f55ff8f44
+  already rebased 2:c0fd129beb01 "r2" (2.diff) as 1660ab13ce9a
+  already rebased 3:6ff5b8feed8e "r3" (3.diff) as 1660ab13ce9a
+  rebasing 4:094320fec554 "r4" (4.diff)
+  note: rebase of 4:094320fec554 created no changes to commit
+  rebasing 5:681a378595ba "r5" (5.diff)
+  rebasing 6:512a1f24768b "r6" (6.diff qtip)
+  note: rebase of 6:512a1f24768b created no changes to commit
+  saved backup bundle to $TESTTMP/b/.hg/strip-backup/b4bffa6e4776-b9bfb84d-backup.hg (glob)
 
   $ hg tglog
   @  8: 'r5' tags: 5.diff qtip tip

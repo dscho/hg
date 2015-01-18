@@ -1,10 +1,12 @@
-  $ echo "[ui]" >> $HGRCPATH
-  $ echo "commitsubrepos = Yes" >> $HGRCPATH
-  $ echo "[extensions]" >> $HGRCPATH
-  $ echo "mq=" >> $HGRCPATH
-  $ echo "record=" >> $HGRCPATH
-  $ echo "[diff]" >> $HGRCPATH
-  $ echo "nodates=1" >> $HGRCPATH
+  $ cat <<EOF >> $HGRCPATH
+  > [ui]
+  > commitsubrepos = Yes
+  > [extensions]
+  > mq =
+  > record =
+  > [diff]
+  > nodates = 1
+  > EOF
 
   $ stdin=`pwd`/stdin.tmp
 
@@ -241,7 +243,7 @@ qpop
   [255]
   $ hg revert sub
   reverting subrepo sub
-  adding sub/a
+  adding sub/a (glob)
   $ hg qpop
   popping 1.diff
   now at: 0.diff
@@ -260,7 +262,7 @@ qpush
   [255]
   $ hg revert sub
   reverting subrepo sub
-  adding sub/a
+  adding sub/a (glob)
   $ hg qpush
   applying 1.diff
    subrepository sub diverged (local revision: b2fdb12cd82b, remote revision: aa037b301eba)

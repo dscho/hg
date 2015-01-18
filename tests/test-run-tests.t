@@ -33,8 +33,8 @@ failing test
 
   $ $TESTDIR/run-tests.py --with-hg=`which hg`
   
-  --- $TESTTMP/test-failure.t (glob)
-  +++ $TESTTMP/test-failure.t.err (glob)
+  --- $TESTTMP/test-failure.t
+  +++ $TESTTMP/test-failure.t.err
   @@ -1,4 +1,4 @@
      $ echo babar
   -  rataxes
@@ -87,8 +87,8 @@ test for --retest
 
   $ $TESTDIR/run-tests.py --with-hg=`which hg` --retest
   
-  --- $TESTTMP/test-failure.t (glob)
-  +++ $TESTTMP/test-failure.t.err (glob)
+  --- $TESTTMP/test-failure.t
+  +++ $TESTTMP/test-failure.t.err
   @@ -1,4 +1,4 @@
      $ echo babar
   -  rataxes
@@ -121,8 +121,8 @@ failed
 
   $ $TESTDIR/run-tests.py --with-hg=`which hg` test-failure.t
   
-  --- $TESTTMP/test-failure.t (glob)
-  +++ $TESTTMP/test-failure.t.err (glob)
+  --- $TESTTMP/test-failure.t
+  +++ $TESTTMP/test-failure.t.err
   @@ -1,4 +1,4 @@
      $ echo babar
   -  rataxes
@@ -181,22 +181,22 @@ Running In Debug Mode
 ======================
 
   $ $TESTDIR/run-tests.py --with-hg=`which hg` --debug 2>&1 | grep -v pwd
-  + echo SALT* 0 0 (glob)
-  SALT* 0 0 (glob)
+  + echo *SALT* 0 0 (glob)
+  *SALT* 0 0 (glob)
   + echo babar
   babar
-  + echo SALT* 4 0 (glob)
-  SALT* 4 0 (glob)
-  .+ echo SALT* 0 0 (glob)
-  SALT* 0 0 (glob)
+  + echo *SALT* 4 0 (glob)
+  *SALT* 4 0 (glob)
+  .+ echo *SALT* 0 0 (glob)
+  *SALT* 0 0 (glob)
   + echo babar
   babar
-  + echo SALT* 2 0 (glob)
-  SALT* 2 0 (glob)
+  + echo *SALT* 2 0 (glob)
+  *SALT* 2 0 (glob)
   + echo xyzzy
   xyzzy
-  + echo SALT* 4 0 (glob)
-  SALT* 4 0 (glob)
+  + echo *SALT* 4 0 (glob)
+  *SALT* 4 0 (glob)
   .
   # Ran 2 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -274,7 +274,7 @@ Refuse the fix
 Interactive with custom view
 
   $ echo 'n' | $TESTDIR/run-tests.py --with-hg=`which hg` -i --view echo
-  $TESTTMP/test-failure.t $TESTTMP/test-failure.t.err
+  $TESTTMP/test-failure.t $TESTTMP/test-failure.t.err (glob)
   Accept this change? [n]* (glob)
   ERROR: test-failure.t output changed
   !.
@@ -286,7 +286,7 @@ Interactive with custom view
 View the fix
 
   $ echo 'y' | $TESTDIR/run-tests.py --with-hg=`which hg` --view echo
-  $TESTTMP/test-failure.t $TESTTMP/test-failure.t.err
+  $TESTTMP/test-failure.t $TESTTMP/test-failure.t.err (glob)
   
   ERROR: test-failure.t output changed
   !.
@@ -297,24 +297,43 @@ View the fix
 
 Accept the fix
 
-  $ echo 'y' | $TESTDIR/run-tests.py --with-hg=`which hg` -i
+  $ echo "  $ echo 'saved backup bundle to \$TESTTMP/foo.hg'" >> test-failure.t
+  $ echo "  saved backup bundle to \$TESTTMP/foo.hg" >> test-failure.t
+  $ echo "  $ echo 'saved backup bundle to \$TESTTMP/foo.hg'" >> test-failure.t
+  $ echo "  saved backup bundle to \$TESTTMP/foo.hg (glob)" >> test-failure.t
+  $ echo "  $ echo 'saved backup bundle to \$TESTTMP/foo.hg'" >> test-failure.t
+  $ echo "  saved backup bundle to \$TESTTMP/*.hg (glob)" >> test-failure.t
+  $ echo 'y' | $TESTDIR/run-tests.py --with-hg=`which hg` -i 2>&1 | \
+  >   sed -e 's,(glob)$,&<,g'
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
-  @@ -1,4 +1,4 @@
+  @@ -1,9 +1,9 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+     $ echo 'saved backup bundle to $TESTTMP/foo.hg'
+  -  saved backup bundle to $TESTTMP/foo.hg
+  +  saved backup bundle to $TESTTMP/foo.hg (glob)<
+     $ echo 'saved backup bundle to $TESTTMP/foo.hg'
+     saved backup bundle to $TESTTMP/foo.hg (glob)<
+     $ echo 'saved backup bundle to $TESTTMP/foo.hg'
   Accept this change? [n] ..
   # Ran 2 tests, 0 skipped, 0 warned, 0 failed.
 
-  $ cat test-failure.t
+  $ sed -e 's,(glob)$,&<,g' test-failure.t
     $ echo babar
     babar
   This is a noop statement so that
   this test is still more bytes than success.
+    $ echo 'saved backup bundle to $TESTTMP/foo.hg'
+    saved backup bundle to $TESTTMP/foo.hg (glob)<
+    $ echo 'saved backup bundle to $TESTTMP/foo.hg'
+    saved backup bundle to $TESTTMP/foo.hg (glob)<
+    $ echo 'saved backup bundle to $TESTTMP/foo.hg'
+    saved backup bundle to $TESTTMP/*.hg (glob)<
 
 (reinstall)
   $ mv backup test-failure.t

@@ -15,7 +15,7 @@ from i18n import _
 import errno
 import error, util
 
-version = 1
+version = 2
 
 def active(func):
     def _active(self, *args, **kwds):
@@ -25,7 +25,8 @@ def active(func):
         return func(self, *args, **kwds)
     return _active
 
-def _playback(journal, report, opener, entries, backupentries, unlink=True):
+def _playback(journal, report, opener, vfsmap, entries, backupentries,
+              unlink=True):
     for f, o, _ignore in entries:
         if o or not unlink:
             try:
@@ -43,26 +44,46 @@ def _playback(journal, report, opener, entries, backupentries, unlink=True):
                     raise
 
     backupfiles = []
-    for f, b, _ignore in backupentries:
-        filepath = opener.join(f)
-        backuppath = opener.join(b)
+    for l, f, b, c in backupentries:
+        if l not in vfsmap and c:
+            report("couldn't handle %s: unknown cache location %s\n"
+                        % (b, l))
+        vfs = vfsmap[l]
         try:
-            util.copyfile(backuppath, filepath)
-            backupfiles.append(b)
-        except IOError:
-            report(_("failed to recover %s\n") % f)
-            raise
+            if f and b:
+                filepath = vfs.join(f)
+                backuppath = vfs.join(b)
+                try:
+                    util.copyfile(backuppath, filepath)
+                    backupfiles.append(b)
+                except IOError:
+                    report(_("failed to recover %s\n") % f)
+            else:
+                target = f or b
+                try:
+                    vfs.unlink(target)
+                except (IOError, OSError), inst:
+                    if inst.errno != errno.ENOENT:
+                        raise
+        except (IOError, OSError, util.Abort), inst:
+            if not c:
+                raise
 
     opener.unlink(journal)
     backuppath = "%s.backupfiles" % journal
     if opener.exists(backuppath):
         opener.unlink(backuppath)
-    for f in backupfiles:
-        opener.unlink(f)
+    try:
+        for f in backupfiles:
+            if opener.exists(f):
+                opener.unlink(f)
+    except (IOError, OSError, util.Abort), inst:
+        # only pure backup file remains, it is sage to ignore any error
+        pass
 
 class transaction(object):
-    def __init__(self, report, opener, journal, after=None, createmode=None,
-            onclose=None, onabort=None):
+    def __init__(self, report, opener, vfsmap, journalname, undoname=None,
+                 after=None, createmode=None):
         """Begin a new transaction
 
         Begins a new transaction that allows rolling back writes in the event of
@@ -70,37 +91,54 @@ class transaction(object):
 
         * `after`: called after the transaction has been committed
         * `createmode`: the mode of the journal file that will be created
-        * `onclose`: called as the transaction is closing, but before it is
-        closed
-        * `onabort`: called as the transaction is aborting, but before any files
-        have been truncated
         """
         self.count = 1
         self.usages = 1
         self.report = report
+        # a vfs to the store content
         self.opener = opener
+        # a map to access file in various {location -> vfs}
+        vfsmap = vfsmap.copy()
+        vfsmap[''] = opener  # set default value
+        self._vfsmap = vfsmap
         self.after = after
-        self.onclose = onclose
-        self.onabort = onabort
         self.entries = []
-        self.backupentries = []
         self.map = {}
-        self.backupmap = {}
-        self.journal = journal
+        self.journal = journalname
+        self.undoname = undoname
         self._queue = []
         # a dict of arguments to be passed to hooks
         self.hookargs = {}
-
-        self.backupjournal = "%s.backupfiles" % journal
         self.file = opener.open(self.journal, "w")
-        self.backupsfile = opener.open(self.backupjournal, 'w')
-        self.backupsfile.write('%d\n' % version)
+
+        # a list of ('location', 'path', 'backuppath', cache) entries.
+        # - if 'backuppath' is empty, no file existed at backup time
+        # - if 'path' is empty, this is a temporary transaction file
+        # - if 'location' is not empty, the path is outside main opener reach.
+        #   use 'location' value as a key in a vfsmap to find the right 'vfs'
+        # (cache is currently unused)
+        self._backupentries = []
+        self._backupmap = {}
+        self._backupjournal = "%s.backupfiles" % self.journal
+        self._backupsfile = opener.open(self._backupjournal, 'w')
+        self._backupsfile.write('%d\n' % version)
+
         if createmode is not None:
             opener.chmod(self.journal, createmode & 0666)
-            opener.chmod(self.backupjournal, createmode & 0666)
+            opener.chmod(self._backupjournal, createmode & 0666)
 
         # hold file generations to be performed on commit
         self._filegenerators = {}
+        # hold callback to write pending data for hooks
+        self._pendingcallback = {}
+        # True is any pending data have been written ever
+        self._anypending = False
+        # holds callback to call when writing the transaction
+        self._finalizecallback = {}
+        # hold callback for post transaction close
+        self._postclosecallback = {}
+        # holds callbacks to call during abort
+        self._abortcallback = {}
 
     def __del__(self):
         if self.journal:
@@ -108,38 +146,37 @@ class transaction(object):
 
     @active
     def startgroup(self):
-        self._queue.append(([], []))
+        """delay registration of file entry
+
+        This is used by strip to delay vision of strip offset. The transaction
+        sees either none or all of the strip actions to be done."""
+        self._queue.append([])
 
     @active
     def endgroup(self):
+        """apply delayed registration of file entry.
+
+        This is used by strip to delay vision of strip offset. The transaction
+        sees either none or all of the strip actions to be done."""
         q = self._queue.pop()
-        self.entries.extend(q[0])
-        self.backupentries.extend(q[1])
-
-        offsets = []
-        backups = []
-        for f, o, _data in q[0]:
-            offsets.append((f, o))
-
-        for f, b, _data in q[1]:
-            backups.append((f, b))
-
-        d = ''.join(['%s\0%d\n' % (f, o) for f, o in offsets])
-        self.file.write(d)
-        self.file.flush()
-
-        d = ''.join(['%s\0%s\n' % (f, b) for f, b in backups])
-        self.backupsfile.write(d)
-        self.backupsfile.flush()
+        for f, o, data in q:
+            self._addentry(f, o, data)
 
     @active
     def add(self, file, offset, data=None):
-        if file in self.map or file in self.backupmap:
+        """record the state of an append-only file before update"""
+        if file in self.map or file in self._backupmap:
             return
         if self._queue:
-            self._queue[-1][0].append((file, offset, data))
+            self._queue[-1].append((file, offset, data))
             return
 
+        self._addentry(file, offset, data)
+
+    def _addentry(self, file, offset, data):
+        """add a append-only entry to memory and on-disk state"""
+        if file in self.map or file in self._backupmap:
+            return
         self.entries.append((file, offset, data))
         self.map[file] = len(self.entries) - 1
         # add enough data to the journal to do the truncate
@@ -147,7 +184,7 @@ class transaction(object):
         self.file.flush()
 
     @active
-    def addbackup(self, file, hardlink=True, vfs=None):
+    def addbackup(self, file, hardlink=True, location=''):
         """Adds a backup of the file to the transaction
 
         Calling addbackup() creates a hardlink backup of the specified file
@@ -157,31 +194,44 @@ class transaction(object):
         * `file`: the file path, relative to .hg/store
         * `hardlink`: use a hardlink to quickly create the backup
         """
+        if self._queue:
+            msg = 'cannot use transaction.addbackup inside "group"'
+            raise RuntimeError(msg)
 
-        if file in self.map or file in self.backupmap:
+        if file in self.map or file in self._backupmap:
             return
-        backupfile = "%s.backup.%s" % (self.journal, file)
-        if vfs is None:
-            vfs = self.opener
+        vfs = self._vfsmap[location]
+        dirname, filename = vfs.split(file)
+        backupfilename = "%s.backup.%s" % (self.journal, filename)
+        backupfile = vfs.reljoin(dirname, backupfilename)
         if vfs.exists(file):
             filepath = vfs.join(file)
-            backuppath = self.opener.join(backupfile)
-            util.copyfiles(filepath, backuppath, hardlink=hardlink)
+            backuppath = vfs.join(backupfile)
+            util.copyfile(filepath, backuppath, hardlink=hardlink)
         else:
-            self.add(file, 0)
-            return
+            backupfile = ''
 
-        if self._queue:
-            self._queue[-1][1].append((file, backupfile))
-            return
+        self._addbackupentry((location, file, backupfile, False))
 
-        self.backupentries.append((file, backupfile, None))
-        self.backupmap[file] = len(self.backupentries) - 1
-        self.backupsfile.write("%s\0%s\n" % (file, backupfile))
-        self.backupsfile.flush()
+    def _addbackupentry(self, entry):
+        """register a new backup entry and write it to disk"""
+        self._backupentries.append(entry)
+        self._backupmap[file] = len(self._backupentries) - 1
+        self._backupsfile.write("%s\0%s\0%s\0%d\n" % entry)
+        self._backupsfile.flush()
 
     @active
-    def addfilegenerator(self, genid, filenames, genfunc, order=0, vfs=None):
+    def registertmp(self, tmpfile, location=''):
+        """register a temporary transaction file
+
+        Such files will be deleted when the transaction exits (on both
+        failure and success).
+        """
+        self._addbackupentry((location, '', tmpfile, False))
+
+    @active
+    def addfilegenerator(self, genid, filenames, genfunc, order=0,
+                         location=''):
         """add a function to generates some files at transaction commit
 
         The `genfunc` argument is a function capable of generating proper
@@ -199,38 +249,43 @@ class transaction(object):
 
         The `order` argument may be used to control the order in which multiple
         generator will be executed.
+
+        The `location` arguments may be used to indicate the files are located
+        outside of the the standard directory for transaction. It should match
+        one of the key of the `transaction.vfsmap` dictionary.
         """
         # For now, we are unable to do proper backup and restore of custom vfs
         # but for bookmarks that are handled outside this mechanism.
-        assert vfs is None or filenames == ('bookmarks',)
-        self._filegenerators[genid] = (order, filenames, genfunc, vfs)
+        self._filegenerators[genid] = (order, filenames, genfunc, location)
 
-    def _generatefiles(self):
+    def _generatefiles(self, suffix=''):
         # write files registered for generation
+        any = False
         for entry in sorted(self._filegenerators.values()):
-            order, filenames, genfunc, vfs = entry
-            if vfs is None:
-                vfs = self.opener
+            any = True
+            order, filenames, genfunc, location = entry
+            vfs = self._vfsmap[location]
             files = []
             try:
                 for name in filenames:
-                    # Some files are already backed up when creating the
-                    # localrepo. Until this is properly fixed we disable the
-                    # backup for them.
-                    if name not in ('phaseroots', 'bookmarks'):
-                        self.addbackup(name)
+                    name += suffix
+                    if suffix:
+                        self.registertmp(name, location=location)
+                    else:
+                        self.addbackup(name, location=location)
                     files.append(vfs(name, 'w', atomictemp=True))
                 genfunc(*files)
             finally:
                 for f in files:
                     f.close()
+        return any
 
     @active
     def find(self, file):
         if file in self.map:
             return self.entries[self.map[file]]
-        if file in self.backupmap:
-            return self.backupentries[self.backupmap[file]]
+        if file in self._backupmap:
+            return self._backupentries[self._backupmap[file]]
         return None
 
     @active
@@ -263,29 +318,121 @@ class transaction(object):
     def running(self):
         return self.count > 0
 
+    def addpending(self, category, callback):
+        """add a callback to be called when the transaction is pending
+
+        The transaction will be given as callback's first argument.
+
+        Category is a unique identifier to allow overwriting an old callback
+        with a newer callback.
+        """
+        self._pendingcallback[category] = callback
+
+    @active
+    def writepending(self):
+        '''write pending file to temporary version
+
+        This is used to allow hooks to view a transaction before commit'''
+        categories = sorted(self._pendingcallback)
+        for cat in categories:
+            # remove callback since the data will have been flushed
+            any = self._pendingcallback.pop(cat)(self)
+            self._anypending = self._anypending or any
+        self._anypending |= self._generatefiles(suffix='.pending')
+        return self._anypending
+
+    @active
+    def addfinalize(self, category, callback):
+        """add a callback to be called when the transaction is closed
+
+        The transaction will be given as callback's first argument.
+
+        Category is a unique identifier to allow overwriting old callbacks with
+        newer callbacks.
+        """
+        self._finalizecallback[category] = callback
+
+    @active
+    def addpostclose(self, category, callback):
+        """add a callback to be called after the transaction is closed
+
+        The transaction will be given as callback's first argument.
+
+        Category is a unique identifier to allow overwriting an old callback
+        with a newer callback.
+        """
+        self._postclosecallback[category] = callback
+
+    @active
+    def addabort(self, category, callback):
+        """add a callback to be called when the transaction is aborted.
+
+        The transaction will be given as the first argument to the callback.
+
+        Category is a unique identifier to allow overwriting an old callback
+        with a newer callback.
+        """
+        self._abortcallback[category] = callback
+
     @active
     def close(self):
         '''commit the transaction'''
-        if self.count == 1 and self.onclose is not None:
+        if self.count == 1:
             self._generatefiles()
-            self.onclose()
+            categories = sorted(self._finalizecallback)
+            for cat in categories:
+                self._finalizecallback[cat](self)
 
         self.count -= 1
         if self.count != 0:
             return
         self.file.close()
-        self.backupsfile.close()
+        self._backupsfile.close()
+        # cleanup temporary files
+        for l, f, b, c in self._backupentries:
+            if l not in self._vfsmap and c:
+                self.report("couldn't remote %s: unknown cache location %s\n"
+                            % (b, l))
+                continue
+            vfs = self._vfsmap[l]
+            if not f and b and vfs.exists(b):
+                try:
+                    vfs.unlink(b)
+                except (IOError, OSError, util.Abort), inst:
+                    if not c:
+                        raise
+                    # Abort may be raise by read only opener
+                    self.report("couldn't remote %s: %s\n"
+                                % (vfs.join(b), inst))
         self.entries = []
+        self._writeundo()
         if self.after:
             self.after()
         if self.opener.isfile(self.journal):
             self.opener.unlink(self.journal)
-        if self.opener.isfile(self.backupjournal):
-            self.opener.unlink(self.backupjournal)
-            for _f, b, _ignore in self.backupentries:
-                self.opener.unlink(b)
-        self.backupentries = []
+        if self.opener.isfile(self._backupjournal):
+            self.opener.unlink(self._backupjournal)
+            for l, _f, b, c in self._backupentries:
+                if l not in self._vfsmap and c:
+                    self.report("couldn't remote %s: unknown cache location"
+                                "%s\n" % (b, l))
+                    continue
+                vfs = self._vfsmap[l]
+                if b and vfs.exists(b):
+                    try:
+                        vfs.unlink(b)
+                    except (IOError, OSError, util.Abort), inst:
+                        if not c:
+                            raise
+                        # Abort may be raise by read only opener
+                        self.report("couldn't remote %s: %s\n"
+                                    % (vfs.join(b), inst))
+        self._backupentries = []
         self.journal = None
+        # run post close action
+        categories = sorted(self._postclosecallback)
+        for cat in categories:
+            self._postclosecallback[cat](self)
 
     @active
     def abort(self):
@@ -294,28 +441,53 @@ class transaction(object):
         scope)'''
         self._abort()
 
+    def _writeundo(self):
+        """write transaction data for possible future undo call"""
+        if self.undoname is None:
+            return
+        undobackupfile = self.opener.open("%s.backupfiles" % self.undoname, 'w')
+        undobackupfile.write('%d\n' % version)
+        for l, f, b, c in self._backupentries:
+            if not f:  # temporary file
+                continue
+            if not b:
+                u = ''
+            else:
+                if l not in self._vfsmap and c:
+                    self.report("couldn't remote %s: unknown cache location"
+                                "%s\n" % (b, l))
+                    continue
+                vfs = self._vfsmap[l]
+                base, name = vfs.split(b)
+                assert name.startswith(self.journal), name
+                uname = name.replace(self.journal, self.undoname, 1)
+                u = vfs.reljoin(base, uname)
+                util.copyfile(vfs.join(b), vfs.join(u), hardlink=True)
+            undobackupfile.write("%s\0%s\0%s\0%d\n" % (l, f, u, c))
+        undobackupfile.close()
+
+
     def _abort(self):
         self.count = 0
         self.usages = 0
         self.file.close()
-        self.backupsfile.close()
-
-        if self.onabort is not None:
-            self.onabort()
+        self._backupsfile.close()
 
         try:
-            if not self.entries and not self.backupentries:
+            if not self.entries and not self._backupentries:
                 if self.journal:
                     self.opener.unlink(self.journal)
-                if self.backupjournal:
-                    self.opener.unlink(self.backupjournal)
+                if self._backupjournal:
+                    self.opener.unlink(self._backupjournal)
                 return
 
             self.report(_("transaction abort!\n"))
 
             try:
-                _playback(self.journal, self.report, self.opener,
-                          self.entries, self.backupentries, False)
+                for cat in sorted(self._abortcallback):
+                    self._abortcallback[cat](self)
+                _playback(self.journal, self.report, self.opener, self._vfsmap,
+                          self.entries, self._backupentries, False)
                 self.report(_("rollback completed\n"))
             except Exception:
                 self.report(_("rollback failed - please run hg recover\n"))
@@ -323,7 +495,7 @@ class transaction(object):
             self.journal = None
 
 
-def rollback(opener, file, report):
+def rollback(opener, vfsmap, file, report):
     """Rolls back the transaction contained in the given file
 
     Reads the entries in the specified file, and the corresponding
@@ -359,10 +531,10 @@ def rollback(opener, file, report):
                     if line:
                         # Shave off the trailing newline
                         line = line[:-1]
-                        f, b = line.split('\0')
-                        backupentries.append((f, b, None))
+                        l, f, b, c = line.split('\0')
+                        backupentries.append((l, f, b, bool(c)))
             else:
-                report(_("journal was created by a newer version of "
+                report(_("journal was created by a different version of "
                          "Mercurial"))
 
-    _playback(file, report, opener, entries, backupentries)
+    _playback(file, report, opener, vfsmap, entries, backupentries)

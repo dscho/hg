@@ -11,11 +11,10 @@
 import os
 import copy
 
-from mercurial import hg, commands, util, cmdutil, scmutil, match as match_, \
+from mercurial import hg, util, cmdutil, scmutil, match as match_, \
         archival, pathutil, revset
 from mercurial.i18n import _
 from mercurial.node import hex
-from hgext import rebase
 
 import lfutil
 import lfcommands
@@ -35,20 +34,27 @@ def composelargefilematcher(match, manifest):
     m.matchfn = lambda f: lfile(f) and origmatchfn(f)
     return m
 
+def composenormalfilematcher(match, manifest, exclude=None):
+    excluded = set()
+    if exclude is not None:
+        excluded.update(exclude)
+
+    m = copy.copy(match)
+    notlfile = lambda f: not (lfutil.isstandin(f) or lfutil.standin(f) in
+            manifest or f in excluded)
+    m._files = filter(notlfile, m._files)
+    m._fmap = set(m._files)
+    m._always = False
+    origmatchfn = m.matchfn
+    m.matchfn = lambda f: notlfile(f) and origmatchfn(f)
+    return m
+
 def installnormalfilesmatchfn(manifest):
     '''installmatchfn with a matchfn that ignores all largefiles'''
     def overridematch(ctx, pats=[], opts={}, globbed=False,
             default='relpath'):
         match = oldmatch(ctx, pats, opts, globbed, default)
-        m = copy.copy(match)
-        notlfile = lambda f: not (lfutil.isstandin(f) or lfutil.standin(f) in
-                manifest)
-        m._files = filter(notlfile, m._files)
-        m._fmap = set(m._files)
-        m._always = False
-        origmatchfn = m.matchfn
-        m.matchfn = lambda f: notlfile(f) and origmatchfn(f) or None
-        return m
+        return composenormalfilematcher(match, manifest)
     oldmatch = installmatchfn(overridematch)
 
 def installmatchfn(f):
@@ -64,7 +70,7 @@ def restorematchfn():
     was called.  no-op if scmutil.match is its original function.
 
     Note that n calls to installmatchfn will require n calls to
-    restore matchfn to reverse'''
+    restore the original matchfn.'''
     scmutil.match = getattr(scmutil.match, 'oldmatch')
 
 def installmatchandpatsfn(f):
@@ -75,18 +81,18 @@ def installmatchandpatsfn(f):
 
 def restorematchandpatsfn():
     '''restores scmutil.matchandpats to what it was before
-    installnormalfilesmatchandpatsfn was called.  no-op if scmutil.matchandpats
+    installmatchandpatsfn was called. No-op if scmutil.matchandpats
     is its original function.
 
-    Note that n calls to installnormalfilesmatchandpatsfn will require n calls
-    to restore matchfn to reverse'''
+    Note that n calls to installmatchandpatsfn will require n calls
+    to restore the original matchfn.'''
     scmutil.matchandpats = getattr(scmutil.matchandpats, 'oldmatchandpats',
             scmutil.matchandpats)
 
-def addlargefiles(ui, repo, *pats, **opts):
-    large = opts.pop('large', None)
+def addlargefiles(ui, repo, isaddremove, matcher, **opts):
+    large = opts.get('large')
     lfsize = lfutil.getminsize(
-        ui, lfutil.islfilesrepo(repo), opts.pop('lfsize', None))
+        ui, lfutil.islfilesrepo(repo), opts.get('lfsize'))
 
     lfmatcher = None
     if lfutil.islfilesrepo(repo):
@@ -95,7 +101,7 @@ def addlargefiles(ui, repo, *pats, **opts):
             lfmatcher = match_.match(repo.root, '', list(lfpats))
 
     lfnames = []
-    m = scmutil.match(repo[None], pats, opts)
+    m = copy.copy(matcher)
     m.bad = lambda x, y: None
     wctx = repo[None]
     for f in repo.walk(m):
@@ -104,27 +110,31 @@ def addlargefiles(ui, repo, *pats, **opts):
         nfile = f in wctx
         exists = lfile or nfile
 
+        # addremove in core gets fancy with the name, add doesn't
+        if isaddremove:
+            name = m.uipath(f)
+        else:
+            name = m.rel(f)
+
         # Don't warn the user when they attempt to add a normal tracked file.
         # The normal add code will do that for us.
         if exact and exists:
             if lfile:
-                ui.warn(_('%s already a largefile\n') % f)
+                ui.warn(_('%s already a largefile\n') % name)
             continue
 
         if (exact or not exists) and not lfutil.isstandin(f):
-            wfile = repo.wjoin(f)
-
             # In case the file was removed previously, but not committed
             # (issue3507)
-            if not os.path.exists(wfile):
+            if not repo.wvfs.exists(f):
                 continue
 
             abovemin = (lfsize and
-                        os.lstat(wfile).st_size >= lfsize * 1024 * 1024)
+                        repo.wvfs.lstat(f).st_size >= lfsize * 1024 * 1024)
             if large or abovemin or (lfmatcher and lfmatcher(f)):
                 lfnames.append(f)
                 if ui.verbose or not exact:
-                    ui.status(_('adding %s as a largefile\n') % m.rel(f))
+                    ui.status(_('adding %s as a largefile\n') % name)
 
     bad = []
 
@@ -148,19 +158,18 @@ def addlargefiles(ui, repo, *pats, **opts):
             bad += [lfutil.splitstandin(f)
                     for f in repo[None].add(standins)
                     if f in m.files()]
+
+        added = [f for f in lfnames if f not in bad]
     finally:
         wlock.release()
-    return bad
+    return added, bad
 
-def removelargefiles(ui, repo, isaddremove, *pats, **opts):
+def removelargefiles(ui, repo, isaddremove, matcher, **opts):
     after = opts.get('after')
-    if not pats and not after:
-        raise util.Abort(_('no files specified'))
-    m = composelargefilematcher(scmutil.match(repo[None], pats, opts),
-                                repo[None].manifest())
+    m = composelargefilematcher(matcher, repo[None].manifest())
     try:
         repo.lfstatus = True
-        s = repo.status(match=m, clean=True)
+        s = repo.status(match=m, clean=not isaddremove)
     finally:
         repo.lfstatus = False
     manifest = repo[None].manifest()
@@ -187,21 +196,19 @@ def removelargefiles(ui, repo, isaddremove, *pats, **opts):
         result = warn(added, _('not removing %s: file has been marked for add'
                                ' (use forget to undo)\n')) or result
 
-    for f in sorted(remove):
-        if ui.verbose or not m.exact(f):
-            ui.status(_('removing %s\n') % m.rel(f))
-
     # Need to lock because standin files are deleted then removed from the
     # repository and we could race in-between.
     wlock = repo.wlock()
     try:
         lfdirstate = lfutil.openlfdirstate(ui, repo)
-        for f in remove:
-            if not after:
-                # If this is being called by addremove, notify the user that we
-                # are removing the file.
+        for f in sorted(remove):
+            if ui.verbose or not m.exact(f):
+                # addremove in core gets fancy with the name, remove doesn't
                 if isaddremove:
-                    ui.status(_('removing %s\n') % f)
+                    name = m.uipath(f)
+                else:
+                    name = m.rel(f)
+                ui.status(_('removing %s\n') % name)
 
             if not opts.get('dry_run'):
                 if not after:
@@ -235,28 +242,29 @@ def decodepath(orig, path):
 
 # -- Wrappers: modify existing commands --------------------------------
 
-# Add works by going through the files that the user wanted to add and
-# checking if they should be added as largefiles. Then it makes a new
-# matcher which matches only the normal files and runs the original
-# version of add.
 def overrideadd(orig, ui, repo, *pats, **opts):
-    normal = opts.pop('normal')
-    if normal:
-        if opts.get('large'):
-            raise util.Abort(_('--normal cannot be used with --large'))
-        return orig(ui, repo, *pats, **opts)
-    bad = addlargefiles(ui, repo, *pats, **opts)
-    installnormalfilesmatchfn(repo[None].manifest())
-    result = orig(ui, repo, *pats, **opts)
-    restorematchfn()
+    if opts.get('normal') and opts.get('large'):
+        raise util.Abort(_('--normal cannot be used with --large'))
+    return orig(ui, repo, *pats, **opts)
 
-    return (result == 1 or bad) and 1 or 0
+def cmdutiladd(orig, ui, repo, matcher, prefix, explicitonly, **opts):
+    # The --normal flag short circuits this override
+    if opts.get('normal'):
+        return orig(ui, repo, matcher, prefix, explicitonly, **opts)
 
-def overrideremove(orig, ui, repo, *pats, **opts):
-    installnormalfilesmatchfn(repo[None].manifest())
-    result = orig(ui, repo, *pats, **opts)
-    restorematchfn()
-    return removelargefiles(ui, repo, False, *pats, **opts) or result
+    ladded, lbad = addlargefiles(ui, repo, False, matcher, **opts)
+    normalmatcher = composenormalfilematcher(matcher, repo[None].manifest(),
+                                             ladded)
+    bad = orig(ui, repo, normalmatcher, prefix, explicitonly, **opts)
+
+    bad.extend(f for f in lbad)
+    return bad
+
+def cmdutilremove(orig, ui, repo, matcher, prefix, after, force, subrepos):
+    normalmatcher = composenormalfilematcher(matcher, repo[None].manifest())
+    result = orig(ui, repo, normalmatcher, prefix, after, force, subrepos)
+    return removelargefiles(ui, repo, False, matcher, after=after,
+                            force=force) or result
 
 def overridestatusfn(orig, repo, rev2, **opts):
     try:
@@ -397,7 +405,7 @@ def overrideupdate(orig, ui, repo, *pats, **opts):
         wlock.release()
 
 # Before starting the manifest merge, merge.updates will call
-# _checkunknown to check if there are any files in the merged-in
+# _checkunknownfile to check if there are any files in the merged-in
 # changeset that collide with unknown files in the working copy.
 #
 # The largefiles are seen as unknown, so this prevents us from merging
@@ -405,16 +413,16 @@ def overrideupdate(orig, ui, repo, *pats, **opts):
 #
 # The overridden function filters the unknown files by removing any
 # largefiles. This makes the merge proceed and we can then handle this
-# case further in the overridden manifestmerge function below.
-def overridecheckunknownfile(origfn, repo, wctx, mctx, f):
+# case further in the overridden calculateupdates function below.
+def overridecheckunknownfile(origfn, repo, wctx, mctx, f, f2=None):
     if lfutil.standin(repo.dirstate.normalize(f)) in wctx:
         return False
-    return origfn(repo, wctx, mctx, f)
+    return origfn(repo, wctx, mctx, f, f2)
 
 # The manifest merge handles conflicts on the manifest level. We want
 # to handle changes in largefile-ness of files at this level too.
 #
-# The strategy is to run the original manifestmerge and then process
+# The strategy is to run the original calculateupdates and then process
 # the action list it outputs. There are two cases we need to deal with:
 #
 # 1. Normal file in p1, largefile in p2. Here the largefile is
@@ -440,81 +448,65 @@ def overridecheckunknownfile(origfn, repo, wctx, mctx, f):
 def overridecalculateupdates(origfn, repo, p1, p2, pas, branchmerge, force,
                              partial, acceptremote, followcopies):
     overwrite = force and not branchmerge
-    actions = origfn(repo, p1, p2, pas, branchmerge, force, partial,
-                     acceptremote, followcopies)
+    actions, diverge, renamedelete = origfn(
+        repo, p1, p2, pas, branchmerge, force, partial, acceptremote,
+        followcopies)
 
     if overwrite:
-        return actions
+        return actions, diverge, renamedelete
 
-    removes = set(a[0] for a in actions['r'])
-
-    newglist = []
-    lfmr = [] # LargeFiles: Mark as Removed ... and mark largefile as added
-    for action in actions['g']:
-        f, args, msg = action
+    # Convert to dictionary with filename as key and action as value.
+    lfiles = set()
+    for f in actions:
         splitstandin = f and lfutil.splitstandin(f)
-        if (splitstandin is not None and
-            splitstandin in p1 and splitstandin not in removes):
+        if splitstandin in p1:
+            lfiles.add(splitstandin)
+        elif lfutil.standin(f) in p1:
+            lfiles.add(f)
+
+    for lfile in lfiles:
+        standin = lfutil.standin(lfile)
+        (lm, largs, lmsg) = actions.get(lfile, (None, None, None))
+        (sm, sargs, smsg) = actions.get(standin, (None, None, None))
+        if sm in ('g', 'dc') and lm != 'r':
             # Case 1: normal file in the working copy, largefile in
             # the second parent
-            lfile = splitstandin
-            standin = f
-            msg = _('remote turned local normal file %s into a largefile\n'
-                    'use (l)argefile or keep (n)ormal file?'
-                    '$$ &Largefile $$ &Normal file') % lfile
-            if (# local has unchanged normal file, pick remote largefile
-                pas and lfile in pas[0] and
-                not pas[0][lfile].cmp(p1[lfile]) or
-                # if remote has unchanged largefile, pick local normal file
-                not (pas and standin in pas[0] and
-                     not pas[0][standin].cmp(p2[standin])) and
-                # else, prompt
-                repo.ui.promptchoice(msg, 0) == 0
-                ): # pick remote largefile
-                actions['r'].append((lfile, None, msg))
-                newglist.append((standin, (p2.flags(standin),), msg))
+            usermsg = _('remote turned local normal file %s into a largefile\n'
+                        'use (l)argefile or keep (n)ormal file?'
+                        '$$ &Largefile $$ &Normal file') % lfile
+            if repo.ui.promptchoice(usermsg, 0) == 0: # pick remote largefile
+                actions[lfile] = ('r', None, 'replaced by standin')
+                actions[standin] = ('g', sargs, 'replaces standin')
             else: # keep local normal file
-                actions['r'].append((standin, None, msg))
-        elif lfutil.standin(f) in p1 and lfutil.standin(f) not in removes:
+                actions[lfile] = ('k', None, 'replaces standin')
+                if branchmerge:
+                    actions[standin] = ('k', None, 'replaced by non-standin')
+                else:
+                    actions[standin] = ('r', None, 'replaced by non-standin')
+        elif lm in ('g', 'dc') and sm != 'r':
             # Case 2: largefile in the working copy, normal file in
             # the second parent
-            standin = lfutil.standin(f)
-            lfile = f
-            msg = _('remote turned local largefile %s into a normal file\n'
+            usermsg = _('remote turned local largefile %s into a normal file\n'
                     'keep (l)argefile or use (n)ormal file?'
                     '$$ &Largefile $$ &Normal file') % lfile
-            if (# if remote has unchanged normal file, pick local largefile
-                pas and f in pas[0] and
-                not pas[0][f].cmp(p2[f]) or
-                # if local has unchanged largefile, pick remote normal file
-                not (pas and standin in pas[0] and
-                     not pas[0][standin].cmp(p1[standin])) and
-                # else, prompt
-                repo.ui.promptchoice(msg, 0) == 0
-                ): # keep local largefile
+            if repo.ui.promptchoice(usermsg, 0) == 0: # keep local largefile
                 if branchmerge:
                     # largefile can be restored from standin safely
-                    actions['r'].append((lfile, None, msg))
+                    actions[lfile] = ('k', None, 'replaced by standin')
+                    actions[standin] = ('k', None, 'replaces standin')
                 else:
                     # "lfile" should be marked as "removed" without
                     # removal of itself
-                    lfmr.append((lfile, None, msg))
+                    actions[lfile] = ('lfmr', None,
+                                      'forget non-standin largefile')
 
                     # linear-merge should treat this largefile as 're-added'
-                    actions['a'].append((standin, None, msg))
+                    actions[standin] = ('a', None, 'keep standin')
             else: # pick remote normal file
-                actions['r'].append((standin, None, msg))
-                newglist.append((lfile, (p2.flags(lfile),), msg))
-        else:
-            newglist.append(action)
+                actions[lfile] = ('g', largs, 'replaces standin')
+                actions[standin] = ('r', None, 'replaced by non-standin')
 
-    newglist.sort()
-    actions['g'] = newglist
-    if lfmr:
-        lfmr.sort()
-        actions['lfmr'] = lfmr
-
-    return actions
+    return actions, diverge, renamedelete
 
 def mergerecordupdates(orig, repo, actions, branchmerge):
     if 'lfmr' in actions:
@@ -620,7 +612,6 @@ def overridecopy(orig, ui, repo, pats, opts, rename=False):
                 lfile = lambda f: lfutil.standin(f) in manifest
                 m._files = [lfutil.standin(f) for f in m._files if lfile(f)]
                 m._fmap = set(m._files)
-                m._always = False
                 origmatchfn = m.matchfn
                 m.matchfn = lambda f: (lfutil.isstandin(f) and
                                     (f in manifest) and
@@ -728,7 +719,6 @@ def overriderevert(orig, ui, repo, *pats, **opts):
             m._files = [tostandin(f) for f in m._files]
             m._files = [f for f in m._files if f is not None]
             m._fmap = set(m._files)
-            m._always = False
             origmatchfn = m.matchfn
             def matchfn(f):
                 if lfutil.isstandin(f):
@@ -756,37 +746,14 @@ def overriderevert(orig, ui, repo, *pats, **opts):
     finally:
         wlock.release()
 
-# When we rebase a repository with remotely changed largefiles, we need to
-# take some extra care so that the largefiles are correctly updated in the
-# working copy
+# after pulling changesets, we need to take some extra care to get
+# largefiles updated remotely
 def overridepull(orig, ui, repo, source=None, **opts):
     revsprepull = len(repo)
     if not source:
         source = 'default'
     repo.lfpullsource = source
-    if opts.get('rebase', False):
-        repo._isrebasing = True
-        try:
-            if opts.get('update'):
-                del opts['update']
-                ui.debug('--update and --rebase are not compatible, ignoring '
-                         'the update flag\n')
-            del opts['rebase']
-            origpostincoming = commands.postincoming
-            def _dummy(*args, **kwargs):
-                pass
-            commands.postincoming = _dummy
-            try:
-                result = commands.pull(ui, repo, source, **opts)
-            finally:
-                commands.postincoming = origpostincoming
-            revspostpull = len(repo)
-            if revspostpull > revsprepull:
-                result = result or rebase.rebase(ui, repo)
-        finally:
-            repo._isrebasing = False
-    else:
-        result = orig(ui, repo, source, **opts)
+    result = orig(ui, repo, source, **opts)
     revspostpull = len(repo)
     lfrevs = opts.get('lfrev', [])
     if opts.get('all_largefiles'):
@@ -860,11 +827,14 @@ def hgclone(orig, ui, opts, *args, **kwargs):
     return result
 
 def overriderebase(orig, ui, repo, **opts):
-    repo._isrebasing = True
+    resuming = opts.get('continue')
+    repo._lfcommithooks.append(lfutil.automatedcommithook(resuming))
+    repo._lfstatuswriters.append(lambda *msg, **opts: None)
     try:
         return orig(ui, repo, **opts)
     finally:
-        repo._isrebasing = False
+        repo._lfstatuswriters.pop()
+        repo._lfcommithooks.pop()
 
 def overridearchive(orig, repo, dest, node, kind, decode=True, matchfn=None,
             prefix=None, mtime=None, subrepos=None):
@@ -941,16 +911,16 @@ def overridearchive(orig, repo, dest, node, kind, decode=True, matchfn=None,
         for subpath in sorted(ctx.substate):
             sub = ctx.sub(subpath)
             submatch = match_.narrowmatcher(subpath, matchfn)
-            sub.archive(repo.ui, archiver, prefix, submatch)
+            sub.archive(archiver, prefix, submatch)
 
     archiver.done()
 
-def hgsubrepoarchive(orig, repo, ui, archiver, prefix, match=None):
+def hgsubrepoarchive(orig, repo, archiver, prefix, match=None):
     repo._get(repo._state + ('hg',))
     rev = repo._state[1]
     ctx = repo._repo[rev]
 
-    lfcommands.cachelfiles(ui, repo._repo, ctx.node())
+    lfcommands.cachelfiles(repo.ui, repo._repo, ctx.node())
 
     def write(name, mode, islink, getdata):
         # At this point, the standin has been replaced with the largefile name,
@@ -988,13 +958,12 @@ def hgsubrepoarchive(orig, repo, ui, archiver, prefix, match=None):
     for subpath in sorted(ctx.substate):
         sub = ctx.sub(subpath)
         submatch = match_.narrowmatcher(subpath, match)
-        sub.archive(ui, archiver, os.path.join(prefix, repo._path) + '/',
-                    submatch)
+        sub.archive(archiver, os.path.join(prefix, repo._path) + '/', submatch)
 
 # If a largefile is modified, the change is not reflected in its
 # standin until a commit. cmdutil.bailifchanged() raises an exception
 # if the repo has uncommitted changes. Wrap it to also check if
-# largefiles were changed. This is used by bisect and backout.
+# largefiles were changed. This is used by bisect, backout and fetch.
 def overridebailifchanged(orig, repo):
     orig(repo)
     repo.lfstatus = True
@@ -1003,21 +972,10 @@ def overridebailifchanged(orig, repo):
     if s.modified or s.added or s.removed or s.deleted:
         raise util.Abort(_('uncommitted changes'))
 
-# Fetch doesn't use cmdutil.bailifchanged so override it to add the check
-def overridefetch(orig, ui, repo, *pats, **opts):
-    repo.lfstatus = True
-    s = repo.status()
-    repo.lfstatus = False
-    if s.modified or s.added or s.removed or s.deleted:
-        raise util.Abort(_('uncommitted changes'))
-    return orig(ui, repo, *pats, **opts)
-
-def overrideforget(orig, ui, repo, *pats, **opts):
-    installnormalfilesmatchfn(repo[None].manifest())
-    result = orig(ui, repo, *pats, **opts)
-    restorematchfn()
-    m = composelargefilematcher(scmutil.match(repo[None], pats, opts),
-                                repo[None].manifest())
+def cmdutilforget(orig, ui, repo, match, prefix, explicitonly):
+    normalmatcher = composenormalfilematcher(match, repo[None].manifest())
+    bad, forgot = orig(ui, repo, normalmatcher, prefix, explicitonly)
+    m = composelargefilematcher(match, repo[None].manifest())
 
     try:
         repo.lfstatus = True
@@ -1029,10 +987,10 @@ def overrideforget(orig, ui, repo, *pats, **opts):
 
     for f in forget:
         if lfutil.standin(f) not in repo.dirstate and not \
-                os.path.isdir(m.rel(lfutil.standin(f))):
+                repo.wvfs.isdir(lfutil.standin(f)):
             ui.warn(_('not removing %s: file is already untracked\n')
                     % m.rel(f))
-            result = 1
+            bad.append(f)
 
     for f in forget:
         if ui.verbose or not m.exact(f):
@@ -1052,11 +1010,13 @@ def overrideforget(orig, ui, repo, *pats, **opts):
         standins = [lfutil.standin(f) for f in forget]
         for f in standins:
             util.unlinkpath(repo.wjoin(f), ignoremissing=True)
-        repo[None].forget(standins)
+        rejected = repo[None].forget(standins)
     finally:
         wlock.release()
 
-    return result
+    bad.extend(f for f in rejected if f in m.files())
+    forgot.extend(f for f in forget if f not in rejected)
+    return bad, forgot
 
 def _getoutgoings(repo, other, missing, addfunc):
     """get pairs of filename and largefile hash in outgoing revisions
@@ -1149,10 +1109,10 @@ def overridesummary(orig, ui, repo, *pats, **opts):
     finally:
         repo.lfstatus = False
 
-def scmutiladdremove(orig, repo, pats=[], opts={}, dry_run=None,
+def scmutiladdremove(orig, repo, matcher, prefix, opts={}, dry_run=None,
                      similarity=None):
     if not lfutil.islfilesrepo(repo):
-        return orig(repo, pats, opts, dry_run, similarity)
+        return orig(repo, matcher, prefix, opts, dry_run, similarity)
     # Get the list of missing largefiles so we can remove them
     lfdirstate = lfutil.openlfdirstate(repo.ui, repo)
     unsure, s = lfdirstate.status(match_.always(repo.root, repo.getcwd()), [],
@@ -1163,24 +1123,37 @@ def scmutiladdremove(orig, repo, pats=[], opts={}, dry_run=None,
     # we don't remove the standin in the largefiles code, preventing a very
     # confused state later.
     if s.deleted:
-        m = [repo.wjoin(f) for f in s.deleted]
-        removelargefiles(repo.ui, repo, True, *m, **opts)
+        m = copy.copy(matcher)
+
+        # The m._files and m._map attributes are not changed to the deleted list
+        # because that affects the m.exact() test, which in turn governs whether
+        # or not the file name is printed, and how.  Simply limit the original
+        # matches to those in the deleted status list.
+        matchfn = m.matchfn
+        m.matchfn = lambda f: f in s.deleted and matchfn(f)
+
+        removelargefiles(repo.ui, repo, True, m, **opts)
     # Call into the normal add code, and any files that *should* be added as
     # largefiles will be
-    addlargefiles(repo.ui, repo, *pats, **opts)
+    added, bad = addlargefiles(repo.ui, repo, True, matcher, **opts)
     # Now that we've handled largefiles, hand off to the original addremove
     # function to take care of the rest.  Make sure it doesn't do anything with
-    # largefiles by installing a matcher that will ignore them.
-    installnormalfilesmatchfn(repo[None].manifest())
-    result = orig(repo, pats, opts, dry_run, similarity)
-    restorematchfn()
-    return result
+    # largefiles by passing a matcher that will ignore them.
+    matcher = composenormalfilematcher(matcher, repo[None].manifest(), added)
+    return orig(repo, matcher, prefix, opts, dry_run, similarity)
 
 # Calling purge with --all will cause the largefiles to be deleted.
 # Override repo.status to prevent this from happening.
 def overridepurge(orig, ui, repo, *dirs, **opts):
-    # XXX large file status is buggy when used on repo proxy.
-    # XXX this needs to be investigate.
+    # XXX Monkey patching a repoview will not work. The assigned attribute will
+    # be set on the unfiltered repo, but we will only lookup attributes in the
+    # unfiltered repo if the lookup in the repoview object itself fails. As the
+    # monkey patched method exists on the repoview class the lookup will not
+    # fail. As a result, the original version will shadow the monkey patched
+    # one, defeating the monkey patch.
+    #
+    # As a work around we use an unfiltered repo here. We should do something
+    # cleaner instead.
     repo = repo.unfiltered()
     oldstatus = repo.status
     def overridestatus(node1='.', node2=None, match=None, ignored=False,
@@ -1236,16 +1209,14 @@ def overriderollback(orig, ui, repo, **opts):
     return result
 
 def overridetransplant(orig, ui, repo, *revs, **opts):
+    resuming = opts.get('continue')
+    repo._lfcommithooks.append(lfutil.automatedcommithook(resuming))
+    repo._lfstatuswriters.append(lambda *msg, **opts: None)
     try:
-        oldstandins = lfutil.getstandinsstate(repo)
-        repo._istransplanting = True
         result = orig(ui, repo, *revs, **opts)
-        newstandins = lfutil.getstandinsstate(repo)
-        filelist = lfutil.getlfilestoupdate(oldstandins, newstandins)
-        lfcommands.updatelfiles(repo.ui, repo, filelist=filelist,
-                                printmessage=True)
     finally:
-        repo._istransplanting = False
+        repo._lfstatuswriters.pop()
+        repo._lfcommithooks.pop()
     return result
 
 def overridecat(orig, ui, repo, file1, *pats, **opts):
@@ -1296,14 +1267,6 @@ def overridecat(orig, ui, repo, file1, *pats, **opts):
         err = 0
     return err
 
-def mercurialsinkbefore(orig, sink):
-    sink.repo._isconverting = True
-    orig(sink)
-
-def mercurialsinkafter(orig, sink):
-    sink.repo._isconverting = False
-    orig(sink)
-
 def mergeupdate(orig, repo, node, branchmerge, force, partial,
                 *args, **kwargs):
     wlock = repo.wlock()
@@ -1332,8 +1295,21 @@ def mergeupdate(orig, repo, node, branchmerge, force, partial,
             unsure, s = lfdirstate.status(match_.always(repo.root,
                                                         repo.getcwd()),
                                           [], False, False, False)
-            for lfile in unsure + s.modified + s.added:
+            pctx = repo['.']
+            for lfile in unsure + s.modified:
+                lfileabs = repo.wvfs.join(lfile)
+                if not os.path.exists(lfileabs):
+                    continue
+                lfhash = lfutil.hashrepofile(repo, lfile)
+                standin = lfutil.standin(lfile)
+                lfutil.writestandin(repo, standin, lfhash,
+                                    lfutil.getexecutable(lfileabs))
+                if (standin in pctx and
+                    lfhash == lfutil.readstandin(repo, lfile, '.')):
+                    lfdirstate.normal(lfile)
+            for lfile in s.added:
                 lfutil.updatestandin(repo, lfutil.standin(lfile))
+            lfdirstate.write()
 
         if linearmerge:
             # Only call updatelfiles on the standins that have changed
@@ -1347,12 +1323,8 @@ def mergeupdate(orig, repo, node, branchmerge, force, partial,
             newstandins = lfutil.getstandinsstate(repo)
             filelist = lfutil.getlfilestoupdate(oldstandins, newstandins)
 
-        # suppress status message while automated committing
-        printmessage = not (getattr(repo, "_isrebasing", False) or
-                            getattr(repo, "_istransplanting", False))
         lfcommands.updatelfiles(repo.ui, repo, filelist=filelist,
-                                printmessage=printmessage,
-                                normallookup=partial)
+                                normallookup=partial, checked=linearmerge)
 
         return result
     finally:

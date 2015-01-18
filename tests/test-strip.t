@@ -187,6 +187,30 @@
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     a
   
+  $ hg up -C 4
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg parents
+  changeset:   4:264128213d29
+  tag:         tip
+  parent:      1:ef3a871183d7
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     c
+  
+  $ hg --config experimental.bundle2-exp=True --config experimental.strip-bundle2-version=02 --traceback strip 4
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  saved backup bundle to $TESTTMP/test/.hg/strip-backup/264128213d29-0b39d6bf-backup.hg (glob)
+  $ hg parents
+  changeset:   1:ef3a871183d7
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     b
+  
+  $ hg debugbundle .hg/strip-backup/*
+  Stream params: {}
+  b2x:changegroup -- "{'version': '02'}"
+      264128213d290d868c54642d13aeaa3675551a78
+  $ restore
 
   $ hg up -C 2
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -462,7 +486,7 @@ Strip adds, removes, modifies with --keep
   $ echo b > b
   $ echo d > d
   $ hg strip --keep tip
-  saved backup bundle to $TESTTMP/test/.hg/strip-backup/*-backup.hg (glob)
+  saved backup bundle to $TESTTMP/test/.hg/strip-backup/57e364c8a475-4cfed93c-backup.hg (glob)
   $ hg status
   M b
   ! bar
@@ -547,3 +571,25 @@ Make sure no one adds back a -b option:
   
   (use "hg strip -h" to show more help)
   [255]
+
+  $ cd ..
+
+Verify bundles don't get overwritten:
+
+  $ hg init doublebundle
+  $ cd doublebundle
+  $ touch a
+  $ hg commit -Aqm a
+  $ touch b
+  $ hg commit -Aqm b
+  $ hg strip -r 0
+  0 files updated, 0 files merged, 2 files removed, 0 files unresolved
+  saved backup bundle to $TESTTMP/doublebundle/.hg/strip-backup/3903775176ed-e68910bd-backup.hg (glob)
+  $ ls .hg/strip-backup
+  3903775176ed-e68910bd-backup.hg
+  $ hg pull -q -r 3903775176ed .hg/strip-backup/3903775176ed-e68910bd-backup.hg
+  $ hg strip -r 0
+  saved backup bundle to $TESTTMP/doublebundle/.hg/strip-backup/3903775176ed-54390173-backup.hg (glob)
+  $ ls .hg/strip-backup
+  3903775176ed-54390173-backup.hg
+  3903775176ed-e68910bd-backup.hg

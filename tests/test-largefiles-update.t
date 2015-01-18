@@ -25,19 +25,52 @@ directory (and ".hg/largefiles/dirstate")
   $ hg commit -m '#2'
   created new head
 
+Test that update also updates the lfdirstate of 'unsure' largefiles after
+hashing them:
+
+The previous operations will usually have left us with largefiles with a mtime
+within the same second as the dirstate was written.
+The lfdirstate entries will thus have been written with an invalidated/unset
+mtime to make sure further changes within the same second is detected.
+We will however occasionally be "lucky" and get a tick between writing
+largefiles and writing dirstate so we get valid lfdirstate timestamps. The
+following verification is thus disabled but can be verified manually.
+
+#if false
+  $ hg debugdirstate --large --nodate
+  n 644          7 unset               large1
+  n 644         13 unset               large2
+#endif
+
+Wait to make sure we get a tick so the mtime of the largefiles become valid.
+
+  $ sleep 1
+
+A linear merge will update standins before performing the actual merge. It will
+do a lfdirstate status walk and find 'unset'/'unsure' files, hash them, and
+update the corresponding standins.
+Verify that it actually marks the clean files as clean in lfdirstate so
+we don't have to hash them again next time we update.
+
+  $ hg up
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg debugdirstate --large --nodate
+  n 644          7 set                 large1
+  n 644         13 set                 large2
+
 Test that lfdirstate keeps track of last modification of largefiles and
 prevents unnecessary hashing of content - also after linear/noop update
 
   $ sleep 1
   $ hg st
   $ hg debugdirstate --large --nodate
-  n 644          7 large1
-  n 644         13 large2
+  n 644          7 set                 large1
+  n 644         13 set                 large2
   $ hg up
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg debugdirstate --large --nodate
-  n 644          7 large1
-  n 644         13 large2
+  n 644          7 set                 large1
+  n 644         13 set                 large2
 
 Test that "hg merge" updates largefiles from "other" correctly
 
@@ -221,6 +254,8 @@ automated commit like rebase/transplant
   $ hg commit -m '#4'
 
   $ hg rebase -s 1 -d 2 --keep
+  rebasing 1:72518492caa6 "#1"
+  rebasing 4:07d6153b5c04 "#4" (tip)
 #if windows
   $ hg status -A large1
   large1: * (glob)
@@ -332,13 +367,11 @@ Test a linear merge to a revision containing same-name normal file
   $ hg update -q -C 2
   $ echo 'modified large2 for linear merge' > large2
   $ hg update -q 5
-  local changed .hglf/large2 which remote deleted
-  use (c)hanged version or (d)elete? c
   remote turned local largefile large2 into a normal file
   keep (l)argefile or use (n)ormal file? l
   $ hg debugdirstate --nodates | grep large2
-  a   0         -1 .hglf/large2
-  r   0          0 large2
+  a   0         -1 unset               .hglf/large2
+  r   0          0 set                 large2
   $ hg status -A large2
   A large2
   $ cat large2
@@ -353,8 +386,8 @@ Test a linear merge to a revision containing same-name normal file
   remote turned local largefile large3 into a normal file
   keep (l)argefile or use (n)ormal file? l
   $ hg debugdirstate --nodates | grep large3
-  a   0         -1 .hglf/large3
-  r   0          0 large3
+  a   0         -1 unset               .hglf/large3
+  r   0          0 set                 large3
   $ hg status -A large3
   A large3
   $ cat large3
@@ -366,22 +399,20 @@ Test that the internal linear merging works correctly
 
   $ hg update -q -C 2
   $ hg strip 3 4
-  saved backup bundle to $TESTTMP/repo/.hg/strip-backup/9530e27857f7-backup.hg (glob)
-  $ mv .hg/strip-backup/9530e27857f7-backup.hg $TESTTMP
+  saved backup bundle to $TESTTMP/repo/.hg/strip-backup/9530e27857f7-2e7b195d-backup.hg (glob)
+  $ mv .hg/strip-backup/9530e27857f7-2e7b195d-backup.hg $TESTTMP
 
 (internal linear merging at "hg pull --update")
 
   $ echo 'large1 for linear merge (conflict)' > large1
   $ echo 'large2 for linear merge (conflict with normal file)' > large2
-  $ hg pull --update --config debug.dirstate.delaywrite=2 $TESTTMP/9530e27857f7-backup.hg
-  pulling from $TESTTMP/9530e27857f7-backup.hg (glob)
+  $ hg pull --update --config debug.dirstate.delaywrite=2 $TESTTMP/9530e27857f7-2e7b195d-backup.hg
+  pulling from $TESTTMP/9530e27857f7-2e7b195d-backup.hg (glob)
   searching for changes
   adding changesets
   adding manifests
   adding file changes
   added 3 changesets with 5 changes to 5 files
-  local changed .hglf/large2 which remote deleted
-  use (c)hanged version or (d)elete? c
   remote turned local largefile large2 into a normal file
   keep (l)argefile or use (n)ormal file? l
   largefile large1 has a merge conflict
@@ -410,13 +441,11 @@ Test that the internal linear merging works correctly
 
   $ echo 'large1 for linear merge (conflict)' > large1
   $ echo 'large2 for linear merge (conflict with normal file)' > large2
-  $ hg unbundle --update --config debug.dirstate.delaywrite=2 $TESTTMP/9530e27857f7-backup.hg
+  $ hg unbundle --update --config debug.dirstate.delaywrite=2 $TESTTMP/9530e27857f7-2e7b195d-backup.hg
   adding changesets
   adding manifests
   adding file changes
   added 3 changesets with 5 changes to 5 files
-  local changed .hglf/large2 which remote deleted
-  use (c)hanged version or (d)elete? c
   remote turned local largefile large2 into a normal file
   keep (l)argefile or use (n)ormal file? l
   largefile large1 has a merge conflict
@@ -463,7 +492,6 @@ Test that the internal linear merging works correctly
   $ hg update --config ui.interactive=True --config debug.dirstate.delaywrite=2 <<EOF
   > m
   > r
-  > c
   > l
   > l
   > EOF
@@ -471,8 +499,6 @@ Test that the internal linear merging works correctly
   (M)erge, keep (l)ocal or keep (r)emote? m
    subrepository sources for sub differ (in checked out version)
   use (l)ocal source (f74e50bd9e55) or (r)emote source (d65e59e952a9)? r
-  local changed .hglf/large2 which remote deleted
-  use (c)hanged version or (d)elete? c
   remote turned local largefile large2 into a normal file
   keep (l)argefile or use (n)ormal file? l
   largefile large1 has a merge conflict
@@ -509,6 +535,7 @@ it is aborted by conflict.
   $ hg rebase -s 1 -d 3 --keep --config ui.interactive=True <<EOF
   > o
   > EOF
+  rebasing 1:72518492caa6 "#1"
   largefile large1 has a merge conflict
   ancestor was 4669e532d5b2c093a78eca010077e708a071bb64
   keep (l)ocal e5bb990443d6a92aaf7223813720f7566c9dd05b or
@@ -523,8 +550,27 @@ it is aborted by conflict.
   $ cat large1
   large1 in #1
 
-  $ hg rebase -q --abort
-  rebase aborted
+Test that rebase updates standins for manually modified largefiles at
+the 1st commit of resuming.
+
+  $ echo "manually modified before 'hg rebase --continue'" > large1
+  $ hg resolve -m normal1
+  (no more unresolved files)
+  $ hg rebase --continue --config ui.interactive=True <<EOF
+  > c
+  > EOF
+  rebasing 1:72518492caa6 "#1"
+  rebasing 4:07d6153b5c04 "#4"
+  local changed .hglf/large1 which remote deleted
+  use (c)hanged version or (d)elete? c
+
+  $ hg diff -c "tip~1" --nodates .hglf/large1 | grep '^[+-][0-9a-z]'
+  -e5bb990443d6a92aaf7223813720f7566c9dd05b
+  +8a4f783556e7dea21139ca0466eafce954c75c13
+  $ rm -f large1
+  $ hg update -q -C tip
+  $ cat large1
+  manually modified before 'hg rebase --continue'
 
 Test that transplant updates largefiles, of which standins are safely
 changed, even if it is aborted by conflict of other.
@@ -556,6 +602,20 @@ changed, even if it is aborted by conflict of other.
   fa44618ea25181aff4f48b70428294790cec9f61
   $ cat largeX
   largeX
+
+Test that transplant updates standins for manually modified largefiles
+at the 1st commit of resuming.
+
+  $ echo "manually modified before 'hg transplant --continue'" > large1
+  $ hg transplant --continue
+  07d6153b5c04 transplanted as f1bf30eb88cc
+  $ hg diff -c tip .hglf/large1 | grep '^[+-][0-9a-z]'
+  -e5bb990443d6a92aaf7223813720f7566c9dd05b
+  +6a4f36d4075fbe0f30ec1d26ca44e63c05903671
+  $ rm -f large1
+  $ hg update -q -C tip
+  $ cat large1
+  manually modified before 'hg transplant --continue'
 
 Test that "hg status" doesn't show removal of largefiles not managed
 in the target context.
@@ -619,3 +679,16 @@ bit correctly on the platform being unaware of it.
 #endif
 
   $ cd ..
+
+Test that "hg convert" avoids copying largefiles from the working
+directory into store, because "hg convert" doesn't update largefiles
+in the working directory (removing files under ".cache/largefiles"
+forces "hg convert" to copy corresponding largefiles)
+
+  $ cat >> $HGRCPATH <<EOF
+  > [extensions]
+  > convert =
+  > EOF
+
+  $ rm $TESTTMP/.cache/largefiles/6a4f36d4075fbe0f30ec1d26ca44e63c05903671
+  $ hg convert -q repo repo.converted

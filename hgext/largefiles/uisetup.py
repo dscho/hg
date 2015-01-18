@@ -33,10 +33,9 @@ def uisetup(ui):
     # and in the process of handling commit -A (issue3542)
     entry = extensions.wrapfunction(scmutil, 'addremove',
                                     overrides.scmutiladdremove)
-    entry = extensions.wrapcommand(commands.table, 'remove',
-                                   overrides.overrideremove)
-    entry = extensions.wrapcommand(commands.table, 'forget',
-                                   overrides.overrideforget)
+    extensions.wrapfunction(cmdutil, 'add', overrides.cmdutiladd)
+    extensions.wrapfunction(cmdutil, 'remove', overrides.cmdutilremove)
+    extensions.wrapfunction(cmdutil, 'forget', overrides.cmdutilforget)
 
     # Subrepos call status function
     entry = extensions.wrapcommand(commands.table, 'status',
@@ -160,22 +159,14 @@ def uisetup(ui):
 
     # override some extensions' stuff as well
     for name, module in extensions.extensions():
-        if name == 'fetch':
-            extensions.wrapcommand(getattr(module, 'cmdtable'), 'fetch',
-                overrides.overridefetch)
         if name == 'purge':
             extensions.wrapcommand(getattr(module, 'cmdtable'), 'purge',
                 overrides.overridepurge)
         if name == 'rebase':
             extensions.wrapcommand(getattr(module, 'cmdtable'), 'rebase',
                 overrides.overriderebase)
+            extensions.wrapfunction(module, 'rebase',
+                                    overrides.overriderebase)
         if name == 'transplant':
             extensions.wrapcommand(getattr(module, 'cmdtable'), 'transplant',
                 overrides.overridetransplant)
-        if name == 'convert':
-            convcmd = getattr(module, 'convcmd')
-            hgsink = getattr(convcmd, 'mercurial_sink')
-            extensions.wrapfunction(hgsink, 'before',
-                                    overrides.mercurialsinkbefore)
-            extensions.wrapfunction(hgsink, 'after',
-                                    overrides.mercurialsinkafter)

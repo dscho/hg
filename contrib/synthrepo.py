@@ -323,15 +323,32 @@ def synthesize(ui, repo, descpath, **opts):
     initcount = int(opts['initfiles'])
     if initcount and initdirs:
         pctx = repo[None].parents()[0]
+        dirs = set(pctx.dirs())
         files = {}
+
+        def validpath(path):
+            # Don't pick filenames which are already directory names.
+            if path in dirs:
+                return False
+            # Don't pick directories which were used as file names.
+            while path:
+                if path in files:
+                    return False
+                path = os.path.dirname(path)
+            return True
+
         for i in xrange(0, initcount):
             ui.progress(_synthesizing, i, unit=_files, total=initcount)
 
             path = pickpath()
-            while path in pctx.dirs():
+            while not validpath(path):
                 path = pickpath()
             data = '%s contents\n' % path
             files[path] = context.memfilectx(repo, path, data)
+            dir = os.path.dirname(path)
+            while dir and dir not in dirs:
+                dirs.add(dir)
+                dir = os.path.dirname(dir)
 
         def filectxfn(repo, memctx, path):
             return files[path]
@@ -410,16 +427,18 @@ def synthesize(ui, repo, descpath, **opts):
                         break
         if filesadded:
             dirs = list(pctx.dirs())
-            dirs.append('')
+            dirs.insert(0, '')
         for __ in xrange(pick(filesadded)):
-            path = [random.choice(dirs)]
-            if pick(dirsadded):
+            pathstr = ''
+            while pathstr in dirs:
+                path = [random.choice(dirs)]
+                if pick(dirsadded):
+                    path.append(random.choice(words))
                 path.append(random.choice(words))
-            path.append(random.choice(words))
-            path = '/'.join(filter(None, path))
+                pathstr = '/'.join(filter(None, path))
             data = '\n'.join(makeline()
                              for __ in xrange(pick(linesinfilesadded))) + '\n'
-            changes[path] = context.memfilectx(repo, path, data)
+            changes[pathstr] = context.memfilectx(repo, pathstr, data)
         def filectxfn(repo, memctx, path):
             return changes[path]
         if not changes:
@@ -428,6 +447,8 @@ def synthesize(ui, repo, descpath, **opts):
             date = repo['tip'].date()[0] + pick(interarrival)
         else:
             date = time.time() - (86400 * count)
+        # dates in mercurial must be positive, fit in 32-bit signed integers.
+        date = min(0x7fffffff, max(0, date))
         user = random.choice(words) + '@' + random.choice(words)
         mc = context.memctx(repo, pl, makeline(minimum=2),
                             sorted(changes.iterkeys()),

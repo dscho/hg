@@ -25,6 +25,8 @@ class diffopts(object):
     showfunc enables diff -p output
     git enables the git extended patch format
     nodates removes dates from diff headers
+    nobinary ignores binary files
+    noprefix disables the 'a/' and 'b/' prefixes (ignored in plain mode)
     ignorews ignores all whitespace changes in the diff
     ignorewsamount ignores changes in the amount of whitespace
     ignoreblanklines ignores changes whose lines are all blank
@@ -38,6 +40,7 @@ class diffopts(object):
         'git': False,
         'nodates': False,
         'nobinary': False,
+        'noprefix': False,
         'ignorews': False,
         'ignorewsamount': False,
         'ignoreblanklines': False,
@@ -153,6 +156,13 @@ def unidiff(a, ad, b, bd, fn1, fn2, opts=defaultopts):
 
     if not a and not b:
         return ""
+
+    if opts.noprefix:
+        aprefix = bprefix = ''
+    else:
+        aprefix = 'a/'
+        bprefix = 'b/'
+
     epoch = util.datestr((0, 0))
 
     fn1 = util.pconvert(fn1)
@@ -167,17 +177,17 @@ def unidiff(a, ad, b, bd, fn1, fn2, opts=defaultopts):
         if a is None:
             l1 = '--- /dev/null%s' % datetag(epoch)
         else:
-            l1 = "--- %s%s" % ("a/" + fn1, datetag(ad, fn1))
-        l2 = "+++ %s%s" % ("b/" + fn2, datetag(bd, fn2))
+            l1 = "--- %s%s%s" % (aprefix, fn1, datetag(ad, fn1))
+        l2 = "+++ %s%s" % (bprefix + fn2, datetag(bd, fn2))
         l3 = "@@ -0,0 +1,%d @@\n" % len(b)
         l = [l1, l2, l3] + ["+" + e for e in b]
     elif not b:
         a = splitnewlines(a)
-        l1 = "--- %s%s" % ("a/" + fn1, datetag(ad, fn1))
+        l1 = "--- %s%s%s" % (aprefix, fn1, datetag(ad, fn1))
         if b is None:
             l2 = '+++ /dev/null%s' % datetag(epoch)
         else:
-            l2 = "+++ %s%s" % ("b/" + fn2, datetag(bd, fn2))
+            l2 = "+++ %s%s%s" % (bprefix, fn2, datetag(bd, fn2))
         l3 = "@@ -1,%d +0,0 @@\n" % len(a)
         l = [l1, l2, l3] + ["-" + e for e in a]
     else:
@@ -187,8 +197,8 @@ def unidiff(a, ad, b, bd, fn1, fn2, opts=defaultopts):
         if not l:
             return ""
 
-        l.insert(0, "--- a/%s%s" % (fn1, datetag(ad, fn1)))
-        l.insert(1, "+++ b/%s%s" % (fn2, datetag(bd, fn2)))
+        l.insert(0, "--- %s%s%s" % (aprefix, fn1, datetag(ad, fn1)))
+        l.insert(1, "+++ %s%s%s" % (bprefix, fn2, datetag(bd, fn2)))
 
     for ln in xrange(len(l)):
         if l[ln][-1] != '\n':

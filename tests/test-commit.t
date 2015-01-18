@@ -50,7 +50,10 @@ commit added file that has been deleted
   $ hg add
   adding dir/file (glob)
   $ hg -v commit -m commit-9 dir
+  committing files:
   dir/file
+  committing manifest
+  committing changelog
   committed changeset 2:d2a76177cb42
 
   $ echo > dir.file
@@ -71,7 +74,10 @@ commit added file that has been deleted
   abort: dir2: no match under directory!
   [255]
   $ hg -v commit -m commit-13 ../dir
+  committing files:
   dir/file
+  committing manifest
+  committing changelog
   committed changeset 3:1cd62a2d8db5
   $ cd ..
 
@@ -92,7 +98,10 @@ commit added file that has been deleted
   [255]
   $ echo >> dir/file
   $ hg -v commit -m commit-17 dir/file
+  committing files:
   dir/file
+  committing manifest
+  committing changelog
   committed changeset 4:49176991390e
 
 An empty date was interpreted as epoch origin
@@ -430,6 +439,84 @@ specific template keywords work well
   [255]
 
   $ cat >> .hg/hgrc <<EOF
+  > [committemplate]
+  > changeset = {desc}
+  >     HG: files={files}
+  >     HG:
+  >     {splitlines(diff()) % 'HG: {line}\n'
+  >    }HG:
+  >     HG: files={files}\n
+  > EOF
+  $ hg status -amr
+  M changed
+  A added
+  R removed
+  $ HGEDITOR=cat hg commit -q -e -m "foo bar" changed
+  foo bar
+  HG: files=changed
+  HG:
+  HG: --- a/changed	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ b/changed	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -1,1 +1,2 @@
+  HG:  changed
+  HG: +changed
+  HG:
+  HG: files=changed
+  $ hg status -amr
+  A added
+  R removed
+  $ hg parents --template "M {file_mods}\nA {file_adds}\nR {file_dels}\n"
+  M changed
+  A 
+  R 
+  $ hg rollback -q
+
+  $ cat >> .hg/hgrc <<EOF
+  > [committemplate]
+  > changeset = {desc}
+  >     HG: files={files}
+  >     HG:
+  >     {splitlines(diff("changed")) % 'HG: {line}\n'
+  >    }HG:
+  >     HG: files={files}
+  >     HG:
+  >     {splitlines(diff("added")) % 'HG: {line}\n'
+  >    }HG:
+  >     HG: files={files}
+  >     HG:
+  >     {splitlines(diff("removed")) % 'HG: {line}\n'
+  >    }HG:
+  >     HG: files={files}\n
+  > EOF
+  $ HGEDITOR=cat hg commit -q -e -m "foo bar" added removed
+  foo bar
+  HG: files=added removed
+  HG:
+  HG:
+  HG: files=added removed
+  HG:
+  HG: --- /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ b/added	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -0,0 +1,1 @@
+  HG: +added
+  HG:
+  HG: files=added removed
+  HG:
+  HG: --- a/removed	Thu Jan 01 00:00:00 1970 +0000
+  HG: +++ /dev/null	Thu Jan 01 00:00:00 1970 +0000
+  HG: @@ -1,1 +0,0 @@
+  HG: -removed
+  HG:
+  HG: files=added removed
+  $ hg status -amr
+  M changed
+  $ hg parents --template "M {file_mods}\nA {file_adds}\nR {file_dels}\n"
+  M 
+  A added
+  R removed
+  $ hg rollback -q
+
+  $ cat >> .hg/hgrc <<EOF
   > # disable customizing for subsequent tests
   > [committemplate]
   > changeset =
@@ -470,9 +557,15 @@ verify pathauditor blocks evil filepaths
   > r.commitctx(c)
   > EOF
   $ $PYTHON evil-commit.py
+#if windows
+  $ hg co --clean tip
+  abort: path contains illegal component: .h\xe2\x80\x8cg\\hgrc (esc)
+  [255]
+#else
   $ hg co --clean tip
   abort: path contains illegal component: .h\xe2\x80\x8cg/hgrc (esc)
   [255]
+#endif
 
   $ hg rollback -f
   repository tip rolled back to revision 1 (undo commit)
@@ -489,7 +582,7 @@ verify pathauditor blocks evil filepaths
   > EOF
   $ $PYTHON evil-commit.py
   $ hg co --clean tip
-  abort: path contains illegal component: HG~1/hgrc
+  abort: path contains illegal component: HG~1/hgrc (glob)
   [255]
 
   $ hg rollback -f
@@ -507,5 +600,5 @@ verify pathauditor blocks evil filepaths
   > EOF
   $ $PYTHON evil-commit.py
   $ hg co --clean tip
-  abort: path contains illegal component: HG8B6C~2/hgrc
+  abort: path contains illegal component: HG8B6C~2/hgrc (glob)
   [255]

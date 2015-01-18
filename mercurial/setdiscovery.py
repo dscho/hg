@@ -40,12 +40,25 @@ nodes that will maximize the number of nodes that will be
 classified with it (since all ancestors or descendants will be marked as well).
 """
 
-from node import nullid
+from node import nullid, nullrev
 from i18n import _
 import random
 import util, dagutil
 
-def _updatesample(dag, nodes, sample, always, quicksamplesize=0):
+def _updatesample(dag, nodes, sample, quicksamplesize=0):
+    """update an existing sample to match the expected size
+
+    The sample is updated with nodes exponentially distant from each head of the
+    <nodes> set. (H~1, H~2, H~4, H~8, etc).
+
+    If a target size is specified, the sampling will stop once this size is
+    reached. Otherwise sampling will happen until roots of the <nodes> set are
+    reached.
+
+    :dag: a dag object from dagutil
+    :nodes:  set of nodes we want to discover (if None, assume the whole dag)
+    :sample: a sample to update
+    :quicksamplesize: optional target size of the sample"""
     # if nodes is empty we scan the entire graph
     if nodes:
         heads = dag.headsetofconnecteds(nodes)
@@ -63,53 +76,41 @@ def _updatesample(dag, nodes, sample, always, quicksamplesize=0):
         if d > factor:
             factor *= 2
         if d == factor:
-            if curr not in always: # need this check for the early exit below
-                sample.add(curr)
-                if quicksamplesize and (len(sample) >= quicksamplesize):
-                    return
+            sample.add(curr)
+            if quicksamplesize and (len(sample) >= quicksamplesize):
+                return
         seen.add(curr)
         for p in dag.parents(curr):
             if not nodes or p in nodes:
                 dist.setdefault(p, d + 1)
                 visit.append(p)
 
-def _setupsample(dag, nodes, size):
-    if len(nodes) <= size:
-        return set(nodes), None, 0
-    always = dag.headsetofconnecteds(nodes)
-    desiredlen = size - len(always)
-    if desiredlen <= 0:
-        # This could be bad if there are very many heads, all unknown to the
-        # server. We're counting on long request support here.
-        return always, None, desiredlen
-    return always, set(), desiredlen
+def _takequicksample(dag, nodes, size):
+    """takes a quick sample of size <size>
 
-def _takequicksample(dag, nodes, size, initial):
-    always, sample, desiredlen = _setupsample(dag, nodes, size)
-    if sample is None:
-        return always
-    if initial:
-        fromset = None
-    else:
-        fromset = nodes
-    _updatesample(dag, fromset, sample, always, quicksamplesize=desiredlen)
-    sample.update(always)
+    It is meant for initial sampling and focuses on querying heads and close
+    ancestors of heads.
+
+    :dag: a dag object
+    :nodes: set of nodes to discover
+    :size: the maximum size of the sample"""
+    sample = dag.headsetofconnecteds(nodes)
+    if size <= len(sample):
+        return _limitsample(sample, size)
+    _updatesample(dag, None, sample, quicksamplesize=size)
     return sample
 
 def _takefullsample(dag, nodes, size):
-    always, sample, desiredlen = _setupsample(dag, nodes, size)
-    if sample is None:
-        return always
+    sample = dag.headsetofconnecteds(nodes)
     # update from heads
-    _updatesample(dag, nodes, sample, always)
+    _updatesample(dag, nodes, sample)
     # update from roots
-    _updatesample(dag.inverse(), nodes, sample, always)
+    _updatesample(dag.inverse(), nodes, sample)
     assert sample
-    sample = _limitsample(sample, desiredlen)
-    if len(sample) < desiredlen:
-        more = desiredlen - len(sample)
-        sample.update(random.sample(list(nodes - sample - always), more))
-    sample.update(always)
+    sample = _limitsample(sample, size)
+    if len(sample) < size:
+        more = size - len(sample)
+        sample.update(random.sample(list(nodes - sample), more))
     return sample
 
 def _limitsample(sample, desiredlen):
@@ -174,50 +175,46 @@ def findcommonheads(ui, local, remote,
 
     # full blown discovery
 
-    # own nodes where I don't know if remote knows them
-    undecided = dag.nodeset()
     # own nodes I know we both know
-    common = set()
-    # own nodes I know remote lacks
-    missing = set()
-
     # treat remote heads (and maybe own heads) as a first implicit sample
     # response
-    common.update(dag.ancestorset(srvheads))
-    undecided.difference_update(common)
+    common = cl.incrementalmissingrevs(srvheads)
+    commoninsample = set(n for i, n in enumerate(sample) if yesno[i])
+    common.addbases(commoninsample)
+    # own nodes where I don't know if remote knows them
+    undecided = set(common.missingancestors(ownheads))
+    # own nodes I know remote lacks
+    missing = set()
 
     full = False
     while undecided:
 
         if sample:
-            commoninsample = set(n for i, n in enumerate(sample) if yesno[i])
-            common.update(dag.ancestorset(commoninsample, common))
-
             missinginsample = [n for i, n in enumerate(sample) if not yesno[i]]
             missing.update(dag.descendantset(missinginsample, missing))
 
             undecided.difference_update(missing)
-            undecided.difference_update(common)
 
         if not undecided:
             break
 
-        if full:
-            ui.note(_("sampling from both directions\n"))
-            sample = _takefullsample(dag, undecided, size=fullsamplesize)
-            targetsize = fullsamplesize
-        elif common:
-            # use cheapish initial sample
-            ui.debug("taking initial sample\n")
-            sample = _takefullsample(dag, undecided, size=fullsamplesize)
+        if full or common.hasbases():
+            if full:
+                ui.note(_("sampling from both directions\n"))
+            else:
+                ui.debug("taking initial sample\n")
+            samplefunc = _takefullsample
             targetsize = fullsamplesize
         else:
             # use even cheaper initial sample
             ui.debug("taking quick initial sample\n")
-            sample = _takequicksample(dag, undecided, size=initialsamplesize,
-                                      initial=True)
+            samplefunc = _takequicksample
             targetsize = initialsamplesize
-        sample = _limitsample(sample, targetsize)
+        if len(undecided) < targetsize:
+            sample = list(undecided)
+        else:
+            sample = samplefunc(dag, undecided, targetsize)
+            sample = _limitsample(sample, targetsize)
 
         roundtrips += 1
         ui.progress(_('searching'), roundtrips, unit=_('queries'))
@@ -228,7 +225,17 @@ def findcommonheads(ui, local, remote,
         yesno = remote.known(dag.externalizeall(sample))
         full = True
 
-    result = dag.headsetofconnecteds(common)
+        if sample:
+            commoninsample = set(n for i, n in enumerate(sample) if yesno[i])
+            common.addbases(commoninsample)
+            common.removeancestorsfrom(undecided)
+
+    # heads(common) == heads(common.bases) since common represents common.bases
+    # and all its ancestors
+    result = dag.headsetofconnecteds(common.bases)
+    # common.bases can include nullrev, but our contract requires us to not
+    # return any heads in that case, so discard that
+    result.discard(nullrev)
     ui.progress(_('searching'), None)
     ui.debug("%d total queries\n" % roundtrips)
 

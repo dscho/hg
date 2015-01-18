@@ -1,6 +1,6 @@
 # keyword.py - $Keyword$ expansion for Mercurial
 #
-# Copyright 2007-2014 Christian Ebert <blacktrash@gmx.net>
+# Copyright 2007-2015 Christian Ebert <blacktrash@gmx.net>
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
@@ -264,8 +264,17 @@ class kwtemplater(object):
             if util.binary(data):
                 continue
             if expand:
+                parents = ctx.parents()
                 if lookup:
                     ctx = self.linkctx(f, mf[f])
+                elif self.restrict and len(parents) > 1:
+                    # merge commit
+                    # in case of conflict f is in modified state during
+                    # merge, even if f does not differ from f in parent
+                    for p in parents:
+                        if f in p and not p[f].cmp(ctx[f]):
+                            ctx = p[f].changectx()
+                            break
                 data, found = self.substitute(data, f, ctx, re_kw.subn)
             elif self.restrict:
                 found = re_kw.search(data)
@@ -273,7 +282,7 @@ class kwtemplater(object):
                 data, found = _shrinktext(data, re_kw.subn)
             if found:
                 self.ui.note(msg % f)
-                fp = self.repo.wopener(f, "wb", atomictemp=True)
+                fp = self.repo.wvfs(f, "wb", atomictemp=True)
                 fp.write(data)
                 fp.close()
                 if kwcmd:
@@ -402,7 +411,7 @@ def demo(ui, repo, *args, **opts):
         if args:
             # simulate hgrc parsing
             rcmaps = ['[keywordmaps]\n'] + [a + '\n' for a in args]
-            fp = repo.opener('hgrc', 'w')
+            fp = repo.vfs('hgrc', 'w')
             fp.writelines(rcmaps)
             fp.close()
             ui.readconfig(repo.join('hgrc'))
@@ -431,7 +440,7 @@ def demo(ui, repo, *args, **opts):
     demoitems('keywordset', ui.configitems('keywordset'))
     demoitems('keywordmaps', kwmaps.iteritems())
     keywords = '$' + '$\n$'.join(sorted(kwmaps.keys())) + '$\n'
-    repo.wopener.write(fn, keywords)
+    repo.wvfs.write(fn, keywords)
     repo[None].add([fn])
     ui.note(_('\nkeywords written to %s:\n') % fn)
     ui.note(keywords)
@@ -448,12 +457,9 @@ def demo(ui, repo, *args, **opts):
     repo.commit(text=msg)
     ui.status(_('\n\tkeywords expanded\n'))
     ui.write(repo.wread(fn))
-    for root, dirs, files in os.walk(tmpdir, topdown=False):
+    for root, dirs, files in os.walk(tmpdir):
         for f in files:
-            util.unlink(os.path.join(root, f))
-        for d in dirs:
-            os.rmdir(os.path.join(root, d))
-    os.rmdir(tmpdir)
+            util.unlinkpath(repo.vfs.reljoin(root, f))
 
 @command('kwexpand',
     commands.walkopts,
@@ -585,7 +591,7 @@ def reposetup(ui, repo):
         def file(self, f):
             if f[0] == '/':
                 f = f[1:]
-            return kwfilelog(self.sopener, kwt, f)
+            return kwfilelog(self.svfs, kwt, f)
 
         def wread(self, filename):
             data = super(kwrepo, self).wread(filename)

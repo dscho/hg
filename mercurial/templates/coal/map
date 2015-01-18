@@ -109,6 +109,12 @@ changelogparent = '
 
 changesetparent = '<a href="{url|urlescape}rev/{node|short}{sessionvars%urlparameter}">{node|short}</a> '
 
+changesetparentdiff = '
+  {changesetparent}
+  {ifeq(node, basenode, '(current diff)', '({difffrom})')}'
+
+difffrom = '<a href="{url|urlescape}rev/{node|short}:{originalnode|short}{sessionvars%urlparameter}">diff</a>'
+
 filerevparent = '<a href="{url|urlescape}file/{node|short}/{file|urlescape}{sessionvars%urlparameter}">{rename%filerename}{node|short}</a> '
 filerevchild = '<a href="{url|urlescape}file/{node|short}/{file|urlescape}{sessionvars%urlparameter}">{node|short}</a> '
 
@@ -231,3 +237,6 @@ error = ../paper/error.tmpl
 urlparameter = '{separator}{name}={value|urlescape}'
 hiddenformentry = '<input type="hidden" name="{name}" value="{value|escape}" />'
 breadcrumb = '&gt; <a href="{url|urlescape}">{name|escape}</a> '
+
+searchhint = 'Find changesets by keywords (author, files, the commit message), revision
+  number or hash, or <a href="{url|urlescape}help/revsets">revset expression</a>.'

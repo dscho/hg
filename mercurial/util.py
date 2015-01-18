@@ -19,7 +19,8 @@ import error, osutil, encoding
 import errno, shutil, sys, tempfile, traceback
 import re as remod
 import os, time, datetime, calendar, textwrap, signal, collections
-import imp, socket, urllib
+import imp, socket, urllib, struct
+import gc
 
 if os.name == 'nt':
     import windows as platform
@@ -228,6 +229,15 @@ except NameError:
 import subprocess
 closefds = os.name == 'posix'
 
+def unpacker(fmt):
+    """create a struct unpacker for the specified format"""
+    try:
+        # 2.5+
+        return struct.Struct(fmt).unpack
+    except AttributeError:
+        # 2.4
+        return lambda buf: struct.unpack(fmt, buf)
+
 def popen2(cmd, env=None, newlines=False):
     # Setting bufsize to -1 lets the system decide the buffer size.
     # The default for bufsize is 0, meaning unbuffered. This leads to
@@ -369,6 +379,12 @@ class sortdict(dict):
         return self._list
     def iterkeys(self):
         return self._list.__iter__()
+    def iteritems(self):
+        for k in self._list:
+            yield k, self[k]
+    def insert(self, index, key, val):
+        self._list.insert(index, key)
+        dict.__setitem__(self, key, val)
 
 class lrucachedict(object):
     '''cache most recent gets from or sets to this dictionary'''
@@ -538,6 +554,28 @@ def always(fn):
 def never(fn):
     return False
 
+def nogc(func):
+    """disable garbage collector
+
+    Python's garbage collector triggers a GC each time a certain number of
+    container objects (the number being defined by gc.get_threshold()) are
+    allocated even when marked not to be tracked by the collector. Tracking has
+    no effect on when GCs are triggered, only on what objects the GC looks
+    into. As a workaround, disable GC while building complex (huge)
+    containers.
+
+    This garbage collector issue have been fixed in 2.7.
+    """
+    def wrapper(*args, **kwargs):
+        gcenabled = gc.isenabled()
+        gc.disable()
+        try:
+            return func(*args, **kwargs)
+        finally:
+            if gcenabled:
+                gc.enable()
+    return wrapper
+
 def pathto(root, n1, n2):
     '''return the relative path from one place to another.
     root should use os.sep to separate directories
@@ -613,9 +651,8 @@ def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None, out=None):
     '''enhanced shell command execution.
     run with environment maybe modified, maybe in different dir.
 
-    if command fails and onerr is None, return status.  if ui object,
-    print error message and return status, else raise onerr object as
-    exception.
+    if command fails and onerr is None, return status, else raise onerr
+    object as exception.
 
     if out is specified, it is assumed to be a file-like object that has a
     write() method. stdout and stderr will be redirected to out.'''
@@ -664,10 +701,7 @@ def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None, out=None):
                             explainexit(rc)[0])
         if errprefix:
             errmsg = '%s: %s' % (errprefix, errmsg)
-        try:
-            onerr.warn(errmsg + '\n')
-        except AttributeError:
-            raise onerr(errmsg)
+        raise onerr(errmsg)
     return rc
 
 def checksignature(func):
@@ -682,10 +716,16 @@ def checksignature(func):
 
     return check
 
-def copyfile(src, dest):
+def copyfile(src, dest, hardlink=False):
     "copy a file, preserving mode and atime/mtime"
     if os.path.lexists(dest):
         unlink(dest)
+    if hardlink:
+        try:
+            oslink(src, dest)
+            return
+        except (IOError, OSError):
+            pass # fall back to normal copy
     if os.path.islink(src):
         os.symlink(os.readlink(src), dest)
     else:
@@ -1086,15 +1126,20 @@ def makedirs(name, mode=None, notindexed=False):
     if mode is not None:
         os.chmod(name, mode)
 
-def ensuredirs(name, mode=None):
-    """race-safe recursive directory creation"""
+def ensuredirs(name, mode=None, notindexed=False):
+    """race-safe recursive directory creation
+
+    Newly created directories are marked as "not to be indexed by
+    the content indexing service", if ``notindexed`` is specified
+    for "write" mode access.
+    """
     if os.path.isdir(name):
         return
     parent = os.path.dirname(os.path.abspath(name))
     if parent != name:
-        ensuredirs(parent, mode)
+        ensuredirs(parent, mode, notindexed)
     try:
-        os.mkdir(name)
+        makedir(name, notindexed)
     except OSError, err:
         if err.errno == errno.EEXIST and os.path.isdir(name):
             # someone else seems to have won a directory creation race
@@ -1148,7 +1193,7 @@ class chunkbuffer(object):
         """Read L bytes of data from the iterator of chunks of data.
         Returns less than L bytes if the iterator runs dry.
 
-        If size parameter is ommited, read everything"""
+        If size parameter is omitted, read everything"""
         left = l
         buf = []
         queue = self._queue
@@ -1418,7 +1463,7 @@ def matchdate(date):
         except ValueError:
             raise Abort(_("invalid day spec: %s") % date[1:])
         if days < 0:
-            raise Abort(_("%s must be nonnegative (see 'hg help dates')")
+            raise Abort(_('%s must be nonnegative (see "hg help dates")')
                 % date[1:])
         when = makedate()[0] - days * 3600 * 24
         return lambda x: x >= when

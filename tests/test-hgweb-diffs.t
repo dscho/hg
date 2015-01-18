@@ -115,10 +115,10 @@ revision
     <td class="diffstat">
        2 files changed, 2 insertions(+), 0 deletions(-)
   
-      <a id="diffstatexpand" href="javascript:toggleDiffstat()"/>[<tt>+</tt>]</a>
+      <a id="diffstatexpand" href="javascript:toggleDiffstat()">[<tt>+</tt>]</a>
       <div id="diffstatdetails" style="display:none;">
-        <a href="javascript:toggleDiffstat()"/>[<tt>-</tt>]</a>
-        <p>
+        <a href="javascript:toggleDiffstat()">[<tt>-</tt>]</a>
+        <p></p>
         <table class="stripes2">  <tr>
       <td class="diffstat-file"><a href="#l1.1">a</a></td>
       <td class="diffstat-total" align="right">1</td>
@@ -387,10 +387,10 @@ revision
     <td class="diffstat">
        2 files changed, 2 insertions(+), 0 deletions(-)
   
-      <a id="diffstatexpand" href="javascript:toggleDiffstat()"/>[<tt>+</tt>]</a>
+      <a id="diffstatexpand" href="javascript:toggleDiffstat()">[<tt>+</tt>]</a>
       <div id="diffstatdetails" style="display:none;">
-        <a href="javascript:toggleDiffstat()"/>[<tt>-</tt>]</a>
-        <p>
+        <a href="javascript:toggleDiffstat()">[<tt>-</tt>]</a>
+        <p></p>
         <table class="stripes2">  <tr>
       <td class="diffstat-file"><a href="#l1.1">a</a></td>
       <td class="diffstat-total" align="right">1</td>

@@ -276,8 +276,11 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
                         'style': '', 'patch': None, 'git': None}
                 cmdutil.show_changeset(repo.ui, repo, opts).show(ctx)
                 ltags, dist = repo.ui.popbuffer().split('\n')
-                tags = ''.join('latesttag: %s\n' % t for t in ltags.split(':'))
+                ltags = ltags.split(':')
+                changessince = len(repo.revs('only(.,%s)', ltags[0]))
+                tags = ''.join('latesttag: %s\n' % t for t in ltags)
                 tags += 'latesttagdistance: %s\n' % dist
+                tags += 'changessincelatesttag: %s\n' % changessince
 
             return base + tags
 
@@ -304,7 +307,7 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
         for subpath in sorted(ctx.substate):
             sub = ctx.sub(subpath)
             submatch = matchmod.narrowmatcher(subpath, matchfn)
-            total += sub.archive(repo.ui, archiver, prefix, submatch)
+            total += sub.archive(archiver, prefix, submatch)
 
     if total == 0:
         raise error.Abort(_('no files match the archive pattern'))

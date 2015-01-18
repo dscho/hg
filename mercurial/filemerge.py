@@ -37,6 +37,9 @@ def internaltool(name, trymerge, onfailure=None):
 def _findtool(ui, tool):
     if tool in internals:
         return tool
+    return findexternaltool(ui, tool)
+
+def findexternaltool(ui, tool):
     for kn in ("regkey", "regkeyalt"):
         k = _toolstr(ui, tool, kn)
         if not k:
@@ -298,8 +301,7 @@ def _xmerge(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels=None):
         replace = {'local': a, 'base': b, 'other': c, 'output': out}
         args = util.interpolate(r'\$', replace, args,
                                 lambda s: util.shellquote(util.localpath(s)))
-        r = util.system(toolpath + ' ' + args, cwd=repo.root, environ=env,
-                        out=ui.fout)
+        r = ui.system(toolpath + ' ' + args, cwd=repo.root, environ=env)
         return True, r
     return False, 0
 

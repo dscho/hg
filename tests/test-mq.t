@@ -5,11 +5,12 @@
   >     fi
   > }
 
-  $ echo "[extensions]" >> $HGRCPATH
-  $ echo "mq=" >> $HGRCPATH
-
-  $ echo "[mq]" >> $HGRCPATH
-  $ echo "plain=true" >> $HGRCPATH
+  $ cat <<EOF >> $HGRCPATH
+  > [extensions]
+  > mq =
+  > [mq]
+  > plain = true
+  > EOF
 
 
 help
@@ -800,7 +801,7 @@ strip with local changes, should complain
 
   $ hg strip -f tip
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
-  saved backup bundle to $TESTTMP/b/.hg/strip-backup/*-backup.hg (glob)
+  saved backup bundle to $TESTTMP/b/.hg/strip-backup/770eb8fce608-0ddcae0f-backup.hg (glob)
   $ cd ..
 
 
@@ -1399,7 +1400,10 @@ apply force, should discard changes in hello, but not bye
   applying empty
   saving current version of hello.txt as hello.txt.orig
   patching file hello.txt
+  committing files:
   hello.txt
+  committing manifest
+  committing changelog
   now at: empty
   $ hg st
   M bye.txt
@@ -1582,7 +1586,7 @@ Test that secret mq patch does not break hgweb
 
   $ cd ..
 
-Test interraction with revset (issue4426)
+Test interaction with revset (issue4426)
 
   $ hg init issue4426
   $ cd issue4426

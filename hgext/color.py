@@ -144,7 +144,8 @@ codes).
 
 import os
 
-from mercurial import cmdutil, commands, dispatch, extensions, ui as uimod, util
+from mercurial import cmdutil, commands, dispatch, extensions, subrepo, util
+from mercurial import ui as uimod
 from mercurial import templater, error
 from mercurial.i18n import _
 
@@ -301,6 +302,11 @@ _styles = {'grep.match': 'red bold',
            'histedit.remaining': 'red bold',
            'ui.prompt': 'yellow',
            'log.changeset': 'yellow',
+           'patchbomb.finalsummary': '',
+           'patchbomb.from': 'magenta',
+           'patchbomb.to': 'cyan',
+           'patchbomb.subject': 'green',
+           'patchbomb.diffstats': '',
            'rebase.rebased': 'blue',
            'rebase.remaining': 'red bold',
            'resolve.resolved': 'green bold',
@@ -483,7 +489,14 @@ def uisetup(ui):
             extstyles()
             configstyles(ui_)
         return orig(ui_, opts, cmd, cmdfunc)
+    def colorgit(orig, gitsub, commands, env=None, stream=False, cwd=None):
+        if gitsub.ui._colormode and len(commands) and commands[0] == "diff":
+                # insert the argument in the front,
+                # the end of git diff arguments is used for paths
+                commands.insert(1, '--color')
+        return orig(gitsub, commands, env, stream, cwd)
     extensions.wrapfunction(dispatch, '_runcommand', colorcmd)
+    extensions.wrapfunction(subrepo.gitsubrepo, '_gitnodir', colorgit)
     templater.funcs['label'] = templatelabel
 
 def extsetup(ui):

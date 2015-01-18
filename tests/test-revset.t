@@ -438,6 +438,32 @@ Test empty set input
   8
   9
 
+Test '%' operator
+
+  $ log '9%'
+  8
+  9
+  $ log '9%5'
+  2
+  4
+  8
+  9
+  $ log '(7 + 9)%(5 + 2)'
+  4
+  6
+  7
+  8
+  9
+
+Test the order of operations
+
+  $ log '7 + 9%5 + 2'
+  7
+  2
+  4
+  8
+  9
+
 Test explicit numeric revision
   $ log 'rev(-1)'
   $ log 'rev(0)'
@@ -959,10 +985,24 @@ far away.
     (range
       ('symbol', '2')
       ('symbol', '5')))
-  hg: parse error: not a function: _aliasarg
+  abort: failed to parse the definition of revset alias "injectparamasstring2": not a function: _aliasarg
   [255]
+  $ hg debugrevspec --debug --config revsetalias.anotherbadone='branch(' "tip"
+  ('symbol', 'tip')
+  warning: failed to parse the definition of revset alias "anotherbadone": at 7: not a prefix: end
+  warning: failed to parse the definition of revset alias "injectparamasstring2": not a function: _aliasarg
+  9
   >>> data = file('.hg/hgrc', 'rb').read()
   >>> file('.hg/hgrc', 'wb').write(data.replace('_aliasarg', ''))
+
+  $ try 'tip'
+  ('symbol', 'tip')
+  9
+
+  $ hg debugrevspec --debug --config revsetalias.'bad name'='tip' "tip"
+  ('symbol', 'tip')
+  warning: failed to parse the declaration of revset alias "bad name": at 4: invalid token
+  9
 
   $ try 'd(2:5)'
   (func
@@ -1117,6 +1157,54 @@ tests for 'remote()' predicate:
   2
   $ cd ../repo
   $ log 'remote(".a.b.c.", "../remote3")'
+
+tests for concatenation of strings/symbols by "##"
+
+  $ try "278 ## '5f5' ## 1ee ## 'ce5'"
+  (_concat
+    (_concat
+      (_concat
+        ('symbol', '278')
+        ('string', '5f5'))
+      ('symbol', '1ee'))
+    ('string', 'ce5'))
+  ('string', '2785f51eece5')
+  0
+
+  $ echo 'cat4($1, $2, $3, $4) = $1 ## $2 ## $3 ## $4' >> .hg/hgrc
+  $ try "cat4(278, '5f5', 1ee, 'ce5')"
+  (func
+    ('symbol', 'cat4')
+    (list
+      (list
+        (list
+          ('symbol', '278')
+          ('string', '5f5'))
+        ('symbol', '1ee'))
+      ('string', 'ce5')))
+  (_concat
+    (_concat
+      (_concat
+        ('symbol', '278')
+        ('string', '5f5'))
+      ('symbol', '1ee'))
+    ('string', 'ce5'))
+  ('string', '2785f51eece5')
+  0
+
+(check concatenation in alias nesting)
+
+  $ echo 'cat2($1, $2) = $1 ## $2' >> .hg/hgrc
+  $ echo 'cat2x2($1, $2, $3, $4) = cat2($1 ## $2, $3 ## $4)' >> .hg/hgrc
+  $ log "cat2x2(278, '5f5', 1ee, 'ce5')"
+  0
+
+(check operator priority)
+
+  $ echo 'cat2n2($1, $2, $3, $4) = $1 ## $2 or $3 ## $4~2' >> .hg/hgrc
+  $ log "cat2n2(2785f5, 1eece5, 24286f, 4ae135)"
+  0
+  4
 
   $ cd ..
 

@@ -43,6 +43,18 @@ to be a sendmail compatible mailer or fill out the [smtp] section so
 that the patchbomb extension can automatically send patchbombs
 directly from the commandline. See the [email] and [smtp] sections in
 hgrc(5) for details.
+
+You can control the default inclusion of an introduction message with the
+``patchbomb.intro`` configuration option. The configuration is always
+overwritten by command line flags like --intro and --desc::
+
+  [patchbomb]
+  intro=auto   # include introduction message if more than 1 patch (default)
+  intro=never  # never include an introduction message
+  intro=always # always include an introduction message
+
+You can set patchbomb to always ask for confirmation by setting
+``patchbomb.confirm`` to true.
 '''
 
 import os, errno, socket, tempfile, cStringIO
@@ -66,9 +78,23 @@ def prompt(ui, prompt, default=None, rest=':'):
         prompt += ' [%s]' % default
     return ui.prompt(prompt + rest, default)
 
-def introwanted(opts, number):
+def introwanted(ui, opts, number):
     '''is an introductory message apparently wanted?'''
-    return number > 1 or opts.get('intro') or opts.get('desc')
+    introconfig = ui.config('patchbomb', 'intro', 'auto')
+    if opts.get('intro') or opts.get('desc'):
+        intro = True
+    elif introconfig == 'always':
+        intro = True
+    elif introconfig == 'never':
+        intro = False
+    elif introconfig == 'auto':
+        intro = 1 < number
+    else:
+        ui.write_err(_('warning: invalid patchbomb.intro value "%s"\n')
+                     % introconfig)
+        ui.write_err(_('(should be one of always, never, auto)\n'))
+        intro = 1 < number
+    return intro
 
 def makepatch(ui, repo, patchlines, opts, _charsets, idx, total, numbered,
               patchname=None):
@@ -152,6 +178,175 @@ def makepatch(ui, repo, patchlines, opts, _charsets, idx, total, numbered,
     msg['X-Mercurial-Series-Index'] = '%i' % idx
     msg['X-Mercurial-Series-Total'] = '%i' % total
     return msg, subj, ds
+
+def _getpatches(repo, revs, **opts):
+    """return a list of patches for a list of revisions
+
+    Each patch in the list is itself a list of lines.
+    """
+    ui = repo.ui
+    prev = repo['.'].rev()
+    for r in scmutil.revrange(repo, revs):
+        if r == prev and (repo[None].files() or repo[None].deleted()):
+            ui.warn(_('warning: working directory has '
+                      'uncommitted changes\n'))
+        output = cStringIO.StringIO()
+        cmdutil.export(repo, [r], fp=output,
+                     opts=patch.difffeatureopts(ui, opts, git=True))
+        yield output.getvalue().split('\n')
+def _getbundle(repo, dest, **opts):
+    """return a bundle containing changesets missing in "dest"
+
+    The `opts` keyword-arguments are the same as the one accepted by the
+    `bundle` command.
+
+    The bundle is a returned as a single in-memory binary blob.
+    """
+    ui = repo.ui
+    tmpdir = tempfile.mkdtemp(prefix='hg-email-bundle-')
+    tmpfn = os.path.join(tmpdir, 'bundle')
+    try:
+        commands.bundle(ui, repo, tmpfn, dest, **opts)
+        fp = open(tmpfn, 'rb')
+        data = fp.read()
+        fp.close()
+        return data
+    finally:
+        try:
+            os.unlink(tmpfn)
+        except OSError:
+            pass
+        os.rmdir(tmpdir)
+
+def _getdescription(repo, defaultbody, sender, **opts):
+    """obtain the body of the introduction message and return it
+
+    This is also used for the body of email with an attached bundle.
+
+    The body can be obtained either from the command line option or entered by
+    the user through the editor.
+    """
+    ui = repo.ui
+    if opts.get('desc'):
+        body = open(opts.get('desc')).read()
+    else:
+        ui.write(_('\nWrite the introductory message for the '
+                   'patch series.\n\n'))
+        body = ui.edit(defaultbody, sender)
+        # Save series description in case sendmail fails
+        msgfile = repo.vfs('last-email.txt', 'wb')
+        msgfile.write(body)
+        msgfile.close()
+    return body
+
+def _getbundlemsgs(repo, sender, bundle, **opts):
+    """Get the full email for sending a given bundle
+
+    This function returns a list of "email" tuples (subject, content, None).
+    The list is always one message long in that case.
+    """
+    ui = repo.ui
+    _charsets = mail._charsets(ui)
+    subj = (opts.get('subject')
+            or prompt(ui, 'Subject:', 'A bundle for your repository'))
+
+    body = _getdescription(repo, '', sender, **opts)
+    msg = email.MIMEMultipart.MIMEMultipart()
+    if body:
+        msg.attach(mail.mimeencode(ui, body, _charsets, opts.get('test')))
+    datapart = email.MIMEBase.MIMEBase('application', 'x-mercurial-bundle')
+    datapart.set_payload(bundle)
+    bundlename = '%s.hg' % opts.get('bundlename', 'bundle')
+    datapart.add_header('Content-Disposition', 'attachment',
+                        filename=bundlename)
+    email.Encoders.encode_base64(datapart)
+    msg.attach(datapart)
+    msg['Subject'] = mail.headencode(ui, subj, _charsets, opts.get('test'))
+    return [(msg, subj, None)]
+
+def _makeintro(repo, sender, patches, **opts):
+    """make an introduction email, asking the user for content if needed
+
+    email is returned as (subject, body, cumulative-diffstat)"""
+    ui = repo.ui
+    _charsets = mail._charsets(ui)
+    tlen = len(str(len(patches)))
+
+    flag = opts.get('flag') or ''
+    if flag:
+        flag = ' ' + ' '.join(flag)
+    prefix = '[PATCH %0*d of %d%s]' % (tlen, 0, len(patches), flag)
+
+    subj = (opts.get('subject') or
+            prompt(ui, '(optional) Subject: ', rest=prefix, default=''))
+    if not subj:
+        return None         # skip intro if the user doesn't bother
+
+    subj = prefix + ' ' + subj
+
+    body = ''
+    if opts.get('diffstat'):
+        # generate a cumulative diffstat of the whole patch series
+        diffstat = patch.diffstat(sum(patches, []))
+        body = '\n' + diffstat
+    else:
+        diffstat = None
+
+    body = _getdescription(repo, body, sender, **opts)
+    msg = mail.mimeencode(ui, body, _charsets, opts.get('test'))
+    msg['Subject'] = mail.headencode(ui, subj, _charsets,
+                                     opts.get('test'))
+    return (msg, subj, diffstat)
+
+def _getpatchmsgs(repo, sender, patches, patchnames=None, **opts):
+    """return a list of emails from a list of patches
+
+    This involves introduction message creation if necessary.
+
+    This function returns a list of "email" tuples (subject, content, None).
+    """
+    ui = repo.ui
+    _charsets = mail._charsets(ui)
+    msgs = []
+
+    ui.write(_('this patch series consists of %d patches.\n\n')
+             % len(patches))
+
+    # build the intro message, or skip it if the user declines
+    if introwanted(ui, opts, len(patches)):
+        msg = _makeintro(repo, sender, patches, **opts)
+        if msg:
+            msgs.append(msg)
+
+    # are we going to send more than one message?
+    numbered = len(msgs) + len(patches) > 1
+
+    # now generate the actual patch messages
+    name = None
+    for i, p in enumerate(patches):
+        if patchnames:
+            name = patchnames[i]
+        msg = makepatch(ui, repo, p, opts, _charsets, i + 1,
+                        len(patches), numbered, name)
+        msgs.append(msg)
+
+    return msgs
+
+def _getoutgoing(repo, dest, revs):
+    '''Return the revisions present locally but not in dest'''
+    ui = repo.ui
+    url = ui.expandpath(dest or 'default-push', dest or 'default')
+    url = hg.parseurl(url)[0]
+    ui.status(_('comparing with %s\n') % util.hidepassword(url))
+
+    revs = [r for r in scmutil.revrange(repo, revs) if r >= 0]
+    if not revs:
+        revs = [len(repo) - 1]
+    revs = repo.revs('outgoing(%s) and ::%ld', dest or '', revs)
+    if not revs:
+        ui.status(_("no changes found\n"))
+        return []
+    return [str(r) for r in revs]
 
 emailopts = [
     ('', 'body', None, _('send patches as inline message text (default)')),
@@ -240,6 +435,9 @@ def patchbomb(ui, repo, *revs, **opts):
     In case email sending fails, you will find a backup of your series
     introductory message in ``.hg/last-email.txt``.
 
+    The default behavior of this command can be customized through
+    configuration. (See :hg:`help patchbomb` for details)
+
     Examples::
 
       hg email -r 3000          # send patch 3000 only
@@ -277,48 +475,6 @@ def patchbomb(ui, repo, *revs, **opts):
     # internal option used by pbranches
     patches = opts.get('patches')
 
-    def getoutgoing(dest, revs):
-        '''Return the revisions present locally but not in dest'''
-        url = ui.expandpath(dest or 'default-push', dest or 'default')
-        url = hg.parseurl(url)[0]
-        ui.status(_('comparing with %s\n') % util.hidepassword(url))
-
-        revs = [r for r in scmutil.revrange(repo, revs) if r >= 0]
-        if not revs:
-            revs = [len(repo) - 1]
-        revs = repo.revs('outgoing(%s) and ::%ld', dest or '', revs)
-        if not revs:
-            ui.status(_("no changes found\n"))
-            return []
-        return [str(r) for r in revs]
-
-    def getpatches(revs):
-        prev = repo['.'].rev()
-        for r in scmutil.revrange(repo, revs):
-            if r == prev and (repo[None].files() or repo[None].deleted()):
-                ui.warn(_('warning: working directory has '
-                          'uncommitted changes\n'))
-            output = cStringIO.StringIO()
-            cmdutil.export(repo, [r], fp=output,
-                         opts=patch.diffopts(ui, opts))
-            yield output.getvalue().split('\n')
-
-    def getbundle(dest):
-        tmpdir = tempfile.mkdtemp(prefix='hg-email-bundle-')
-        tmpfn = os.path.join(tmpdir, 'bundle')
-        try:
-            commands.bundle(ui, repo, tmpfn, dest, **opts)
-            fp = open(tmpfn, 'rb')
-            data = fp.read()
-            fp.close()
-            return data
-        finally:
-            try:
-                os.unlink(tmpfn)
-            except OSError:
-                pass
-            os.rmdir(tmpdir)
-
     if not (opts.get('test') or mbox):
         # really sending
         mail.validateconfig(ui)
@@ -342,7 +498,7 @@ def patchbomb(ui, repo, *revs, **opts):
         revs = rev
 
     if outgoing:
-        revs = getoutgoing(dest, rev)
+        revs = _getoutgoing(repo, dest, rev)
     if bundle:
         opts['revs'] = revs
 
@@ -355,102 +511,21 @@ def patchbomb(ui, repo, *revs, **opts):
     def genmsgid(id):
         return '<%s.%s@%s>' % (id[:20], int(start_time[0]), socket.getfqdn())
 
-    def getdescription(body, sender):
-        if opts.get('desc'):
-            body = open(opts.get('desc')).read()
-        else:
-            ui.write(_('\nWrite the introductory message for the '
-                       'patch series.\n\n'))
-            body = ui.edit(body, sender)
-            # Save series description in case sendmail fails
-            msgfile = repo.opener('last-email.txt', 'wb')
-            msgfile.write(body)
-            msgfile.close()
-        return body
-
-    def getpatchmsgs(patches, patchnames=None):
-        msgs = []
-
-        ui.write(_('this patch series consists of %d patches.\n\n')
-                 % len(patches))
-
-        # build the intro message, or skip it if the user declines
-        if introwanted(opts, len(patches)):
-            msg = makeintro(patches)
-            if msg:
-                msgs.append(msg)
-
-        # are we going to send more than one message?
-        numbered = len(msgs) + len(patches) > 1
-
-        # now generate the actual patch messages
-        name = None
-        for i, p in enumerate(patches):
-            if patchnames:
-                name = patchnames[i]
-            msg = makepatch(ui, repo, p, opts, _charsets, i + 1,
-                            len(patches), numbered, name)
-            msgs.append(msg)
-
-        return msgs
-
-    def makeintro(patches):
-        tlen = len(str(len(patches)))
-
-        flag = opts.get('flag') or ''
-        if flag:
-            flag = ' ' + ' '.join(flag)
-        prefix = '[PATCH %0*d of %d%s]' % (tlen, 0, len(patches), flag)
-
-        subj = (opts.get('subject') or
-                prompt(ui, '(optional) Subject: ', rest=prefix, default=''))
-        if not subj:
-            return None         # skip intro if the user doesn't bother
-
-        subj = prefix + ' ' + subj
-
-        body = ''
-        if opts.get('diffstat'):
-            # generate a cumulative diffstat of the whole patch series
-            diffstat = patch.diffstat(sum(patches, []))
-            body = '\n' + diffstat
-        else:
-            diffstat = None
-
-        body = getdescription(body, sender)
-        msg = mail.mimeencode(ui, body, _charsets, opts.get('test'))
-        msg['Subject'] = mail.headencode(ui, subj, _charsets,
-                                         opts.get('test'))
-        return (msg, subj, diffstat)
-
-    def getbundlemsgs(bundle):
-        subj = (opts.get('subject')
-                or prompt(ui, 'Subject:', 'A bundle for your repository'))
-
-        body = getdescription('', sender)
-        msg = email.MIMEMultipart.MIMEMultipart()
-        if body:
-            msg.attach(mail.mimeencode(ui, body, _charsets, opts.get('test')))
-        datapart = email.MIMEBase.MIMEBase('application', 'x-mercurial-bundle')
-        datapart.set_payload(bundle)
-        bundlename = '%s.hg' % opts.get('bundlename', 'bundle')
-        datapart.add_header('Content-Disposition', 'attachment',
-                            filename=bundlename)
-        email.Encoders.encode_base64(datapart)
-        msg.attach(datapart)
-        msg['Subject'] = mail.headencode(ui, subj, _charsets, opts.get('test'))
-        return [(msg, subj, None)]
-
     sender = (opts.get('from') or ui.config('email', 'from') or
               ui.config('patchbomb', 'from') or
               prompt(ui, 'From', ui.username()))
 
     if patches:
-        msgs = getpatchmsgs(patches, opts.get('patchnames'))
+        msgs = _getpatchmsgs(repo, sender, patches, opts.get('patchnames'),
+                             **opts)
     elif bundle:
-        msgs = getbundlemsgs(getbundle(dest))
+        bundledata = _getbundle(repo, dest, **opts)
+        bundleopts = opts.copy()
+        bundleopts.pop('bundle', None)  # already processed
+        msgs = _getbundlemsgs(repo, sender, bundledata, **bundleopts)
     else:
-        msgs = getpatchmsgs(list(getpatches(revs)))
+        _patches = list(_getpatches(repo, revs, **opts))
+        msgs = _getpatchmsgs(repo, sender, _patches, **opts)
 
     showaddrs = []
 
@@ -482,15 +557,18 @@ def patchbomb(ui, repo, *revs, **opts):
     bcc = getaddrs('Bcc') or []
     replyto = getaddrs('Reply-To')
 
-    if opts.get('diffstat') or opts.get('confirm'):
-        ui.write(_('\nFinal summary:\n\n'))
-        ui.write(('From: %s\n' % sender))
+    confirm = ui.configbool('patchbomb', 'confirm')
+    confirm |= bool(opts.get('diffstat') or opts.get('confirm'))
+
+    if confirm:
+        ui.write(_('\nFinal summary:\n\n'), label='patchbomb.finalsummary')
+        ui.write(('From: %s\n' % sender), label='patchbomb.from')
         for addr in showaddrs:
-            ui.write('%s\n' % addr)
+            ui.write('%s\n' % addr, label='patchbomb.to')
         for m, subj, ds in msgs:
-            ui.write(('Subject: %s\n' % subj))
+            ui.write(('Subject: %s\n' % subj), label='patchbomb.subject')
             if ds:
-                ui.write(ds)
+                ui.write(ds, label='patchbomb.diffstats')
         ui.write('\n')
         if ui.promptchoice(_('are you sure you want to send (yn)?'
                              '$$ &Yes $$ &No')):
