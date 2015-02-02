@@ -919,9 +919,8 @@ class changeset_printer(object):
             # we will use the templatename as the color name since those two
             # should be the same
             for name in ns.names(self.repo, changenode):
-                # i18n: column positioning for "hg log"
-                name = _(("%s:" % ns.logname).ljust(13) + "%s\n") % name
-                self.ui.write("%s" % name, label='log.%s' % ns.colorname)
+                self.ui.write(ns.logfmt % name,
+                              label='log.%s' % ns.colorname)
         if self.ui.debugflag:
             # i18n: column positioning for "hg log"
             self.ui.write(_("phase:       %s\n") % _(ctx.phasestr()),
@@ -1781,7 +1780,8 @@ def _makelogrevset(repo, pats, opts, revs):
                 # manifest entry, so use match.files(), not pats.
                 opts[fpats[followfirst]] = list(match.files())
             else:
-                opts[fnopats[followdescendants][followfirst]] = str(startrev)
+                op = fnopats[followdescendants][followfirst]
+                opts[op] = 'rev(%d)' % startrev
         else:
             opts['_patslog'] = list(pats)
 
@@ -2764,9 +2764,6 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
             (unknown,       actions['unknown'],  discard),
             )
 
-        needdata = ('revert', 'add', 'undelete')
-        _revertprefetch(repo, ctx, *[actions[name][0] for name in needdata])
-
         wctx = repo[None]
         for abs, (rel, exact) in sorted(names.items()):
             # target file to be touch on disk (relative to cwd)
@@ -2796,6 +2793,9 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
 
 
         if not opts.get('dry_run'):
+            needdata = ('revert', 'add', 'undelete')
+            _revertprefetch(repo, ctx, *[actions[name][0] for name in needdata])
+
             _performrevert(repo, parents, ctx, actions)
 
             # get the list of subrepos that must be reverted

@@ -112,7 +112,7 @@ clone root, make local change
   @@ -1,2 +1,3 @@
    g
    gg
-  +ggg (no-eol)
+  +ggg
   $ hg commit --subrepos -m ggg
   committing subrepository s
   $ hg debugsub
@@ -133,6 +133,7 @@ clone root separately, make different local change
   $ echo f > f
   $ hg status --subrepos
   ? s/f
+  $ hg add .
   $ git add f
   $ cd ..
 
@@ -695,7 +696,7 @@ check differences made by most recent change
   +woopwoop
   +
   +foo
-  +bar (no-eol)
+  +bar
 
   $ hg commit --subrepos -m "Added foobar"
   committing subrepository s
@@ -717,7 +718,7 @@ check differences made by most recent change
   +woopwoop
   +
   +foo
-  +bar (no-eol)
+  +bar
 
 check output when only diffing the subrepository
   $ hg diff -c . --subrepos s
@@ -730,7 +731,7 @@ check output when only diffing the subrepository
   +woopwoop
   +
   +foo
-  +bar (no-eol)
+  +bar
 
 check output when diffing something else
   $ hg diff -c . --subrepos .hgsubstate --nodates
@@ -760,7 +761,7 @@ add new changes, including whitespace
   --- /dev/null
   +++ b/s/barfoo
   @@ -0,0 +1 @@
-  +foo (no-eol)
+  +foo
   $ hg diff --subrepos s/foobar
   diff --git a/s/foobar b/s/foobar
   index 8a5a5e2..bd5812a 100644
@@ -771,7 +772,7 @@ add new changes, including whitespace
   +woop    woop
    
    foo
-   bar (no-eol)
+   bar
 
 execute a diffstat
 the output contains a regex, because git 1.7.10 and 1.7.11
@@ -779,7 +780,7 @@ the output contains a regex, because git 1.7.10 and 1.7.11
   $ hg diff --subrepos --stat
   \s*barfoo |\s*1 + (re)
   \s*foobar |\s*2 +- (re)
-   2 files changed, 2 insertions\(\+\), 1 deletions?\(-\) \(no-eol\) (re)
+   2 files changed, 2 insertions\(\+\), 1 deletions?\(-\) (re)
 
 ensure adding include/exclude ignores the subrepo
   $ hg diff --subrepos -I s/foobar
@@ -787,7 +788,7 @@ ensure adding include/exclude ignores the subrepo
 
 revert the subrepository
   $ hg revert --all
-  reverting subrepo ../gitroot (glob)
+  reverting subrepo ../gitroot
 
   $ hg status --subrepos
   ? s/barfoo
@@ -796,7 +797,7 @@ revert the subrepository
   $ mv s/foobar.orig s/foobar
 
   $ hg revert --no-backup s
-  reverting subrepo ../gitroot (glob)
+  reverting subrepo ../gitroot
 
   $ hg status --subrepos
   ? s/barfoo

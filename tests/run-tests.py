@@ -786,7 +786,7 @@ class TTest(Test):
         tdir = self._testdir.replace('\\', '/')
         proc = Popen4('%s -c "%s/hghave %s"' %
                       (self._shell, tdir, ' '.join(reqs)),
-                      self._testtmp, 0)
+                      self._testtmp, 0, self._getenv())
         stdout, stderr = proc.communicate()
         ret = proc.wait()
         if wifexited(ret):
@@ -1663,6 +1663,9 @@ class TestRunner(object):
         if oldpypath:
             pypath.append(oldpypath)
         os.environ[IMPL_PATH] = os.pathsep.join(pypath)
+
+        if self.options.pure:
+            os.environ["HGTEST_RUN_TESTS_PURE"] = "--pure"
 
         self._coveragefile = os.path.join(self._testdir, '.coverage')
 

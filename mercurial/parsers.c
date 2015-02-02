@@ -115,6 +115,7 @@ static PyObject *asciilower(PyObject *self, PyObject *args)
 				"ascii", str, len, i, (i + 1),
 				"unexpected code byte");
 			PyErr_SetObject(PyExc_UnicodeDecodeError, err);
+			Py_XDECREF(err);
 			goto quit;
 		}
 		newstr[i] = lowertable[(unsigned char)c];
@@ -409,7 +410,7 @@ static PyObject *pack_dirstate(PyObject *self, PyObject *args)
 	PyObject *packobj = NULL;
 	PyObject *map, *copymap, *pl, *mtime_unset = NULL;
 	Py_ssize_t nbytes, pos, l;
-	PyObject *k, *v, *pn;
+	PyObject *k, *v = NULL, *pn;
 	char *p, *s;
 	double now;
 
@@ -526,6 +527,7 @@ static PyObject *pack_dirstate(PyObject *self, PyObject *args)
 bail:
 	Py_XDECREF(mtime_unset);
 	Py_XDECREF(packobj);
+	Py_XDECREF(v);
 	return NULL;
 }
 
@@ -816,19 +818,27 @@ static PyObject *index_clearcaches(indexObject *self)
 static PyObject *index_stats(indexObject *self)
 {
 	PyObject *obj = PyDict_New();
+	PyObject *t = NULL;
 
 	if (obj == NULL)
 		return NULL;
 
 #define istat(__n, __d) \
-	if (PyDict_SetItemString(obj, __d, PyInt_FromSsize_t(self->__n)) == -1) \
-		goto bail;
+	t = PyInt_FromSsize_t(self->__n); \
+	if (!t) \
+		goto bail; \
+	if (PyDict_SetItemString(obj, __d, t) == -1) \
+		goto bail; \
+	Py_DECREF(t);
 
 	if (self->added) {
 		Py_ssize_t len = PyList_GET_SIZE(self->added);
-		if (PyDict_SetItemString(obj, "index entries added",
-					 PyInt_FromSsize_t(len)) == -1)
+		t = PyInt_FromSsize_t(len);
+		if (!t)
 			goto bail;
+		if (PyDict_SetItemString(obj, "index entries added", t) == -1)
+			goto bail;
+		Py_DECREF(t);
 	}
 
 	if (self->raw_length != self->length - 1)
@@ -848,6 +858,7 @@ static PyObject *index_stats(indexObject *self)
 
 bail:
 	Py_XDECREF(obj);
+	Py_XDECREF(t);
 	return NULL;
 }
 
@@ -1260,6 +1271,7 @@ static PyObject *raise_revlog_error(void)
 			goto classfail;
 		}
 		Py_INCREF(errclass);
+		Py_DECREF(mod);
 	}
 
 	errobj = PyObject_CallFunction(errclass, NULL);
@@ -1690,9 +1702,11 @@ static PyObject *index_ancestors(indexObject *self, PyObject *args)
 		if (!PyInt_Check(obj)) {
 			PyErr_SetString(PyExc_TypeError,
 					"arguments must all be ints");
+			Py_DECREF(obj);
 			goto bail;
 		}
 		val = PyInt_AsLong(obj);
+		Py_DECREF(obj);
 		if (val == -1) {
 			ret = PyList_New(0);
 			goto done;
@@ -1790,9 +1804,11 @@ static PyObject *index_commonancestorsheads(indexObject *self, PyObject *args)
 		if (!PyInt_Check(obj)) {
 			PyErr_SetString(PyExc_TypeError,
 					"arguments must all be ints");
+			Py_DECREF(obj);
 			goto bail;
 		}
 		val = PyInt_AsLong(obj);
+		Py_DECREF(obj);
 		if (val == -1) {
 			ret = PyList_New(0);
 			goto done;
@@ -2266,8 +2282,16 @@ static void module_init(PyObject *mod)
 
 static int check_python_version(void)
 {
-	PyObject *sys = PyImport_ImportModule("sys");
-	long hexversion = PyInt_AsLong(PyObject_GetAttrString(sys, "hexversion"));
+	PyObject *sys = PyImport_ImportModule("sys"), *ver;
+	long hexversion;
+	if (!sys)
+		return -1;
+	ver = PyObject_GetAttrString(sys, "hexversion");
+	Py_DECREF(sys);
+	if (!ver)
+		return -1;
+	hexversion = PyInt_AsLong(ver);
+	Py_DECREF(ver);
 	/* sys.hexversion is a 32-bit number by default, so the -1 case
 	 * should only occur in unusual circumstances (e.g. if sys.hexversion
 	 * is manually set to an invalid value). */

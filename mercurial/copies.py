@@ -133,7 +133,7 @@ def _tracefile(fctx, am, limit=-1):
     for f in fctx.ancestors():
         if am.get(f.path(), None) == f.filenode():
             return f
-        if f.rev() < limit:
+        if limit >= 0 and f.linkrev() < limit and f.rev() < limit:
             return None
 
 def _dirstatecopies(d):
@@ -170,8 +170,11 @@ def _forwardcopies(a, b):
     missing = set(b.manifest().iterkeys())
     missing.difference_update(a.manifest().iterkeys())
 
+    ancestrycontext = a._repo.changelog.ancestors([b.rev()], inclusive=True)
     for f in missing:
-        ofctx = _tracefile(b[f], am, limit)
+        fctx = b[f]
+        fctx._ancestrycontext = ancestrycontext
+        ofctx = _tracefile(fctx, am, limit)
         if ofctx:
             cm[f] = ofctx.path()
 

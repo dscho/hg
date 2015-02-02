@@ -26,7 +26,7 @@ from mercurial import hg, util, context, bookmarks, error, scmutil, exchange
 from common import NoRepo, commit, converter_source, converter_sink
 
 import re
-sha1re = re.compile(r'\b[0-9a-f]{6,40}\b')
+sha1re = re.compile(r'\b[0-9a-f]{12,40}\b')
 
 class mercurial_sink(converter_sink):
     def __init__(self, ui, path):
@@ -467,7 +467,7 @@ class mercurial_source(converter_source):
     def lookuprev(self, rev):
         try:
             return hex(self.repo.lookup(rev))
-        except error.RepoError:
+        except (error.RepoError, error.LookupError):
             return None
 
     def getbookmarks(self):

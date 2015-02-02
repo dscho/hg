@@ -465,7 +465,9 @@ Test the order of operations
   9
 
 Test explicit numeric revision
+  $ log 'rev(-2)'
   $ log 'rev(-1)'
+  -1
   $ log 'rev(0)'
   0
   $ log 'rev(9)'
@@ -474,6 +476,10 @@ Test explicit numeric revision
   $ log 'rev(tip)'
   hg: parse error: rev expects a number
   [255]
+
+Test null revision
+  $ log 'ancestors(null)'
+  -1
 
   $ log 'outgoing()'
   8
@@ -703,7 +709,7 @@ check that conversion to only works
 we can use patterns when searching for tags
 
   $ log 'tag("1..*")'
-  abort: tag '1..*' does not exist
+  abort: tag '1..*' does not exist!
   [255]
   $ log 'tag("re:1..*")'
   6
@@ -714,11 +720,17 @@ we can use patterns when searching for tags
   $ log 'tag("re:0..*")'
 
   $ log 'tag(unknown)'
-  abort: tag 'unknown' does not exist
+  abort: tag 'unknown' does not exist!
   [255]
+  $ log 'tag("re:unknown")'
+  $ log 'present(tag("unknown"))'
+  $ log 'present(tag("re:unknown"))'
   $ log 'branch(unknown)'
   abort: unknown revision 'unknown'!
   [255]
+  $ log 'branch("re:unknown")'
+  $ log 'present(branch("unknown"))'
+  $ log 'present(branch("re:unknown"))'
   $ log 'user(bob)'
   2
 
@@ -765,6 +777,15 @@ we can use patterns when searching for tags
   2
   3
   1
+
+  $ log 'named("unknown")'
+  abort: namespace 'unknown' does not exist!
+  [255]
+  $ log 'named("re:unknown")'
+  abort: no namespace exists that match 'unknown'!
+  [255]
+  $ log 'present(named("unknown"))'
+  $ log 'present(named("re:unknown"))'
 
 issue2437
 

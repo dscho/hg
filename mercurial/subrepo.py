@@ -435,7 +435,7 @@ class abstractsubrepo(object):
         """
         raise NotImplementedError
 
-    def add(self, ui, match, dryrun, listsubrepos, prefix, explicitonly):
+    def add(self, ui, match, prefix, explicitonly, **opts):
         return []
 
     def addremove(self, matcher, prefix, opts, dry_run, similarity):
@@ -1648,13 +1648,17 @@ class gitsubrepo(abstractsubrepo):
         if match.anypats():
             return #No support for include/exclude yet
 
+        output = ""
         if match.always():
-            ui.write(self._gitcommand(cmd))
+            output += self._gitcommand(cmd) + '\n'
         elif match.files():
             for f in match.files():
-                ui.write(self._gitcommand(cmd + [f]))
+                output += self._gitcommand(cmd + [f]) + '\n'
         elif match(gitprefix): #Subrepo is matched
-            ui.write(self._gitcommand(cmd))
+            output += self._gitcommand(cmd) + '\n'
+
+        if output.strip():
+            ui.write(output)
 
     @annotatesubrepoerror
     def revert(self, substate, *pats, **opts):

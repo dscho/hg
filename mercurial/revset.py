@@ -31,7 +31,7 @@ def _revancestors(repo, revs, followfirst):
             revsnode = revqueue.popleft()
             heapq.heappush(h, -revsnode)
 
-        seen = set([node.nullrev])
+        seen = set()
         while h:
             current = -heapq.heappop(h)
             if current not in seen:
@@ -496,7 +496,8 @@ def bookmark(repo, subset, x):
         if kind == 'literal':
             bmrev = repo._bookmarks.get(pattern, None)
             if not bmrev:
-                raise util.Abort(_("bookmark '%s' does not exist") % bm)
+                raise error.RepoLookupError(_("bookmark '%s' does not exist")
+                                            % bm)
             bms.add(repo[bmrev].rev())
         else:
             matchrevs = set()
@@ -504,8 +505,8 @@ def bookmark(repo, subset, x):
                 if matcher(name):
                     matchrevs.add(bmrev)
             if not matchrevs:
-                raise util.Abort(_("no bookmarks exist that match '%s'")
-                                 % pattern)
+                raise error.RepoLookupError(_("no bookmarks exist"
+                                              " that match '%s'") % pattern)
             for bmrev in matchrevs:
                 bms.add(repo[bmrev].rev())
     else:
@@ -1048,7 +1049,8 @@ def _matchfiles(repo, subset, x):
                 # i18n: "_matchfiles" is a keyword
                 raise error.ParseError(_('_matchfiles expected at most one '
                                          'revision'))
-            rev = value
+            if value != '': # empty means working directory; leave rev as None
+                rev = value
         elif prefix == 'd:':
             if default is not None:
                 # i18n: "_matchfiles" is a keyword
@@ -1261,15 +1263,16 @@ def named(repo, subset, x):
     namespaces = set()
     if kind == 'literal':
         if pattern not in repo.names:
-            raise util.Abort(_("namespace '%s' does not exist") % ns)
+            raise error.RepoLookupError(_("namespace '%s' does not exist")
+                                        % ns)
         namespaces.add(repo.names[pattern])
     else:
         for name, ns in repo.names.iteritems():
             if matcher(name):
                 namespaces.add(ns)
         if not namespaces:
-            raise util.Abort(_("no namespace exists that match '%s'")
-                             % pattern)
+            raise error.RepoLookupError(_("no namespace exists"
+                                          " that match '%s'") % pattern)
 
     names = set()
     for ns in namespaces:
@@ -1544,7 +1547,7 @@ def rev(repo, subset, x):
     except (TypeError, ValueError):
         # i18n: "rev" is a keyword
         raise error.ParseError(_("rev expects a number"))
-    if l not in fullreposet(repo):
+    if l not in fullreposet(repo) and l != node.nullrev:
         return baseset()
     return subset & baseset([l])
 
@@ -1815,7 +1818,8 @@ def tag(repo, subset, x):
             # avoid resolving all tags
             tn = repo._tagscache.tags.get(pattern, None)
             if tn is None:
-                raise util.Abort(_("tag '%s' does not exist") % pattern)
+                raise error.RepoLookupError(_("tag '%s' does not exist")
+                                            % pattern)
             s = set([repo[tn].rev()])
         else:
             s = set([cl.rev(n) for t, n in repo.tagslist() if matcher(t)])
