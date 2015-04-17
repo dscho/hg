@@ -177,18 +177,21 @@ proc getcommits {rargs} {
     set ncmupdate 1
     set limit 0
     set revargs {}
+    set showhidden no
     for {set i 0} {$i < [llength $rargs]} {incr i} {
 	set opt [lindex $rargs $i]
-	if {$opt == "--limit"} {
+	switch -- $opt --limit {
 	    incr i
 	    set limit [lindex $rargs $i]
-	} else {
+	} --hidden {
+	    set showhidden yes
+	} default {
 	    lappend revargs $opt
 	}
     }
     if [catch {
-	set parse_args [concat --default HEAD $revargs]
-	set parse_temp [eval exec {$env(HG)} --config ui.report_untrusted=false debug-rev-parse $parse_args]
+	set parse_args [concat tip $revargs]
+	set parse_temp [eval exec {$env(HG)} --config ui.report_untrusted=false log --template '{node}\n' $parse_args]
 	regsub -all "\r\n" $parse_temp "\n" parse_temp
 	set parsed_args [split $parse_temp "\n"]
     } err] {
@@ -200,6 +203,9 @@ proc getcommits {rargs} {
     }
     if {$limit > 0} {
 	set parsed_args [concat -n $limit $parsed_args]
+    }
+    if {$showhidden} {
+	append parsed_args --hidden
     }
     if [catch {
 	set commfd [open "|{$env(HG)} --config ui.report_untrusted=false debug-rev-list --header --topo-order --parents $parsed_args" r]
@@ -331,7 +337,7 @@ proc readcommit {id} {
 
 proc parsecommit {id contents listed olds} {
     global commitinfo children nchildren parents nparents cdate ncleft
-    global firstparents
+    global firstparents obsolete
 
     set inhdr 1
     set comment {}
@@ -369,21 +375,25 @@ proc parsecommit {id contents listed olds} {
 		set inhdr 0
 	    } else {
 		set tag [lindex $line 0]
-		if {$tag == "author"} {
+		switch -- $tag "author" {
 		    set x [expr {[llength $line] - 2}]
 		    set audate [lindex $line $x]
 		    set auname [join [lrange $line 1 [expr {$x - 1}]]]
-		} elseif {$tag == "committer"} {
+		} "committer" {
 		    set x [expr {[llength $line] - 2}]
 		    set comdate [lindex $line $x]
 		    set comname [join [lrange $line 1 [expr {$x - 1}]]]
-		} elseif {$tag == "revision"} {
+		} "revision" {
 		    set rev [lindex $line 1]
-        } elseif {$tag == "branch"} {
+		} "branch" {
 		    set branch [join [lrange $line 1 end]]
-        } elseif {$tag == "bookmark"} {
+		} "bookmark" {
 		    set bookmark [join [lrange $line 1 end]]
-        }
+		} "obsolete" {
+		    set obsolete($id) ""
+		} "phase" {
+		    set phase [lindex $line 1 end]
+		}
 	    }
 	} else {
 	    if {$comment == {}} {
@@ -407,7 +417,7 @@ proc parsecommit {id contents listed olds} {
 	set comdate [clock format $comdate]
     }
     set commitinfo($id) [list $headline $auname $audate \
-			     $comname $comdate $comment $rev $branch $bookmark]
+			     $comname $comdate $comment $rev $branch $bookmark $phase]
 
     if {[info exists firstparents]} {
         set i [lsearch $firstparents $id]
@@ -1133,7 +1143,7 @@ proc drawcommitline {level} {
     global lineno lthickness mainline mainlinearrow sidelines
     global commitlisted rowtextx idpos lastuse displist
     global oldnlines olddlevel olddisplist
-    global aucolormap curid curidfont
+    global aucolormap curid curidfont obsolete
 
     incr numcommits
     incr lineno
@@ -1141,13 +1151,26 @@ proc drawcommitline {level} {
     set lastuse($id) $lineno
     set lineid($lineno) $id
     set idline($id) $lineno
-    set ofill [expr {[info exists commitlisted($id)]? "blue": "white"}]
+    set shape oval
+    set outline #000080
+    set ofill [expr {[info exists commitlisted($id)]? "#7f7fff": "white"}]
     if {![info exists commitinfo($id)]} {
 	readcommit $id
 	if {![info exists commitinfo($id)]} {
 	    set commitinfo($id) {"No commit information available"}
 	    set nparents($id) 0
 	}
+    } else {
+	switch [lindex $commitinfo($id) 9] secret {
+	    set shape rect
+	} public {
+	    set outline black
+	    set ofill blue
+	}
+    }
+    if {[info exists obsolete($id)]} {
+	set outline darkgrey
+	set ofill lightgrey
     }
     assigncolor $id
     set currentparents {}
@@ -1175,9 +1198,9 @@ proc drawcommitline {level} {
     }
     drawlines $id 0
     set orad [expr {$linespc / 3}]
-    set t [$canv create oval [expr $x - $orad] [expr $y1 - $orad] \
+    set t [$canv create $shape [expr $x - $orad] [expr $y1 - $orad] \
 	       [expr $x + $orad - 1] [expr $y1 + $orad - 1] \
-	       -fill $ofill -outline black -width 1]
+	       -fill $ofill -outline $outline -width 1]
     $canv raise $t
     $canv bind $t <1> {selcanvline {} %x %y}
     set xt [xcoord [llength $displist] $level $lineno]
@@ -2493,6 +2516,9 @@ proc selectline {l isnew} {
     }
     $ctext insert end "User: [lindex $info 1]\n"
     $ctext insert end "Date: [lindex $info 2]\n"
+    if {[lindex $info 3] ne ""} {
+	$ctext insert end "Committer: [lindex $info 3]\n"
+    }
     if {[info exists idbookmarks($id)]} {
 	$ctext insert end "Bookmarks:"
 	foreach bookmark $idbookmarks($id) {
@@ -2520,6 +2546,12 @@ proc selectline {l isnew} {
 	    append comment "Child:  [commit_descriptor $c]\n"
 	}
     }
+
+    if {[lindex $info 9] eq "secret"} {
+	# for now, display phase for secret changesets only
+	append comment "Phase: [lindex $info 9]\n"
+    }
+
     append comment "\n"
     append comment [lindex $info 5]
 
@@ -4040,13 +4072,15 @@ proc doquit {} {
 
 proc getconfig {} {
     global env
-
-    set lines [exec $env(HG) debug-config]
-    regsub -all "\r\n" $lines "\n" config
     set config {}
-    foreach line [split $lines "\n"] {
-	regsub "^(k|v)=" $line "" line
-	lappend config $line
+
+    set lines [exec $env(HG) debugconfig]
+    foreach line [split $lines \n] {
+	set line [string trimright $line \r]
+	if {[string match hgk.* $line]} {
+	    regexp {(.*)=(.*)} $line - k v
+	    lappend config $k $v
+	}
     }
     return $config
 }
@@ -4110,8 +4144,9 @@ set redisplaying 0
 set stuffsaved 0
 set patchnum 0
 
+set config(hgk.vdiff) ""
 array set config [getconfig]
-set hgvdiff $config(vdiff)
+set hgvdiff $config(hgk.vdiff)
 setcoords
 makewindow
 readrefs

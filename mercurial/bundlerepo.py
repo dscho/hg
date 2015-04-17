@@ -15,7 +15,7 @@ from node import nullid
 from i18n import _
 import os, tempfile, shutil
 import changegroup, util, mdiff, discovery, cmdutil, scmutil, exchange
-import localrepo, changelog, manifest, filelog, revlog, error, phases
+import localrepo, changelog, manifest, filelog, revlog, error, phases, bundle2
 
 class bundlerevlog(revlog.revlog):
     def __init__(self, opener, indexfile, bundle, linkmapper):
@@ -177,9 +177,6 @@ class bundlefilelog(bundlerevlog, filelog.filelog):
     def baserevision(self, nodeorrev):
         return filelog.filelog.revision(self, nodeorrev)
 
-    def _file(self, f):
-        self._repo.file(f)
-
 class bundlepeer(localrepo.localpeer):
     def canpush(self):
         return False
@@ -219,7 +216,7 @@ class bundlerepository(localrepo.localrepository):
 
         self.tempfile = None
         f = util.posixfile(bundlename, "rb")
-        self.bundle = exchange.readbundle(ui, f, bundlename)
+        self.bundlefile = self.bundle = exchange.readbundle(ui, f, bundlename)
         if self.bundle.compressed():
             fdtemp, temp = self.vfs.mkstemp(prefix="hg-bundle-",
                                             suffix=".hg10un")
@@ -237,7 +234,27 @@ class bundlerepository(localrepo.localrepository):
                 fptemp.close()
 
             f = self.vfs.open(self.tempfile, mode="rb")
-            self.bundle = exchange.readbundle(ui, f, bundlename, self.vfs)
+            self.bundlefile = self.bundle = exchange.readbundle(ui, f,
+                                                                bundlename,
+                                                                self.vfs)
+
+        if isinstance(self.bundle, bundle2.unbundle20):
+            cgparts = [part for part in self.bundle.iterparts()
+                       if (part.type == 'changegroup')
+                       and (part.params.get('version', '01')
+                            in changegroup.packermap)]
+
+            if not cgparts:
+                raise util.Abort('No changegroups found')
+            version = cgparts[0].params.get('version', '01')
+            cgparts = [p for p in cgparts
+                       if p.params.get('version', '01') == version]
+            if len(cgparts) > 1:
+                raise NotImplementedError("Can't process multiple changegroups")
+            part = cgparts[0]
+
+            part.seek(0)
+            self.bundle = changegroup.packermap[version][1](part, 'UN')
 
         # dict with the mapping 'filename' -> position in the bundle
         self.bundlefilespos = {}
@@ -303,7 +320,7 @@ class bundlerepository(localrepo.localrepository):
 
     def close(self):
         """Close assigned bundle file immediately."""
-        self.bundle.close()
+        self.bundlefile.close()
         if self.tempfile is not None:
             self.vfs.unlink(self.tempfile)
         if self._tempparent:
@@ -409,7 +426,10 @@ def getremotechanges(ui, repo, other, onlyheads=None, bundlename=None,
             rheads = None
         else:
             cg = other.changegroupsubset(incoming, rheads, 'incoming')
-        bundletype = localrepo and "HG10BZ" or "HG10UN"
+        if localrepo:
+            bundletype = "HG10BZ"
+        else:
+            bundletype = "HG10UN"
         fname = bundle = changegroup.writebundle(ui, cg, bundlename, bundletype)
         # keep written bundle?
         if bundlename:

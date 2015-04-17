@@ -10,6 +10,7 @@ import util, cmdutil, error
 from i18n import _, gettext
 
 _extensions = {}
+_aftercallbacks = {}
 _order = []
 _ignore = ['hbisect', 'bookmarks', 'parentrevspec', 'interhg', 'inotify']
 
@@ -87,6 +88,8 @@ def load(ui, name, path):
             mod = importh(name)
     _extensions[shortname] = mod
     _order.append(shortname)
+    for fn in _aftercallbacks.get(shortname, []):
+        fn(loaded=True)
     return mod
 
 def loadall(ui):
@@ -123,7 +126,45 @@ def loadall(ui):
                     raise
                 extsetup() # old extsetup with no ui argument
 
-def wrapcommand(table, command, wrapper):
+    # Call aftercallbacks that were never met.
+    for shortname in _aftercallbacks:
+        if shortname in _extensions:
+            continue
+
+        for fn in _aftercallbacks[shortname]:
+            fn(loaded=False)
+
+def afterloaded(extension, callback):
+    '''Run the specified function after a named extension is loaded.
+
+    If the named extension is already loaded, the callback will be called
+    immediately.
+
+    If the named extension never loads, the callback will be called after
+    all extensions have been loaded.
+
+    The callback receives the named argument ``loaded``, which is a boolean
+    indicating whether the dependent extension actually loaded.
+    '''
+
+    if extension in _extensions:
+        callback(loaded=True)
+    else:
+        _aftercallbacks.setdefault(extension, []).append(callback)
+
+def bind(func, *args):
+    '''Partial function application
+
+      Returns a new function that is the partial application of args and kwargs
+      to func.  For example,
+
+          f(1, 2, bar=3) === bind(f, 1)(2, bar=3)'''
+    assert callable(func)
+    def closure(*a, **kw):
+        return func(*(args + a), **kw)
+    return closure
+
+def wrapcommand(table, command, wrapper, synopsis=None, docstring=None):
     '''Wrap the command named `command' in table
 
     Replace command in the command table with wrapper. The wrapped command will
@@ -135,6 +176,22 @@ def wrapcommand(table, command, wrapper):
 
     where orig is the original (wrapped) function, and *args, **kwargs
     are the arguments passed to it.
+
+    Optionally append to the command synopsis and docstring, used for help.
+    For example, if your extension wraps the ``bookmarks`` command to add the
+    flags ``--remote`` and ``--all`` you might call this function like so:
+
+      synopsis = ' [-a] [--remote]'
+      docstring = """
+
+      The ``remotenames`` extension adds the ``--remote`` and ``--all`` (``-a``)
+      flags to the bookmarks command. Either flag will show the remote bookmarks
+      known to the repository; ``--remote`` will also supress the output of the
+      local bookmarks.
+      """
+
+      extensions.wrapcommand(commands.table, 'bookmarks', exbookmarks,
+                             synopsis, docstring)
     '''
     assert callable(wrapper)
     aliases, entry = cmdutil.findcmd(command, table)
@@ -144,15 +201,19 @@ def wrapcommand(table, command, wrapper):
             break
 
     origfn = entry[0]
-    def wrap(*args, **kwargs):
-        return util.checksignature(wrapper)(
-            util.checksignature(origfn), *args, **kwargs)
+    wrap = bind(util.checksignature(wrapper), util.checksignature(origfn))
 
-    wrap.__doc__ = getattr(origfn, '__doc__')
     wrap.__module__ = getattr(origfn, '__module__')
+
+    doc = getattr(origfn, '__doc__')
+    if docstring is not None:
+        doc += docstring
+    wrap.__doc__ = doc
 
     newentry = list(entry)
     newentry[0] = wrap
+    if synopsis is not None:
+        newentry[2] += synopsis
     table[key] = tuple(newentry)
     return entry
 
@@ -190,12 +251,10 @@ def wrapfunction(container, funcname, wrapper):
     subclass trick.
     '''
     assert callable(wrapper)
-    def wrap(*args, **kwargs):
-        return wrapper(origfn, *args, **kwargs)
 
     origfn = getattr(container, funcname)
     assert callable(origfn)
-    setattr(container, funcname, wrap)
+    setattr(container, funcname, bind(wrapper, origfn))
     return origfn
 
 def _disabledpaths(strip_init=False):

@@ -7,10 +7,10 @@
 
 from i18n import _
 from mercurial.node import nullrev
-import util, error, osutil, revset, similar, encoding, phases, parsers
+import util, error, osutil, revset, similar, encoding, phases
 import pathutil
 import match as matchmod
-import os, errno, re, glob, tempfile
+import os, errno, re, glob, tempfile, shutil, stat, inspect
 
 if os.name == 'nt':
     import scmwindows as scmplatform
@@ -172,6 +172,40 @@ class casecollisionauditor(object):
         self._loweredfiles.add(fl)
         self._newfiles.add(f)
 
+def develwarn(tui, msg):
+    """issue a developer warning message"""
+    msg = 'devel-warn: ' + msg
+    if tui.tracebackflag:
+        util.debugstacktrace(msg, 2)
+    else:
+        curframe = inspect.currentframe()
+        calframe = inspect.getouterframes(curframe, 2)
+        tui.write_err('%s at: %s:%s (%s)\n' % ((msg,) + calframe[2][1:4]))
+
+def filteredhash(repo, maxrev):
+    """build hash of filtered revisions in the current repoview.
+
+    Multiple caches perform up-to-date validation by checking that the
+    tiprev and tipnode stored in the cache file match the current repository.
+    However, this is not sufficient for validating repoviews because the set
+    of revisions in the view may change without the repository tiprev and
+    tipnode changing.
+
+    This function hashes all the revs filtered from the view and returns
+    that SHA-1 digest.
+    """
+    cl = repo.changelog
+    if not cl.filteredrevs:
+        return None
+    key = None
+    revs = sorted(r for r in cl.filteredrevs if r <= maxrev)
+    if revs:
+        s = util.sha1()
+        for rev in revs:
+            s.update('%s;' % rev)
+        key = s.digest()
+    return key
+
 class abstractvfs(object):
     """Abstract base class; cannot be instantiated"""
 
@@ -316,6 +350,31 @@ class abstractvfs(object):
     def readlink(self, path):
         return os.readlink(self.join(path))
 
+    def removedirs(self, path=None):
+        """Remove a leaf directory and all empty intermediate ones
+        """
+        return util.removedirs(self.join(path))
+
+    def rmtree(self, path=None, ignore_errors=False, forcibly=False):
+        """Remove a directory tree recursively
+
+        If ``forcibly``, this tries to remove READ-ONLY files, too.
+        """
+        if forcibly:
+            def onerror(function, path, excinfo):
+                if function is not os.remove:
+                    raise
+                # read-only files cannot be unlinked under Windows
+                s = os.stat(path)
+                if (s.st_mode & stat.S_IWRITE) != 0:
+                    raise
+                os.chmod(path, stat.S_IMODE(s.st_mode) | stat.S_IWRITE)
+                os.remove(path)
+        else:
+            onerror = None
+        return shutil.rmtree(self.join(path),
+                             ignore_errors=ignore_errors, onerror=onerror)
+
     def setflags(self, path, l, x):
         return util.setflags(self.join(path), l, x)
 
@@ -330,6 +389,22 @@ class abstractvfs(object):
 
     def utime(self, path=None, t=None):
         return os.utime(self.join(path), t)
+
+    def walk(self, path=None, onerror=None):
+        """Yield (dirpath, dirs, files) tuple for each directories under path
+
+        ``dirpath`` is relative one from the root of this vfs. This
+        uses ``os.sep`` as path separator, even you specify POSIX
+        style ``path``.
+
+        "The root of this vfs" is represented as empty ``dirpath``.
+        """
+        root = os.path.normpath(self.join(None))
+        # when dirpath == root, dirpath[prefixlen:] becomes empty
+        # because len(dirpath) < prefixlen.
+        prefixlen = len(pathutil.normasprefix(root))
+        for dirpath, dirs, files in os.walk(self.join(path), onerror=onerror):
+            yield (dirpath[prefixlen:], dirs, files)
 
 class vfs(abstractvfs):
     '''Operate files relative to a base directory
@@ -445,9 +520,9 @@ class vfs(abstractvfs):
         else:
             self.write(dst, src)
 
-    def join(self, path):
+    def join(self, path, *insidef):
         if path:
-            return os.path.join(self.base, path)
+            return os.path.join(self.base, path, *insidef)
         else:
             return self.base
 
@@ -475,9 +550,9 @@ class filtervfs(abstractvfs, auditvfs):
     def __call__(self, path, *args, **kwargs):
         return self.vfs(self._filter(path), *args, **kwargs)
 
-    def join(self, path):
+    def join(self, path, *insidef):
         if path:
-            return self.vfs.join(self._filter(path))
+            return self.vfs.join(self._filter(self.vfs.reljoin(path, *insidef)))
         else:
             return self.vfs.join(path)
 
@@ -582,6 +657,13 @@ def rcpath():
             _rcpath = osrcpath()
     return _rcpath
 
+def intrev(repo, rev):
+    """Return integer for a given revision that can be used in comparison or
+    arithmetic operation"""
+    if rev is None:
+        return len(repo)
+    return rev
+
 def revsingle(repo, revspec, default='.'):
     if not revspec and revspec != 0:
         return repo[default]
@@ -628,12 +710,22 @@ def revrange(repo, revs):
         return repo[val].rev()
 
     seen, l = set(), revset.baseset([])
+
+    revsetaliases = [alias for (alias, _) in
+                     repo.ui.configitems("revsetalias")]
+
     for spec in revs:
         if l and not seen:
             seen = set(l)
         # attempt to parse old-style ranges first to deal with
         # things like old-tag which contain query metacharacters
         try:
+            # ... except for revset aliases without arguments. These
+            # should be parsed as soon as possible, because they might
+            # clash with a hash prefix.
+            if spec in revsetaliases:
+                raise error.RepoLookupError
+
             if isinstance(spec, int):
                 seen.add(spec)
                 l = l + revset.baseset([spec])
@@ -641,6 +733,9 @@ def revrange(repo, revs):
 
             if _revrangesep in spec:
                 start, end = spec.split(_revrangesep, 1)
+                if start in revsetaliases or end in revsetaliases:
+                    raise error.RepoLookupError
+
                 start = revfix(repo, start, 0)
                 end = revfix(repo, end, len(repo) - 1)
                 if end == nullrev and start < 0:
@@ -672,11 +767,11 @@ def revrange(repo, revs):
         # fall through to new-style queries if old-style fails
         m = revset.match(repo.ui, spec, repo)
         if seen or l:
-            dl = [r for r in m(repo, revset.spanset(repo)) if r not in seen]
+            dl = [r for r in m(repo) if r not in seen]
             l = l + revset.baseset(dl)
             seen.update(dl)
         else:
-            l = m(repo, revset.spanset(repo))
+            l = m(repo)
 
     return l
 
@@ -710,8 +805,10 @@ def matchandpats(ctx, pats=[], opts={}, globbed=False, default='relpath'):
     m = ctx.match(pats, opts.get('include'), opts.get('exclude'),
                          default)
     def badfn(f, msg):
-        ctx._repo.ui.warn("%s: %s\n" % (m.rel(f), msg))
+        ctx.repo().ui.warn("%s: %s\n" % (m.rel(f), msg))
     m.bad = badfn
+    if m.always():
+        pats = []
     return m, pats
 
 def match(ctx, pats=[], opts={}, globbed=False, default='relpath'):
@@ -1061,48 +1158,3 @@ class filecache(object):
             del obj.__dict__[self.name]
         except KeyError:
             raise AttributeError(self.name)
-
-class dirs(object):
-    '''a multiset of directory names from a dirstate or manifest'''
-
-    def __init__(self, map, skip=None):
-        self._dirs = {}
-        addpath = self.addpath
-        if util.safehasattr(map, 'iteritems') and skip is not None:
-            for f, s in map.iteritems():
-                if s[0] != skip:
-                    addpath(f)
-        else:
-            for f in map:
-                addpath(f)
-
-    def addpath(self, path):
-        dirs = self._dirs
-        for base in finddirs(path):
-            if base in dirs:
-                dirs[base] += 1
-                return
-            dirs[base] = 1
-
-    def delpath(self, path):
-        dirs = self._dirs
-        for base in finddirs(path):
-            if dirs[base] > 1:
-                dirs[base] -= 1
-                return
-            del dirs[base]
-
-    def __iter__(self):
-        return self._dirs.iterkeys()
-
-    def __contains__(self, d):
-        return d in self._dirs
-
-if util.safehasattr(parsers, 'dirs'):
-    dirs = parsers.dirs
-
-def finddirs(path):
-    pos = path.rfind('/')
-    while pos != -1:
-        yield path[:pos]
-        pos = path.rfind('/', 0, pos)

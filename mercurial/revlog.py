@@ -277,6 +277,8 @@ class revlog(object):
 
     def tip(self):
         return self.node(len(self.index) - 2)
+    def __contains__(self, rev):
+        return 0 <= rev < len(self)
     def __len__(self):
         return len(self.index) - 1
     def __iter__(self):
@@ -722,6 +724,9 @@ class revlog(object):
         except AttributeError:
             return self._headrevs()
 
+    def computephases(self, roots):
+        return self.index.computephases(roots)
+
     def _headrevs(self):
         count = len(self)
         if not count:
@@ -1124,7 +1129,12 @@ class revlog(object):
                               % self.indexfile)
 
         trindex = trinfo[2]
-        dataoff = self.start(trindex)
+        if trindex is not None:
+            dataoff = self.start(trindex)
+        else:
+            # revlog was stripped at start of transaction, use all leftover data
+            trindex = len(self) - 1
+            dataoff = self.end(-2)
 
         tr.add(self.datafile, dataoff)
 
@@ -1231,8 +1241,18 @@ class revlog(object):
             if dfh:
                 dfh.flush()
             ifh.flush()
-            basetext = self.revision(self.node(cachedelta[0]))
-            btext[0] = mdiff.patch(basetext, cachedelta[1])
+            baserev = cachedelta[0]
+            delta = cachedelta[1]
+            # special case deltas which replace entire base; no need to decode
+            # base revision. this neatly avoids censored bases, which throw when
+            # they're decoded.
+            hlen = struct.calcsize(">lll")
+            if delta[:hlen] == mdiff.replacediffheader(self.rawsize(baserev),
+                                                       len(delta) - hlen):
+                btext[0] = delta[hlen:]
+            else:
+                basetext = self.revision(self.node(baserev))
+                btext[0] = mdiff.patch(basetext, delta)
             try:
                 self.checkhash(btext[0], p1, p2, node)
                 if flags & REVIDX_ISCENSORED:
@@ -1249,8 +1269,14 @@ class revlog(object):
                 delta = cachedelta[1]
             else:
                 t = buildtext()
-                ptext = self.revision(self.node(rev))
-                delta = mdiff.textdiff(ptext, t)
+                if self.iscensored(rev):
+                    # deltas based on a censored revision must replace the
+                    # full content in one patch, so delta works everywhere
+                    header = mdiff.replacediffheader(self.rawsize(rev), len(t))
+                    delta = header + t
+                else:
+                    ptext = self.revision(self.node(rev))
+                    delta = mdiff.textdiff(ptext, t)
             data = self.compress(delta)
             l = len(data[1]) + len(data[0])
             if basecache[0] == rev:
@@ -1368,7 +1394,10 @@ class revlog(object):
             transaction.add(self.indexfile, isize, r)
             transaction.add(self.datafile, end)
             dfh = self.opener(self.datafile, "a")
-
+        def flush():
+            if dfh:
+                dfh.flush()
+            ifh.flush()
         try:
             # loop through our set of deltas
             chain = None
@@ -1401,9 +1430,24 @@ class revlog(object):
                                       _('unknown delta base'))
 
                 baserev = self.rev(deltabase)
+
+                if baserev != nullrev and self.iscensored(baserev):
+                    # if base is censored, delta must be full replacement in a
+                    # single patch operation
+                    hlen = struct.calcsize(">lll")
+                    oldlen = self.rawsize(baserev)
+                    newlen = len(delta) - hlen
+                    if delta[:hlen] != mdiff.replacediffheader(oldlen, newlen):
+                        raise error.CensoredBaseError(self.indexfile,
+                                                      self.node(baserev))
+
+                flags = REVIDX_DEFAULT_FLAGS
+                if self._peek_iscensored(baserev, delta, flush):
+                    flags |= REVIDX_ISCENSORED
+
                 chain = self._addrevision(node, None, transaction, link,
-                                          p1, p2, REVIDX_DEFAULT_FLAGS,
-                                          (baserev, delta), ifh, dfh)
+                                          p1, p2, flags, (baserev, delta),
+                                          ifh, dfh)
                 if not dfh and not self._inline:
                     # addrevision switched from inline to conventional
                     # reopen the index
@@ -1416,6 +1460,14 @@ class revlog(object):
             ifh.close()
 
         return content
+
+    def iscensored(self, rev):
+        """Check if a file revision is censored."""
+        return False
+
+    def _peek_iscensored(self, baserev, delta, flush):
+        """Quickly check if a delta produces a censored revision."""
+        return False
 
     def getstrippoint(self, minlink):
         """find the minimum rev that must be stripped to strip the linkrev

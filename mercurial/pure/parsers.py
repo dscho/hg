@@ -5,30 +5,19 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from mercurial.node import bin, nullid
-from mercurial import util
+from mercurial.node import nullid
 import struct, zlib, cStringIO
 
 _pack = struct.pack
 _unpack = struct.unpack
 _compress = zlib.compress
 _decompress = zlib.decompress
-_sha = util.sha1
 
 # Some code below makes tuples directly because it's more convenient. However,
 # code outside this module should always use dirstatetuple.
 def dirstatetuple(*x):
     # x is a tuple
     return x
-
-def parse_manifest(mfdict, fdict, lines):
-    for l in lines.splitlines():
-        f, n = l.split('\0')
-        if len(n) > 40:
-            fdict[f] = n[40:]
-            mfdict[f] = bin(n[:40])
-        else:
-            mfdict[f] = bin(n)
 
 def parse_index2(data, inline):
     def gettype(q):

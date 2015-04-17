@@ -10,6 +10,7 @@ from node import hex, nullid
 import errno, urllib
 import util, scmutil, changegroup, base85, error
 import discovery, phases, obsolete, bookmarks as bookmod, bundle2, pushkey
+import lock as lockmod
 
 def readbundle(ui, fh, fname, vfs=None):
     header = changegroup.readexactly(fh, 4)
@@ -32,8 +33,8 @@ def readbundle(ui, fh, fname, vfs=None):
         if alg is None:
             alg = changegroup.readexactly(fh, 2)
         return changegroup.cg1unpacker(fh, alg)
-    elif version == '2Y':
-        return bundle2.unbundle20(ui, fh, header=magic + version)
+    elif version.startswith('2'):
+        return bundle2.getunbundler(ui, fh, header=magic + version)
     else:
         raise util.Abort(_('%s: unknown bundle version %s') % (fname, version))
 
@@ -49,8 +50,16 @@ def buildobsmarkerspart(bundler, markers):
         if version is None:
             raise ValueError('bundler do not support common obsmarker format')
         stream = obsolete.encodemarkers(markers, True, version=version)
-        return bundler.newpart('b2x:obsmarkers', data=stream)
+        return bundler.newpart('obsmarkers', data=stream)
     return None
+
+def _canusebundle2(op):
+    """return true if a pull/push can use bundle2
+
+    Feel free to nuke this function when we drop the experimental option"""
+    return (op.repo.ui.configbool('experimental', 'bundle2-exp', False)
+            and op.remote.capable('bundle2'))
+
 
 class pushoperation(object):
     """A object that represent a single push operation
@@ -192,8 +201,13 @@ def push(repo, remote, force=False, revs=None, newbranch=False, bookmarks=()):
     if not pushop.remote.canpush():
         raise util.Abort(_("destination does not support push"))
     # get local lock as we might write phase data
-    locallock = None
+    localwlock = locallock = None
     try:
+        # bundle2 push may receive a reply bundle touching bookmarks or other
+        # things requiring the wlock. Take it now to ensure proper ordering.
+        maypushback = pushop.ui.configbool('experimental', 'bundle2.pushback')
+        if _canusebundle2(pushop) and maypushback:
+            localwlock = pushop.repo.wlock()
         locallock = pushop.repo.lock()
         pushop.locallocked = True
     except IOError, err:
@@ -217,9 +231,7 @@ def push(repo, remote, force=False, revs=None, newbranch=False, bookmarks=()):
             lock = pushop.remote.lock()
         try:
             _pushdiscovery(pushop)
-            if (pushop.repo.ui.configbool('experimental', 'bundle2-exp',
-                                          False)
-                and pushop.remote.capable('bundle2-exp')):
+            if _canusebundle2(pushop):
                 _pushbundle2(pushop)
             _pushchangeset(pushop)
             _pushsyncphase(pushop)
@@ -235,6 +247,8 @@ def push(repo, remote, force=False, revs=None, newbranch=False, bookmarks=()):
             pushop.trmanager.release()
         if locallock is not None:
             locallock.release()
+        if localwlock is not None:
+            localwlock.release()
 
     return pushop
 
@@ -421,7 +435,7 @@ b2partsgenorder = []
 # This exists to help extensions wrap steps if necessary
 b2partsgenmapping = {}
 
-def b2partsgenerator(stepname):
+def b2partsgenerator(stepname, idx=None):
     """decorator for function generating bundle2 part
 
     The function is added to the step -> function mapping and appended to the
@@ -433,7 +447,10 @@ def b2partsgenerator(stepname):
     def dec(func):
         assert stepname not in b2partsgenmapping
         b2partsgenmapping[stepname] = func
-        b2partsgenorder.append(stepname)
+        if idx is None:
+            b2partsgenorder.append(stepname)
+        else:
+            b2partsgenorder.insert(idx, stepname)
         return func
     return dec
 
@@ -453,10 +470,10 @@ def _pushb2ctx(pushop, bundler):
                                      pushop.remote,
                                      pushop.outgoing)
     if not pushop.force:
-        bundler.newpart('b2x:check:heads', data=iter(pushop.remoteheads))
+        bundler.newpart('check:heads', data=iter(pushop.remoteheads))
     b2caps = bundle2.bundle2caps(pushop.remote)
     version = None
-    cgversions = b2caps.get('b2x:changegroup')
+    cgversions = b2caps.get('changegroup')
     if not cgversions:  # 3.1 and 3.2 ship with an empty value
         cg = changegroup.getlocalchangegroupraw(pushop.repo, 'push',
                                                 pushop.outgoing)
@@ -468,7 +485,7 @@ def _pushb2ctx(pushop, bundler):
         cg = changegroup.getlocalchangegroupraw(pushop.repo, 'push',
                                                 pushop.outgoing,
                                                 version=version)
-    cgpart = bundler.newpart('b2x:changegroup', data=cg)
+    cgpart = bundler.newpart('changegroup', data=cg)
     if version is not None:
         cgpart.addparam('version', version)
     def handlereply(op):
@@ -484,13 +501,13 @@ def _pushb2phases(pushop, bundler):
     if 'phases' in pushop.stepsdone:
         return
     b2caps = bundle2.bundle2caps(pushop.remote)
-    if not 'b2x:pushkey' in b2caps:
+    if not 'pushkey' in b2caps:
         return
     pushop.stepsdone.add('phases')
     part2node = []
     enc = pushkey.encode
     for newremotehead in pushop.outdatedphases:
-        part = bundler.newpart('b2x:pushkey')
+        part = bundler.newpart('pushkey')
         part.addparam('namespace', enc('phases'))
         part.addparam('key', enc(newremotehead.hex()))
         part.addparam('old', enc(str(phases.draft)))
@@ -527,13 +544,13 @@ def _pushb2bookmarks(pushop, bundler):
     if 'bookmarks' in pushop.stepsdone:
         return
     b2caps = bundle2.bundle2caps(pushop.remote)
-    if 'b2x:pushkey' not in b2caps:
+    if 'pushkey' not in b2caps:
         return
     pushop.stepsdone.add('bookmarks')
     part2book = []
     enc = pushkey.encode
     for book, old, new in pushop.outbookmarks:
-        part = bundler.newpart('b2x:pushkey')
+        part = bundler.newpart('pushkey')
         part.addparam('namespace', enc('bookmarks'))
         part.addparam('key', enc(book))
         part.addparam('old', enc(old))
@@ -577,7 +594,7 @@ def _pushbundle2(pushop):
     # create reply capability
     capsblob = bundle2.encodecaps(bundle2.getrepocaps(pushop.repo,
                                                       allowpushback=pushback))
-    bundler.newpart('b2x:replycaps', data=capsblob)
+    bundler.newpart('replycaps', data=capsblob)
     replyhandlers = []
     for partgenname in b2partsgenorder:
         partgen = b2partsgenmapping[partgenname]
@@ -845,15 +862,6 @@ class transactionmanager(object):
     def close(self):
         """close transaction if created"""
         if self._tr is not None:
-            repo = self.repo
-            p = lambda: self._tr.writepending() and repo.root or ""
-            repo.hook('b2x-pretransactionclose', throw=True, pending=p,
-                      **self._tr.hookargs)
-            hookargs = dict(self._tr.hookargs)
-            def runhooks():
-                repo.hook('b2x-transactionclose', **hookargs)
-            self._tr.addpostclose('b2x-hook-transactionclose',
-                                  lambda tr: repo._afterlock(runhooks))
             self._tr.close()
 
     def release(self):
@@ -876,8 +884,7 @@ def pull(repo, remote, heads=None, force=False, bookmarks=()):
     try:
         pullop.trmanager = transactionmanager(repo, 'pull', remote.url())
         _pulldiscovery(pullop)
-        if (pullop.repo.ui.configbool('experimental', 'bundle2-exp', False)
-            and pullop.remote.capable('bundle2-exp')):
+        if _canusebundle2(pullop):
             _pullbundle2(pullop)
         _pullchangeset(pullop)
         _pullphase(pullop)
@@ -970,7 +977,7 @@ def _pullbundle2(pullop):
     kwargs['common'] = pullop.common
     kwargs['heads'] = pullop.heads or pullop.rheads
     kwargs['cg'] = pullop.fetch
-    if 'b2x:listkeys' in remotecaps:
+    if 'listkeys' in remotecaps:
         kwargs['listkeys'] = ['phase', 'bookmarks']
     if not pullop.fetch:
         pullop.repo.ui.status(_("no changes found\n"))
@@ -984,8 +991,6 @@ def _pullbundle2(pullop):
             kwargs['obsmarkers'] = True
             pullop.stepsdone.add('obsmarkers')
     _pullbundle2extraprepare(pullop, kwargs)
-    if kwargs.keys() == ['format']:
-        return # nothing to pull
     bundle = pullop.remote.getbundle('pull', **kwargs)
     try:
         op = bundle2.processbundle(pullop.repo, bundle, pullop.gettransaction)
@@ -1125,7 +1130,7 @@ def _pullobsolete(pullop):
 
 def caps20to10(repo):
     """return a set with appropriate options to use bundle20 during getbundle"""
-    caps = set(['HG2Y'])
+    caps = set(['HG20'])
     capsblob = bundle2.encodecaps(bundle2.getrepocaps(repo))
     caps.add('bundle2=' + urllib.quote(capsblob))
     return caps
@@ -1138,7 +1143,7 @@ getbundle2partsorder = []
 # This exists to help extensions wrap steps if necessary
 getbundle2partsmapping = {}
 
-def getbundle2partsgenerator(stepname):
+def getbundle2partsgenerator(stepname, idx=None):
     """decorator for function generating bundle2 part for getbundle
 
     The function is added to the step -> function mapping and appended to the
@@ -1150,7 +1155,10 @@ def getbundle2partsgenerator(stepname):
     def dec(func):
         assert stepname not in getbundle2partsmapping
         getbundle2partsmapping[stepname] = func
-        getbundle2partsorder.append(stepname)
+        if idx is None:
+            getbundle2partsorder.append(stepname)
+        else:
+            getbundle2partsorder.insert(idx, stepname)
         return func
     return dec
 
@@ -1158,7 +1166,7 @@ def getbundle(repo, source, heads=None, common=None, bundlecaps=None,
               **kwargs):
     """return a full bundle (with potentially multiple kind of parts)
 
-    Could be a bundle HG10 or a bundle HG2Y depending on bundlecaps
+    Could be a bundle HG10 or a bundle HG20 depending on bundlecaps
     passed. For now, the bundle can contain only changegroup, but this will
     changes when more part type will be available for bundle2.
 
@@ -1170,7 +1178,10 @@ def getbundle(repo, source, heads=None, common=None, bundlecaps=None,
     when the API of bundle is refined.
     """
     # bundle10 case
-    if bundlecaps is None or 'HG2Y' not in bundlecaps:
+    usebundle2 = False
+    if bundlecaps is not None:
+        usebundle2 = util.any((cap.startswith('HG2') for cap in bundlecaps))
+    if not usebundle2:
         if bundlecaps and not kwargs.get('cg', True):
             raise ValueError(_('request for bundle10 must include changegroup'))
 
@@ -1206,7 +1217,7 @@ def _getbundlechangegrouppart(bundler, repo, source, bundlecaps=None,
     if kwargs.get('cg', True):
         # build changegroup bundle here.
         version = None
-        cgversions = b2caps.get('b2x:changegroup')
+        cgversions = b2caps.get('changegroup')
         if not cgversions:  # 3.1 and 3.2 ship with an empty value
             cg = changegroup.getchangegroupraw(repo, source, heads=heads,
                                                common=common,
@@ -1222,7 +1233,7 @@ def _getbundlechangegrouppart(bundler, repo, source, bundlecaps=None,
                                                version=version)
 
     if cg:
-        part = bundler.newpart('b2x:changegroup', data=cg)
+        part = bundler.newpart('changegroup', data=cg)
         if version is not None:
             part.addparam('version', version)
 
@@ -1232,7 +1243,7 @@ def _getbundlelistkeysparts(bundler, repo, source, bundlecaps=None,
     """add parts containing listkeys namespaces to the requested bundle"""
     listkeys = kwargs.get('listkeys', ())
     for namespace in listkeys:
-        part = bundler.newpart('b2x:listkeys')
+        part = bundler.newpart('listkeys')
         part.addparam('namespace', namespace)
         keys = repo.listkeys(namespace).items()
         part.data = pushkey.encodekeys(keys)
@@ -1272,34 +1283,29 @@ def unbundle(repo, cg, heads, source, url):
     If the push was raced as PushRaced exception is raised."""
     r = 0
     # need a transaction when processing a bundle2 stream
-    tr = None
-    lock = repo.lock()
+    wlock = lock = tr = None
     try:
         check_heads(repo, heads, 'uploading changes')
         # push can proceed
         if util.safehasattr(cg, 'params'):
+            r = None
             try:
-                tr = repo.transaction('unbundle')
+                wlock = repo.wlock()
+                lock = repo.lock()
+                tr = repo.transaction(source)
                 tr.hookargs['source'] = source
                 tr.hookargs['url'] = url
-                tr.hookargs['bundle2-exp'] = '1'
+                tr.hookargs['bundle2'] = '1'
                 r = bundle2.processbundle(repo, cg, lambda: tr).reply
-                p = lambda: tr.writepending() and repo.root or ""
-                repo.hook('b2x-pretransactionclose', throw=True, pending=p,
-                          **tr.hookargs)
-                hookargs = dict(tr.hookargs)
-                def runhooks():
-                    repo.hook('b2x-transactionclose', **hookargs)
-                tr.addpostclose('b2x-hook-transactionclose',
-                                lambda tr: repo._afterlock(runhooks))
                 tr.close()
             except Exception, exc:
                 exc.duringunbundle2 = True
+                if r is not None:
+                    exc._bundle2salvagedoutput = r.salvageoutput()
                 raise
         else:
+            lock = repo.lock()
             r = changegroup.addchangegroup(repo, cg, source, url)
     finally:
-        if tr is not None:
-            tr.release()
-        lock.release()
+        lockmod.release(tr, lock, wlock)
     return r

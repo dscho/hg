@@ -218,10 +218,71 @@
   
   $ hg debugbundle .hg/strip-backup/*
   Stream params: {}
-  b2x:changegroup -- "{'version': '02'}"
+  changegroup -- "{'version': '02'}"
       264128213d290d868c54642d13aeaa3675551a78
+  $ hg incoming .hg/strip-backup/*
+  comparing with .hg/strip-backup/264128213d29-0b39d6bf-backup.hg
+  searching for changes
+  changeset:   4:264128213d29
+  tag:         tip
+  parent:      1:ef3a871183d7
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     c
+  
   $ restore
-
+  $ hg up -C 4
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg --config experimental.bundle2-exp=True --config experimental.strip-bundle2-version=02 --traceback strip 4
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  saved backup bundle to $TESTTMP/test/.hg/strip-backup/264128213d29-0b39d6bf-backup.hg (glob)
+  $ hg parents
+  changeset:   1:ef3a871183d7
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     b
+  
+  $ hg debugbundle .hg/strip-backup/*
+  Stream params: {}
+  changegroup -- "{'version': '02'}"
+      264128213d290d868c54642d13aeaa3675551a78
+  $ hg pull .hg/strip-backup/*
+  pulling from .hg/strip-backup/264128213d29-0b39d6bf-backup.hg
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 0 changes to 0 files (+1 heads)
+  (run 'hg heads' to see heads, 'hg merge' to merge)
+  $ rm .hg/strip-backup/*
+  $ hg log --graph
+  o  changeset:   4:264128213d29
+  |  tag:         tip
+  |  parent:      1:ef3a871183d7
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     c
+  |
+  | o  changeset:   3:443431ffac4f
+  | |  user:        test
+  | |  date:        Thu Jan 01 00:00:00 1970 +0000
+  | |  summary:     e
+  | |
+  | o  changeset:   2:65bd5f99a4a3
+  |/   user:        test
+  |    date:        Thu Jan 01 00:00:00 1970 +0000
+  |    summary:     d
+  |
+  @  changeset:   1:ef3a871183d7
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     b
+  |
+  o  changeset:   0:9ab35a2d17cb
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     a
+  
   $ hg up -C 2
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg merge 4
@@ -435,10 +496,11 @@ applied patches after stripping ancestor of queue
 Verify strip protects against stripping wc parent when there are uncommitted mods
 
   $ echo b > b
+  $ echo bb > bar
   $ hg add b
   $ hg ci -m 'b'
   $ hg log --graph
-  @  changeset:   1:7519abd79d14
+  @  changeset:   1:76dcf9fab855
   |  tag:         tip
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
@@ -449,9 +511,24 @@ Verify strip protects against stripping wc parent when there are uncommitted mod
      date:        Thu Jan 01 00:00:00 1970 +0000
      summary:     a
   
+  $ hg up 0
+  1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo c > bar
+  $ hg up -t false
+  merging bar
+  merging bar failed!
+  1 files updated, 0 files merged, 0 files removed, 1 files unresolved
+  use 'hg resolve' to retry unresolved file merges
+  [1]
+  $ hg sum
+  parent: 1:76dcf9fab855 tip
+   b
+  branch: default
+  commit: 1 modified, 1 unknown, 1 unresolved
+  update: (current)
+  mq:     3 unapplied
 
   $ echo c > b
-  $ echo c > bar
   $ hg strip tip
   abort: local changes found
   [255]
@@ -467,6 +544,16 @@ Verify strip protects against stripping wc parent when there are uncommitted mod
   $ hg status
   M bar
   ? b
+  ? bar.orig
+
+  $ rm bar.orig
+  $ hg sum
+  parent: 0:9ab35a2d17cb tip
+   a
+  branch: default
+  commit: 1 modified, 1 unknown
+  update: (current)
+  mq:     3 unapplied
 
 Strip adds, removes, modifies with --keep
 
@@ -575,7 +662,7 @@ Make sure no one adds back a -b option:
    -f --force          force removal of changesets, discard uncommitted changes
                        (no backup)
       --no-backup      no backups
-   -k --keep           do not modify working copy during strip
+   -k --keep           do not modify working directory during strip
    -B --bookmark VALUE remove revs only reachable from given bookmark
       --mq             operate on patch repository
   

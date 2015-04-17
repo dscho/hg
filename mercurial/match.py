@@ -9,6 +9,8 @@ import re
 import util, pathutil
 from i18n import _
 
+propertycache = util.propertycache
+
 def _rematcher(regex):
     '''compile the regexp with the best available regexp engine and return a
     matcher function'''
@@ -33,6 +35,15 @@ def _expandsets(kindpats, ctx):
             continue
         other.append((kind, pat))
     return fset, other
+
+def _kindpatsalwaysmatch(kindpats):
+    """"Checks whether the kindspats match everything, as e.g.
+    'relpath:.' does.
+    """
+    for kind, pat in kindpats:
+        if pat != '' or kind not in ['relpath', 'glob']:
+            return False
+    return True
 
 class match(object):
     def __init__(self, root, cwd, patterns, include=[], exclude=[],
@@ -63,17 +74,16 @@ class match(object):
         self._cwd = cwd
         self._files = [] # exact files and roots of patterns
         self._anypats = bool(include or exclude)
-        self._ctx = ctx
         self._always = False
         self._pathrestricted = bool(include or exclude or patterns)
 
         matchfns = []
         if include:
-            kindpats = _normalize(include, 'glob', root, cwd, auditor)
+            kindpats = self._normalize(include, 'glob', root, cwd, auditor)
             self.includepat, im = _buildmatch(ctx, kindpats, '(?:/|$)')
             matchfns.append(im)
         if exclude:
-            kindpats = _normalize(exclude, 'glob', root, cwd, auditor)
+            kindpats = self._normalize(exclude, 'glob', root, cwd, auditor)
             self.excludepat, em = _buildmatch(ctx, kindpats, '(?:/|$)')
             matchfns.append(lambda f: not em(f))
         if exact:
@@ -83,11 +93,12 @@ class match(object):
                 self._files = list(patterns)
             matchfns.append(self.exact)
         elif patterns:
-            kindpats = _normalize(patterns, default, root, cwd, auditor)
-            self._files = _roots(kindpats)
-            self._anypats = self._anypats or _anypats(kindpats)
-            self.patternspat, pm = _buildmatch(ctx, kindpats, '$')
-            matchfns.append(pm)
+            kindpats = self._normalize(patterns, default, root, cwd, auditor)
+            if not _kindpatsalwaysmatch(kindpats):
+                self._files = _roots(kindpats)
+                self._anypats = self._anypats or _anypats(kindpats)
+                self.patternspat, pm = _buildmatch(ctx, kindpats, '$')
+                matchfns.append(pm)
 
         if not matchfns:
             m = util.always
@@ -148,6 +159,20 @@ class match(object):
         else: optimal roots'''
         return self._files
 
+    @propertycache
+    def _dirs(self):
+        return set(util.dirs(self._fmap)) | set(['.'])
+
+    def visitdir(self, dir):
+        '''Helps while traversing a directory tree. Returns the string 'all' if
+        the given directory and all subdirectories should be visited. Otherwise
+        returns True or False indicating whether the given directory should be
+        visited. If 'all' is returned, calling this method on a subdirectory
+        gives an undefined result.'''
+        if not self._fmap or self.exact(dir):
+            return 'all'
+        return dir in self._dirs
+
     def exact(self, f):
         '''Returns True if f is in .files().'''
         return f in self._fmap
@@ -160,6 +185,34 @@ class match(object):
         '''Matcher will match everything and .files() will be empty
         - optimization might be possible and necessary.'''
         return self._always
+
+    def isexact(self):
+        return self.matchfn == self.exact
+
+    def _normalize(self, patterns, default, root, cwd, auditor):
+        '''Convert 'kind:pat' from the patterns list to tuples with kind and
+        normalized and rooted patterns and with listfiles expanded.'''
+        kindpats = []
+        for kind, pat in [_patsplit(p, default) for p in patterns]:
+            if kind in ('glob', 'relpath'):
+                pat = pathutil.canonpath(root, cwd, pat, auditor)
+            elif kind in ('relglob', 'path'):
+                pat = util.normpath(pat)
+            elif kind in ('listfile', 'listfile0'):
+                try:
+                    files = util.readfile(pat)
+                    if kind == 'listfile0':
+                        files = files.split('\0')
+                    else:
+                        files = files.splitlines()
+                    files = [f for f in files if f]
+                except EnvironmentError:
+                    raise util.Abort(_("unable to read file list (%s)") % pat)
+                kindpats += self._normalize(files, default, root, cwd, auditor)
+                continue
+            # else: re or relre - which cannot be normalized
+            kindpats.append((kind, pat))
+        return kindpats
 
 def exact(root, cwd, files):
     return match(root, cwd, files, exact=True)
@@ -219,6 +272,34 @@ class narrowmatcher(match):
 
     def rel(self, f):
         return self._matcher.rel(self._path + "/" + f)
+
+class icasefsmatcher(match):
+    """A matcher for wdir on case insensitive filesystems, which normalizes the
+    given patterns to the case in the filesystem.
+    """
+
+    def __init__(self, root, cwd, patterns, include, exclude, default, auditor,
+                 ctx):
+        init = super(icasefsmatcher, self).__init__
+        self._dsnormalize = ctx.repo().dirstate.normalize
+
+        init(root, cwd, patterns, include, exclude, default, auditor=auditor,
+             ctx=ctx)
+
+        # m.exact(file) must be based off of the actual user input, otherwise
+        # inexact case matches are treated as exact, and not noted without -v.
+        if self._files:
+            self._fmap = set(_roots(self._kp))
+
+    def _normalize(self, patterns, default, root, cwd, auditor):
+        self._kp = super(icasefsmatcher, self)._normalize(patterns, default,
+                                                          root, cwd, auditor)
+        kindpats = []
+        for kind, pats in self._kp:
+            if kind not in ('re', 'relre'):  # regex can't be normalized
+                pats = self._dsnormalize(pats)
+            kindpats.append((kind, pats))
+        return kindpats
 
 def patkind(pattern, default=None):
     '''If pattern is 'kind:pat' with a known kind, return kind.'''
@@ -369,31 +450,6 @@ def _buildregexmatch(kindpats, globsuffix):
             except re.error:
                 raise util.Abort(_("invalid pattern (%s): %s") % (k, p))
         raise util.Abort(_("invalid pattern"))
-
-def _normalize(patterns, default, root, cwd, auditor):
-    '''Convert 'kind:pat' from the patterns list to tuples with kind and
-    normalized and rooted patterns and with listfiles expanded.'''
-    kindpats = []
-    for kind, pat in [_patsplit(p, default) for p in patterns]:
-        if kind in ('glob', 'relpath'):
-            pat = pathutil.canonpath(root, cwd, pat, auditor)
-        elif kind in ('relglob', 'path'):
-            pat = util.normpath(pat)
-        elif kind in ('listfile', 'listfile0'):
-            try:
-                files = util.readfile(pat)
-                if kind == 'listfile0':
-                    files = files.split('\0')
-                else:
-                    files = files.splitlines()
-                files = [f for f in files if f]
-            except EnvironmentError:
-                raise util.Abort(_("unable to read file list (%s)") % pat)
-            kindpats += _normalize(files, default, root, cwd, auditor)
-            continue
-        # else: re or relre - which cannot be normalized
-        kindpats.append((kind, pat))
-    return kindpats
 
 def _roots(kindpats):
     '''return roots and exact explicitly listed files from patterns

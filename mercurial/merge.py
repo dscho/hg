@@ -1045,9 +1045,7 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
                 raise util.Abort(_("uncommitted changes"),
                                  hint=_("use 'hg status' to list changes"))
             for s in sorted(wc.substate):
-                if wc.sub(s).dirty():
-                    raise util.Abort(_("uncommitted changes in "
-                                       "subrepository '%s'") % s)
+                wc.sub(s).bailifchanged()
 
         elif not overwrite:
             if p1 == p2: # no-op update
@@ -1186,9 +1184,17 @@ def graft(repo, ctx, pctx, labels):
     labels - merge labels eg ['local', 'graft']
 
     """
+    # If we're grafting a descendant onto an ancestor, be sure to pass
+    # mergeancestor=True to update. This does two things: 1) allows the merge if
+    # the destination is the same as the parent of the ctx (so we can use graft
+    # to copy commits), and 2) informs update that the incoming changes are
+    # newer than the destination so it doesn't prompt about "remote changed foo
+    # which local deleted".
+    mergeancestor = repo.changelog.isancestor(repo['.'].node(), ctx.node())
 
     stats = update(repo, ctx.node(), True, True, False, pctx.node(),
-                   labels=labels)
+                   mergeancestor=mergeancestor, labels=labels)
+
     # drop the second merge parent
     repo.dirstate.beginparentchange()
     repo.setparents(repo['.'].node(), nullid)

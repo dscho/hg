@@ -42,7 +42,7 @@ def _bundle(repo, bases, heads, node, suffix, compress=True):
     name = "%s/%s-%s-%s.hg" % (backupdir, short(node), totalhash[:8], suffix)
 
     if usebundle2:
-        bundletype = "HG2Y"
+        bundletype = "HG20"
     elif compress:
         bundletype = "HG10BZ"
     else:
@@ -137,6 +137,7 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
     # create a changegroup for all the branches we need to keep
     backupfile = None
     vfs = repo.vfs
+    node = nodelist[-1]
     if backup:
         backupfile = _bundle(repo, stripbases, cl.heads(), node, topic)
         repo.ui.status(_("saved backup bundle to %s\n") %
@@ -181,6 +182,8 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
                 repo.ui.pushbuffer()
             if isinstance(gen, bundle2.unbundle20):
                 tr = repo.transaction('strip')
+                tr.hookargs = {'source': 'strip',
+                               'url': 'bundle:' + vfs.join(chgrpfile)}
                 try:
                     bundle2.processbundle(repo, gen, lambda: tr)
                     tr.close()

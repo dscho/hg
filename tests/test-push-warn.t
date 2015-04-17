@@ -19,6 +19,14 @@
   $ hg add t3
   $ hg commit -m "3"
 
+Specifying a revset that evaluates to null will abort
+
+  $ hg push -r '0 & 1' ../a
+  pushing to ../a
+  abort: specified revisions evaluate to an empty set
+  (use different revision arguments)
+  [255]
+
   $ hg push ../a
   pushing to ../a
   searching for changes
@@ -411,7 +419,7 @@ multiple new heads but also doesn't report too many heads:
   adding c
   created new head
 
-  $ for i in `seq 3`; do hg -R h up -q 0; echo $i > h/b; hg -R h ci -qAm$i; done
+  $ for i in `python $TESTDIR/seq.py 3`; do hg -R h up -q 0; echo $i > h/b; hg -R h ci -qAm$i; done
 
   $ hg -R i push h
   pushing to h

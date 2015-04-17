@@ -397,7 +397,7 @@ class converter(object):
                 dest = self.map[changes]
             self.map[rev] = dest
             return
-        files, copies = changes
+        files, copies, cleanp2 = changes
         pbranches = []
         if commit.parents:
             for prev in commit.parents:
@@ -413,9 +413,19 @@ class converter(object):
             parents = [self.map.get(p, p) for p in parents]
         except KeyError:
             parents = [b[0] for b in pbranches]
-        source = progresssource(self.ui, self.source, len(files))
+        if len(pbranches) != 2:
+            cleanp2 = set()
+        if len(parents) < 3:
+            source = progresssource(self.ui, self.source, len(files))
+        else:
+            # For an octopus merge, we end up traversing the list of
+            # changed files N-1 times. This tweak to the number of
+            # files makes it so the progress bar doesn't overflow
+            # itself.
+            source = progresssource(self.ui, self.source,
+                                    len(files) * (len(parents) - 1))
         newnode = self.dest.putcommit(files, copies, parents, commit,
-                                      source, self.map, full)
+                                      source, self.map, full, cleanp2)
         source.close()
         self.source.converted(rev, newnode)
         self.map[rev] = newnode
@@ -515,7 +525,11 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     sortmode = [m for m in sortmodes if opts.get(m)]
     if len(sortmode) > 1:
         raise util.Abort(_('more than one sort mode specified'))
-    sortmode = sortmode and sortmode[0] or defaultsort
+    if sortmode:
+        sortmode = sortmode[0]
+    else:
+        sortmode = defaultsort
+
     if sortmode == 'sourcesort' and not srcc.hasnativeorder():
         raise util.Abort(_('--sourcesort is not supported by this data source'))
     if sortmode == 'closesort' and not srcc.hasnativeclose():
@@ -531,4 +545,3 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
 
     c = converter(ui, srcc, destc, revmapfile, opts)
     c.convert(sortmode)
-

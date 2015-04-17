@@ -581,8 +581,6 @@ Test 3507 (both normal files and largefiles were a problem)
   C sub2/large6
   C sub2/large7
   $ hg up -C '.^'
-  getting changed largefiles
-  0 largefiles updated, 0 removed
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg remove large
   $ hg addremove --traceback
@@ -1183,12 +1181,12 @@ rebased or not.
   adding manifests
   adding file changes
   added 1 changesets with 2 changes to 2 files (+1 heads)
-  0 largefiles cached
   rebasing 8:f574fb32bb45 "modify normal file largefile in repo d"
   Invoking status precommit hook
   M sub/normal4
   M sub2/large6
   saved backup bundle to $TESTTMP/d/.hg/strip-backup/f574fb32bb45-dd1d9f80-backup.hg (glob)
+  0 largefiles cached
   $ [ -f .hg/largefiles/e166e74c7303192238d60af5a9c4ce9bef0b7928 ]
   $ hg log --template '{rev}:{node|short}  {desc|firstline}\n'
   9:598410d3eb9a  modify normal file largefile in repo d
@@ -1431,8 +1429,6 @@ Rollback on largefiles.
 
 verify that largefile .orig file no longer is overwritten on every update -C:
   $ hg update --clean
-  getting changed largefiles
-  0 largefiles updated, 0 removed
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cat sub2/large7.orig
   mistake

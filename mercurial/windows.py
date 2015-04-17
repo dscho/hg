@@ -26,14 +26,22 @@ testpid = win32.testpid
 unlink = win32.unlink
 
 umask = 0022
+_SEEK_END = 2 # os.SEEK_END was introduced in Python 2.5
 
-# wrap osutil.posixfile to provide friendlier exceptions
 def posixfile(name, mode='r', buffering=-1):
+    '''Open a file with even more POSIX-like semantics'''
     try:
-        return osutil.posixfile(name, mode, buffering)
+        fp = osutil.posixfile(name, mode, buffering) # may raise WindowsError
+
+        # The position when opening in append mode is implementation defined, so
+        # make it consistent with other platforms, which position at EOF.
+        if 'a' in mode:
+            fp.seek(0, _SEEK_END)
+
+        return fp
     except WindowsError, err:
+        # convert to a friendlier exception
         raise IOError(err.errno, '%s: %s' % (name, err.strerror))
-posixfile.__doc__ = osutil.posixfile.__doc__
 
 class winstdout(object):
     '''stdout on windows misbehaves if sent through a pipe'''
@@ -132,6 +140,10 @@ def normpath(path):
 
 def normcase(path):
     return encoding.upper(path)
+
+# see posix.py for definitions
+normcasespec = encoding.normcasespecs.upper
+normcasefallback = encoding.upperfallback
 
 def samestat(s1, s2):
     return False
@@ -258,7 +270,7 @@ def groupname(gid=None):
     If gid is None, return the name of the current group."""
     return None
 
-def _removedirs(name):
+def removedirs(name):
     """special version of os.removedirs that does not remove symlinked
     directories or junction points if they actually contain files"""
     if osutil.listdir(name):
@@ -285,7 +297,7 @@ def unlinkpath(f, ignoremissing=False):
             raise
     # try removing directories that might now be empty
     try:
-        _removedirs(os.path.dirname(f))
+        removedirs(os.path.dirname(f))
     except OSError:
         pass
 
@@ -351,7 +363,7 @@ def readpipe(pipe):
     """Read all available data from a pipe."""
     chunks = []
     while True:
-        size = os.fstat(pipe.fileno()).st_size
+        size = win32.peekpipe(pipe)
         if not size:
             break
 

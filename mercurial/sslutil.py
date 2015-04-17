@@ -10,12 +10,16 @@ import os, sys
 
 from mercurial import util
 from mercurial.i18n import _
+
+_canloaddefaultcerts = False
 try:
     # avoid using deprecated/broken FakeSocket in python 2.6
     import ssl
     CERT_REQUIRED = ssl.CERT_REQUIRED
     try:
         ssl_context = ssl.SSLContext
+        _canloaddefaultcerts = util.safehasattr(ssl_context,
+                                                'load_default_certs')
 
         def ssl_wrap_socket(sock, keyfile, certfile, cert_reqs=ssl.CERT_NONE,
                             ca_certs=None, serverhostname=None):
@@ -35,6 +39,8 @@ try:
             sslcontext.verify_mode = cert_reqs
             if ca_certs is not None:
                 sslcontext.load_verify_locations(cafile=ca_certs)
+            elif _canloaddefaultcerts:
+                sslcontext.load_default_certs()
 
             sslsocket = sslcontext.wrap_socket(sock,
                                                server_hostname=serverhostname)
@@ -123,11 +129,21 @@ def _plainapplepython():
       for using system certificate store CAs in addition to the provided
       cacerts file
     """
-    if sys.platform != 'darwin' or util.mainfrozen():
+    if sys.platform != 'darwin' or util.mainfrozen() or not sys.executable:
         return False
-    exe = (sys.executable or '').lower()
+    exe = os.path.realpath(sys.executable).lower()
     return (exe.startswith('/usr/bin/python') or
             exe.startswith('/system/library/frameworks/python.framework/'))
+
+def _defaultcacerts():
+    """return path to CA certificates; None for system's store; ! to disable"""
+    if _plainapplepython():
+        dummycert = os.path.join(os.path.dirname(__file__), 'dummycert.pem')
+        if os.path.exists(dummycert):
+            return dummycert
+    if _canloaddefaultcerts:
+        return None
+    return '!'
 
 def sslkwargs(ui, host):
     kws = {}
@@ -135,17 +151,18 @@ def sslkwargs(ui, host):
     if hostfingerprint:
         return kws
     cacerts = ui.config('web', 'cacerts')
-    if cacerts:
+    if cacerts == '!':
+        pass
+    elif cacerts:
         cacerts = util.expandpath(cacerts)
         if not os.path.exists(cacerts):
             raise util.Abort(_('could not find web.cacerts: %s') % cacerts)
-    elif cacerts is None and _plainapplepython():
-        dummycert = os.path.join(os.path.dirname(__file__), 'dummycert.pem')
-        if os.path.exists(dummycert):
-            ui.debug('using %s to enable OS X system CA\n' % dummycert)
-            ui.setconfig('web', 'cacerts', dummycert, 'dummy')
-            cacerts = dummycert
-    if cacerts:
+    else:
+        cacerts = _defaultcacerts()
+        if cacerts and cacerts != '!':
+            ui.debug('using %s to enable OS X system CA\n' % cacerts)
+        ui.setconfig('web', 'cacerts', cacerts, 'defaultcacerts')
+    if cacerts != '!':
         kws.update({'ca_certs': cacerts,
                     'cert_reqs': CERT_REQUIRED,
                     })
@@ -194,7 +211,7 @@ class validator(object):
                                  hint=_('check hostfingerprint configuration'))
             self.ui.debug('%s certificate matched fingerprint %s\n' %
                           (host, nicefingerprint))
-        elif cacerts:
+        elif cacerts != '!':
             msg = _verifycert(peercert2, host)
             if msg:
                 raise util.Abort(_('%s certificate error: %s') % (host, msg),

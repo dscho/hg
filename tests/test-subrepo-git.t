@@ -134,6 +134,7 @@ clone root separately, make different local change
   $ hg status --subrepos
   ? s/f
   $ hg add .
+  adding f
   $ git add f
   $ cd ..
 
@@ -174,6 +175,8 @@ user a pulls, merges, commits
   pulling subrepo s from $TESTTMP/gitroot
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
+  $ hg st --subrepos s
+  A s/f
   $ cat s/f
   f
   $ cat s/g
@@ -782,9 +785,57 @@ the output contains a regex, because git 1.7.10 and 1.7.11
   \s*foobar |\s*2 +- (re)
    2 files changed, 2 insertions\(\+\), 1 deletions?\(-\) (re)
 
-ensure adding include/exclude ignores the subrepo
+adding an include should ignore the other elements
   $ hg diff --subrepos -I s/foobar
+  diff --git a/s/foobar b/s/foobar
+  index 8a5a5e2..bd5812a 100644
+  --- a/s/foobar
+  +++ b/s/foobar
+  @@ -1,4 +1,4 @@
+  -woopwoop
+  +woop    woop
+   
+   foo
+   bar
+
+adding an exclude should ignore this element
   $ hg diff --subrepos -X s/foobar
+  diff --git a/s/barfoo b/s/barfoo
+  new file mode 100644
+  index 0000000..257cc56
+  --- /dev/null
+  +++ b/s/barfoo
+  @@ -0,0 +1 @@
+  +foo
+
+moving a file should show a removal and an add
+  $ hg revert --all
+  reverting subrepo ../gitroot
+  $ cd s
+  $ git mv foobar woop
+  $ cd ..
+  $ hg diff --subrepos
+  diff --git a/s/foobar b/s/foobar
+  deleted file mode 100644
+  index 8a5a5e2..0000000
+  --- a/s/foobar
+  +++ /dev/null
+  @@ -1,4 +0,0 @@
+  -woopwoop
+  -
+  -foo
+  -bar
+  diff --git a/s/woop b/s/woop
+  new file mode 100644
+  index 0000000..8a5a5e2
+  --- /dev/null
+  +++ b/s/woop
+  @@ -0,0 +1,4 @@
+  +woopwoop
+  +
+  +foo
+  +bar
+  $ rm s/woop
 
 revert the subrepository
   $ hg revert --all
@@ -801,5 +852,236 @@ revert the subrepository
 
   $ hg status --subrepos
   ? s/barfoo
+
+show file at specific revision
+  $ cat > s/foobar << EOF
+  > woop    woop
+  > fooo bar
+  > EOF
+  $ hg commit --subrepos -m "updated foobar"
+  committing subrepository s
+  $ cat > s/foobar << EOF
+  > current foobar
+  > (should not be visible using hg cat)
+  > EOF
+
+  $ hg cat -r . s/foobar
+  woop    woop
+  fooo bar (no-eol)
+  $ hg cat -r "parents(.)" s/foobar > catparents
+
+  $ mkdir -p tmp/s
+
+  $ hg cat -r "parents(.)" --output tmp/%% s/foobar
+  $ diff tmp/% catparents
+
+  $ hg cat -r "parents(.)" --output tmp/%s s/foobar
+  $ diff tmp/foobar catparents
+
+  $ hg cat -r "parents(.)" --output tmp/%d/otherfoobar s/foobar
+  $ diff tmp/s/otherfoobar catparents
+
+  $ hg cat -r "parents(.)" --output tmp/%p s/foobar
+  $ diff tmp/s/foobar catparents
+
+  $ hg cat -r "parents(.)" --output tmp/%H s/foobar
+  $ diff tmp/255ee8cf690ec86e99b1e80147ea93ece117cd9d catparents
+
+  $ hg cat -r "parents(.)" --output tmp/%R s/foobar
+  $ diff tmp/10 catparents
+
+  $ hg cat -r "parents(.)" --output tmp/%h s/foobar
+  $ diff tmp/255ee8cf690e catparents
+
+  $ rm tmp/10
+  $ hg cat -r "parents(.)" --output tmp/%r s/foobar
+  $ diff tmp/10 catparents
+
+  $ mkdir tmp/tc
+  $ hg cat -r "parents(.)" --output tmp/%b/foobar s/foobar
+  $ diff tmp/tc/foobar catparents
+
+cleanup
+  $ rm -r tmp
+  $ rm catparents
+
+add git files, using either files or patterns
+  $ echo "hsss! hsssssssh!" > s/snake.python
+  $ echo "ccc" > s/c.c
+  $ echo "cpp" > s/cpp.cpp
+
+  $ hg add s/snake.python s/c.c s/cpp.cpp
+  $ hg st --subrepos s
+  M s/foobar
+  A s/c.c
+  A s/cpp.cpp
+  A s/snake.python
+  ? s/barfoo
+  $ hg revert s
+  reverting subrepo ../gitroot
+
+  $ hg add --subrepos "glob:**.python"
+  adding s/snake.python (glob)
+  $ hg st --subrepos s
+  A s/snake.python
+  ? s/barfoo
+  ? s/c.c
+  ? s/cpp.cpp
+  ? s/foobar.orig
+  $ hg revert s
+  reverting subrepo ../gitroot
+
+  $ hg add --subrepos s
+  adding s/barfoo (glob)
+  adding s/c.c (glob)
+  adding s/cpp.cpp (glob)
+  adding s/foobar.orig (glob)
+  adding s/snake.python (glob)
+  $ hg st --subrepos s
+  A s/barfoo
+  A s/c.c
+  A s/cpp.cpp
+  A s/foobar.orig
+  A s/snake.python
+  $ hg revert s
+  reverting subrepo ../gitroot
+make sure everything is reverted correctly
+  $ hg st --subrepos s
+  ? s/barfoo
+  ? s/c.c
+  ? s/cpp.cpp
+  ? s/foobar.orig
+  ? s/snake.python
+
+  $ hg add --subrepos --exclude "path:s/c.c"
+  adding s/barfoo (glob)
+  adding s/cpp.cpp (glob)
+  adding s/foobar.orig (glob)
+  adding s/snake.python (glob)
+  $ hg st --subrepos s
+  A s/barfoo
+  A s/cpp.cpp
+  A s/foobar.orig
+  A s/snake.python
+  ? s/c.c
+  $ hg revert --all -q
+
+.hgignore should not have influence in subrepos
+  $ cat > .hgignore << EOF
+  > syntax: glob
+  > *.python
+  > EOF
+  $ hg add .hgignore
+  $ hg add --subrepos "glob:**.python" s/barfoo
+  adding s/snake.python (glob)
+  $ hg st --subrepos s
+  A s/barfoo
+  A s/snake.python
+  ? s/c.c
+  ? s/cpp.cpp
+  ? s/foobar.orig
+  $ hg revert --all -q
+
+.gitignore should have influence,
+except for explicitly added files (no patterns)
+  $ cat > s/.gitignore << EOF
+  > *.python
+  > EOF
+  $ hg add s/.gitignore
+  $ hg st --subrepos s
+  A s/.gitignore
+  ? s/barfoo
+  ? s/c.c
+  ? s/cpp.cpp
+  ? s/foobar.orig
+  $ hg st --subrepos s --all
+  A s/.gitignore
+  ? s/barfoo
+  ? s/c.c
+  ? s/cpp.cpp
+  ? s/foobar.orig
+  I s/snake.python
+  C s/f
+  C s/foobar
+  C s/g
+  $ hg add --subrepos "glob:**.python"
+  $ hg st --subrepos s
+  A s/.gitignore
+  ? s/barfoo
+  ? s/c.c
+  ? s/cpp.cpp
+  ? s/foobar.orig
+  $ hg add --subrepos s/snake.python
+  $ hg st --subrepos s
+  A s/.gitignore
+  A s/snake.python
+  ? s/barfoo
+  ? s/c.c
+  ? s/cpp.cpp
+  ? s/foobar.orig
+
+correctly do a dry run
+  $ hg add --subrepos s --dry-run
+  adding s/barfoo (glob)
+  adding s/c.c (glob)
+  adding s/cpp.cpp (glob)
+  adding s/foobar.orig (glob)
+  $ hg st --subrepos s
+  A s/.gitignore
+  A s/snake.python
+  ? s/barfoo
+  ? s/c.c
+  ? s/cpp.cpp
+  ? s/foobar.orig
+
+error given when adding an already tracked file
+  $ hg add s/.gitignore
+  s/.gitignore already tracked!
+  [1]
+  $ hg add s/g
+  s/g already tracked!
+  [1]
+
+removed files can be re-added
+removing files using 'rm' or 'git rm' has the same effect,
+since we ignore the staging area
+  $ hg ci --subrepos -m 'snake'
+  committing subrepository s
+  $ cd s
+  $ rm snake.python
+(remove leftover .hg so Mercurial doesn't look for a root here)
+  $ rm -rf .hg
+  $ hg status --subrepos --all .
+  R snake.python
+  ? barfoo
+  ? c.c
+  ? cpp.cpp
+  ? foobar.orig
+  C .gitignore
+  C f
+  C foobar
+  C g
+  $ git rm snake.python
+  rm 'snake.python'
+  $ hg status --subrepos --all .
+  R snake.python
+  ? barfoo
+  ? c.c
+  ? cpp.cpp
+  ? foobar.orig
+  C .gitignore
+  C f
+  C foobar
+  C g
+  $ touch snake.python
+  $ cd ..
+  $ hg add s/snake.python
+  $ hg status -S
+  M s/snake.python
+  ? .hgignore
+  ? s/barfoo
+  ? s/c.c
+  ? s/cpp.cpp
+  ? s/foobar.orig
 
   $ cd ..

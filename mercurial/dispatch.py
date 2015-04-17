@@ -7,6 +7,7 @@
 
 from i18n import _
 import os, sys, atexit, signal, pdb, socket, errno, shlex, time, traceback, re
+import difflib
 import util, commands, hg, fancyopts, extensions, hook, error
 import cmdutil, encoding
 import ui as uimod
@@ -26,6 +27,31 @@ class request(object):
 def run():
     "run the command in sys.argv"
     sys.exit((dispatch(request(sys.argv[1:])) or 0) & 255)
+
+def _getsimilar(symbols, value):
+    sim = lambda x: difflib.SequenceMatcher(None, value, x).ratio()
+    # The cutoff for similarity here is pretty arbitrary. It should
+    # probably be investigated and tweaked.
+    return [s for s in symbols if sim(s) > 0.6]
+
+def _formatparse(write, inst):
+    similar = []
+    if isinstance(inst, error.UnknownIdentifier):
+        # make sure to check fileset first, as revset can invoke fileset
+        similar = _getsimilar(inst.symbols, inst.function)
+    if len(inst.args) > 1:
+        write(_("hg: parse error at %s: %s\n") %
+                         (inst.args[1], inst.args[0]))
+        if (inst.args[0][0] == ' '):
+            write(_("unexpected leading whitespace\n"))
+    else:
+        write(_("hg: parse error: %s\n") % inst.args[0])
+        if similar:
+            if len(similar) == 1:
+                write(_("(did you mean %r?)\n") % similar[0])
+            else:
+                ss = ", ".join(sorted(similar))
+                write(_("(did you mean one of %s?)\n") % ss)
 
 def dispatch(req):
     "run the command specified in req.args"
@@ -55,13 +81,7 @@ def dispatch(req):
             ferr.write(_("(%s)\n") % inst.hint)
         return -1
     except error.ParseError, inst:
-        if len(inst.args) > 1:
-            ferr.write(_("hg: parse error at %s: %s\n") %
-                             (inst.args[1], inst.args[0]))
-            if (inst.args[0][0] == ' '):
-                ferr.write(_("unexpected leading whitespace\n"))
-        else:
-            ferr.write(_("hg: parse error: %s\n") % inst.args[0])
+        _formatparse(ferr.write, inst)
         return -1
 
     msg = ' '.join(' ' in a and repr(a) or a for a in req.args)
@@ -154,13 +174,7 @@ def _runcatch(req):
         ui.warn(_("hg: command '%s' is ambiguous:\n    %s\n") %
                 (inst.args[0], " ".join(inst.args[1])))
     except error.ParseError, inst:
-        if len(inst.args) > 1:
-            ui.warn(_("hg: parse error at %s: %s\n") %
-                             (inst.args[1], inst.args[0]))
-            if (inst.args[0][0] == ' '):
-                ui.warn(_("unexpected leading whitespace\n"))
-        else:
-            ui.warn(_("hg: parse error: %s\n") % inst.args[0])
+        _formatparse(ui.warn, inst)
         return -1
     except error.LockHeld, inst:
         if inst.errno == errno.ETIMEDOUT:
@@ -206,7 +220,15 @@ def _runcatch(req):
             # (but don't check for extensions themselves)
             commands.help_(ui, inst.args[0], unknowncmd=True)
         except error.UnknownCommand:
-            commands.help_(ui, 'shortlist')
+            suggested = False
+            if len(inst.args) == 2:
+                sim = _getsimilar(inst.args[1], inst.args[0])
+                if sim:
+                    ui.warn(_('(did you mean one of %s?)\n') %
+                            ', '.join(sorted(sim)))
+                    suggested = True
+            if not suggested:
+                commands.help_(ui, 'shortlist')
     except error.InterventionRequired, inst:
         ui.warn("%s\n" % inst)
         return 1
@@ -804,7 +826,7 @@ def _dispatch(req):
 
     if cmdoptions.get('insecure', False):
         for ui_ in uis:
-            ui_.setconfig('web', 'cacerts', '', '--insecure')
+            ui_.setconfig('web', 'cacerts', '!', '--insecure')
 
     if options['version']:
         return commands.version_(ui)

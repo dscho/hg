@@ -61,6 +61,8 @@ def list_stdlib_modules():
     for m in 'ctypes', 'email':
         yield m
     yield 'builtins' # python3 only
+    for m in 'fcntl', 'grp', 'pwd', 'termios':  # Unix only
+        yield m
     stdlib_prefixes = set([sys.prefix, sys.exec_prefix])
     # We need to supplement the list of prefixes for the search to work
     # when run from within a virtualenv.
@@ -90,7 +92,8 @@ def list_stdlib_modules():
             for name in files:
                 if name == '__init__.py':
                     continue
-                if not (name.endswith('.py') or name.endswith('.so')):
+                if not (name.endswith('.py') or name.endswith('.so')
+                        or name.endswith('.pyd')):
                     continue
                 full_path = os.path.join(top, name)
                 if 'site-packages' in full_path:
@@ -162,36 +165,31 @@ def verify_stdlib_on_own_line(source):
 class CircularImport(Exception):
     pass
 
-
-def cyclekey(names):
-    return tuple(sorted(set(names)))
-
-def check_one_mod(mod, imports, path=None, ignore=None):
-    if path is None:
-        path = []
-    if ignore is None:
-        ignore = []
-    path = path + [mod]
-    for i in sorted(imports.get(mod, [])):
-        if i not in stdlib_modules and not i.startswith('mercurial.'):
-            i = mod.rsplit('.', 1)[0] + '.' + i
-        if i in path:
-            firstspot = path.index(i)
-            cycle = path[firstspot:] + [i]
-            if cyclekey(cycle) not in ignore:
-                raise CircularImport(cycle)
-            continue
-        check_one_mod(i, imports, path=path, ignore=ignore)
+def checkmod(mod, imports):
+    shortest = {}
+    visit = [[mod]]
+    while visit:
+        path = visit.pop(0)
+        for i in sorted(imports.get(path[-1], [])):
+            if i not in stdlib_modules and not i.startswith('mercurial.'):
+                i = mod.rsplit('.', 1)[0] + '.' + i
+            if len(path) < shortest.get(i, 1000):
+                shortest[i] = len(path)
+                if i in path:
+                    if i == path[0]:
+                        raise CircularImport(path)
+                    continue
+                visit.append(path + [i])
 
 def rotatecycle(cycle):
     """arrange a cycle so that the lexicographically first module listed first
 
-    >>> rotatecycle(['foo', 'bar', 'foo'])
+    >>> rotatecycle(['foo', 'bar'])
     ['bar', 'foo', 'bar']
     """
     lowest = min(cycle)
     idx = cycle.index(lowest)
-    return cycle[idx:] + cycle[1:idx] + [lowest]
+    return cycle[idx:] + cycle[:idx] + [lowest]
 
 def find_cycles(imports):
     """Find cycles in an already-loaded import graph.
@@ -201,17 +199,17 @@ def find_cycles(imports):
     ...            'top.baz': ['foo'],
     ...            'top.qux': ['foo']}
     >>> print '\\n'.join(sorted(find_cycles(imports)))
-    top.bar -> top.baz -> top.foo -> top.bar -> top.bar
-    top.foo -> top.qux -> top.foo -> top.foo
+    top.bar -> top.baz -> top.foo -> top.bar
+    top.foo -> top.qux -> top.foo
     """
-    cycles = {}
+    cycles = set()
     for mod in sorted(imports.iterkeys()):
         try:
-            check_one_mod(mod, imports, ignore=cycles)
+            checkmod(mod, imports)
         except CircularImport, e:
             cycle = e.args[0]
-            cycles[cyclekey(cycle)] = ' -> '.join(rotatecycle(cycle))
-    return cycles.values()
+            cycles.add(" -> ".join(rotatecycle(cycle)))
+    return cycles
 
 def _cycle_sortkey(c):
     return len(c), c

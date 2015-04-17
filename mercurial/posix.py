@@ -16,6 +16,7 @@ samestat = os.path.samestat
 oslink = os.link
 unlink = os.unlink
 rename = os.rename
+removedirs = os.removedirs
 expandglobs = False
 
 umask = os.umask(0)
@@ -200,6 +201,11 @@ def samedevice(fpath1, fpath2):
 def normcase(path):
     return path.lower()
 
+# what normcase does to ASCII strings
+normcasespec = encoding.normcasespecs.lower
+# fallback normcase function for non-ASCII strings
+normcasefallback = normcase
+
 if sys.platform == 'darwin':
 
     def normcase(path):
@@ -223,7 +229,11 @@ if sys.platform == 'darwin':
         try:
             return encoding.asciilower(path)  # exception for non-ASCII
         except UnicodeDecodeError:
-            pass
+            return normcasefallback(path)
+
+    normcasespec = encoding.normcasespecs.lower
+
+    def normcasefallback(path):
         try:
             u = path.decode('utf-8')
         except UnicodeDecodeError:
@@ -301,6 +311,9 @@ if sys.platform == 'cygwin':
                 return mp + encoding.upper(path[mplen:])
 
         return encoding.upper(path)
+
+    normcasespec = encoding.normcasespecs.other
+    normcasefallback = normcase
 
     # Cygwin translates native ACLs to POSIX permissions,
     # but these translations are not supported by native

@@ -10,7 +10,7 @@ import os, copy
 from mercurial import match, patch, error, ui, util, pathutil, context
 from mercurial.i18n import _
 from mercurial.node import hex, nullid
-from common import ErrorResponse
+from common import ErrorResponse, paritygen
 from common import HTTP_NOT_FOUND
 import difflib
 
@@ -138,9 +138,10 @@ def _siblings(siblings=[], hiderev=None):
         yield d
 
 def parents(ctx, hide=None):
-    if (isinstance(ctx, context.basefilectx) and
-        ctx.changectx().rev() != ctx.linkrev()):
-        return _siblings([ctx._repo[ctx.linkrev()]], hide)
+    if isinstance(ctx, context.basefilectx):
+        introrev = ctx.introrev()
+        if ctx.changectx().rev() != introrev:
+            return _siblings([ctx.repo()[introrev]], hide)
     return _siblings(ctx.parents(), hide)
 
 def children(ctx, hide=None):
@@ -278,6 +279,62 @@ def changelistentry(web, ctx, tmpl):
         "branches": nodebranchdict(repo, ctx)
     }
 
+def changesetentry(web, req, tmpl, ctx):
+    '''Obtain a dictionary to be used to render the "changeset" template.'''
+
+    showtags = showtag(web.repo, tmpl, 'changesettag', ctx.node())
+    showbookmarks = showbookmark(web.repo, tmpl, 'changesetbookmark',
+                                 ctx.node())
+    showbranch = nodebranchnodefault(ctx)
+
+    files = []
+    parity = paritygen(web.stripecount)
+    for blockno, f in enumerate(ctx.files()):
+        template = f in ctx and 'filenodelink' or 'filenolink'
+        files.append(tmpl(template,
+                          node=ctx.hex(), file=f, blockno=blockno + 1,
+                          parity=parity.next()))
+
+    basectx = basechangectx(web.repo, req)
+    if basectx is None:
+        basectx = ctx.p1()
+
+    style = web.config('web', 'style', 'paper')
+    if 'style' in req.form:
+        style = req.form['style'][0]
+
+    parity = paritygen(web.stripecount)
+    diff = diffs(web.repo, tmpl, ctx, basectx, None, parity, style)
+
+    parity = paritygen(web.stripecount)
+    diffstatsgen = diffstatgen(ctx, basectx)
+    diffstats = diffstat(tmpl, ctx, diffstatsgen, parity)
+
+    return dict(
+        diff=diff,
+        rev=ctx.rev(),
+        node=ctx.hex(),
+        parent=tuple(parents(ctx)),
+        child=children(ctx),
+        basenode=basectx.hex(),
+        changesettag=showtags,
+        changesetbookmark=showbookmarks,
+        changesetbranch=showbranch,
+        author=ctx.user(),
+        desc=ctx.description(),
+        extra=ctx.extra(),
+        date=ctx.date(),
+        phase=ctx.phasestr(),
+        files=files,
+        diffsummary=lambda **x: diffsummary(diffstatsgen),
+        diffstat=diffstats,
+        archives=web.archivelist(ctx.hex()),
+        tags=nodetagsdict(web.repo, ctx.node()),
+        bookmarks=nodebookmarksdict(web.repo, ctx.node()),
+        branch=nodebranchnodefault(ctx),
+        inbranch=nodeinbranch(web.repo, ctx),
+        branches=nodebranchdict(web.repo, ctx))
+
 def listfilediffs(tmpl, files, node, max):
     for f in files[:max]:
         yield tmpl('filedifflink', node=hex(node), file=f)
@@ -295,7 +352,7 @@ def diffs(repo, tmpl, ctx, basectx, files, parity, style):
     blockcount = countgen()
     def prettyprintlines(diff, blockno):
         for lineno, l in enumerate(diff.splitlines(True)):
-            lineno = "%d.%d" % (blockno, lineno + 1)
+            difflineno = "%d.%d" % (blockno, lineno + 1)
             if l.startswith('+'):
                 ltype = "difflineplus"
             elif l.startswith('-'):
@@ -306,8 +363,9 @@ def diffs(repo, tmpl, ctx, basectx, files, parity, style):
                 ltype = "diffline"
             yield tmpl(ltype,
                        line=l,
-                       lineid="l%s" % lineno,
-                       linenumber="% 8s" % lineno)
+                       lineno=lineno + 1,
+                       lineid="l%s" % difflineno,
+                       linenumber="% 8s" % difflineno)
 
     if files:
         m = match.exact(repo.root, repo.getcwd(), files)
@@ -317,7 +375,10 @@ def diffs(repo, tmpl, ctx, basectx, files, parity, style):
     diffopts = patch.diffopts(repo.ui, untrusted=True)
     if basectx is None:
         parents = ctx.parents()
-        node1 = parents and parents[0].node() or nullid
+        if parents:
+            node1 = parents[0].node()
+        else:
+            node1 = nullid
     else:
         node1 = basectx.node()
     node2 = ctx.node()
@@ -345,8 +406,10 @@ def compare(tmpl, context, leftlines, rightlines):
         return tmpl('comparisonline',
                     type=type,
                     lineid=lineid,
+                    leftlineno=leftlineno,
                     leftlinenumber="% 6s" % (leftlineno or ''),
                     leftline=leftline or '',
+                    rightlineno=rightlineno,
                     rightlinenumber="% 6s" % (rightlineno or ''),
                     rightline=rightline or '')
 

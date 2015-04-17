@@ -506,7 +506,10 @@ def files(ui, repo, *pats, **opts):
     kwt = kwtools['templater']
     wctx = repo[None]
     status = _status(ui, repo, wctx, kwt, *pats, **opts)
-    cwd = pats and repo.getcwd() or ''
+    if pats:
+        cwd = repo.getcwd()
+    else:
+        cwd = ''
     files = []
     if not opts.get('unknown') or opts.get('all'):
         files = sorted(status.modified + status.added + status.clean)
@@ -640,11 +643,10 @@ def reposetup(ui, repo):
         # shrink keywords read from working dir
         self.lines = kwt.shrinklines(self.fname, self.lines)
 
-    def kw_diff(orig, repo, node1=None, node2=None, match=None, changes=None,
-                opts=None, prefix=''):
+    def kwdiff(orig, *args, **kwargs):
         '''Monkeypatch patch.diff to avoid expansion.'''
         kwt.restrict = True
-        return orig(repo, node1, node2, match, changes, opts, prefix)
+        return orig(*args, **kwargs)
 
     def kwweb_skip(orig, web, req, tmpl):
         '''Wraps webcommands.x turning off keyword expansion.'''
@@ -734,16 +736,10 @@ def reposetup(ui, repo):
 
     extensions.wrapfunction(context.filectx, 'cmp', kwfilectx_cmp)
     extensions.wrapfunction(patch.patchfile, '__init__', kwpatchfile_init)
-    extensions.wrapfunction(patch, 'diff', kw_diff)
+    extensions.wrapfunction(patch, 'diff', kwdiff)
     extensions.wrapfunction(cmdutil, 'amend', kw_amend)
     extensions.wrapfunction(cmdutil, 'copy', kw_copy)
+    extensions.wrapfunction(cmdutil, 'dorecord', kw_dorecord)
     for c in 'annotate changeset rev filediff diff'.split():
         extensions.wrapfunction(webcommands, c, kwweb_skip)
-    for name in recordextensions.split():
-        try:
-            record = extensions.find(name)
-            extensions.wrapfunction(record, 'dorecord', kw_dorecord)
-        except KeyError:
-            pass
-
     repo.__class__ = kwrepo

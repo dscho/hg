@@ -46,18 +46,31 @@ changeset graph
   $ hg ci -me -d '5 0'
 
 Make sure largefiles doesn't interfere with logging a regular file
-  $ hg log a --config extensions.largefiles=
-  changeset:   0:9161b9aeaf16
-  user:        test
-  date:        Thu Jan 01 00:00:01 1970 +0000
-  summary:     a
-  
+  $ hg --debug log a -T '{rev}: {desc}\n' --config extensions.largefiles=
+  updated patterns: ['.hglf/a', 'a']
+  0: a
   $ hg log a
   changeset:   0:9161b9aeaf16
   user:        test
   date:        Thu Jan 01 00:00:01 1970 +0000
   summary:     a
   
+  $ hg log glob:a*
+  changeset:   3:2ca5ba701980
+  user:        test
+  date:        Thu Jan 01 00:00:04 1970 +0000
+  summary:     d
+  
+  changeset:   0:9161b9aeaf16
+  user:        test
+  date:        Thu Jan 01 00:00:01 1970 +0000
+  summary:     a
+  
+  $ hg --debug log glob:a* -T '{rev}: {desc}\n' --config extensions.largefiles=
+  updated patterns: ['glob:.hglf/a*', 'glob:a*']
+  3: d
+  0: a
+
 log on directory
 
   $ hg log dir
@@ -634,7 +647,7 @@ log -f
   
 
 
-log -f -r 1:tip
+log -f -r '1 + 4'
 
   $ hg up -C 0
   1 files updated, 0 files merged, 1 files removed, 0 files unresolved
@@ -642,25 +655,24 @@ log -f -r 1:tip
   $ hg ci -Amb2 -d '1 0'
   adding b2
   created new head
-  $ hg log -f -r 1:tip
+  $ hg log -f -r '1 + 4'
+  changeset:   4:ddb82e70d1a1
+  tag:         tip
+  parent:      0:67e992f2c4f3
+  user:        test
+  date:        Thu Jan 01 00:00:01 1970 +0000
+  summary:     b2
+  
   changeset:   1:3d5bf5654eda
   user:        test
   date:        Thu Jan 01 00:00:01 1970 +0000
   summary:     r1
   
-  changeset:   2:60c670bf5b30
+  changeset:   0:67e992f2c4f3
   user:        test
   date:        Thu Jan 01 00:00:01 1970 +0000
-  summary:     r2
+  summary:     base
   
-  changeset:   3:e62f78d544b4
-  parent:      1:3d5bf5654eda
-  user:        test
-  date:        Thu Jan 01 00:00:01 1970 +0000
-  summary:     b1
-  
-
-
 log -f -r null
 
   $ hg log -f -r null
@@ -675,10 +687,17 @@ log -f -r null
   
 
 
+log -f with null parent
+
+  $ hg up -C null
+  0 files updated, 0 files merged, 2 files removed, 0 files unresolved
+  $ hg log -f
+
+
 log -r .  with two parents
 
   $ hg up -C 3
-  2 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg merge tip
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
@@ -1342,6 +1361,11 @@ Also check when maxrev < lastrevfilelog
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     add foo, related
   
+  changeset:   2:c4c64aedf0f7
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     add unrelated old foo
+  
   $ cd ..
 
 Issue2383: hg log showing _less_ differences than hg diff
@@ -1599,6 +1623,70 @@ issue3772: hg log -r :null showing revision 0 as well
   user:        
   date:        Thu Jan 01 00:00:00 1970 +0000
   
+working-directory revision requires special treatment
+
+  $ hg log -r 'wdir()'
+  changeset:   0:65624cd9070a+
+  user:        test
+  date:        [A-Za-z0-9:+ ]+ (re)
+  
+  $ hg log -r 'wdir()' -q
+  0:65624cd9070a+
+
+  $ hg log -r 'wdir()' --debug
+  changeset:   0:65624cd9070a035fa7191a54f2b8af39f16b0c08+
+  phase:       draft
+  parent:      0:65624cd9070a035fa7191a54f2b8af39f16b0c08
+  parent:      -1:0000000000000000000000000000000000000000
+  user:        test
+  date:        [A-Za-z0-9:+ ]+ (re)
+  extra:       branch=default
+  
+  $ hg log -r 'wdir()' -Tjson
+  [
+   {
+    "rev": null,
+    "node": null,
+    "branch": "default",
+    "phase": "draft",
+    "user": "test",
+    "date": [*, 0], (glob)
+    "desc": "",
+    "bookmarks": [],
+    "tags": ["tip"],
+    "parents": ["65624cd9070a035fa7191a54f2b8af39f16b0c08"]
+   }
+  ]
+
+  $ hg log -r 'wdir()' -Tjson -q
+  [
+   {
+    "rev": null,
+    "node": null
+   }
+  ]
+
+  $ hg log -r 'wdir()' -Tjson --debug
+  [
+   {
+    "rev": null,
+    "node": null,
+    "branch": "default",
+    "phase": "draft",
+    "user": "test",
+    "date": [*, 0], (glob)
+    "desc": "",
+    "bookmarks": [],
+    "tags": ["tip"],
+    "parents": ["65624cd9070a035fa7191a54f2b8af39f16b0c08"],
+    "manifest": null,
+    "extra": {"branch": "default"},
+    "modified": [],
+    "added": [],
+    "removed": []
+   }
+  ]
+
 Check that adding an arbitrary name shows up in log automatically
 
   $ cat > ../names.py <<EOF
@@ -1655,7 +1743,7 @@ hg log -f dir across branches
   |
   o  a
   
-Ensure that largefiles doesn't intefere with following a normal file
+Ensure that largefiles doesn't interfere with following a normal file
   $ hg  --config extensions.largefiles= log -f d -T '{desc}' -G
   @  c
   |

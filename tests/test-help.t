@@ -72,7 +72,7 @@ Short help:
    grep          search for a pattern in specified files and revisions
    heads         show branch heads
    help          show help for a given topic or a help overview
-   identify      identify the working copy or specified revision
+   identify      identify the working directory or specified revision
    import        import an ordered set of patches
    incoming      show new changesets found in source
    init          create a new repository in the given directory
@@ -147,7 +147,7 @@ Short help:
    grep          search for a pattern in specified files and revisions
    heads         show branch heads
    help          show help for a given topic or a help overview
-   identify      identify the working copy or specified revision
+   identify      identify the working directory or specified revision
    import        import an ordered set of patches
    incoming      show new changesets found in source
    init          create a new repository in the given directory
@@ -245,6 +245,7 @@ Test extension help:
        acl           hooks for controlling repository access
        blackbox      log repository events to a blackbox for debugging
        bugzilla      hooks for integrating with the Bugzilla bug tracker
+       censor        erase file content at a given revision
        churn         command to display statistics about repository history
        color         colorize output from some commands
        convert       import revisions from foreign VCS repositories into
@@ -411,7 +412,7 @@ Test help option with version option
   Mercurial Distributed SCM (version *) (glob)
   (see http://mercurial.selenic.com for more information)
   
-  Copyright (C) 2005-2014 Matt Mackall and others
+  Copyright (C) 2005-2015 Matt Mackall and others
   This is free software; see the source for copying conditions. There is NO
   warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
@@ -508,6 +509,7 @@ Test command without options
    -B --ignore-blank-lines  ignore changes whose lines are all blank
    -U --unified NUM         number of lines of context to show
       --stat                output diffstat-style summary of changes
+      --root DIR            produce diffs relative to subdirectory
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
    -S --subrepos            recurse into subrepositories
@@ -689,7 +691,7 @@ Test that default list of commands omits extension commands
    grep          search for a pattern in specified files and revisions
    heads         show branch heads
    help          show help for a given topic or a help overview
-   identify      identify the working copy or specified revision
+   identify      identify the working directory or specified revision
    import        import an ordered set of patches
    incoming      show new changesets found in source
    init          create a new repository in the given directory
@@ -1100,6 +1102,125 @@ Test section lookup
   $ hg help glossary.mc.guffin
   abort: help section not found
   [255]
+
+Test dynamic list of merge tools only shows up once
+  $ hg help merge-tools
+  Merge Tools
+  """""""""""
+  
+      To merge files Mercurial uses merge tools.
+  
+      A merge tool combines two different versions of a file into a merged file.
+      Merge tools are given the two files and the greatest common ancestor of
+      the two file versions, so they can determine the changes made on both
+      branches.
+  
+      Merge tools are used both for "hg resolve", "hg merge", "hg update", "hg
+      backout" and in several extensions.
+  
+      Usually, the merge tool tries to automatically reconcile the files by
+      combining all non-overlapping changes that occurred separately in the two
+      different evolutions of the same initial base file. Furthermore, some
+      interactive merge programs make it easier to manually resolve conflicting
+      merges, either in a graphical way, or by inserting some conflict markers.
+      Mercurial does not include any interactive merge programs but relies on
+      external tools for that.
+  
+      Available merge tools
+      =====================
+  
+      External merge tools and their properties are configured in the merge-
+      tools configuration section - see hgrc(5) - but they can often just be
+      named by their executable.
+  
+      A merge tool is generally usable if its executable can be found on the
+      system and if it can handle the merge. The executable is found if it is an
+      absolute or relative executable path or the name of an application in the
+      executable search path. The tool is assumed to be able to handle the merge
+      if it can handle symlinks if the file is a symlink, if it can handle
+      binary files if the file is binary, and if a GUI is available if the tool
+      requires a GUI.
+  
+      There are some internal merge tools which can be used. The internal merge
+      tools are:
+  
+      ":dump"
+        Creates three versions of the files to merge, containing the contents of
+        local, other and base. These files can then be used to perform a merge
+        manually. If the file to be merged is named "a.txt", these files will
+        accordingly be named "a.txt.local", "a.txt.other" and "a.txt.base" and
+        they will be placed in the same directory as "a.txt".
+  
+      ":fail"
+        Rather than attempting to merge files that were modified on both
+        branches, it marks them as unresolved. The resolve command must be used
+        to resolve these conflicts.
+  
+      ":local"
+        Uses the local version of files as the merged version.
+  
+      ":merge"
+        Uses the internal non-interactive simple merge algorithm for merging
+        files. It will fail if there are any conflicts and leave markers in the
+        partially merged file. Markers will have two sections, one for each side
+        of merge.
+  
+      ":merge3"
+        Uses the internal non-interactive simple merge algorithm for merging
+        files. It will fail if there are any conflicts and leave markers in the
+        partially merged file. Marker will have three sections, one from each
+        side of the merge and one for the base content.
+  
+      ":other"
+        Uses the other version of files as the merged version.
+  
+      ":prompt"
+        Asks the user which of the local or the other version to keep as the
+        merged version.
+  
+      ":tagmerge"
+        Uses the internal tag merge algorithm (experimental).
+  
+      Internal tools are always available and do not require a GUI but will by
+      default not handle symlinks or binary files.
+  
+      Choosing a merge tool
+      =====================
+  
+      Mercurial uses these rules when deciding which merge tool to use:
+  
+      1. If a tool has been specified with the --tool option to merge or
+         resolve, it is used.  If it is the name of a tool in the merge-tools
+         configuration, its configuration is used. Otherwise the specified tool
+         must be executable by the shell.
+      2. If the "HGMERGE" environment variable is present, its value is used and
+         must be executable by the shell.
+      3. If the filename of the file to be merged matches any of the patterns in
+         the merge-patterns configuration section, the first usable merge tool
+         corresponding to a matching pattern is used. Here, binary capabilities
+         of the merge tool are not considered.
+      4. If ui.merge is set it will be considered next. If the value is not the
+         name of a configured tool, the specified value is used and must be
+         executable by the shell. Otherwise the named tool is used if it is
+         usable.
+      5. If any usable merge tools are present in the merge-tools configuration
+         section, the one with the highest priority is used.
+      6. If a program named "hgmerge" can be found on the system, it is used -
+         but it will by default not be used for symlinks and binary files.
+      7. If the file to be merged is not binary and is not a symlink, then
+         internal ":merge" is used.
+      8. The merge of the file fails and must be resolved before commit.
+  
+      Note:
+         After selecting a merge program, Mercurial will by default attempt to
+         merge the files using a simple merge algorithm first. Only if it
+         doesn't succeed because of conflicting changes Mercurial will actually
+         execute the merge program. Whether to use the simple merge algorithm
+         first can be controlled by the premerge setting of the merge tool.
+         Premerge is enabled by default unless the file is binary or a symlink.
+  
+      See the merge-tools and ui sections of hgrc(5) for details on the
+      configuration of merge tools.
 
 Test usage of section marks in help documents
 
@@ -1536,7 +1657,7 @@ Dish up an empty repo; serve it cold.
   identify
   </a>
   </td><td>
-  identify the working copy or specified revision
+  identify the working directory or specified revision
   </td></tr>
   <tr><td>
   <a href="/help/import">

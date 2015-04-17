@@ -156,7 +156,6 @@ tip - two revisions
   <ul>
   <li><a href="/help">help</a></li>
   </ul>
-  <p></p>
   <div class="atom-logo">
   <a href="/atom-log/01de2d66a28d/a" title="subscribe to atom feed">
   <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed" />
@@ -181,11 +180,13 @@ tip - two revisions
   | <a href="/log/5ed941583260/a">(0)</a> <a href="/log/tip/a">tip</a> </div>
   
   <table class="bigtable">
+  <thead>
    <tr>
     <th class="age">age</th>
     <th class="author">author</th>
     <th class="description">description</th>
    </tr>
+  </thead>
   <tbody class="stripes2">
    <tr>
     <td class="age">Thu, 01 Jan 1970 00:00:00 +0000</td>
@@ -266,7 +267,6 @@ second version - two revisions
   <ul>
   <li><a href="/help">help</a></li>
   </ul>
-  <p></p>
   <div class="atom-logo">
   <a href="/atom-log/01de2d66a28d/a" title="subscribe to atom feed">
   <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed" />
@@ -291,11 +291,13 @@ second version - two revisions
   | <a href="/log/5ed941583260/a">(0)</a> <a href="/log/tip/a">tip</a> </div>
   
   <table class="bigtable">
+  <thead>
    <tr>
     <th class="age">age</th>
     <th class="author">author</th>
     <th class="description">description</th>
    </tr>
+  </thead>
   <tbody class="stripes2">
    <tr>
     <td class="age">Thu, 01 Jan 1970 00:00:00 +0000</td>
@@ -376,7 +378,6 @@ first deleted - one revision
   <ul>
   <li><a href="/help">help</a></li>
   </ul>
-  <p></p>
   <div class="atom-logo">
   <a href="/atom-log/5ed941583260/a" title="subscribe to atom feed">
   <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed" />
@@ -401,11 +402,13 @@ first deleted - one revision
   | <a href="/log/5ed941583260/a">(0)</a> <a href="/log/tip/a">tip</a> </div>
   
   <table class="bigtable">
+  <thead>
    <tr>
     <th class="age">age</th>
     <th class="author">author</th>
     <th class="description">description</th>
    </tr>
+  </thead>
   <tbody class="stripes2">
    <tr>
     <td class="age">Thu, 01 Jan 1970 00:00:00 +0000</td>
@@ -481,7 +484,6 @@ first version - one revision
   <ul>
   <li><a href="/help">help</a></li>
   </ul>
-  <p></p>
   <div class="atom-logo">
   <a href="/atom-log/5ed941583260/a" title="subscribe to atom feed">
   <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed" />
@@ -506,11 +508,13 @@ first version - one revision
   | <a href="/log/5ed941583260/a">(0)</a> <a href="/log/tip/a">tip</a> </div>
   
   <table class="bigtable">
+  <thead>
    <tr>
     <th class="age">age</th>
     <th class="author">author</th>
     <th class="description">description</th>
    </tr>
+  </thead>
   <tbody class="stripes2">
    <tr>
     <td class="age">Thu, 01 Jan 1970 00:00:00 +0000</td>

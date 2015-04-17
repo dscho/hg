@@ -122,6 +122,7 @@ testpats = [
     (r'sed (-e )?\'(\d+|/[^/]*/)i(?!\\\n)',
      "put a backslash-escaped newline after sed 'i' command"),
     (r'^diff *-\w*u.*$\n(^  \$ |^$)', "prefix diff -u with cmp"),
+    (r'seq ', "don't use 'seq', use $TESTDIR/seq.py")
   ],
   # warnings
   [
@@ -153,7 +154,7 @@ utestpats = [
     (uprefix + r'(\s|fi\b|done\b)', "use > for continued lines"),
     (uprefix + r'.*:\.\S*/', "x:.y in a path does not work on msys, rewrite "
      "as x://.y, or see `hg log -k msys` for alternatives", r'-\S+:\.|' #-Rxxx
-     'hg pull -q file:../test'), # in test-pull.t which is skipped on windows
+     '# no-msys'), # in test-pull.t which is skipped on windows
     (r'^  saved backup bundle to \$TESTTMP.*\.hg$', winglobmsg),
     (r'^  changeset .* references (corrupted|missing) \$TESTTMP/.*[^)]$',
      winglobmsg),
@@ -334,6 +335,7 @@ cpats = [
     (r'(while|if|do|for)\(', "use space after while/if/do/for"),
     (r'return\(', "return is not a function"),
     (r' ;', "no space before ;"),
+    (r'[^;] \)', "no space before )"),
     (r'[)][{]', "space between ) and {"),
     (r'\w+\* \w+', "use int *foo, not int* foo"),
     (r'\W\([^\)]+\) \w+', "use (int)foo, not (int) foo"),

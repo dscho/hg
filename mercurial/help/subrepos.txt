@@ -78,7 +78,7 @@ Interaction with Mercurial Commands
 :add: add does not recurse in subrepos unless -S/--subrepos is
     specified.  However, if you specify the full path of a file in a
     subrepo, it will be added even without -S/--subrepos specified.
-    Git and Subversion subrepositories are currently silently
+    Subversion subrepositories are currently silently
     ignored.
 
 :addremove: addremove does not recurse into subrepos unless
@@ -91,7 +91,7 @@ Interaction with Mercurial Commands
     -S/--subrepos is specified.
 
 :cat: cat currently only handles exact file matches in subrepos.
-    Git and Subversion subrepositories are currently ignored.
+    Subversion subrepositories are currently ignored.
 
 :commit: commit creates a consistent snapshot of the state of the
     entire project and its subrepositories. If any subrepositories
@@ -108,6 +108,10 @@ Interaction with Mercurial Commands
     specified. Changes are displayed as usual, on the subrepositories
     elements. Git subrepositories do not support --include/--exclude.
     Subversion subrepositories are currently silently ignored.
+
+:files: files does not recurse into subrepos unless -S/--subrepos is
+    specified.  Git and Subversion subrepositories are currently
+    silently ignored.
 
 :forget: forget currently only handles exact file matches in subrepos.
     Git and Subversion subrepositories are currently silently ignored.

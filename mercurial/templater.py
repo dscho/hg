@@ -162,8 +162,13 @@ def buildfilter(exp, context):
 
 def runfilter(context, mapping, data):
     func, data, filt = data
+    # func() may return string, generator of strings or arbitrary object such
+    # as date tuple, but filter does not want generator.
+    thing = func(context, mapping, data)
+    if isinstance(thing, types.GeneratorType):
+        thing = stringify(thing)
     try:
-        return filt(func(context, mapping, data))
+        return filt(thing)
     except (ValueError, AttributeError, TypeError):
         if isinstance(data, tuple):
             dt = data[1]
@@ -214,6 +219,8 @@ def buildfunc(exp, context):
     raise error.ParseError(_("unknown function '%s'") % n)
 
 def date(context, mapping, args):
+    """:date(date[, fmt]): Format a date. See :hg:`help dates` for formatting
+    strings."""
     if not (1 <= len(args) <= 2):
         # i18n: "date" is a keyword
         raise error.ParseError(_("date expects one or two arguments"))
@@ -225,6 +232,8 @@ def date(context, mapping, args):
     return util.datestr(date)
 
 def diff(context, mapping, args):
+    """:diff([includepattern [, excludepattern]]): Show a diff, optionally
+    specifying files to include or exclude."""
     if len(args) > 2:
         # i18n: "diff" is a keyword
         raise error.ParseError(_("diff expects one, two or no arguments"))
@@ -242,6 +251,8 @@ def diff(context, mapping, args):
     return ''.join(chunks)
 
 def fill(context, mapping, args):
+    """:fill(text[, width[, initialident[, hangindent]]]): Fill many
+    paragraphs with optional indentation. See the "fill" filter."""
     if not (1 <= len(args) <= 4):
         # i18n: "fill" is a keyword
         raise error.ParseError(_("fill expects one to four arguments"))
@@ -265,8 +276,8 @@ def fill(context, mapping, args):
     return templatefilters.fill(text, width, initindent, hangindent)
 
 def pad(context, mapping, args):
-    """usage: pad(text, width, fillchar=' ', right=False)
-    """
+    """:pad(text, width[, fillchar=' '[, right=False]]): Pad text with a
+    fill character."""
     if not (2 <= len(args) <= 4):
         # i18n: "pad" is a keyword
         raise error.ParseError(_("pad() expects two to four arguments"))
@@ -291,6 +302,9 @@ def pad(context, mapping, args):
         return text.ljust(width, fillchar)
 
 def get(context, mapping, args):
+    """:get(dict, key): Get an attribute/key from an object. Some keywords
+    are complex types. This function allows you to obtain the value of an
+    attribute on these type."""
     if len(args) != 2:
         # i18n: "get" is a keyword
         raise error.ParseError(_("get() expects two arguments"))
@@ -312,6 +326,8 @@ def _evalifliteral(arg, context, mapping):
         yield t
 
 def if_(context, mapping, args):
+    """:if(expr, then[, else]): Conditionally execute based on the result of
+    an expression."""
     if not (2 <= len(args) <= 3):
         # i18n: "if" is a keyword
         raise error.ParseError(_("if expects two or three arguments"))
@@ -323,6 +339,8 @@ def if_(context, mapping, args):
         yield _evalifliteral(args[2], context, mapping)
 
 def ifcontains(context, mapping, args):
+    """:ifcontains(search, thing, then[, else]): Conditionally execute based
+    on whether the item "search" is in "thing"."""
     if not (3 <= len(args) <= 4):
         # i18n: "ifcontains" is a keyword
         raise error.ParseError(_("ifcontains expects three or four arguments"))
@@ -330,15 +348,14 @@ def ifcontains(context, mapping, args):
     item = stringify(args[0][0](context, mapping, args[0][1]))
     items = args[1][0](context, mapping, args[1][1])
 
-    # Iterating over items gives a formatted string, so we iterate
-    # directly over the raw values.
-    if ((callable(items) and item in [i.values()[0] for i in items()]) or
-        (isinstance(items, str) and item in items)):
+    if item in items:
         yield _evalifliteral(args[2], context, mapping)
     elif len(args) == 4:
         yield _evalifliteral(args[3], context, mapping)
 
 def ifeq(context, mapping, args):
+    """:ifeq(expr1, expr2, then[, else]): Conditionally execute based on
+    whether 2 items are equivalent."""
     if not (3 <= len(args) <= 4):
         # i18n: "ifeq" is a keyword
         raise error.ParseError(_("ifeq expects three or four arguments"))
@@ -351,6 +368,7 @@ def ifeq(context, mapping, args):
         yield _evalifliteral(args[3], context, mapping)
 
 def join(context, mapping, args):
+    """:join(list, sep): Join items in a list with a delimiter."""
     if not (1 <= len(args) <= 2):
         # i18n: "join" is a keyword
         raise error.ParseError(_("join expects one or two arguments"))
@@ -373,6 +391,9 @@ def join(context, mapping, args):
         yield x
 
 def label(context, mapping, args):
+    """:label(label, expr): Apply a label to generated content. Content with
+    a label applied can result in additional post-processing, such as
+    automatic colorization."""
     if len(args) != 2:
         # i18n: "label" is a keyword
         raise error.ParseError(_("label expects two arguments"))
@@ -381,19 +402,19 @@ def label(context, mapping, args):
     yield _evalifliteral(args[1], context, mapping)
 
 def revset(context, mapping, args):
-    """usage: revset(query[, formatargs...])
-    """
+    """:revset(query[, formatargs...]): Execute a revision set query. See
+    :hg:`help revset`."""
     if not len(args) > 0:
         # i18n: "revset" is a keyword
         raise error.ParseError(_("revset expects one or more arguments"))
 
     raw = args[0][1]
     ctx = mapping['ctx']
-    repo = ctx._repo
+    repo = ctx.repo()
 
     def query(expr):
         m = revsetmod.match(repo.ui, expr)
-        return m(repo, revsetmod.spanset(repo))
+        return m(repo)
 
     if len(args) > 1:
         formatargs = list([a[0](context, mapping, a[1]) for a in args[1:]])
@@ -411,6 +432,7 @@ def revset(context, mapping, args):
     return templatekw.showlist("revision", revs, **mapping)
 
 def rstdoc(context, mapping, args):
+    """:rstdoc(text, style): Format ReStructuredText."""
     if len(args) != 2:
         # i18n: "rstdoc" is a keyword
         raise error.ParseError(_("rstdoc expects two arguments"))
@@ -421,8 +443,8 @@ def rstdoc(context, mapping, args):
     return minirst.format(text, style=style, keep=['verbose'])
 
 def shortest(context, mapping, args):
-    """usage: shortest(node, minlength=4)
-    """
+    """:shortest(node, minlength=4): Obtain the shortest representation of
+    a node."""
     if not (1 <= len(args) <= 2):
         # i18n: "shortest" is a keyword
         raise error.ParseError(_("shortest() expects one or two arguments"))
@@ -473,6 +495,7 @@ def shortest(context, mapping, args):
                 return shortest
 
 def strip(context, mapping, args):
+    """:strip(text[, chars]): Strip characters from a string."""
     if not (1 <= len(args) <= 2):
         # i18n: "strip" is a keyword
         raise error.ParseError(_("strip expects one or two arguments"))
@@ -484,6 +507,8 @@ def strip(context, mapping, args):
     return text.strip()
 
 def sub(context, mapping, args):
+    """:sub(pattern, replacement, expression): Perform text substitution
+    using regular expressions."""
     if len(args) != 3:
         # i18n: "sub" is a keyword
         raise error.ParseError(_("sub expects three arguments"))
@@ -494,6 +519,8 @@ def sub(context, mapping, args):
     yield re.sub(pat, rpl, src)
 
 def startswith(context, mapping, args):
+    """:startswith(pattern, text): Returns the value from the "text" argument
+    if it begins with the content from the "pattern" argument."""
     if len(args) != 2:
         # i18n: "startswith" is a keyword
         raise error.ParseError(_("startswith expects two arguments"))
@@ -506,7 +533,7 @@ def startswith(context, mapping, args):
 
 
 def word(context, mapping, args):
-    """return nth word from a string"""
+    """:word(number, text[, separator]): Return the nth word from a string."""
     if not (2 <= len(args) <= 3):
         # i18n: "word" is a keyword
         raise error.ParseError(_("word expects two or three arguments, got %d")
@@ -654,7 +681,10 @@ class templater(object):
         self.mapfile = mapfile or 'template'
         self.cache = cache.copy()
         self.map = {}
-        self.base = (mapfile and os.path.dirname(mapfile)) or ''
+        if mapfile:
+            self.base = os.path.dirname(mapfile)
+        else:
+            self.base = ''
         self.filters = templatefilters.filters.copy()
         self.filters.update(filters)
         self.defaults = defaults
@@ -763,3 +793,6 @@ def stylemap(styles, paths=None):
                     return style, mapfile
 
     raise RuntimeError("No hgweb templates found in %r" % paths)
+
+# tell hggettext to extract docstrings from these functions:
+i18nfunctions = funcs.values()

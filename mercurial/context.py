@@ -66,8 +66,7 @@ class basectx(object):
         return self.filectx(key)
 
     def __iter__(self):
-        for f in sorted(self._manifest):
-            yield f
+        return iter(self._manifest)
 
     def _manifestmatches(self, match, s):
         """generate a new manifest filtered by the match argument
@@ -153,6 +152,8 @@ class basectx(object):
         return hex(self.node())
     def manifest(self):
         return self._manifest
+    def repo(self):
+        return self._repo
     def phasestr(self):
         return phases.phasenames[self.phase()]
     def mutable(self):
@@ -265,12 +266,11 @@ class basectx(object):
         diffopts = patch.diffopts(self._repo.ui, opts)
         return patch.diff(self._repo, ctx2, self, match=match, opts=diffopts)
 
-    @propertycache
-    def _dirs(self):
-        return scmutil.dirs(self._manifest)
-
     def dirs(self):
-        return self._dirs
+        return self._manifest.dirs()
+
+    def hasdir(self, dir):
+        return self._manifest.hasdir(dir)
 
     def dirty(self, missing=False, merge=True, branch=True):
         return False
@@ -376,10 +376,6 @@ class changectx(basectx):
                 return
             if isinstance(changeid, long):
                 changeid = str(changeid)
-            if changeid == '.':
-                self._node = repo.dirstate.p1()
-                self._rev = repo.changelog.rev(self._node)
-                return
             if changeid == 'null':
                 self._node = nullid
                 self._rev = nullrev
@@ -387,6 +383,12 @@ class changectx(basectx):
             if changeid == 'tip':
                 self._node = repo.changelog.tip()
                 self._rev = repo.changelog.rev(self._node)
+                return
+            if changeid == '.' or changeid == repo.dirstate.p1():
+                # this is a hack to delay/avoid loading obsmarkers
+                # when we know that '.' won't be hidden
+                self._node = repo.dirstate.p1()
+                self._rev = repo.unfiltered().changelog.rev(self._node)
                 return
             if len(changeid) == 20:
                 try:
@@ -585,30 +587,15 @@ class changectx(basectx):
         return self._repo.changelog.descendant(self._rev, other._rev)
 
     def walk(self, match):
-        fset = set(match.files())
-        # for dirstate.walk, files=['.'] means "walk the whole tree".
-        # follow that here, too
-        fset.discard('.')
+        '''Generates matching file names.'''
 
-        # avoid the entire walk if we're only looking for specific files
-        if fset and not match.anypats():
-            if util.all([fn in self for fn in fset]):
-                for fn in sorted(fset):
-                    if match(fn):
-                        yield fn
-                raise StopIteration
+        # Override match.bad method to have message with nodeid
+        oldbad = match.bad
+        def bad(fn, msg):
+            oldbad(fn, _('no such file in rev %s') % self)
+        match.bad = bad
 
-        for fn in self:
-            if fn in fset:
-                # specified pattern is the exact name
-                fset.remove(fn)
-            if match(fn):
-                yield fn
-        for fn in sorted(fset):
-            if fn in self._dirs:
-                # specified pattern is a directory
-                continue
-            match.bad(fn, _('no such file in rev %s') % self)
+        return self._manifest.walk(match)
 
     def matches(self, match):
         return self.walk(match)
@@ -722,6 +709,8 @@ class basefilectx(object):
         return self._changectx.manifest()
     def changectx(self):
         return self._changectx
+    def repo(self):
+        return self._repo
 
     def path(self):
         return self._path
@@ -752,7 +741,7 @@ class basefilectx(object):
         return True
 
     def _adjustlinkrev(self, path, filelog, fnode, srcrev, inclusive=False):
-        """return the first ancestor of <srcrev> introducting <fnode>
+        """return the first ancestor of <srcrev> introducing <fnode>
 
         If the linkrev of the file revision does not point to an ancestor of
         srcrev, we'll walk down the ancestors until we find one introducing
@@ -830,7 +819,7 @@ class basefilectx(object):
             # be replaced with the rename information. This parent is -always-
             # the first one.
             #
-            # As null id have alway been filtered out in the previous list
+            # As null id have always been filtered out in the previous list
             # comprehension, inserting to 0 will always result in "replacing
             # first nullid parent with rename information.
             pl.insert(0, (r[0], r[1], self._repo.file(r[0])))
@@ -919,7 +908,7 @@ class basefilectx(object):
         introrev = self.introrev()
         if self.rev() != introrev:
             base = self.filectx(self.filenode(), changeid=introrev)
-        if getattr(base, '_ancestrycontext', None) is None:
+        if introrev and getattr(base, '_ancestrycontext', None) is None:
             ac = self._repo.changelog.ancestors([introrev], inclusive=True)
             base._ancestrycontext = ac
 
@@ -969,7 +958,11 @@ class basefilectx(object):
     def ancestors(self, followfirst=False):
         visit = {}
         c = self
-        cut = followfirst and 1 or None
+        if followfirst:
+            cut = 1
+        else:
+            cut = None
+
         while True:
             for parent in c.parents()[:cut]:
                 visit[(parent.linkrev(), parent.filenode())] = parent
@@ -1199,6 +1192,8 @@ class committablectx(basectx):
     def subrev(self, subpath):
         return None
 
+    def manifestnode(self):
+        return None
     def user(self):
         return self._user or self._repo.ui.username()
     def date(self):
@@ -1265,6 +1260,7 @@ class committablectx(basectx):
         return self._parents[0].ancestor(c2) # punt on two parents for now
 
     def walk(self, match):
+        '''Generates matching file names.'''
         return sorted(self._repo.dirstate.walk(match, sorted(self.substate),
                                                True, False))
 
@@ -1295,9 +1291,6 @@ class committablectx(basectx):
             self._repo.dirstate.drop(f)
         self._repo.dirstate.setparents(node)
         self._repo.dirstate.endparentchange()
-
-    def dirs(self):
-        return self._repo.dirstate.dirs()
 
 class workingctx(committablectx):
     """A workingctx object makes access to data related to
@@ -1433,6 +1426,18 @@ class workingctx(committablectx):
                 self._repo.dirstate.copy(source, dest)
             finally:
                 wlock.release()
+
+    def match(self, pats=[], include=None, exclude=None, default='glob'):
+        r = self._repo
+
+        # Only a case insensitive filesystem needs magic to translate user input
+        # to actual case in the filesystem.
+        if not util.checkcase(r.root):
+            return matchmod.icasefsmatcher(r.root, r.getcwd(), pats, include,
+                                           exclude, default, r.auditor, self)
+        return matchmod.match(r.root, r.getcwd(), pats,
+                              include, exclude, default,
+                              auditor=r.auditor, ctx=self)
 
     def _filtersuspectsymlink(self, files):
         if not files or self._repo.dirstate._checklink:
@@ -1570,7 +1575,7 @@ class workingctx(committablectx):
             def bad(f, msg):
                 # 'f' may be a directory pattern from 'match.files()',
                 # so 'f not in ctx1' is not enough
-                if f not in other and f not in other.dirs():
+                if f not in other and not other.hasdir(f):
                     self._repo.ui.warn('%s: %s\n' %
                                        (self._repo.dirstate.pathto(f), msg))
             match.bad = bad
@@ -1592,6 +1597,10 @@ class committablefilectx(basefilectx):
 
     def __nonzero__(self):
         return True
+
+    def linkrev(self):
+        # linked to self._changectx no matter if file is modified or not
+        return self.rev()
 
     def parents(self):
         '''return parent filectxs, following copies if necessary'''
@@ -1764,7 +1773,11 @@ class memctx(committablectx):
             # "filectxfn" for performance (e.g. converting from another VCS)
             self._filectxfn = util.cachefunc(filectxfn)
 
-        self._extra = extra and extra.copy() or {}
+        if extra:
+            self._extra = extra.copy()
+        else:
+            self._extra = {}
+
         if self._extra.get('branch', '') == '':
             self._extra['branch'] = 'default'
 

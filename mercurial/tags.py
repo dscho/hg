@@ -15,21 +15,78 @@ from i18n import _
 import util
 import encoding
 import error
+from array import array
 import errno
 import time
 
+# Tags computation can be expensive and caches exist to make it fast in
+# the common case.
+#
+# The "hgtagsfnodes1" cache file caches the .hgtags filenode values for
+# each revision in the repository. The file is effectively an array of
+# fixed length records. Read the docs for "hgtagsfnodescache" for technical
+# details.
+#
+# The .hgtags filenode cache grows in proportion to the length of the
+# changelog. The file is truncated when the # changelog is stripped.
+#
+# The purpose of the filenode cache is to avoid the most expensive part
+# of finding global tags, which is looking up the .hgtags filenode in the
+# manifest for each head. This can take dozens or over 100ms for
+# repositories with very large manifests. Multiplied by dozens or even
+# hundreds of heads and there is a significant performance concern.
+#
+# There also exist a separate cache file for each repository filter.
+# These "tags-*" files store information about the history of tags.
+#
+# The tags cache files consists of a cache validation line followed by
+# a history of tags.
+#
+# The cache validation line has the format:
+#
+#   <tiprev> <tipnode> [<filteredhash>]
+#
+# <tiprev> is an integer revision and <tipnode> is a 40 character hex
+# node for that changeset. These redundantly identify the repository
+# tip from the time the cache was written. In addition, <filteredhash>,
+# if present, is a 40 character hex hash of the contents of the filtered
+# revisions for this filter. If the set of filtered revs changes, the
+# hash will change and invalidate the cache.
+#
+# The history part of the tags cache consists of lines of the form:
+#
+#   <node> <tag>
+#
+# (This format is identical to that of .hgtags files.)
+#
+# <tag> is the tag name and <node> is the 40 character hex changeset
+# the tag is associated with.
+#
+# Tags are written sorted by tag name.
+#
+# Tags associated with multiple changesets have an entry for each changeset.
+# The most recent changeset (in terms of revlog ordering for the head
+# setting it) for each tag is last.
+
 def findglobaltags(ui, repo, alltags, tagtypes):
-    '''Find global tags in repo by reading .hgtags from every head that
-    has a distinct version of it, using a cache to avoid excess work.
-    Updates the dicts alltags, tagtypes in place: alltags maps tag name
-    to (node, hist) pair (see _readtags() below), and tagtypes maps tag
-    name to tag type ("global" in this case).'''
+    '''Find global tags in a repo.
+
+    "alltags" maps tag name to (node, hist) 2-tuples.
+
+    "tagtypes" maps tag name to tag type. Global tags always have the
+    "global" tag type.
+
+    The "alltags" and "tagtypes" dicts are updated in place. Empty dicts
+    should be passed in.
+
+    The tags cache is read and updated as a side-effect of calling.
+    '''
     # This is so we can be lazy and assume alltags contains only global
     # tags when we pass it to _writetagcache().
     assert len(alltags) == len(tagtypes) == 0, \
            "findglobaltags() should be called first"
 
-    (heads, tagfnode, cachetags, shouldwrite) = _readtagcache(ui, repo)
+    (heads, tagfnode, valid, cachetags, shouldwrite) = _readtagcache(ui, repo)
     if cachetags is not None:
         assert not shouldwrite
         # XXX is this really 100% correct?  are there oddball special
@@ -38,9 +95,9 @@ def findglobaltags(ui, repo, alltags, tagtypes):
         _updatetags(cachetags, 'global', alltags, tagtypes)
         return
 
-    seen = set()                    # set of fnode
+    seen = set()  # set of fnode
     fctx = None
-    for head in reversed(heads):        # oldest to newest
+    for head in reversed(heads):  # oldest to newest
         assert head in repo.changelog.nodemap, \
                "tag cache returned bogus head %s" % short(head)
 
@@ -57,10 +114,10 @@ def findglobaltags(ui, repo, alltags, tagtypes):
 
     # and update the cache (if necessary)
     if shouldwrite:
-        _writetagcache(ui, repo, heads, tagfnode, alltags)
+        _writetagcache(ui, repo, valid, alltags)
 
 def readlocaltags(ui, repo, alltags, tagtypes):
-    '''Read local tags in repo.  Update alltags and tagtypes.'''
+    '''Read local tags in repo. Update alltags and tagtypes.'''
     try:
         data = repo.vfs.read("localtags")
     except IOError, inst:
@@ -86,14 +143,18 @@ def readlocaltags(ui, repo, alltags, tagtypes):
 
 def _readtaghist(ui, repo, lines, fn, recode=None, calcnodelines=False):
     '''Read tag definitions from a file (or any source of lines).
+
     This function returns two sortdicts with similar information:
+
     - the first dict, bintaghist, contains the tag information as expected by
       the _readtags function, i.e. a mapping from tag name to (node, hist):
         - node is the node id from the last line read for that name,
         - hist is the list of node ids previously associated with it (in file
-          order).  All node ids are binary, not hex.
+          order). All node ids are binary, not hex.
+
     - the second dict, hextaglines, is a mapping from tag name to a list of
       [hexnode, line number] pairs, ordered from the oldest to the newest node.
+
     When calcnodelines is False the hextaglines dict is not calculated (an
     empty dict is returned). This is done to improve this function's
     performance in cases where the line numbers are not needed.
@@ -139,10 +200,13 @@ def _readtaghist(ui, repo, lines, fn, recode=None, calcnodelines=False):
 
 def _readtags(ui, repo, lines, fn, recode=None, calcnodelines=False):
     '''Read tag definitions from a file (or any source of lines).
-    Return a mapping from tag name to (node, hist): node is the node id
-    from the last line read for that name, and hist is the list of node
-    ids previously associated with it (in file order).  All node ids are
-    binary, not hex.'''
+
+    Returns a mapping from tag name to (node, hist).
+
+    "node" is the node id from the last line read for that name. "hist"
+    is the list of node ids previously associated with it (in file order).
+    All node ids are binary, not hex.
+    '''
     filetags, nodelines = _readtaghist(ui, repo, lines, fn, recode=recode,
                                        calcnodelines=calcnodelines)
     for tag, taghist in filetags.items():
@@ -174,64 +238,54 @@ def _updatetags(filetags, tagtype, alltags, tagtypes):
         ahist.extend([n for n in bhist if n not in ahist])
         alltags[name] = anode, ahist
 
-
-# The tag cache only stores info about heads, not the tag contents
-# from each head.  I.e. it doesn't try to squeeze out the maximum
-# performance, but is simpler has a better chance of actually
-# working correctly.  And this gives the biggest performance win: it
-# avoids looking up .hgtags in the manifest for every head, and it
-# can avoid calling heads() at all if there have been no changes to
-# the repo.
+def _filename(repo):
+    """name of a tagcache file for a given repo or repoview"""
+    filename = 'cache/tags2'
+    if repo.filtername:
+        filename = '%s-%s' % (filename, repo.filtername)
+    return filename
 
 def _readtagcache(ui, repo):
-    '''Read the tag cache and return a tuple (heads, fnodes, cachetags,
-    shouldwrite).  If the cache is completely up-to-date, cachetags is a
-    dict of the form returned by _readtags(); otherwise, it is None and
-    heads and fnodes are set.  In that case, heads is the list of all
-    heads currently in the repository (ordered from tip to oldest) and
-    fnodes is a mapping from head to .hgtags filenode.  If those two are
-    set, caller is responsible for reading tag info from each head.'''
+    '''Read the tag cache.
+
+    Returns a tuple (heads, fnodes, validinfo, cachetags, shouldwrite).
+
+    If the cache is completely up-to-date, "cachetags" is a dict of the
+    form returned by _readtags() and "heads", "fnodes", and "validinfo" are
+    None and "shouldwrite" is False.
+
+    If the cache is not up to date, "cachetags" is None. "heads" is a list
+    of all heads currently in the repository, ordered from tip to oldest.
+    "validinfo" is a tuple describing cache validation info. This is used
+    when writing the tags cache. "fnodes" is a mapping from head to .hgtags
+    filenode. "shouldwrite" is True.
+
+    If the cache is not up to date, the caller is responsible for reading tag
+    info from each returned head. (See findglobaltags().)
+    '''
+    import scmutil  # avoid cycle
 
     try:
-        cachefile = repo.vfs('cache/tags', 'r')
+        cachefile = repo.vfs(_filename(repo), 'r')
         # force reading the file for static-http
         cachelines = iter(cachefile)
     except IOError:
         cachefile = None
 
-    # The cache file consists of lines like
-    #   <headrev> <headnode> [<tagnode>]
-    # where <headrev> and <headnode> redundantly identify a repository
-    # head from the time the cache was written, and <tagnode> is the
-    # filenode of .hgtags on that head.  Heads with no .hgtags file will
-    # have no <tagnode>.  The cache is ordered from tip to oldest (which
-    # is part of why <headrev> is there: a quick visual check is all
-    # that's required to ensure correct order).
-    #
-    # This information is enough to let us avoid the most expensive part
-    # of finding global tags, which is looking up <tagnode> in the
-    # manifest for each head.
-    cacherevs = []                      # list of headrev
-    cacheheads = []                     # list of headnode
-    cachefnode = {}                     # map headnode to filenode
+    cacherev = None
+    cachenode = None
+    cachehash = None
     if cachefile:
         try:
-            for line in cachelines:
-                if line == "\n":
-                    break
-                line = line.split()
-                cacherevs.append(int(line[0]))
-                headnode = bin(line[1])
-                cacheheads.append(headnode)
-                if len(line) == 3:
-                    fnode = bin(line[2])
-                    cachefnode[headnode] = fnode
+            validline = cachelines.next()
+            validline = validline.split()
+            cacherev = int(validline[0])
+            cachenode = bin(validline[1])
+            if len(validline) > 2:
+                cachehash = bin(validline[2])
         except Exception:
-            # corruption of the tags cache, just recompute it
-            ui.warn(_('.hg/cache/tags is corrupt, rebuilding it\n'))
-            cacheheads = []
-            cacherevs = []
-            cachefnode = {}
+            # corruption of the cache, just recompute it.
+            pass
 
     tipnode = repo.changelog.tip()
     tiprev = len(repo.changelog) - 1
@@ -240,18 +294,22 @@ def _readtagcache(ui, repo):
     # (Unchanged tip trivially means no changesets have been added.
     # But, thanks to localrepository.destroyed(), it also means none
     # have been destroyed by strip or rollback.)
-    if cacheheads and cacheheads[0] == tipnode and cacherevs[0] == tiprev:
+    if (cacherev == tiprev
+            and cachenode == tipnode
+            and cachehash == scmutil.filteredhash(repo, tiprev)):
         tags = _readtags(ui, repo, cachelines, cachefile.name)
         cachefile.close()
-        return (None, None, tags, False)
+        return (None, None, None, tags, False)
     if cachefile:
         cachefile.close()               # ignore rest of file
+
+    valid = (tiprev, tipnode, scmutil.filteredhash(repo, tiprev))
 
     repoheads = repo.heads()
     # Case 2 (uncommon): empty repo; get out quickly and don't bother
     # writing an empty cache.
     if repoheads == [nullid]:
-        return ([], {}, {}, False)
+        return ([], {}, valid, {}, False)
 
     # Case 3 (uncommon): cache file missing or empty.
 
@@ -269,75 +327,53 @@ def _readtagcache(ui, repo):
     if not len(repo.file('.hgtags')):
         # No tags have ever been committed, so we can avoid a
         # potentially expensive search.
-        return (repoheads, cachefnode, None, True)
+        return ([], {}, valid, None, True)
 
     starttime = time.time()
-
-    newheads = [head
-                for head in repoheads
-                if head not in set(cacheheads)]
 
     # Now we have to lookup the .hgtags filenode for every new head.
     # This is the most expensive part of finding tags, so performance
     # depends primarily on the size of newheads.  Worst case: no cache
     # file, so newheads == repoheads.
-    for head in reversed(newheads):
-        cctx = repo[head]
-        try:
-            fnode = cctx.filenode('.hgtags')
+    fnodescache = hgtagsfnodescache(repo.unfiltered())
+    cachefnode = {}
+    for head in reversed(repoheads):
+        fnode = fnodescache.getfnode(head)
+        if fnode != nullid:
             cachefnode[head] = fnode
-        except error.LookupError:
-            # no .hgtags file on this head
-            pass
+
+    fnodescache.write()
 
     duration = time.time() - starttime
     ui.log('tagscache',
-           'resolved %d tags cache entries from %d manifests in %0.4f '
+           '%d/%d cache hits/lookups in %0.4f '
            'seconds\n',
-           len(cachefnode), len(newheads), duration)
+           fnodescache.hitcount, fnodescache.lookupcount, duration)
 
     # Caller has to iterate over all heads, but can use the filenodes in
     # cachefnode to get to each .hgtags revision quickly.
-    return (repoheads, cachefnode, None, True)
+    return (repoheads, cachefnode, valid, None, True)
 
-def _writetagcache(ui, repo, heads, tagfnode, cachetags):
-
+def _writetagcache(ui, repo, valid, cachetags):
+    filename = _filename(repo)
     try:
-        cachefile = repo.vfs('cache/tags', 'w', atomictemp=True)
+        cachefile = repo.vfs(filename, 'w', atomictemp=True)
     except (OSError, IOError):
         return
 
-    ui.log('tagscache', 'writing tags cache file with %d heads and %d tags\n',
-            len(heads), len(cachetags))
+    ui.log('tagscache', 'writing .hg/%s with %d tags\n',
+           filename, len(cachetags))
 
-    realheads = repo.heads()            # for sanity checks below
-    for head in heads:
-        # temporary sanity checks; these can probably be removed
-        # once this code has been in crew for a few weeks
-        assert head in repo.changelog.nodemap, \
-               'trying to write non-existent node %s to tag cache' % short(head)
-        assert head in realheads, \
-               'trying to write non-head %s to tag cache' % short(head)
-        assert head != nullid, \
-               'trying to write nullid to tag cache'
-
-        # This can't fail because of the first assert above.  When/if we
-        # remove that assert, we might want to catch LookupError here
-        # and downgrade it to a warning.
-        rev = repo.changelog.rev(head)
-
-        fnode = tagfnode.get(head)
-        if fnode:
-            cachefile.write('%d %s %s\n' % (rev, hex(head), hex(fnode)))
-        else:
-            cachefile.write('%d %s\n' % (rev, hex(head)))
+    if valid[2]:
+        cachefile.write('%d %s %s\n' % (valid[0], hex(valid[1]), hex(valid[2])))
+    else:
+        cachefile.write('%d %s\n' % (valid[0], hex(valid[1])))
 
     # Tag names in the cache are in UTF-8 -- which is the whole reason
     # we keep them in UTF-8 throughout this module.  If we converted
     # them local encoding on input, we would lose info writing them to
     # the cache.
-    cachefile.write('\n')
-    for (name, (node, hist)) in cachetags.iteritems():
+    for (name, (node, hist)) in sorted(cachetags.iteritems()):
         for n in hist:
             cachefile.write("%s %s\n" % (hex(n), name))
         cachefile.write("%s %s\n" % (hex(node), name))
@@ -346,3 +382,153 @@ def _writetagcache(ui, repo, heads, tagfnode, cachetags):
         cachefile.close()
     except (OSError, IOError):
         pass
+
+_fnodescachefile = 'cache/hgtagsfnodes1'
+_fnodesrecsize = 4 + 20 # changeset fragment + filenode
+_fnodesmissingrec = '\xff' * 24
+
+class hgtagsfnodescache(object):
+    """Persistent cache mapping revisions to .hgtags filenodes.
+
+    The cache is an array of records. Each item in the array corresponds to
+    a changelog revision. Values in the array contain the first 4 bytes of
+    the node hash and the 20 bytes .hgtags filenode for that revision.
+
+    The first 4 bytes are present as a form of verification. Repository
+    stripping and rewriting may change the node at a numeric revision in the
+    changelog. The changeset fragment serves as a verifier to detect
+    rewriting. This logic is shared with the rev branch cache (see
+    branchmap.py).
+
+    The instance holds in memory the full cache content but entries are
+    only parsed on read.
+
+    Instances behave like lists. ``c[i]`` works where i is a rev or
+    changeset node. Missing indexes are populated automatically on access.
+    """
+    def __init__(self, repo):
+        assert repo.filtername is None
+
+        self._repo = repo
+
+        # Only for reporting purposes.
+        self.lookupcount = 0
+        self.hitcount = 0
+
+        self._raw = array('c')
+
+        data = repo.vfs.tryread(_fnodescachefile)
+        self._raw.fromstring(data)
+
+        # The end state of self._raw is an array that is of the exact length
+        # required to hold a record for every revision in the repository.
+        # We truncate or extend the array as necessary. self._dirtyoffset is
+        # defined to be the start offset at which we need to write the output
+        # file. This offset is also adjusted when new entries are calculated
+        # for array members.
+        cllen = len(repo.changelog)
+        wantedlen = cllen * _fnodesrecsize
+        rawlen = len(self._raw)
+
+        self._dirtyoffset = None
+
+        if rawlen < wantedlen:
+            self._dirtyoffset = rawlen
+            self._raw.extend('\xff' * (wantedlen - rawlen))
+        elif rawlen > wantedlen:
+            # There's no easy way to truncate array instances. This seems
+            # slightly less evil than copying a potentially large array slice.
+            for i in range(rawlen - wantedlen):
+                self._raw.pop()
+            self._dirtyoffset = len(self._raw)
+
+    def getfnode(self, node):
+        """Obtain the filenode of the .hgtags file at a specified revision.
+
+        If the value is in the cache, the entry will be validated and returned.
+        Otherwise, the filenode will be computed and returned.
+
+        If an .hgtags does not exist at the specified revision, nullid is
+        returned.
+        """
+        ctx = self._repo[node]
+        rev = ctx.rev()
+
+        self.lookupcount += 1
+
+        offset = rev * _fnodesrecsize
+        record = self._raw[offset:offset + _fnodesrecsize].tostring()
+        properprefix = node[0:4]
+
+        # Validate and return existing entry.
+        if record != _fnodesmissingrec:
+            fileprefix = record[0:4]
+
+            if fileprefix == properprefix:
+                self.hitcount += 1
+                return record[4:]
+
+            # Fall through.
+
+        # If we get here, the entry is either missing or invalid. Populate it.
+        try:
+            fnode = ctx.filenode('.hgtags')
+        except error.LookupError:
+            # No .hgtags file on this revision.
+            fnode = nullid
+
+        # Slices on array instances only accept other array.
+        entry = array('c', properprefix + fnode)
+        self._raw[offset:offset + _fnodesrecsize] = entry
+        # self._dirtyoffset could be None.
+        self._dirtyoffset = min(self._dirtyoffset, offset) or 0
+
+        return fnode
+
+    def write(self):
+        """Perform all necessary writes to cache file.
+
+        This may no-op if no writes are needed or if a write lock could
+        not be obtained.
+        """
+        if self._dirtyoffset is None:
+            return
+
+        data = self._raw[self._dirtyoffset:]
+        if not data:
+            return
+
+        repo = self._repo
+
+        try:
+            lock = repo.wlock(wait=False)
+        except error.LockHeld:
+            repo.ui.log('tagscache',
+                        'not writing .hg/%s because lock held\n' %
+                        (_fnodescachefile))
+            return
+
+        try:
+            try:
+                f = repo.vfs.open(_fnodescachefile, 'ab')
+                try:
+                    # if the file has been truncated
+                    actualoffset = f.tell()
+                    if actualoffset < self._dirtyoffset:
+                        self._dirtyoffset = actualoffset
+                        data = self._raw[self._dirtyoffset:]
+                    f.seek(self._dirtyoffset)
+                    f.truncate()
+                    repo.ui.log('tagscache',
+                                'writing %d bytes to %s\n' % (
+                                len(data), _fnodescachefile))
+                    f.write(data)
+                    self._dirtyoffset = None
+                finally:
+                    f.close()
+            except (IOError, OSError), inst:
+                repo.ui.log('tagscache',
+                            "couldn't write %s: %s\n" % (
+                            _fnodescachefile, inst))
+        finally:
+            lock.release()

@@ -612,12 +612,114 @@ Renames and strip
     a
   R a
 
-Renames, similarity and git diff
+Prefix with strip, renames, creates etc
 
   $ hg revert -aC
   undeleting a
   forgetting b
   $ rm b
+  $ mkdir -p dir/dir2
+  $ echo b > dir/dir2/b
+  $ echo c > dir/dir2/c
+  $ echo d > dir/d
+  $ hg ci -Am addbcd
+  adding dir/d
+  adding dir/dir2/b
+  adding dir/dir2/c
+
+prefix '.' is the same as no prefix
+  $ hg import --no-commit --prefix . - <<EOF
+  > diff --git a/dir/a b/dir/a
+  > --- /dev/null
+  > +++ b/dir/a
+  > @@ -0,0 +1 @@
+  > +aaaa
+  > diff --git a/dir/d b/dir/d
+  > --- a/dir/d
+  > +++ b/dir/d
+  > @@ -1,1 +1,2 @@
+  >  d
+  > +dddd
+  > EOF
+  applying patch from stdin
+  $ cat dir/a
+  aaaa
+  $ cat dir/d
+  d
+  dddd
+  $ hg revert -aC
+  forgetting dir/a (glob)
+  reverting dir/d (glob)
+  $ rm dir/a
+
+prefix with default strip
+  $ hg import --no-commit --prefix dir/ - <<EOF
+  > diff --git a/a b/a
+  > --- /dev/null
+  > +++ b/a
+  > @@ -0,0 +1 @@
+  > +aaa
+  > diff --git a/d b/d
+  > --- a/d
+  > +++ b/d
+  > @@ -1,1 +1,2 @@
+  >  d
+  > +dd
+  > EOF
+  applying patch from stdin
+  $ cat dir/a
+  aaa
+  $ cat dir/d
+  d
+  dd
+  $ hg revert -aC
+  forgetting dir/a (glob)
+  reverting dir/d (glob)
+  $ rm dir/a
+(test that prefixes are relative to the cwd)
+  $ mkdir tmpdir
+  $ cd tmpdir
+  $ hg import --no-commit -p2 --prefix ../dir/ - <<EOF
+  > diff --git a/foo/a b/foo/a
+  > new file mode 100644
+  > --- /dev/null
+  > +++ b/foo/a
+  > @@ -0,0 +1 @@
+  > +a
+  > diff --git a/foo/dir2/b b/foo/dir2/b2
+  > rename from foo/dir2/b
+  > rename to foo/dir2/b2
+  > diff --git a/foo/dir2/c b/foo/dir2/c
+  > --- a/foo/dir2/c
+  > +++ b/foo/dir2/c
+  > @@ -0,0 +1 @@
+  > +cc
+  > diff --git a/foo/d b/foo/d
+  > deleted file mode 100644
+  > --- a/foo/d
+  > +++ /dev/null
+  > @@ -1,1 +0,0 @@
+  > -d
+  > EOF
+  applying patch from stdin
+  $ hg st --copies
+  M dir/dir2/c
+  A dir/a
+  A dir/dir2/b2
+    dir/dir2/b
+  R dir/d
+  R dir/dir2/b
+  $ cd ..
+
+Renames, similarity and git diff
+
+  $ hg revert -aC
+  forgetting dir/a (glob)
+  undeleting dir/d (glob)
+  undeleting dir/dir2/b (glob)
+  forgetting dir/dir2/b2 (glob)
+  reverting dir/dir2/c (glob)
+  $ rm dir/a dir/dir2/b2
   $ hg import --similarity 90 --no-commit - <<EOF
   > diff --git a/a b/b
   > rename from a

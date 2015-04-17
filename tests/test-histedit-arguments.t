@@ -103,6 +103,15 @@ Test that we pick the minimum of a revrange
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg up --quiet
 
+Test config specified default
+-----------------------------
+
+  $ HGEDITOR=cat hg histedit --config "histedit.defaultrev=only(.) - ::eb57da33312f" --commands - << EOF
+  > pick c8e68270e35a 3 four
+  > pick 08d98a8350f3 4 five
+  > EOF
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
 Run on a revision not descendants of the initial parent
 --------------------------------------------------------------------
 
@@ -111,6 +120,13 @@ created (and forgotten) by Mercurial earlier than 2.7. This emulates
 Mercurial earlier than 2.7 by renaming ".hg/histedit-state"
 temporarily.
 
+  $ hg log -G -T '{rev} {shortest(node)} {desc}\n' -r 2::
+  @  4 08d9 five
+  |
+  o  3 c8e6 four
+  |
+  o  2 eb57 three
+  |
   $ HGEDITOR=cat hg histedit -r 4 --commands - << EOF
   > edit 08d98a8350f3 4 five
   > EOF
@@ -122,15 +138,23 @@ temporarily.
 
   $ mv .hg/histedit-state .hg/histedit-state.back
   $ hg update --quiet --clean 2
+  $ echo alpha >> alpha
   $ mv .hg/histedit-state.back .hg/histedit-state
 
   $ hg histedit --continue
-  abort: c8e68270e35a is not an ancestor of working directory
-  (use "histedit --abort" to clear broken state)
-  [255]
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  saved backup bundle to $TESTTMP/foo/.hg/strip-backup/08d98a8350f3-02594089-backup.hg (glob)
+  $ hg log -G -T '{rev} {shortest(node)} {desc}\n' -r 2::
+  @  4 f5ed five
+  |
+  | o  3 c8e6 four
+  |/
+  o  2 eb57 three
+  |
 
-  $ hg histedit --abort
-  $ hg update --quiet --clean
+  $ hg unbundle -q $TESTTMP/foo/.hg/strip-backup/08d98a8350f3-02594089-backup.hg
+  $ hg strip -q -r f5ed --config extensions.strip=
+  $ hg up -q 08d98a8350f3
 
 Test that missing revisions are detected
 ---------------------------------------

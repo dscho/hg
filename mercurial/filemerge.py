@@ -21,6 +21,8 @@ def _toollist(ui, tool, part, default=[]):
     return ui.configlist("merge-tools", tool + "." + part, default)
 
 internals = {}
+# Merge tools to document.
+internalsdoc = {}
 
 def internaltool(name, trymerge, onfailure=None):
     '''return a decorator for populating internal merge tool table'''
@@ -29,6 +31,7 @@ def internaltool(name, trymerge, onfailure=None):
         func.__doc__ = "``%s``\n" % fullname + func.__doc__.strip()
         internals[fullname] = func
         internals['internal:' + name] = func
+        internalsdoc[fullname] = func
         func.trymerge = trymerge
         func.onfailure = onfailure
         return func
@@ -301,7 +304,10 @@ def _xmerge(repo, mynode, orig, fcd, fco, fca, toolconf, files, labels=None):
         replace = {'local': a, 'base': b, 'other': c, 'output': out}
         args = util.interpolate(r'\$', replace, args,
                                 lambda s: util.shellquote(util.localpath(s)))
-        r = ui.system(toolpath + ' ' + args, cwd=repo.root, environ=env)
+        cmd = toolpath + ' ' + args
+        repo.ui.debug('launching merge tool: %s\n' % cmd)
+        r = ui.system(cmd, cwd=repo.root, environ=env)
+        repo.ui.debug('merge tool returned: %s\n' % r)
         return True, r
     return False, 0
 

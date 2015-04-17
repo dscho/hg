@@ -248,7 +248,7 @@ verify that large files in subrepos handled properly
   commit: 1 subrepos
   update: (current)
   $ hg ci -m "this commit should fail without -S"
-  abort: uncommitted changes in subrepo subrepo
+  abort: uncommitted changes in subrepository 'subrepo'
   (use --subrepos for recursive commit)
   [255]
 
@@ -336,6 +336,13 @@ Lock in subrepo, otherwise the change isn't archived
   ../lf_subrepo_archive/subrepo
   ../lf_subrepo_archive/subrepo/large.txt
   ../lf_subrepo_archive/subrepo/normal.txt
+  $ cat ../lf_subrepo_archive/.hg_archival.txt
+  repo: 41bd42f10efa43698cc02052ea0977771cba506d
+  node: d56a95e6522858bc08a724c4fe2bdee066d1c30b
+  branch: default
+  latesttag: null
+  latesttagdistance: 4
+  changessincelatesttag: 4
 
 Test update with subrepos.
 
@@ -357,10 +364,16 @@ Test update with subrepos.
   $ hg update -C
   getting changed largefiles
   1 largefiles updated, 0 removed
-  getting changed largefiles
-  0 largefiles updated, 0 removed
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg status -S
+
+  $ hg forget -v subrepo/large.txt
+  removing subrepo/large.txt (glob)
+
+Test reverting a forgotten file
+  $ hg revert -R subrepo subrepo/large.txt
+  $ hg status -SA subrepo/large.txt
+  C subrepo/large.txt
 
   $ hg rm -v subrepo/large.txt
   removing subrepo/large.txt (glob)
@@ -443,6 +456,10 @@ Test actions on largefiles using relative paths from subdir
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     anotherlarge
   
+  $ hg --debug log -T '{rev}: {desc}\n' ../sub/anotherlarge
+  updated patterns: ['../.hglf/sub/../sub/anotherlarge', '../sub/anotherlarge']
+  1: anotherlarge
+
   $ hg log -G anotherlarge
   @  changeset:   1:9627a577c5e9
   |  tag:         tip
@@ -450,6 +467,30 @@ Test actions on largefiles using relative paths from subdir
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     anotherlarge
   |
+
+  $ hg log glob:another*
+  changeset:   1:9627a577c5e9
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     anotherlarge
+  
+  $ hg --debug log -T '{rev}: {desc}\n' -G glob:another*
+  updated patterns: ['glob:../.hglf/sub/another*', 'glob:another*']
+  @  1: anotherlarge
+  |
+
+#if no-msys
+  $ hg --debug log -T '{rev}: {desc}\n' 'glob:../.hglf/sub/another*' # no-msys
+  updated patterns: ['glob:../.hglf/sub/another*']
+  1: anotherlarge
+
+  $ hg --debug log -G -T '{rev}: {desc}\n' 'glob:../.hglf/sub/another*' # no-msys
+  updated patterns: ['glob:../.hglf/sub/another*']
+  @  1: anotherlarge
+  |
+#endif
+
   $ echo more >> anotherlarge
   $ hg st .
   M anotherlarge
@@ -460,7 +501,32 @@ Test actions on largefiles using relative paths from subdir
   ? sub/anotherlarge.orig
   $ cd ..
 
+Test glob logging from the root dir
+  $ hg log glob:**another*
+  changeset:   1:9627a577c5e9
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     anotherlarge
+  
+  $ hg log -G glob:**another*
+  @  changeset:   1:9627a577c5e9
+  |  tag:         tip
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     anotherlarge
+  |
+
   $ cd ..
+
+Log from outer space
+  $ hg --debug log -R addrm2 -T '{rev}: {desc}\n' 'addrm2/sub/anotherlarge'
+  updated patterns: ['addrm2/.hglf/sub/anotherlarge', 'addrm2/sub/anotherlarge']
+  1: anotherlarge
+  $ hg --debug log -R addrm2 -T '{rev}: {desc}\n' 'addrm2/.hglf/sub/anotherlarge'
+  updated patterns: ['addrm2/.hglf/sub/anotherlarge']
+  1: anotherlarge
+
 
 Check error message while exchange
 =========================================================
@@ -737,8 +803,6 @@ merge action 'd' for 'local renamed directory to d2/g' which has no filename
   R d1/f
   $ hg merge
   merging d2/f and d1/f to d2/f
-  getting changed largefiles
-  0 largefiles updated, 0 removed
   1 files updated, 1 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
   $ cd ..

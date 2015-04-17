@@ -218,7 +218,10 @@ def _oldheadssummary(repo, remoteheads, outgoing, inc=False):
     r = repo.set('heads(%ln + %ln)', oldheads, outgoing.missing)
     newheads = list(c.node() for c in r)
     # set some unsynced head to issue the "unsynced changes" warning
-    unsynced = inc and set([None]) or set()
+    if inc:
+        unsynced = set([None])
+    else:
+        unsynced = set()
     return {None: (oldheads, newheads, unsynced)}
 
 def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False,
@@ -269,9 +272,13 @@ def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False,
     # If there are more heads after the push than before, a suitable
     # error message, depending on unsynced status, is displayed.
     error = None
-    allmissing = set(outgoing.missing)
-    allfuturecommon = set(c.node() for c in repo.set('%ld', outgoing.common))
-    allfuturecommon.update(allmissing)
+    # If there is no obsstore, allfuturecommon won't be used, so no
+    # need to compute it.
+    if repo.obsstore:
+        allmissing = set(outgoing.missing)
+        cctx = repo.set('%ld', outgoing.common)
+        allfuturecommon = set(c.node() for c in cctx)
+        allfuturecommon.update(allmissing)
     for branch, heads in sorted(headssum.iteritems()):
         remoteheads, newheads, unsyncedheads = heads
         candidate_newhs = set(newheads)

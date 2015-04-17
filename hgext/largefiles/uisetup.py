@@ -9,7 +9,7 @@
 '''setup for largefiles extension: uisetup'''
 
 from mercurial import archival, cmdutil, commands, extensions, filemerge, hg, \
-    httppeer, merge, scmutil, sshpeer, wireproto, revset, subrepo
+    httppeer, merge, scmutil, sshpeer, wireproto, revset, subrepo, copies
 from mercurial.i18n import _
 from mercurial.hgweb import hgweb_mod, webcommands
 
@@ -36,6 +36,8 @@ def uisetup(ui):
     extensions.wrapfunction(cmdutil, 'add', overrides.cmdutiladd)
     extensions.wrapfunction(cmdutil, 'remove', overrides.cmdutilremove)
     extensions.wrapfunction(cmdutil, 'forget', overrides.cmdutilforget)
+
+    extensions.wrapfunction(copies, 'pathcopies', overrides.copiespathcopies)
 
     # Subrepos call status function
     entry = extensions.wrapcommand(commands.table, 'status',
@@ -74,8 +76,6 @@ def uisetup(ui):
     entry[1].extend(summaryopt)
     cmdutil.summaryremotehooks.add('largefiles', overrides.summaryremotehook)
 
-    entry = extensions.wrapcommand(commands.table, 'update',
-                                   overrides.overrideupdate)
     entry = extensions.wrapcommand(commands.table, 'pull',
                                    overrides.overridepull)
     pullopt = [('', 'all-largefiles', None,
@@ -111,11 +111,7 @@ def uisetup(ui):
     entry = extensions.wrapfunction(subrepo.hgsubrepo, 'dirty',
                                     overrides.overridedirty)
 
-    # Backout calls revert so we need to override both the command and the
-    # function
-    entry = extensions.wrapcommand(commands.table, 'revert',
-                                   overrides.overriderevert)
-    entry = extensions.wrapfunction(commands, 'revert',
+    entry = extensions.wrapfunction(cmdutil, 'revert',
                                     overrides.overriderevert)
 
     extensions.wrapfunction(archival, 'archive', overrides.overridearchive)

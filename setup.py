@@ -63,6 +63,8 @@ else:
         raise SystemExit(
             "Couldn't import standard bz2 (incomplete Python install).")
 
+ispypy = "PyPy" in sys.version
+
 import os, stat, subprocess, time
 import re
 import shutil
@@ -276,7 +278,7 @@ class hgbuildmo(build):
 
 
 class hgdist(Distribution):
-    pure = 0
+    pure = ispypy
 
     global_options = Distribution.global_options + \
                      [('pure', None, "use pure (slow) Python "
@@ -491,6 +493,7 @@ extmodules = [
     Extension('mercurial.mpatch', ['mercurial/mpatch.c'],
               depends=common_depends),
     Extension('mercurial.parsers', ['mercurial/dirs.c',
+                                    'mercurial/manifest.c',
                                     'mercurial/parsers.c',
                                     'mercurial/pathencode.c'],
               depends=common_depends),
@@ -555,7 +558,7 @@ extra = {}
 if py2exeloaded:
     extra['console'] = [
         {'script':'hg',
-         'copyright':'Copyright (C) 2005-2010 Matt Mackall and others',
+         'copyright':'Copyright (C) 2005-2015 Matt Mackall and others',
          'product_version':version}]
     # sub command of 'build' because 'py2exe' does not handle sub_commands
     build.sub_commands.insert(0, ('build_hgextindex', None))

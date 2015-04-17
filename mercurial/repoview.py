@@ -6,6 +6,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+import heapq
 import copy
 import error
 import phases
@@ -13,6 +14,7 @@ import util
 import obsolete
 import struct
 import tags as tagsmod
+from node import nullrev
 
 def hideablerevs(repo):
     """Revisions candidates to be hidden
@@ -20,23 +22,46 @@ def hideablerevs(repo):
     This is a standalone function to help extensions to wrap it."""
     return obsolete.getrevs(repo, 'obsolete')
 
-def _getstaticblockers(repo):
-    """Cacheable revisions blocking hidden changesets from being filtered.
+def _getstatichidden(repo):
+    """Revision to be hidden (disregarding dynamic blocker)
 
-    Additional non-cached hidden blockers are computed in _getdynamicblockers.
-    This is a standalone function to help extensions to wrap it."""
+    To keep a consistent graph, we cannot hide any revisions with
+    non-hidden descendants. This function computes the set of
+    revisions that could be hidden while keeping the graph consistent.
+
+    A second pass will be done to apply "dynamic blocker" like bookmarks or
+    working directory parents.
+
+    """
     assert not repo.changelog.filteredrevs
-    hideable = hideablerevs(repo)
-    blockers = set()
-    if hideable:
-        # We use cl to avoid recursive lookup from repo[xxx]
-        cl = repo.changelog
-        firsthideable = min(hideable)
-        revs = cl.revs(start=firsthideable)
-        tofilter = repo.revs(
-            '(%ld) and children(%ld)', list(revs), list(hideable))
-        blockers.update([r for r in tofilter if r not in hideable])
-    return blockers
+    hidden = set(hideablerevs(repo))
+    if hidden:
+        getphase = repo._phasecache.phase
+        getparentrevs = repo.changelog.parentrevs
+        # Skip heads which are public (guaranteed to not be hidden)
+        heap = [-r for r in repo.changelog.headrevs() if getphase(repo, r)]
+        heapq.heapify(heap)
+        heappop = heapq.heappop
+        heappush = heapq.heappush
+        seen = set() # no need to init it with heads, they have no children
+        while heap:
+            rev = -heappop(heap)
+            # All children have been processed so at that point, if no children
+            # removed 'rev' from the 'hidden' set, 'rev' is going to be hidden.
+            blocker = rev not in hidden
+            for parent in getparentrevs(rev):
+                if parent == nullrev:
+                    continue
+                if blocker:
+                    # If visible, ensure parent will be visible too
+                    hidden.discard(parent)
+                # - Avoid adding the same revision twice
+                # - Skip nodes which are public (guaranteed to not be hidden)
+                pre = len(seen)
+                seen.add(parent)
+                if pre < len(seen) and getphase(repo, rev):
+                    heappush(heap, -parent)
+    return hidden
 
 def _getdynamicblockers(repo):
     """Non-cacheable revisions blocking hidden changesets from being filtered.
@@ -137,8 +162,7 @@ def computehidden(repo):
         cl = repo.changelog
         hidden = tryreadcache(repo, hideable)
         if hidden is None:
-            blocked = cl.ancestors(_getstaticblockers(repo), inclusive=True)
-            hidden = frozenset(r for r in hideable if r not in blocked)
+            hidden = frozenset(_getstatichidden(repo))
             trywritehiddencache(repo, hideable, hidden)
 
         # check if we have wd parents, bookmarks or tags pointing to hidden

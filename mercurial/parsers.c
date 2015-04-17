@@ -56,6 +56,27 @@ static char lowertable[128] = {
 	'\x78', '\x79', '\x7a', '\x7b', '\x7c', '\x7d', '\x7e', '\x7f'
 };
 
+static char uppertable[128] = {
+	'\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x07',
+	'\x08', '\x09', '\x0a', '\x0b', '\x0c', '\x0d', '\x0e', '\x0f',
+	'\x10', '\x11', '\x12', '\x13', '\x14', '\x15', '\x16', '\x17',
+	'\x18', '\x19', '\x1a', '\x1b', '\x1c', '\x1d', '\x1e', '\x1f',
+	'\x20', '\x21', '\x22', '\x23', '\x24', '\x25', '\x26', '\x27',
+	'\x28', '\x29', '\x2a', '\x2b', '\x2c', '\x2d', '\x2e', '\x2f',
+	'\x30', '\x31', '\x32', '\x33', '\x34', '\x35', '\x36', '\x37',
+	'\x38', '\x39', '\x3a', '\x3b', '\x3c', '\x3d', '\x3e', '\x3f',
+	'\x40', '\x41', '\x42', '\x43', '\x44', '\x45', '\x46', '\x47',
+	'\x48', '\x49', '\x4a', '\x4b', '\x4c', '\x4d', '\x4e', '\x4f',
+	'\x50', '\x51', '\x52', '\x53', '\x54', '\x55', '\x56', '\x57',
+	'\x58', '\x59', '\x5a', '\x5b', '\x5c', '\x5d', '\x5e', '\x5f',
+	'\x60',
+		'\x41', '\x42', '\x43', '\x44', '\x45', '\x46', '\x47', /* a-g */
+	'\x48', '\x49', '\x4a', '\x4b', '\x4c', '\x4d', '\x4e', '\x4f', /* h-o */
+	'\x50', '\x51', '\x52', '\x53', '\x54', '\x55', '\x56', '\x57', /* p-w */
+	'\x58', '\x59', '\x5a', 					/* x-z */
+				'\x7b', '\x7c', '\x7d', '\x7e', '\x7f'
+};
+
 static inline int hexdigit(const char *p, Py_ssize_t off)
 {
 	int8_t val = hextable[(unsigned char)p[off]];
@@ -71,7 +92,7 @@ static inline int hexdigit(const char *p, Py_ssize_t off)
 /*
  * Turn a hex-encoded string into binary.
  */
-static PyObject *unhexlify(const char *str, int len)
+PyObject *unhexlify(const char *str, int len)
 {
 	PyObject *ret;
 	char *d;
@@ -93,14 +114,17 @@ static PyObject *unhexlify(const char *str, int len)
 	return ret;
 }
 
-static PyObject *asciilower(PyObject *self, PyObject *args)
+static inline PyObject *_asciitransform(PyObject *str_obj,
+					const char table[128],
+					PyObject *fallback_fn)
 {
 	char *str, *newstr;
-	int i, len;
+	Py_ssize_t i, len;
 	PyObject *newobj = NULL;
+	PyObject *ret = NULL;
 
-	if (!PyArg_ParseTuple(args, "s#", &str, &len))
-		goto quit;
+	str = PyBytes_AS_STRING(str_obj);
+	len = PyBytes_GET_SIZE(str_obj);
 
 	newobj = PyBytes_FromStringAndSize(NULL, len);
 	if (!newobj)
@@ -111,19 +135,120 @@ static PyObject *asciilower(PyObject *self, PyObject *args)
 	for (i = 0; i < len; i++) {
 		char c = str[i];
 		if (c & 0x80) {
-			PyObject *err = PyUnicodeDecodeError_Create(
-				"ascii", str, len, i, (i + 1),
-				"unexpected code byte");
-			PyErr_SetObject(PyExc_UnicodeDecodeError, err);
-			Py_XDECREF(err);
+			if (fallback_fn != NULL) {
+				ret = PyObject_CallFunctionObjArgs(fallback_fn,
+					str_obj, NULL);
+			} else {
+				PyObject *err = PyUnicodeDecodeError_Create(
+					"ascii", str, len, i, (i + 1),
+					"unexpected code byte");
+				PyErr_SetObject(PyExc_UnicodeDecodeError, err);
+				Py_XDECREF(err);
+			}
 			goto quit;
 		}
-		newstr[i] = lowertable[(unsigned char)c];
+		newstr[i] = table[(unsigned char)c];
 	}
 
-	return newobj;
+	ret = newobj;
+	Py_INCREF(ret);
 quit:
 	Py_XDECREF(newobj);
+	return ret;
+}
+
+static PyObject *asciilower(PyObject *self, PyObject *args)
+{
+	PyObject *str_obj;
+	if (!PyArg_ParseTuple(args, "O!:asciilower", &PyBytes_Type, &str_obj))
+		return NULL;
+	return _asciitransform(str_obj, lowertable, NULL);
+}
+
+static PyObject *asciiupper(PyObject *self, PyObject *args)
+{
+	PyObject *str_obj;
+	if (!PyArg_ParseTuple(args, "O!:asciiupper", &PyBytes_Type, &str_obj))
+		return NULL;
+	return _asciitransform(str_obj, uppertable, NULL);
+}
+
+static PyObject *make_file_foldmap(PyObject *self, PyObject *args)
+{
+	PyObject *dmap, *spec_obj, *normcase_fallback;
+	PyObject *file_foldmap = NULL;
+	enum normcase_spec spec;
+	PyObject *k, *v;
+	dirstateTupleObject *tuple;
+	Py_ssize_t pos = 0;
+	const char *table;
+
+	if (!PyArg_ParseTuple(args, "O!O!O!:make_file_foldmap",
+			      &PyDict_Type, &dmap,
+			      &PyInt_Type, &spec_obj,
+			      &PyFunction_Type, &normcase_fallback))
+		goto quit;
+
+	spec = (int)PyInt_AS_LONG(spec_obj);
+	switch (spec) {
+	case NORMCASE_LOWER:
+		table = lowertable;
+		break;
+	case NORMCASE_UPPER:
+		table = uppertable;
+		break;
+	case NORMCASE_OTHER:
+		table = NULL;
+		break;
+	default:
+		PyErr_SetString(PyExc_TypeError, "invalid normcasespec");
+		goto quit;
+	}
+
+#if PY_VERSION_HEX >= 0x02060000
+	/* _PyDict_NewPresized expects a minused parameter, but it actually
+	   creates a dictionary that's the nearest power of two bigger than the
+	   parameter. For example, with the initial minused = 1000, the
+	   dictionary created has size 1024. Of course in a lot of cases that
+	   can be greater than the maximum load factor Python's dict object
+	   expects (= 2/3), so as soon as we cross the threshold we'll resize
+	   anyway. So create a dictionary that's 3/2 the size. Also add some
+	   more to deal with additions outside this function. */
+	file_foldmap = _PyDict_NewPresized((PyDict_Size(dmap) / 5) * 8);
+#else
+	file_foldmap = PyDict_New();
+#endif
+
+	if (file_foldmap == NULL)
+		goto quit;
+
+	while (PyDict_Next(dmap, &pos, &k, &v)) {
+		if (!dirstate_tuple_check(v)) {
+			PyErr_SetString(PyExc_TypeError,
+					"expected a dirstate tuple");
+			goto quit;
+		}
+
+		tuple = (dirstateTupleObject *)v;
+		if (tuple->state != 'r') {
+			PyObject *normed;
+			if (table != NULL) {
+				normed = _asciitransform(k, table,
+					normcase_fallback);
+			} else {
+				normed = PyObject_CallFunctionObjArgs(
+					normcase_fallback, k, NULL);
+			}
+
+			if (normed == NULL)
+				goto quit;
+			if (PyDict_SetItem(file_foldmap, normed, k) == -1)
+				goto quit;
+		}
+	}
+	return file_foldmap;
+quit:
+	Py_XDECREF(file_foldmap);
 	return NULL;
 }
 
@@ -911,6 +1036,111 @@ static int check_filter(PyObject *filter, unsigned long arg) {
 	}
 }
 
+static Py_ssize_t add_roots_get_min(indexObject *self, PyObject *list,
+                                    Py_ssize_t marker, char *phases)
+{
+	PyObject *iter = NULL;
+	PyObject *iter_item = NULL;
+	Py_ssize_t min_idx = index_length(self) + 1;
+	long iter_item_long;
+
+	if (PyList_GET_SIZE(list) != 0) {
+		iter = PyObject_GetIter(list);
+		if (iter == NULL)
+			return -2;
+		while ((iter_item = PyIter_Next(iter)))
+		{
+			iter_item_long = PyInt_AS_LONG(iter_item);
+			Py_DECREF(iter_item);
+			if (iter_item_long < min_idx)
+				min_idx = iter_item_long;
+			phases[iter_item_long] = marker;
+		}
+		Py_DECREF(iter);
+	}
+
+	return min_idx;
+}
+
+static inline void set_phase_from_parents(char *phases, int parent_1,
+                                          int parent_2, Py_ssize_t i)
+{
+	if (parent_1 >= 0 && phases[parent_1] > phases[i])
+		phases[i] = phases[parent_1];
+	if (parent_2 >= 0 && phases[parent_2] > phases[i])
+		phases[i] = phases[parent_2];
+}
+
+static PyObject *compute_phases(indexObject *self, PyObject *args)
+{
+	PyObject *roots = Py_None;
+	PyObject *phaseslist = NULL;
+	PyObject *phaseroots = NULL;
+	PyObject *rev = NULL;
+	PyObject *p1 = NULL;
+	PyObject *p2 = NULL;
+	Py_ssize_t addlen = self->added ? PyList_GET_SIZE(self->added) : 0;
+	Py_ssize_t len = index_length(self) - 1;
+	Py_ssize_t numphase = 0;
+	Py_ssize_t minrevallphases = 0;
+	Py_ssize_t minrevphase = 0;
+	Py_ssize_t i = 0;
+	int parent_1, parent_2;
+	char *phases = NULL;
+	const char *data;
+
+	if (!PyArg_ParseTuple(args, "O", &roots))
+		goto release_none;
+	if (roots == NULL || !PyList_Check(roots))
+		goto release_none;
+
+	phases = calloc(len, 1); /* phase per rev: {0: public, 1: draft, 2: secret} */
+	if (phases == NULL)
+		goto release_none;
+	/* Put the phase information of all the roots in phases */
+	numphase = PyList_GET_SIZE(roots)+1;
+	minrevallphases = len + 1;
+	for (i = 0; i < numphase-1; i++) {
+		phaseroots = PyList_GET_ITEM(roots, i);
+		if (!PyList_Check(phaseroots))
+			goto release_phases;
+		minrevphase = add_roots_get_min(self, phaseroots, i+1, phases);
+		if (minrevphase == -2) /* Error from add_roots_get_min */
+			goto release_phases;
+		minrevallphases = MIN(minrevallphases, minrevphase);
+	}
+	/* Propagate the phase information from the roots to the revs */
+	if (minrevallphases != -1) {
+		for (i = minrevallphases; i < self->raw_length; i++) {
+			data = index_deref(self, i);
+			set_phase_from_parents(phases, getbe32(data+24), getbe32(data+28), i);
+		}
+		for (i = 0; i < addlen; i++) {
+			rev = PyList_GET_ITEM(self->added, i);
+			p1 = PyTuple_GET_ITEM(rev, 5);
+			p2 = PyTuple_GET_ITEM(rev, 6);
+			if (!PyInt_Check(p1) || !PyInt_Check(p2)) {
+				PyErr_SetString(PyExc_TypeError, "revlog parents are invalid");
+				goto release_phases;
+			}
+			parent_1 = (int)PyInt_AS_LONG(p1);
+			parent_2 = (int)PyInt_AS_LONG(p2);
+			set_phase_from_parents(phases, parent_1, parent_2, i+self->raw_length);
+		}
+	}
+	/* Transform phase list to a python list */
+	phaseslist = PyList_New(len);
+	if (phaseslist == NULL)
+		goto release_phases;
+	for (i = 0; i < len; i++)
+		PyList_SET_ITEM(phaseslist, i, PyInt_FromLong(phases[i]));
+
+release_phases:
+	free(phases);
+release_none:
+	return phaseslist;
+}
+
 static PyObject *index_headrevs(indexObject *self, PyObject *args)
 {
 	Py_ssize_t i, len, addlen;
@@ -1102,6 +1332,11 @@ static int nt_find(indexObject *self, const char *node, Py_ssize_t nodelen,
 static int nt_new(indexObject *self)
 {
 	if (self->ntlength == self->ntcapacity) {
+		if (self->ntcapacity >= INT_MAX / (sizeof(nodetree) * 2)) {
+			PyErr_SetString(PyExc_MemoryError,
+					"overflow in nt_new");
+			return -1;
+		}
 		self->ntcapacity *= 2;
 		self->nt = realloc(self->nt,
 				   self->ntcapacity * sizeof(nodetree));
@@ -1163,7 +1398,7 @@ static int nt_insert(indexObject *self, const char *node, int rev)
 static int nt_init(indexObject *self)
 {
 	if (self->nt == NULL) {
-		if (self->raw_length > INT_MAX) {
+		if (self->raw_length > INT_MAX / sizeof(nodetree)) {
 			PyErr_SetString(PyExc_ValueError, "overflow in nt_init");
 			return -1;
 		}
@@ -1676,108 +1911,6 @@ bail:
 }
 
 /*
- * Given a (possibly overlapping) set of revs, return the greatest
- * common ancestors: those with the longest path to the root.
- */
-static PyObject *index_ancestors(indexObject *self, PyObject *args)
-{
-	PyObject *ret = NULL, *gca = NULL;
-	Py_ssize_t argcount, i, len;
-	bitmask repeat = 0;
-	int revcount = 0;
-	int *revs;
-
-	argcount = PySequence_Length(args);
-	revs = malloc(argcount * sizeof(*revs));
-	if (argcount > 0 && revs == NULL)
-		return PyErr_NoMemory();
-	len = index_length(self) - 1;
-
-	for (i = 0; i < argcount; i++) {
-		static const int capacity = 24;
-		PyObject *obj = PySequence_GetItem(args, i);
-		bitmask x;
-		long val;
-
-		if (!PyInt_Check(obj)) {
-			PyErr_SetString(PyExc_TypeError,
-					"arguments must all be ints");
-			Py_DECREF(obj);
-			goto bail;
-		}
-		val = PyInt_AsLong(obj);
-		Py_DECREF(obj);
-		if (val == -1) {
-			ret = PyList_New(0);
-			goto done;
-		}
-		if (val < 0 || val >= len) {
-			PyErr_SetString(PyExc_IndexError,
-					"index out of range");
-			goto bail;
-		}
-		/* this cheesy bloom filter lets us avoid some more
-		 * expensive duplicate checks in the common set-is-disjoint
-		 * case */
-		x = 1ull << (val & 0x3f);
-		if (repeat & x) {
-			int k;
-			for (k = 0; k < revcount; k++) {
-				if (val == revs[k])
-					goto duplicate;
-			}
-		}
-		else repeat |= x;
-		if (revcount >= capacity) {
-			PyErr_Format(PyExc_OverflowError,
-				     "bitset size (%d) > capacity (%d)",
-				     revcount, capacity);
-			goto bail;
-		}
-		revs[revcount++] = (int)val;
-	duplicate:;
-	}
-
-	if (revcount == 0) {
-		ret = PyList_New(0);
-		goto done;
-	}
-	if (revcount == 1) {
-		PyObject *obj;
-		ret = PyList_New(1);
-		if (ret == NULL)
-			goto bail;
-		obj = PyInt_FromLong(revs[0]);
-		if (obj == NULL)
-			goto bail;
-		PyList_SET_ITEM(ret, 0, obj);
-		goto done;
-	}
-
-	gca = find_gca_candidates(self, revs, revcount);
-	if (gca == NULL)
-		goto bail;
-
-	if (PyList_GET_SIZE(gca) <= 1) {
-		ret = gca;
-		Py_INCREF(gca);
-	}
-	else ret = find_deepest(self, gca);
-
-done:
-	free(revs);
-	Py_XDECREF(gca);
-
-	return ret;
-
-bail:
-	free(revs);
-	Py_XDECREF(gca);
-	Py_XDECREF(ret);
-	return NULL;
-}
-
-/*
  * Given a (possibly overlapping) set of revs, return all the
  * common ancestors heads: heads(::args[0] and ::a[1] and ...)
  */
@@ -1868,6 +2001,24 @@ bail:
 	free(revs);
 	Py_XDECREF(ret);
 	return NULL;
+}
+
+/*
+ * Given a (possibly overlapping) set of revs, return the greatest
+ * common ancestors: those with the longest path to the root.
+ */
+static PyObject *index_ancestors(indexObject *self, PyObject *args)
+{
+	PyObject *gca = index_commonancestorsheads(self, args);
+	if (gca == NULL)
+		return NULL;
+
+	if (PyList_GET_SIZE(gca) <= 1) {
+		Py_INCREF(gca);
+		return gca;
+	}
+
+	return find_deepest(self, gca);
 }
 
 /*
@@ -2127,6 +2278,8 @@ static PyMethodDef index_methods[] = {
 	 "clear the index caches"},
 	{"get", (PyCFunction)index_m_get, METH_VARARGS,
 	 "get an index entry"},
+	{"computephases", (PyCFunction)compute_phases, METH_VARARGS,
+		"compute phases"},
 	{"headrevs", (PyCFunction)index_headrevs, METH_VARARGS,
 	 "get head revisions"}, /* Can do filtering since 3.2 */
 	{"headrevsfiltered", (PyCFunction)index_headrevs, METH_VARARGS,
@@ -2230,6 +2383,157 @@ bail:
 	return NULL;
 }
 
+#define BUMPED_FIX 1
+#define USING_SHA_256 2
+
+static PyObject *readshas(
+	const char *source, unsigned char num, Py_ssize_t hashwidth)
+{
+	int i;
+	PyObject *list = PyTuple_New(num);
+	if (list == NULL) {
+		return NULL;
+	}
+	for (i = 0; i < num; i++) {
+		PyObject *hash = PyString_FromStringAndSize(source, hashwidth);
+		if (hash == NULL) {
+			Py_DECREF(list);
+			return NULL;
+		}
+		PyTuple_SetItem(list, i, hash);
+		source += hashwidth;
+	}
+	return list;
+}
+
+static PyObject *fm1readmarker(const char *data, uint32_t *msize)
+{
+	const char *meta;
+
+	double mtime;
+	int16_t tz;
+	uint16_t flags;
+	unsigned char nsuccs, nparents, nmetadata;
+	Py_ssize_t hashwidth = 20;
+
+	PyObject *prec = NULL, *parents = NULL, *succs = NULL;
+	PyObject *metadata = NULL, *ret = NULL;
+	int i;
+
+	*msize = getbe32(data);
+	data += 4;
+	mtime = getbefloat64(data);
+	data += 8;
+	tz = getbeint16(data);
+	data += 2;
+	flags = getbeuint16(data);
+	data += 2;
+
+	if (flags & USING_SHA_256) {
+		hashwidth = 32;
+	}
+
+	nsuccs = (unsigned char)(*data++);
+	nparents = (unsigned char)(*data++);
+	nmetadata = (unsigned char)(*data++);
+
+	prec = PyString_FromStringAndSize(data, hashwidth);
+	data += hashwidth;
+	if (prec == NULL) {
+		goto bail;
+	}
+
+	succs = readshas(data, nsuccs, hashwidth);
+	if (succs == NULL) {
+		goto bail;
+	}
+	data += nsuccs * hashwidth;
+
+	if (nparents == 1 || nparents == 2) {
+		parents = readshas(data, nparents, hashwidth);
+		if (parents == NULL) {
+			goto bail;
+		}
+		data += nparents * hashwidth;
+	} else {
+		parents = Py_None;
+	}
+
+	meta = data + (2 * nmetadata);
+	metadata = PyTuple_New(nmetadata);
+	if (metadata == NULL) {
+		goto bail;
+	}
+	for (i = 0; i < nmetadata; i++) {
+		PyObject *tmp, *left = NULL, *right = NULL;
+		Py_ssize_t metasize = (unsigned char)(*data++);
+		left = PyString_FromStringAndSize(meta, metasize);
+		meta += metasize;
+		metasize = (unsigned char)(*data++);
+		right = PyString_FromStringAndSize(meta, metasize);
+		meta += metasize;
+		if (!left || !right) {
+			Py_XDECREF(left);
+			Py_XDECREF(right);
+			goto bail;
+		}
+		tmp = PyTuple_Pack(2, left, right);
+		Py_DECREF(left);
+		Py_DECREF(right);
+		if (!tmp) {
+			goto bail;
+		}
+		PyTuple_SetItem(metadata, i, tmp);
+	}
+	ret = Py_BuildValue("(OOHO(di)O)", prec, succs, flags,
+			    metadata, mtime, (int)tz * 60, parents);
+bail:
+	Py_XDECREF(prec);
+	Py_XDECREF(succs);
+	Py_XDECREF(metadata);
+	if (parents != Py_None)
+		Py_XDECREF(parents);
+	return ret;
+}
+
+
+static PyObject *fm1readmarkers(PyObject *self, PyObject *args) {
+	const char *data;
+	Py_ssize_t datalen;
+	/* only unsigned long because python 2.4, should be Py_ssize_t */
+	unsigned long offset, stop;
+	PyObject *markers = NULL;
+
+	/* replace kk with nn when we drop Python 2.4 */
+	if (!PyArg_ParseTuple(args, "s#kk", &data, &datalen, &offset, &stop)) {
+		return NULL;
+	}
+	data += offset;
+	markers = PyList_New(0);
+	if (!markers) {
+		return NULL;
+	}
+	while (offset < stop) {
+		uint32_t msize;
+		int error;
+		PyObject *record = fm1readmarker(data, &msize);
+		if (!record) {
+			goto bail;
+		}
+		error = PyList_Append(markers, record);
+		Py_DECREF(record);
+		if (error) {
+			goto bail;
+		}
+		data += msize;
+		offset += msize;
+	}
+	return markers;
+bail:
+	Py_DECREF(markers);
+	return NULL;
+}
+
 static char parsers_doc[] = "Efficient content parsing.";
 
 PyObject *encodedir(PyObject *self, PyObject *args);
@@ -2242,13 +2546,19 @@ static PyMethodDef methods[] = {
 	{"parse_dirstate", parse_dirstate, METH_VARARGS, "parse a dirstate\n"},
 	{"parse_index2", parse_index2, METH_VARARGS, "parse a revlog index\n"},
 	{"asciilower", asciilower, METH_VARARGS, "lowercase an ASCII string\n"},
+	{"asciiupper", asciiupper, METH_VARARGS, "uppercase an ASCII string\n"},
+	{"make_file_foldmap", make_file_foldmap, METH_VARARGS,
+	 "make file foldmap\n"},
 	{"encodedir", encodedir, METH_VARARGS, "encodedir a path\n"},
 	{"pathencode", pathencode, METH_VARARGS, "fncache-encode a path\n"},
 	{"lowerencode", lowerencode, METH_VARARGS, "lower-encode a path\n"},
+	{"fm1readmarkers", fm1readmarkers, METH_VARARGS,
+			"parse v1 obsolete markers\n"},
 	{NULL, NULL}
 };
 
 void dirs_module_init(PyObject *mod);
+void manifest_module_init(PyObject *mod);
 
 static void module_init(PyObject *mod)
 {
@@ -2263,6 +2573,7 @@ static void module_init(PyObject *mod)
 	PyModule_AddStringConstant(mod, "versionerrortext", versionerrortext);
 
 	dirs_module_init(mod);
+	manifest_module_init(mod);
 
 	indexType.tp_new = PyType_GenericNew;
 	if (PyType_Ready(&indexType) < 0 ||

@@ -17,6 +17,57 @@
   $ echo x > x
   $ hg addremove -q
 
+shelve has a help message
+  $ hg shelve -h
+  hg shelve [OPTION]... [FILE]...
+  
+  save and set aside changes from the working directory
+  
+      Shelving takes files that "hg status" reports as not clean, saves the
+      modifications to a bundle (a shelved change), and reverts the files so
+      that their state in the working directory becomes clean.
+  
+      To restore these changes to the working directory, using "hg unshelve";
+      this will work even if you switch to a different commit.
+  
+      When no files are specified, "hg shelve" saves all not-clean files. If
+      specific files or directories are named, only changes to those files are
+      shelved.
+  
+      Each shelved change has a name that makes it easier to find later. The
+      name of a shelved change defaults to being based on the active bookmark,
+      or if there is no active bookmark, the current named branch.  To specify a
+      different name, use "--name".
+  
+      To see a list of existing shelved changes, use the "--list" option. For
+      each shelved change, this will print its name, age, and description; use "
+      --patch" or "--stat" for more details.
+  
+      To delete specific shelved changes, use "--delete". To delete all shelved
+      changes, use "--cleanup".
+  
+  (use "hg help -e shelve" to show help for the shelve extension)
+  
+  options ([+] can be repeated):
+  
+   -A --addremove           mark new/missing files as added/removed before
+                            shelving
+      --cleanup             delete all shelved changes
+      --date DATE           shelve with the specified commit date
+   -d --delete              delete the named shelved change(s)
+   -e --edit                invoke editor on commit messages
+   -l --list                list current shelves
+   -m --message TEXT        use text as shelve message
+   -n --name NAME           use the given name for the shelved commit
+   -p --patch               show patch
+   -i --interactive         interactive mode, only works while creating a shelve
+      --stat                output diffstat-style summary of changes
+   -I --include PATTERN [+] include names matching the given patterns
+   -X --exclude PATTERN [+] exclude names matching the given patterns
+      --mq                  operate on patch repository
+  
+  (some details hidden, use --verbose to show complete help)
+
 shelving in an empty repo should be possible
 (this tests also that editor is not invoked, if '--edit' is not
 specified)
@@ -81,11 +132,11 @@ the common case - no options or filenames
 ensure that our shelved changes exist
 
   $ hg shelve -l
-  default-01      (*)    changes to '[mq]: second.patch' (glob)
-  default         (*)    changes to '[mq]: second.patch' (glob)
+  default-01      (*)* changes to '[mq]: second.patch' (glob)
+  default         (*)* changes to '[mq]: second.patch' (glob)
 
   $ hg shelve -l -p default
-  default         (*)    changes to '[mq]: second.patch' (glob)
+  default         (*)* changes to '[mq]: second.patch' (glob)
   
   diff --git a/a/a b/a/a
   --- a/a/a
@@ -740,4 +791,76 @@ is a no-op), works (issue4398)
   abort: options '--delete' and '--name' may not be used together
   [255]
 
+Test interactive shelve
+  $ cat <<EOF >> $HGRCPATH
+  > [ui]
+  > interactive = true
+  > EOF
+  $ echo 'a' >> a/b
+  $ cat a/a >> a/b
+  $ echo 'x' >> a/b
+  $ mv a/b a/a
+  $ echo 'a' >> foo/foo
+  $ hg st
+  M a/a
+  ? a/a.orig
+  ? foo/foo
+  $ cat a/a
+  a
+  a
+  c
+  x
+  x
+  $ cat foo/foo
+  foo
+  a
+  $ hg shelve --interactive << EOF
+  > y
+  > y
+  > n
+  > EOF
+  diff --git a/a/a b/a/a
+  2 hunks, 2 lines changed
+  examine changes to 'a/a'? [Ynesfdaq?] y
+  
+  @@ -1,3 +1,4 @@
+  +a
+   a
+   c
+   x
+  record change 1/2 to 'a/a'? [Ynesfdaq?] y
+  
+  @@ -1,3 +2,4 @@
+   a
+   c
+   x
+  +x
+  record change 2/2 to 'a/a'? [Ynesfdaq?] n
+  
+  shelved as test
+  merging a/a
+  0 files updated, 1 files merged, 0 files removed, 0 files unresolved
+  $ cat a/a
+  a
+  c
+  x
+  x
+  $ cat foo/foo
+  foo
+  a
+  $ hg st
+  M a/a
+  ? foo/foo
+  $ hg unshelve
+  unshelving change 'test'
+  temporarily committing pending changes (restore with 'hg unshelve --abort')
+  rebasing shelved changes
+  rebasing 6:65b5d1c34c34 "changes to 'create conflict'" (tip)
+  merging a/a
+  $ cat a/a
+  a
+  a
+  c
+  x
+  x
   $ cd ..

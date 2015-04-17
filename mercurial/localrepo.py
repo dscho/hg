@@ -107,14 +107,14 @@ class localpeer(peer.peerrepository):
         return self._repo.known(nodes)
 
     def getbundle(self, source, heads=None, common=None, bundlecaps=None,
-                  format='HG10', **kwargs):
+                  **kwargs):
         cg = exchange.getbundle(self._repo, source, heads=heads,
                                 common=common, bundlecaps=bundlecaps, **kwargs)
-        if bundlecaps is not None and 'HG2Y' in bundlecaps:
+        if bundlecaps is not None and 'HG20' in bundlecaps:
             # When requesting a bundle2, getbundle returns a stream to make the
             # wire level function happier. We need to build a proper object
             # from it in local peer.
-            cg = bundle2.unbundle20(self.ui, cg)
+            cg = bundle2.getunbundler(self.ui, cg)
         return cg
 
     # TODO We might want to move the next two calls into legacypeer and add
@@ -125,15 +125,33 @@ class localpeer(peer.peerrepository):
 
         This function handles the repo locking itself."""
         try:
-            cg = exchange.readbundle(self.ui, cg, None)
-            ret = exchange.unbundle(self._repo, cg, heads, 'push', url)
-            if util.safehasattr(ret, 'getchunks'):
-                # This is a bundle20 object, turn it into an unbundler.
-                # This little dance should be dropped eventually when the API
-                # is finally improved.
-                stream = util.chunkbuffer(ret.getchunks())
-                ret = bundle2.unbundle20(self.ui, stream)
-            return ret
+            try:
+                cg = exchange.readbundle(self.ui, cg, None)
+                ret = exchange.unbundle(self._repo, cg, heads, 'push', url)
+                if util.safehasattr(ret, 'getchunks'):
+                    # This is a bundle20 object, turn it into an unbundler.
+                    # This little dance should be dropped eventually when the
+                    # API is finally improved.
+                    stream = util.chunkbuffer(ret.getchunks())
+                    ret = bundle2.getunbundler(self.ui, stream)
+                return ret
+            except Exception, exc:
+                # If the exception contains output salvaged from a bundle2
+                # reply, we need to make sure it is printed before continuing
+                # to fail. So we build a bundle2 with such output and consume
+                # it directly.
+                #
+                # This is not very elegant but allows a "simple" solution for
+                # issue4594
+                output = getattr(exc, '_bundle2salvagedoutput', ())
+                if output:
+                    bundler = bundle2.bundle20(self._repo.ui)
+                    for out in output:
+                        bundler.addpart(out)
+                    stream = util.chunkbuffer(bundler.getchunks())
+                    b = bundle2.getunbundler(self.ui, stream)
+                    bundle2.processbundle(self._repo, b)
+                raise
         except error.PushRaced, exc:
             raise error.ResponseError(_('push failed:'), str(exc))
 
@@ -174,10 +192,10 @@ class locallegacypeer(localpeer):
 
 class localrepository(object):
 
-    supportedformats = set(('revlogv1', 'generaldelta'))
+    supportedformats = set(('revlogv1', 'generaldelta', 'manifestv2'))
     _basesupported = supportedformats | set(('store', 'fncache', 'shared',
                                              'dotencode'))
-    openerreqs = set(('revlogv1', 'generaldelta'))
+    openerreqs = set(('revlogv1', 'generaldelta', 'manifestv2'))
     requirements = ['revlogv1']
     filtername = None
 
@@ -241,6 +259,8 @@ class localrepository(object):
                     )
                 if self.ui.configbool('format', 'generaldelta', False):
                     requirements.append("generaldelta")
+                if self.ui.configbool('experimental', 'manifestv2', False):
+                    requirements.append("manifestv2")
                 requirements = set(requirements)
             else:
                 raise error.RepoError(_("repository %s not found") % path)
@@ -279,6 +299,7 @@ class localrepository(object):
 
 
         self._branchcaches = {}
+        self._revbranchcache = None
         self.filterpats = {}
         self._datafilters = {}
         self._transref = self._lockref = self._wlockref = None
@@ -302,15 +323,17 @@ class localrepository(object):
         self.names = namespaces.namespaces()
 
     def close(self):
-        pass
+        self._writecaches()
+
+    def _writecaches(self):
+        if self._revbranchcache:
+            self._revbranchcache.write()
 
     def _restrictcapabilities(self, caps):
-        # bundle2 is not ready for prime time, drop it unless explicitly
-        # required by the tests (or some brave tester)
-        if self.ui.configbool('experimental', 'bundle2-exp', False):
+        if self.ui.configbool('experimental', 'bundle2-advertise', True):
             caps = set(caps)
             capsblob = bundle2.encodecaps(bundle2.getrepocaps(self))
-            caps.add('bundle2-exp=' + urllib.quote(capsblob))
+            caps.add('bundle2=' + urllib.quote(capsblob))
         return caps
 
     def _applyrequirements(self, requirements):
@@ -323,6 +346,12 @@ class localrepository(object):
         maxchainlen = self.ui.configint('format', 'maxchainlen')
         if maxchainlen is not None:
             self.svfs.options['maxchainlen'] = maxchainlen
+        manifestcachesize = self.ui.configint('format', 'manifestcachesize')
+        if manifestcachesize is not None:
+            self.svfs.options['manifestcachesize'] = manifestcachesize
+        usetreemanifest = self.ui.configbool('experimental', 'treemanifest')
+        if usetreemanifest is not None:
+            self.svfs.options['usetreemanifest'] = usetreemanifest
 
     def _writerequirements(self):
         reqfile = self.vfs("requires", "w")
@@ -417,9 +446,9 @@ class localrepository(object):
         store = obsolete.obsstore(self.svfs, readonly=readonly,
                                   **kwargs)
         if store and readonly:
-            # message is rare enough to not be translated
-            msg = 'obsolete feature not enabled but %i markers found!\n'
-            self.ui.warn(msg % len(list(store)))
+            self.ui.warn(
+                _('obsolete feature not enabled but %i markers found!\n')
+                % len(list(store)))
         return store
 
     @storecache('00changelog.i')
@@ -462,7 +491,8 @@ class localrepository(object):
 
     def __contains__(self, changeid):
         try:
-            return bool(self.lookup(changeid))
+            self[changeid]
+            return True
         except error.RepoLookupError:
             return False
 
@@ -479,7 +509,7 @@ class localrepository(object):
         '''Return a list of revisions matching the given revset'''
         expr = revset.formatspec(expr, *args)
         m = revset.match(None, expr)
-        return m(self, revset.spanset(self))
+        return m(self)
 
     def set(self, expr, *args):
         '''
@@ -520,7 +550,11 @@ class localrepository(object):
             if prevtags and prevtags[-1] != '\n':
                 fp.write('\n')
             for name in names:
-                m = munge and munge(name) or name
+                if munge:
+                    m = munge(name)
+                else:
+                    m = name
+
                 if (self._tagscache.tagtypes and
                     name in self._tagscache.tagtypes):
                     old = self.tags().get(name, nullid)
@@ -718,6 +752,12 @@ class localrepository(object):
         branchmap.updatecache(self)
         return self._branchcaches[self.filtername]
 
+    @unfilteredmethod
+    def revbranchcache(self):
+        if not self._revbranchcache:
+            self._revbranchcache = branchmap.revbranchcache(self.unfiltered())
+        return self._revbranchcache
+
     def branchtip(self, branch, ignoremissing=False):
         '''return the tip node for a given branch
 
@@ -890,12 +930,21 @@ class localrepository(object):
 
     def currenttransaction(self):
         """return the current transaction or None if non exists"""
-        tr = self._transref and self._transref() or None
+        if self._transref:
+            tr = self._transref()
+        else:
+            tr = None
+
         if tr and tr.running():
             return tr
         return None
 
     def transaction(self, desc, report=None):
+        if (self.ui.configbool('devel', 'all')
+                or self.ui.configbool('devel', 'check-locks')):
+            l = self._lockref and self._lockref()
+            if l is None or not l.held:
+                scmutil.develwarn(self.ui, 'transaction with no lock')
         tr = self.currenttransaction()
         if tr is not None:
             return tr.nest()
@@ -906,19 +955,50 @@ class localrepository(object):
                 _("abandoned transaction found"),
                 hint=_("run 'hg recover' to clean up transaction"))
 
+        self.hook('pretxnopen', throw=True, txnname=desc)
+
         self._writejournal(desc)
         renames = [(vfs, x, undoname(x)) for vfs, x in self._journalfiles()]
-        rp = report and report or self.ui.warn
+        if report:
+            rp = report
+        else:
+            rp = self.ui.warn
         vfsmap = {'plain': self.vfs} # root of .hg/
-        tr = transaction.transaction(rp, self.svfs, vfsmap,
+        # we must avoid cyclic reference between repo and transaction.
+        reporef = weakref.ref(self)
+        def validate(tr):
+            """will run pre-closing hooks"""
+            pending = lambda: tr.writepending() and self.root or ""
+            reporef().hook('pretxnclose', throw=True, pending=pending,
+                           xnname=desc, **tr.hookargs)
+
+        tr = transaction.transaction(rp, self.sopener, vfsmap,
                                      "journal",
                                      "undo",
                                      aftertrans(renames),
-                                     self.store.createmode)
+                                     self.store.createmode,
+                                     validator=validate)
+
+        trid = 'TXN:' + util.sha1("%s#%f" % (id(tr), time.time())).hexdigest()
+        tr.hookargs['TXNID'] = trid
         # note: writing the fncache only during finalize mean that the file is
         # outdated when running hooks. As fncache is used for streaming clone,
         # this is not expected to break anything that happen during the hooks.
         tr.addfinalize('flush-fncache', self.store.write)
+        def txnclosehook(tr2):
+            """To be run if transaction is successful, will schedule a hook run
+            """
+            def hook():
+                reporef().hook('txnclose', throw=False, txnname=desc,
+                               **tr2.hookargs)
+            reporef()._afterlock(hook)
+        tr.addfinalize('txnclose-hook', txnclosehook)
+        def txnaborthook(tr2):
+            """To be run if transaction is aborted
+            """
+            reporef().hook('txnabort', throw=False, txnname=desc,
+                           **tr2.hookargs)
+        tr.addabort('txnabort-hook', txnaborthook)
         self._transref = weakref.ref(tr)
         return tr
 
@@ -1036,6 +1116,9 @@ class localrepository(object):
             else:
                 ui.status(_('working directory now based on '
                             'revision %d\n') % parents)
+            ms = mergemod.mergestate(self)
+            ms.reset(self['.'].node())
+
         # TODO: if we know which new heads may result from this rollback, pass
         # them to destroy(), which will prevent the branchhead cache from being
         # invalidated.
@@ -1123,7 +1206,10 @@ class localrepository(object):
     def lock(self, wait=True):
         '''Lock the repository store (.hg/store) and return a weak reference
         to the lock. Use this before modifying the store (e.g. committing or
-        stripping). If you are opening a transaction, get a lock as well.)'''
+        stripping). If you are opening a transaction, get a lock as well.)
+
+        If both 'lock' and 'wlock' must be acquired, ensure you always acquires
+        'wlock' first to avoid a dead-lock hazard.'''
         l = self._lockref and self._lockref()
         if l is not None and l.held:
             l.lock()
@@ -1143,11 +1229,23 @@ class localrepository(object):
     def wlock(self, wait=True):
         '''Lock the non-store parts of the repository (everything under
         .hg except .hg/store) and return a weak reference to the lock.
-        Use this before modifying files in .hg.'''
+
+        Use this before modifying files in .hg.
+
+        If both 'lock' and 'wlock' must be acquired, ensure you always acquires
+        'wlock' first to avoid a dead-lock hazard.'''
         l = self._wlockref and self._wlockref()
         if l is not None and l.held:
             l.lock()
             return l
+
+        # We do not need to check for non-waiting lock aquisition.  Such
+        # acquisition would not cause dead-lock as they would just fail.
+        if wait and (self.ui.configbool('devel', 'all')
+                     or self.ui.configbool('devel', 'check-locks')):
+            l = self._lockref and self._lockref()
+            if l is not None and l.held:
+                scmutil.develwarn(self.ui, '"wlock" acquired after "lock"')
 
         def unlock():
             if self.dirstate.pendingparentchange():
@@ -1169,11 +1267,15 @@ class localrepository(object):
         """
 
         fname = fctx.path()
-        text = fctx.data()
-        flog = self.file(fname)
         fparent1 = manifest1.get(fname, nullid)
         fparent2 = manifest2.get(fname, nullid)
+        if isinstance(fctx, context.filectx):
+            node = fctx.filenode()
+            if node in [fparent1, fparent2]:
+                self.ui.debug('reusing %s filelog entry\n' % fname)
+                return node
 
+        flog = self.file(fname)
         meta = {}
         copy = fctx.renamed()
         if copy and copy[0] != fname:
@@ -1208,7 +1310,7 @@ class localrepository(object):
 
             # Here, we used to search backwards through history to try to find
             # where the file copy came from if the source of a copy was not in
-            # the parent diretory. However, this doesn't actually make sense to
+            # the parent directory. However, this doesn't actually make sense to
             # do (what does a copy from something not in your working copy even
             # mean?) and it causes bugs (eg, issue4476). Instead, we will warn
             # the user that copy information was dropped, so if they didn't
@@ -1235,6 +1337,7 @@ class localrepository(object):
                 fparent2 = nullid
 
         # is the file changed?
+        text = fctx.data()
         if fparent2 != nullid or flog.cmp(fparent1, text) or meta:
             changelist.append(fname)
             return flog.add(text, meta, tr, linkrev, fparent1, fparent2)
@@ -1270,8 +1373,7 @@ class localrepository(object):
             wctx = self[None]
             merge = len(wctx.parents()) > 1
 
-            if (not force and merge and match and
-                (match.files() or match.anypats())):
+            if not force and merge and not match.always():
                 raise util.Abort(_('cannot partially commit a merge '
                                    '(do not specify files or patterns)'))
 
@@ -1302,10 +1404,10 @@ class localrepository(object):
                         if not force:
                             raise util.Abort(
                                 _("commit with new subrepo %s excluded") % s)
-                    if wctx.sub(s).dirty(True):
+                    dirtyreason = wctx.sub(s).dirtyreason(True)
+                    if dirtyreason:
                         if not self.ui.configbool('ui', 'commitsubrepos'):
-                            raise util.Abort(
-                                _("uncommitted changes in subrepo %s") % s,
+                            raise util.Abort(dirtyreason,
                                 hint=_("use --subrepos for recursive commit"))
                         subs.append(s)
                         commitsubs.add(s)

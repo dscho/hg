@@ -68,15 +68,14 @@ comment associated with each format for details.
 
 """
 import struct
-import util, base85, node
+import util, base85, node, parsers
 import phases
 from i18n import _
 
 _pack = struct.pack
 _unpack = struct.unpack
 _calcsize = struct.calcsize
-
-_SEEK_END = 2 # os.SEEK_END was introduced in Python 2.5
+propertycache = util.propertycache
 
 # the obsolete feature is not mature enough to be enabled by default.
 # you have to rely on third party extension extension to enable this.
@@ -146,7 +145,7 @@ _fm0node = '20s'
 _fm0fsize = _calcsize(_fm0fixed)
 _fm0fnodesize = _calcsize(_fm0node)
 
-def _fm0readmarkers(data, off=0):
+def _fm0readmarkers(data, off):
     # Loop on markers
     l = len(data)
     while off + _fm0fsize <= l:
@@ -285,7 +284,7 @@ _fm1parentmask = (_fm1parentnone << _fm1parentshift)
 _fm1metapair = 'BB'
 _fm1metapairsize = _calcsize('BB')
 
-def _fm1readmarkers(data, off=0):
+def _fm1purereadmarkers(data, off):
     # make some global constants local for performance
     noneflag = _fm1parentnone
     sha2flag = usingsha256
@@ -301,6 +300,7 @@ def _fm1readmarkers(data, off=0):
     # Loop on markers
     stop = len(data) - _fm1fsize
     ufixed = util.unpacker(_fm1fixed)
+
     while off <= stop:
         # read fixed part
         o1 = off + fsize
@@ -395,6 +395,13 @@ def _fm1encodeonemarker(marker):
         data.append(value)
     return ''.join(data)
 
+def _fm1readmarkers(data, off):
+    native = getattr(parsers, 'fm1readmarkers', None)
+    if not native:
+        return _fm1purereadmarkers(data, off)
+    stop = len(data) - _fm1fsize
+    return native(data, off, stop)
+
 # mapping to read/write various marker formats
 # <version> -> (decoder, encoder)
 formats = {_fm0version: (_fm0readmarkers, _fm0encodeonemarker),
@@ -462,15 +469,35 @@ class marker(object):
         """The flags field of the marker"""
         return self._data[2]
 
-def _checkinvalidmarkers(obsstore):
+@util.nogc
+def _addsuccessors(successors, markers):
+    for mark in markers:
+        successors.setdefault(mark[0], set()).add(mark)
+
+@util.nogc
+def _addprecursors(precursors, markers):
+    for mark in markers:
+        for suc in mark[1]:
+            precursors.setdefault(suc, set()).add(mark)
+
+@util.nogc
+def _addchildren(children, markers):
+    for mark in markers:
+        parents = mark[5]
+        if parents is not None:
+            for p in parents:
+                children.setdefault(p, set()).add(mark)
+
+def _checkinvalidmarkers(markers):
     """search for marker with invalid data and raise error if needed
 
     Exist as a separated function to allow the evolve extension for a more
     subtle handling.
     """
-    if node.nullid in obsstore.precursors:
-        raise util.Abort(_('bad obsolescence marker detected: '
-                           'invalid successors nullid'))
+    for mark in markers:
+        if node.nullid in mark[1]:
+            raise util.Abort(_('bad obsolescence marker detected: '
+                               'invalid successors nullid'))
 
 class obsstore(object):
     """Store obsolete markers
@@ -494,16 +521,13 @@ class obsstore(object):
         # caches for various obsolescence related cache
         self.caches = {}
         self._all = []
-        self.precursors = {}
-        self.successors = {}
-        self.children = {}
         self.sopener = sopener
         data = sopener.tryread('obsstore')
         self._version = defaultformat
         self._readonly = readonly
         if data:
             self._version, markers = _readmarkers(data)
-            self._load(markers)
+            self._addmarkers(markers)
 
     def __iter__(self):
         return iter(self._all)
@@ -566,12 +590,6 @@ class obsstore(object):
         if new:
             f = self.sopener('obsstore', 'ab')
             try:
-                # Whether the file's current position is at the begin or at
-                # the end after opening a file for appending is implementation
-                # defined. So we must seek to the end before calling tell(),
-                # or we may get a zero offset for non-zero sized files on
-                # some platforms (issue3543).
-                f.seek(0, _SEEK_END)
                 offset = f.tell()
                 transaction.add('obsstore', offset)
                 # offset == 0: new file - add the version header
@@ -581,7 +599,7 @@ class obsstore(object):
                 # XXX: f.close() == filecache invalidation == obsstore rebuilt.
                 # call 'filecacheentry.refresh()'  here
                 f.close()
-            self._load(new)
+            self._addmarkers(new)
             # new marker *may* have changed several set. invalidate the cache.
             self.caches.clear()
         # records the number of new markers for the transaction hooks
@@ -596,19 +614,37 @@ class obsstore(object):
         version, markers = _readmarkers(data)
         return self.add(transaction, markers)
 
-    @util.nogc
-    def _load(self, markers):
-        for mark in markers:
-            self._all.append(mark)
-            pre, sucs = mark[:2]
-            self.successors.setdefault(pre, set()).add(mark)
-            for suc in sucs:
-                self.precursors.setdefault(suc, set()).add(mark)
-            parents = mark[5]
-            if parents is not None:
-                for p in parents:
-                    self.children.setdefault(p, set()).add(mark)
-        _checkinvalidmarkers(self)
+    @propertycache
+    def successors(self):
+        successors = {}
+        _addsuccessors(successors, self._all)
+        return successors
+
+    @propertycache
+    def precursors(self):
+        precursors = {}
+        _addprecursors(precursors, self._all)
+        return precursors
+
+    @propertycache
+    def children(self):
+        children = {}
+        _addchildren(children, self._all)
+        return children
+
+    def _cached(self, attr):
+        return attr in self.__dict__
+
+    def _addmarkers(self, markers):
+        markers = list(markers) # to allow repeated iteration
+        self._all.extend(markers)
+        if self._cached('successors'):
+            _addsuccessors(self.successors, markers)
+        if self._cached('precursors'):
+            _addprecursors(self.precursors, markers)
+        if self._cached('children'):
+            _addchildren(self.children, markers)
+        _checkinvalidmarkers(markers)
 
     def relevantmarkers(self, nodes):
         """return a set of all obsolescence markers relevant to a set of nodes.
@@ -726,13 +762,13 @@ def relevantmarkers(repo, node):
 
 def precursormarkers(ctx):
     """obsolete marker marking this changeset as a successors"""
-    for data in ctx._repo.obsstore.precursors.get(ctx.node(), ()):
-        yield marker(ctx._repo, data)
+    for data in ctx.repo().obsstore.precursors.get(ctx.node(), ()):
+        yield marker(ctx.repo(), data)
 
 def successormarkers(ctx):
     """obsolete marker making this changeset obsolete"""
-    for data in ctx._repo.obsstore.successors.get(ctx.node(), ()):
-        yield marker(ctx._repo, data)
+    for data in ctx.repo().obsstore.successors.get(ctx.node(), ()):
+        yield marker(ctx.repo(), data)
 
 def allsuccessors(obsstore, nodes, ignoreflags=0):
     """Yield node for every successor of <nodes>.
@@ -1128,8 +1164,12 @@ def _computedivergentset(repo):
     for ctx in repo.set('(not public()) - obsolete()'):
         mark = obsstore.precursors.get(ctx.node(), ())
         toprocess = set(mark)
+        seen = set()
         while toprocess:
             prec = toprocess.pop()[0]
+            if prec in seen:
+                continue # emergency cycle hanging prevention
+            seen.add(prec)
             if prec not in newermap:
                 successorssets(repo, prec, newermap)
             newer = [n for n in newermap[prec] if n]

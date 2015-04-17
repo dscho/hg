@@ -47,6 +47,9 @@ Second branch starting at nullrev:
   fourth (second)
   $ hg log -T '{file_copies % "{source} -> {name}\n"}' -r .
   second -> fourth
+  $ hg log -T '{rev} {ifcontains("fourth", file_copies, "t", "f")}\n' -r .:7
+  8 t
+  7 f
 
 Quoting for ui.logtemplate
 
@@ -93,6 +96,10 @@ Template should precede style option
 
 Default style is like normal output:
 
+  $ echo c >> c
+  $ hg add c
+  $ hg commit -qm ' '
+
   $ hg log > log.out
   $ hg log --style default > style.out
   $ cmp log.out style.out || diff -u log.out style.out
@@ -131,6 +138,8 @@ Default style should also preserve color information (issue2866):
   $ cmp log.out style.out || diff -u log.out style.out
 
   $ mv $HGRCPATH-bak $HGRCPATH
+
+  $ hg --config extensions.strip= strip -q .
 
 Revision with no copies (used to print a traceback):
 
@@ -1868,6 +1877,16 @@ Count filter:
   o  0: children: 1, tags: 0, file_adds: 1, ancestors: 1
   
 
+Upper/lower filters:
+
+  $ hg log -r0 --template '{branch|upper}\n'
+  DEFAULT
+  $ hg log -r0 --template '{author|lower}\n'
+  user name <user@hostname>
+  $ hg log -r0 --template '{date|upper}\n'
+  abort: template filter 'upper' is not compatible with keyword 'date'
+  [255]
+
 Error on syntax:
 
   $ echo 'x = "f' >> t
@@ -1904,6 +1923,11 @@ Thrown an error if a template function doesn't exist
   $ hg tip --template '{foo()}\n'
   hg: parse error: unknown function 'foo'
   [255]
+
+Pass generator object created by template function to filter
+
+  $ hg log -l 1 --template '{if(author, author)|user}\n'
+  test
 
 Test diff function:
 
@@ -2290,6 +2314,14 @@ Test branches inside if statement:
   $ hg log -r 0 --template '{if(branches, "yes", "no")}\n'
   no
 
+Test get function:
+
+  $ hg log -r 0 --template '{get(extras, "branch")}\n'
+  default
+  $ hg log -r 0 --template '{get(files, "should_fail")}\n'
+  hg: parse error: get() expects a dict as first argument
+  [255]
+
 Test shortest(node) function:
 
   $ echo b > b
@@ -2393,6 +2425,10 @@ Test current bookmark templating
   2 bar foo
   1 baz
   0 
+  $ hg log --template "{rev} {ifcontains('foo', bookmarks, 't', 'f')}\n"
+  2 t
+  1 f
+  0 f
 
 Test stringify on sub expressions
 

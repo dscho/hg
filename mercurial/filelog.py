@@ -5,8 +5,8 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import error, revlog
-import re
+import error, mdiff, revlog
+import re, struct
 
 _mdre = re.compile('\1\n')
 def parsemeta(text):
@@ -29,7 +29,7 @@ def packmeta(meta, text):
 
 def _censoredtext(text):
     m, offs = parsemeta(text)
-    return m and "censored" in m and not text[offs:]
+    return m and "censored" in m
 
 class filelog(revlog.revlog):
     def __init__(self, opener, path):
@@ -64,7 +64,7 @@ class filelog(revlog.revlog):
         node = self.node(rev)
         if self.renamed(node):
             return len(self.read(node))
-        if self._iscensored(rev):
+        if self.iscensored(rev):
             return 0
 
         # XXX if self.read(node).startswith("\1\n"), this returns (size+4)
@@ -85,7 +85,7 @@ class filelog(revlog.revlog):
             return False
 
         # censored files compare against the empty file
-        if self._iscensored(self.rev(node)):
+        if self.iscensored(self.rev(node)):
             return text != ''
 
         # renaming a file produces a different hash, even if the data
@@ -101,12 +101,29 @@ class filelog(revlog.revlog):
             super(filelog, self).checkhash(text, p1, p2, node, rev=rev)
         except error.RevlogError:
             if _censoredtext(text):
-                raise error.CensoredNodeError(self.indexfile, node)
+                raise error.CensoredNodeError(self.indexfile, node, text)
             raise
 
-    def _file(self, f):
-        return filelog(self.opener, f)
-
-    def _iscensored(self, rev):
+    def iscensored(self, rev):
         """Check if a file revision is censored."""
         return self.flags(rev) & revlog.REVIDX_ISCENSORED
+
+    def _peek_iscensored(self, baserev, delta, flush):
+        """Quickly check if a delta produces a censored revision."""
+        # Fragile heuristic: unless new file meta keys are added alphabetically
+        # preceding "censored", all censored revisions are prefixed by
+        # "\1\ncensored:". A delta producing such a censored revision must be a
+        # full-replacement delta, so we inspect the first and only patch in the
+        # delta for this prefix.
+        hlen = struct.calcsize(">lll")
+        if len(delta) <= hlen:
+            return False
+
+        oldlen = self.rawsize(baserev)
+        newlen = len(delta) - hlen
+        if delta[:hlen] != mdiff.replacediffheader(oldlen, newlen):
+            return False
+
+        add = "\1\ncensored:"
+        addlen = len(add)
+        return newlen >= addlen and delta[hlen:hlen + addlen] == add

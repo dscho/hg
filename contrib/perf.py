@@ -189,14 +189,25 @@ def perfdirstatedirs(ui, repo):
     timer(d)
     fm.end()
 
-@command('perfdirstatefoldmap')
-def perffoldmap(ui, repo):
+@command('perffilefoldmap')
+def perffilefoldmap(ui, repo):
     timer, fm = gettimer(ui)
     dirstate = repo.dirstate
     'a' in dirstate
     def d():
-        dirstate._foldmap.get('a')
-        del dirstate._foldmap
+        dirstate._filefoldmap.get('a')
+        del dirstate._filefoldmap
+    timer(d)
+    fm.end()
+
+@command('perfdirfoldmap')
+def perfdirfoldmap(ui, repo):
+    timer, fm = gettimer(ui)
+    dirstate = repo.dirstate
+    'a' in dirstate
+    def d():
+        dirstate._dirfoldmap.get('a')
+        del dirstate._dirfoldmap
         del dirstate._dirs
     timer(d)
     fm.end()
@@ -290,6 +301,25 @@ def perfparents(ui, repo):
     def d():
         for n in nl:
             repo.changelog.parents(n)
+    timer(d)
+    fm.end()
+
+@command('perfctxfiles')
+def perfparents(ui, repo, x):
+    x = int(x)
+    timer, fm = gettimer(ui)
+    def d():
+        len(repo[x].files())
+    timer(d)
+    fm.end()
+
+@command('perfrawfiles')
+def perfparents(ui, repo, x):
+    x = int(x)
+    timer, fm = gettimer(ui)
+    cl = repo.changelog
+    def d():
+        len(cl.read(x)[3])
     timer(d)
     fm.end()
 

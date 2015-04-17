@@ -43,10 +43,15 @@ resolve -l should contain unresolved entries
   U file1
   U file2
 
-resolving an unknown path should emit a warning
+  $ hg resolve -l --no-status
+  file1
+  file2
+
+resolving an unknown path should emit a warning, but not for -l
 
   $ hg resolve -m does-not-exist
   arguments do not match paths that need resolving
+  $ hg resolve -l does-not-exist
 
 resolve the failure
 
@@ -59,6 +64,18 @@ resolve -l should show resolved file as resolved
   R file1
   U file2
 
+  $ hg resolve -l -Tjson
+  [
+   {
+    "path": "file1",
+    "status": "R"
+   },
+   {
+    "path": "file2",
+    "status": "U"
+   }
+  ]
+
 resolve -m without paths should mark all resolved
 
   $ hg resolve -m
@@ -68,6 +85,10 @@ resolve -m without paths should mark all resolved
 resolve -l should be empty after commit
 
   $ hg resolve -l
+
+  $ hg resolve -l -Tjson
+  [
+  ]
 
 resolve --all should abort when no merge in progress
 

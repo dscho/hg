@@ -76,6 +76,8 @@ processlock = threading.Lock()
 if sys.version_info < (2, 5):
     subprocess._cleanup = lambda: None
 
+wifexited = getattr(os, "WIFEXITED", lambda x: False)
+
 closefds = os.name == 'posix'
 def Popen4(cmd, wd, timeout, env=None):
     processlock.acquire()
@@ -170,6 +172,8 @@ def getparser():
         help="shortcut for --with-hg=<testdir>/../hg")
     parser.add_option("--loop", action="store_true",
         help="loop tests repeatedly")
+    parser.add_option("--runs-per-test", type="int", dest="runs_per_test",
+        help="run each test N times (default=1)", default=1)
     parser.add_option("-n", "--nodiff", action="store_true",
         help="skip showing test changes")
     parser.add_option("-p", "--port", type="int",
@@ -256,6 +260,10 @@ def parseargs(args, parser):
     if options.anycoverage and options.local:
         # this needs some path mangling somewhere, I guess
         parser.error("sorry, coverage options do not work when --local "
+                     "is specified")
+
+    if options.anycoverage and options.with_hg:
+        parser.error("sorry, coverage options do not work when --with-hg "
                      "is specified")
 
     global verbose
@@ -459,7 +467,14 @@ class Test(unittest.TestCase):
 
         # Remove any previous output files.
         if os.path.exists(self.errpath):
-            os.remove(self.errpath)
+            try:
+                os.remove(self.errpath)
+            except OSError, e:
+                # We might have raced another test to clean up a .err
+                # file, so ignore ENOENT when removing a previous .err
+                # file.
+                if e.errno != errno.ENOENT:
+                    raise
 
     def run(self, result):
         """Run this test and report results against a TestResult instance."""
@@ -528,14 +543,13 @@ class Test(unittest.TestCase):
 
         This will return a tuple describing the result of the test.
         """
-        replacements = self._getreplacements()
         env = self._getenv()
         self._daemonpids.append(env['DAEMON_PIDS'])
         self._createhgrc(env['HGRCPATH'])
 
         vlog('# Test', self.name)
 
-        ret, out = self._run(replacements, env)
+        ret, out = self._run(env)
         self._finished = True
         self._ret = ret
         self._out = out
@@ -608,7 +622,7 @@ class Test(unittest.TestCase):
 
         vlog("# Ret was:", self._ret)
 
-    def _run(self, replacements, env):
+    def _run(self, env):
         # This should be implemented in child classes to run tests.
         raise SkipTest('unknown test type')
 
@@ -691,6 +705,8 @@ class Test(unittest.TestCase):
         hgrc.write('commit = -d "0 0"\n')
         hgrc.write('shelve = --date "0 0"\n')
         hgrc.write('tag = -d "0 0"\n')
+        hgrc.write('[devel]\n')
+        hgrc.write('all = true\n')
         hgrc.write('[largefiles]\n')
         hgrc.write('usercache = %s\n' %
                    (os.path.join(self._testtmp, '.cache/largefiles')))
@@ -707,6 +723,55 @@ class Test(unittest.TestCase):
         # Failed is denoted by AssertionError (by default at least).
         raise AssertionError(msg)
 
+    def _runcommand(self, cmd, env, normalizenewlines=False):
+        """Run command in a sub-process, capturing the output (stdout and
+        stderr).
+
+        Return a tuple (exitcode, output). output is None in debug mode.
+        """
+        if self._debug:
+            proc = subprocess.Popen(cmd, shell=True, cwd=self._testtmp,
+                                    env=env)
+            ret = proc.wait()
+            return (ret, None)
+
+        proc = Popen4(cmd, self._testtmp, self._timeout, env)
+        def cleanup():
+            terminate(proc)
+            ret = proc.wait()
+            if ret == 0:
+                ret = signal.SIGTERM << 8
+            killdaemons(env['DAEMON_PIDS'])
+            return ret
+
+        output = ''
+        proc.tochild.close()
+
+        try:
+            output = proc.fromchild.read()
+        except KeyboardInterrupt:
+            vlog('# Handling keyboard interrupt')
+            cleanup()
+            raise
+
+        ret = proc.wait()
+        if wifexited(ret):
+            ret = os.WEXITSTATUS(ret)
+
+        if proc.timeout:
+            ret = 'timeout'
+
+        if ret:
+            killdaemons(env['DAEMON_PIDS'])
+
+        for s, r in self._getreplacements():
+            output = re.sub(s, r, output)
+
+        if normalizenewlines:
+            output = output.replace('\r\n', '\n')
+
+        return ret, output.splitlines(True)
+
 class PythonTest(Test):
     """A Python-based test."""
 
@@ -714,14 +779,13 @@ class PythonTest(Test):
     def refpath(self):
         return os.path.join(self._testdir, '%s.out' % self.name)
 
-    def _run(self, replacements, env):
+    def _run(self, env):
         py3kswitch = self._py3kwarnings and ' -3' or ''
         cmd = '%s%s "%s"' % (PYTHON, py3kswitch, self.path)
         vlog("# Running", cmd)
-        if os.name == 'nt':
-            replacements.append((r'\r\n', '\n'))
-        result = run(cmd, self._testtmp, replacements, env,
-                   debug=self._debug, timeout=self._timeout)
+        normalizenewlines = os.name == 'nt'
+        result = self._runcommand(cmd, env,
+                                  normalizenewlines=normalizenewlines)
         if self._aborted:
             raise KeyboardInterrupt()
 
@@ -751,7 +815,7 @@ class TTest(Test):
     def refpath(self):
         return os.path.join(self._testdir, self.name)
 
-    def _run(self, replacements, env):
+    def _run(self, env):
         f = open(self.path, 'rb')
         lines = f.readlines()
         f.close()
@@ -768,8 +832,7 @@ class TTest(Test):
         cmd = '%s "%s"' % (self._shell, fname)
         vlog("# Running", cmd)
 
-        exitcode, output = run(cmd, self._testtmp, replacements, env,
-                               debug=self._debug, timeout=self._timeout)
+        exitcode, output = self._runcommand(cmd, env)
 
         if self._aborted:
             raise KeyboardInterrupt()
@@ -1062,49 +1125,6 @@ class TTest(Test):
     def _stringescape(s):
         return TTest.ESCAPESUB(TTest._escapef, s)
 
-
-wifexited = getattr(os, "WIFEXITED", lambda x: False)
-def run(cmd, wd, replacements, env, debug=False, timeout=None):
-    """Run command in a sub-process, capturing the output (stdout and stderr).
-    Return a tuple (exitcode, output).  output is None in debug mode."""
-    if debug:
-        proc = subprocess.Popen(cmd, shell=True, cwd=wd, env=env)
-        ret = proc.wait()
-        return (ret, None)
-
-    proc = Popen4(cmd, wd, timeout, env)
-    def cleanup():
-        terminate(proc)
-        ret = proc.wait()
-        if ret == 0:
-            ret = signal.SIGTERM << 8
-        killdaemons(env['DAEMON_PIDS'])
-        return ret
-
-    output = ''
-    proc.tochild.close()
-
-    try:
-        output = proc.fromchild.read()
-    except KeyboardInterrupt:
-        vlog('# Handling keyboard interrupt')
-        cleanup()
-        raise
-
-    ret = proc.wait()
-    if wifexited(ret):
-        ret = os.WEXITSTATUS(ret)
-
-    if proc.timeout:
-        ret = 'timeout'
-
-    if ret:
-        killdaemons(env['DAEMON_PIDS'])
-
-    for s, r in replacements:
-        output = re.sub(s, r, output)
-    return ret, output.splitlines(True)
-
 iolock = threading.RLock()
 
 class SkipTest(Exception):
@@ -1140,8 +1160,6 @@ class TestResult(unittest._TextTestResult):
         self.warned = []
 
         self.times = []
-        self._started = {}
-        self._stopped = {}
         # Data stored for the benefit of generating xunit reports.
         self.successes = []
         self.faildata = {}
@@ -1263,20 +1281,17 @@ class TestResult(unittest._TextTestResult):
         # child's processes along with real elapsed time taken by a process.
         # This module has one limitation. It can only work for Linux user
         # and not for Windows.
-        self._started[test.name] = os.times()
+        test.started = os.times()
 
     def stopTest(self, test, interrupted=False):
         super(TestResult, self).stopTest(test)
 
-        self._stopped[test.name] = os.times()
+        test.stopped = os.times()
 
-        starttime = self._started[test.name]
-        endtime = self._stopped[test.name]
+        starttime = test.started
+        endtime = test.stopped
         self.times.append((test.name, endtime[2] - starttime[2],
                     endtime[3] - starttime[3], endtime[4] - starttime[4]))
-
-        del self._started[test.name]
-        del self._stopped[test.name]
 
         if interrupted:
             iolock.acquire()
@@ -1288,7 +1303,8 @@ class TestSuite(unittest.TestSuite):
     """Custom unittest TestSuite that knows how to execute Mercurial tests."""
 
     def __init__(self, testdir, jobs=1, whitelist=None, blacklist=None,
-                 retest=False, keywords=None, loop=False,
+                 retest=False, keywords=None, loop=False, runs_per_test=1,
+                 loadtest=None,
                  *args, **kwargs):
         """Create a new instance that can run tests with a configuration.
 
@@ -1323,13 +1339,21 @@ class TestSuite(unittest.TestSuite):
         self._retest = retest
         self._keywords = keywords
         self._loop = loop
+        self._runs_per_test = runs_per_test
+        self._loadtest = loadtest
 
     def run(self, result):
         # We have a number of filters that need to be applied. We do this
         # here instead of inside Test because it makes the running logic for
         # Test simpler.
         tests = []
+        num_tests = [0]
         for test in self._tests:
+            def get():
+                num_tests[0] += 1
+                if getattr(test, 'should_reload', False):
+                    return self._loadtest(test.name, num_tests[0])
+                return test
             if not os.path.exists(test.path):
                 result.addSkip(test, "Doesn't exist")
                 continue
@@ -1356,8 +1380,8 @@ class TestSuite(unittest.TestSuite):
 
                     if ignored:
                         continue
-
-            tests.append(test)
+            for _ in xrange(self._runs_per_test):
+                tests.append(get())
 
         runtests = list(tests)
         done = queue.Queue()
@@ -1373,24 +1397,44 @@ class TestSuite(unittest.TestSuite):
                 done.put(('!', test, 'run-test raised an error, see traceback'))
                 raise
 
+        stoppedearly = False
+
         try:
             while tests or running:
                 if not done.empty() or running == self._jobs or not tests:
                     try:
                         done.get(True, 1)
+                        running -= 1
                         if result and result.shouldStop:
+                            stoppedearly = True
                             break
                     except queue.Empty:
                         continue
-                    running -= 1
                 if tests and not running == self._jobs:
                     test = tests.pop(0)
                     if self._loop:
-                        tests.append(test)
+                        if getattr(test, 'should_reload', False):
+                            num_tests[0] += 1
+                            tests.append(
+                                self._loadtest(test.name, num_tests[0]))
+                        else:
+                            tests.append(test)
                     t = threading.Thread(target=job, name=test.name,
                                          args=(test, result))
                     t.start()
                     running += 1
+
+            # If we stop early we still need to wait on started tests to
+            # finish. Otherwise, there is a race between the test completing
+            # and the test's cleanup code running. This could result in the
+            # test reporting incorrect.
+            if stoppedearly:
+                while running:
+                    try:
+                        done.get(True, 1)
+                        running -= 1
+                    except queue.Empty:
+                        continue
         except KeyboardInterrupt:
             for test in runtests:
                 test.abort()
@@ -1451,7 +1495,11 @@ class TextTestRunner(unittest.TextTestRunner):
                     t = doc.createElement('testcase')
                     t.setAttribute('name', tc)
                     t.setAttribute('time', '%.3f' % timesd[tc])
-                    cd = doc.createCDATASection(cdatasafe(err))
+                    # createCDATASection expects a unicode or it will convert
+                    # using default conversion rules, which will fail if
+                    # string isn't ASCII.
+                    err = cdatasafe(err).decode('utf-8', 'replace')
+                    cd = doc.createCDATASection(err)
                     t.appendChild(cd)
                     s.appendChild(t)
                 xuf.write(doc.toprettyxml(indent='  ', encoding='utf-8'))
@@ -1545,6 +1593,7 @@ class TestRunner(object):
 
     def __init__(self):
         self.options = None
+        self._hgroot = None
         self._testdir = None
         self._hgtmp = None
         self._installdir = None
@@ -1646,6 +1695,11 @@ class TestRunner(object):
 
         runtestdir = os.path.abspath(os.path.dirname(__file__))
         path = [self._bindir, runtestdir] + os.environ["PATH"].split(os.pathsep)
+        if os.path.islink(__file__):
+            # test helper will likely be at the end of the symlink
+            realfile = os.path.realpath(__file__)
+            realdir = os.path.abspath(os.path.dirname(realfile))
+            path.insert(2, realdir)
         if self._tmpbindir != self._bindir:
             path = [self._tmpbindir] + path
         os.environ["PATH"] = os.pathsep.join(path)
@@ -1729,7 +1783,8 @@ class TestRunner(object):
                               retest=self.options.retest,
                               keywords=self.options.keywords,
                               loop=self.options.loop,
-                              tests=tests)
+                              runs_per_test=self.options.runs_per_test,
+                              tests=tests, loadtest=self._gettest)
             verbosity = 1
             if self.options.verbose:
                 verbosity = 2
@@ -1769,14 +1824,16 @@ class TestRunner(object):
         refpath = os.path.join(self._testdir, test)
         tmpdir = os.path.join(self._hgtmp, 'child%d' % count)
 
-        return testcls(refpath, tmpdir,
-                       keeptmpdir=self.options.keep_tmpdir,
-                       debug=self.options.debug,
-                       timeout=self.options.timeout,
-                       startport=self.options.port + count * 3,
-                       extraconfigopts=self.options.extra_config_opt,
-                       py3kwarnings=self.options.py3k_warnings,
-                       shell=self.options.shell)
+        t = testcls(refpath, tmpdir,
+                    keeptmpdir=self.options.keep_tmpdir,
+                    debug=self.options.debug,
+                    timeout=self.options.timeout,
+                    startport=self.options.port + count * 3,
+                    extraconfigopts=self.options.extra_config_opt,
+                    py3kwarnings=self.options.py3k_warnings,
+                    shell=self.options.shell)
+        t.should_reload = True
+        return t
 
     def _cleanup(self):
         """Clean up state from this test invocation."""
@@ -1836,7 +1893,10 @@ class TestRunner(object):
         compiler = ''
         if self.options.compiler:
             compiler = '--compiler ' + self.options.compiler
-        pure = self.options.pure and "--pure" or ""
+        if self.options.pure:
+            pure = "--pure"
+        else:
+            pure = ""
         py3 = ''
         if sys.version_info[0] == 3:
             py3 = '--c2to3'
@@ -1844,6 +1904,7 @@ class TestRunner(object):
         # Run installer in hg root
         script = os.path.realpath(sys.argv[0])
         hgroot = os.path.dirname(os.path.dirname(script))
+        self._hgroot = hgroot
         os.chdir(hgroot)
         nohome = '--home=""'
         if os.name == 'nt':
@@ -1863,6 +1924,17 @@ class TestRunner(object):
                   'prefix': self._installdir, 'libdir': self._pythondir,
                   'bindir': self._bindir,
                   'nohome': nohome, 'logfile': installerrs})
+
+        # setuptools requires install directories to exist.
+        def makedirs(p):
+            try:
+                os.makedirs(p)
+            except OSError, e:
+                if e.errno != errno.EEXIST:
+                    raise
+        makedirs(self._pythondir)
+        makedirs(self._bindir)
+
         vlog("# Running", cmd)
         if os.system(cmd) == 0:
             if not self.options.verbose:
@@ -1870,7 +1942,7 @@ class TestRunner(object):
         else:
             f = open(installerrs, 'rb')
             for line in f:
-                print line
+                sys.stdout.write(line)
             f.close()
             sys.exit(1)
         os.chdir(self._testdir)
@@ -1912,8 +1984,14 @@ class TestRunner(object):
             rc = os.path.join(self._testdir, '.coveragerc')
             vlog('# Installing coverage rc to %s' % rc)
             os.environ['COVERAGE_PROCESS_START'] = rc
-            fn = os.path.join(self._installdir, '..', '.coverage')
-            os.environ['COVERAGE_FILE'] = fn
+            covdir = os.path.join(self._installdir, '..', 'coverage')
+            try:
+                os.mkdir(covdir)
+            except OSError, e:
+                if e.errno != errno.EEXIST:
+                    raise
+
+            os.environ['COVERAGE_DIR'] = covdir
 
     def _checkhglib(self, verb):
         """Ensure that the 'mercurial' package imported by python is
@@ -1946,27 +2024,31 @@ class TestRunner(object):
 
     def _outputcoverage(self):
         """Produce code coverage output."""
+        from coverage import coverage
+
         vlog('# Producing coverage report')
-        os.chdir(self._pythondir)
+        # chdir is the easiest way to get short, relative paths in the
+        # output.
+        os.chdir(self._hgroot)
+        covdir = os.path.join(self._installdir, '..', 'coverage')
+        cov = coverage(data_file=os.path.join(covdir, 'cov'))
 
-        def covrun(*args):
-            cmd = 'coverage %s' % ' '.join(args)
-            vlog('# Running: %s' % cmd)
-            os.system(cmd)
+        # Map install directory paths back to source directory.
+        cov.config.paths['srcdir'] = ['.', self._pythondir]
 
-        covrun('-c')
-        omit = ','.join(os.path.join(x, '*') for x in
-                        [self._bindir, self._testdir])
-        covrun('-i', '-r', '"--omit=%s"' % omit) # report
+        cov.combine()
+
+        omit = [os.path.join(x, '*') for x in [self._bindir, self._testdir]]
+        cov.report(ignore_errors=True, omit=omit)
+
         if self.options.htmlcov:
             htmldir = os.path.join(self._testdir, 'htmlcov')
-            covrun('-i', '-b', '"--directory=%s"' % htmldir,
-                   '"--omit=%s"' % omit)
+            cov.html_report(directory=htmldir, omit=omit)
         if self.options.annotate:
             adir = os.path.join(self._testdir, 'annotated')
             if not os.path.isdir(adir):
                 os.mkdir(adir)
-            covrun('-i', '-a', '"--directory=%s"' % adir, '"--omit=%s"' % omit)
+            cov.annotate(directory=adir, omit=omit)
 
     def _findprogram(self, program):
         """Search PATH for a executable program"""

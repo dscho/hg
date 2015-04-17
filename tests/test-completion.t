@@ -202,8 +202,8 @@ Show all commands + options
   add: include, exclude, subrepos, dry-run
   annotate: rev, follow, no-follow, text, user, file, date, number, changeset, line-number, ignore-all-space, ignore-space-change, ignore-blank-lines, include, exclude, template
   clone: noupdate, updaterev, rev, branch, pull, uncompressed, ssh, remotecmd, insecure
-  commit: addremove, close-branch, amend, secret, edit, include, exclude, message, logfile, date, user, subrepos
-  diff: rev, change, text, git, nodates, noprefix, show-function, reverse, ignore-all-space, ignore-space-change, ignore-blank-lines, unified, stat, include, exclude, subrepos
+  commit: addremove, close-branch, amend, secret, edit, interactive, include, exclude, message, logfile, date, user, subrepos
+  diff: rev, change, text, git, nodates, noprefix, show-function, reverse, ignore-all-space, ignore-space-change, ignore-blank-lines, unified, stat, root, include, exclude, subrepos
   export: output, switch-parent, rev, text, git, nodates
   forget: include, exclude
   init: ssh, remotecmd, insecure
@@ -262,13 +262,13 @@ Show all commands + options
   debugsuccessorssets: 
   debugwalk: include, exclude
   debugwireargs: three, four, five, ssh, remotecmd, insecure
-  files: rev, print0, include, exclude, template
+  files: rev, print0, include, exclude, template, subrepos
   graft: rev, continue, edit, log, force, currentdate, currentuser, date, user, tool, dry-run
   grep: print0, all, text, follow, ignore-case, files-with-matches, line-number, rev, user, date, include, exclude
   heads: rev, topo, active, closed, style, template
   help: extension, command, keyword
   identify: rev, num, id, branch, tags, bookmarks, ssh, remotecmd, insecure
-  import: strip, base, edit, force, no-commit, bypass, partial, exact, import-branch, message, logfile, date, user, similarity
+  import: strip, base, edit, force, no-commit, bypass, partial, exact, prefix, import-branch, message, logfile, date, user, similarity
   incoming: force, newest-first, bundle, rev, bookmarks, branch, patch, git, limit, no-merges, stat, graph, style, template, ssh, remotecmd, insecure, subrepos
   locate: rev, print0, fullpath, include, exclude
   manifest: rev, all, template
@@ -278,8 +278,8 @@ Show all commands + options
   phase: public, draft, secret, force, rev
   recover: 
   rename: after, force, include, exclude, dry-run
-  resolve: all, list, mark, unmark, no-status, tool, include, exclude
-  revert: all, date, rev, no-backup, include, exclude, dry-run
+  resolve: all, list, mark, unmark, no-status, tool, include, exclude, template
+  revert: all, date, rev, no-backup, interactive, include, exclude, dry-run
   rollback: dry-run, force
   root: 
   tag: force, local, rev, remove, edit, message, date, user

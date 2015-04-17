@@ -160,8 +160,11 @@ class unionfilelog(unionrevlog, filelog.filelog):
     def baserevdiff(self, rev1, rev2):
         return filelog.filelog.revdiff(self, rev1, rev2)
 
-    def _file(self, f):
-        self._repo.file(f)
+    def iscensored(self, rev):
+        """Check if a revision is censored."""
+        if rev <= self.repotiprev:
+            return filelog.filelog.iscensored(self, rev)
+        return self.revlog2.iscensored(rev)
 
 class unionpeer(localrepo.localpeer):
     def canpush(self):

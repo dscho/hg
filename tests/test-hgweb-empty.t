@@ -48,7 +48,6 @@ Some tests for hgweb in an empty repository
   <ul>
    <li><a href="/help">help</a></li>
   </ul>
-  <p></p>
   <div class="atom-logo">
   <a href="/atom-log" title="subscribe to atom feed">
   <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed" />
@@ -74,11 +73,13 @@ Some tests for hgweb in an empty repository
   </div>
   
   <table class="bigtable">
+  <thead>
    <tr>
     <th class="age">age</th>
     <th class="author">author</th>
     <th class="description">description</th>
    </tr>
+  </thead>
   <tbody class="stripes2">
   
   </tbody>
@@ -158,7 +159,6 @@ Some tests for hgweb in an empty repository
   <ul>
    <li><a href="/help">help</a></li>
   </ul>
-  <p></p>
   <div class="atom-logo">
   <a href="/atom-log" title="subscribe to atom feed">
   <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed" />
@@ -184,11 +184,13 @@ Some tests for hgweb in an empty repository
   </div>
   
   <table class="bigtable">
+  <thead>
    <tr>
     <th class="age">age</th>
     <th class="author">author</th>
     <th class="description">description</th>
    </tr>
+  </thead>
   <tbody class="stripes2">
   
   </tbody>
@@ -264,7 +266,6 @@ Some tests for hgweb in an empty repository
   <ul>
    <li><a href="/help">help</a></li>
   </ul>
-  <p></p>
   <div class="atom-logo">
   <a href="/atom-log" title="subscribe to atom feed">
   <img class="atom-logo" src="/static/feed-icon-14x14.png" alt="atom feed" />
@@ -431,11 +432,13 @@ Some tests for hgweb in an empty repository
   </form>
   
   <table class="bigtable">
+  <thead>
   <tr>
     <th class="name">name</th>
     <th class="size">size</th>
     <th class="permissions">permissions</th>
   </tr>
+  </thead>
   <tbody class="stripes2">
   <tr class="fileline">
     <td class="name"><a href="/file/000000000000/">[up]</a></td>

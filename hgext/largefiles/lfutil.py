@@ -82,9 +82,10 @@ def inusercache(ui, hash):
     return path and os.path.exists(path)
 
 def findfile(repo, hash):
-    if instore(repo, hash):
+    path, exists = findstorepath(repo, hash)
+    if exists:
         repo.ui.note(_('found %s in store\n') % hash)
-        return storepath(repo, hash)
+        return path
     elif inusercache(repo.ui, hash):
         repo.ui.note(_('found %s in system cache\n') % hash)
         path = storepath(repo, hash)
@@ -164,11 +165,30 @@ def listlfiles(repo, rev=None, matcher=None):
             for f in repo[rev].walk(matcher)
             if rev is not None or repo.dirstate[f] != '?']
 
-def instore(repo, hash):
-    return os.path.exists(storepath(repo, hash))
+def instore(repo, hash, forcelocal=False):
+    return os.path.exists(storepath(repo, hash, forcelocal))
 
-def storepath(repo, hash):
-    return repo.join(os.path.join(longname, hash))
+def storepath(repo, hash, forcelocal=False):
+    if not forcelocal and repo.shared():
+        return repo.vfs.reljoin(repo.sharedpath, longname, hash)
+    return repo.join(longname, hash)
+
+def findstorepath(repo, hash):
+    '''Search through the local store path(s) to find the file for the given
+    hash.  If the file is not found, its path in the primary store is returned.
+    The return value is a tuple of (path, exists(path)).
+    '''
+    # For shared repos, the primary store is in the share source.  But for
+    # backward compatibility, force a lookup in the local store if it wasn't
+    # found in the share source.
+    path = storepath(repo, hash, False)
+
+    if instore(repo, hash):
+        return (path, True)
+    elif repo.shared() and instore(repo, hash, True):
+        return storepath(repo, hash, True)
+
+    return (path, False)
 
 def copyfromcache(repo, hash, filename):
     '''Copy the specified largefile from the repo or system cache to
@@ -388,7 +408,7 @@ def synclfdirstate(repo, lfdirstate, lfile, normallookup):
         lfdirstate.drop(lfile)
 
 def markcommitted(orig, ctx, node):
-    repo = ctx._repo
+    repo = ctx.repo()
 
     orig(node)
 

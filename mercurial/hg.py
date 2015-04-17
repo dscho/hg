@@ -34,7 +34,11 @@ def addbranchrevs(lrepo, other, branches, revs):
         else:
             y = None
         return x, y
-    revs = revs and list(revs) or []
+    if revs:
+        revs = list(revs)
+    else:
+        revs = []
+
     if not peer.capable('branchmap'):
         if branches:
             raise util.Abort(_("remote branch lookup not supported"))
@@ -239,6 +243,12 @@ def copystore(ui, srcrepo, destpath):
     try:
         hardlink = None
         num = 0
+        closetopic = [None]
+        def prog(topic, pos):
+            if pos is None:
+                closetopic[0] = topic
+            else:
+                ui.progress(topic, pos + num)
         srcpublishing = srcrepo.ui.configbool('phases', 'publish', True)
         srcvfs = scmutil.vfs(srcrepo.sharedpath)
         dstvfs = scmutil.vfs(destpath)
@@ -255,12 +265,16 @@ def copystore(ui, srcrepo, destpath):
                     # lock to avoid premature writing to the target
                     destlock = lock.lock(dstvfs, lockfile)
                 hardlink, n = util.copyfiles(srcvfs.join(f), dstvfs.join(f),
-                                             hardlink)
+                                             hardlink, progress=prog)
                 num += n
         if hardlink:
             ui.debug("linked %d files\n" % num)
+            if closetopic[0]:
+                ui.progress(closetopic[0], None)
         else:
             ui.debug("copied %d files\n" % num)
+            if closetopic[0]:
+                ui.progress(closetopic[0], None)
         return destlock
     except: # re-raises
         release(destlock)
@@ -672,7 +686,9 @@ def remoteui(src, opts):
         for key, val in src.configitems(sect):
             dst.setconfig(sect, key, val, 'copied')
     v = src.config('web', 'cacerts')
-    if v:
+    if v == '!':
+        dst.setconfig('web', 'cacerts', v, 'copied')
+    elif v:
         dst.setconfig('web', 'cacerts', util.expandpath(v), 'copied')
 
     return dst

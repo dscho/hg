@@ -296,6 +296,22 @@ def asciilower(s):
     asciilower = impl
     return impl(s)
 
+def _asciiupper(s):
+    '''convert a string to uppercase if ASCII
+
+    Raises UnicodeDecodeError if non-ASCII characters are found.'''
+    s.decode('ascii')
+    return s.upper()
+
+def asciiupper(s):
+    # delay importing avoids cyclic dependency around "parsers" in
+    # pure Python build (util => i18n => encoding => parsers => util)
+    import parsers
+    impl = getattr(parsers, 'asciiupper', _asciiupper)
+    global asciiupper
+    asciiupper = impl
+    return impl(s)
+
 def lower(s):
     "best-effort encoding-aware case-folding of local string s"
     try:
@@ -320,10 +336,11 @@ def lower(s):
 def upper(s):
     "best-effort encoding-aware case-folding of local string s"
     try:
-        s.decode('ascii') # throw exception for non-ASCII character
-        return s.upper()
+        return asciiupper(s)
     except UnicodeDecodeError:
-        pass
+        return upperfallback(s)
+
+def upperfallback(s):
     try:
         if isinstance(s, localstr):
             u = s._utf8.decode("utf-8")
@@ -338,6 +355,21 @@ def upper(s):
         return s.upper() # we don't know how to fold this except in ASCII
     except LookupError, k:
         raise error.Abort(k, hint="please check your locale settings")
+
+class normcasespecs(object):
+    '''what a platform's normcase does to ASCII strings
+
+    This is specified per platform, and should be consistent with what normcase
+    on that platform actually does.
+
+    lower: normcase lowercases ASCII strings
+    upper: normcase uppercases ASCII strings
+    other: the fallback function should always be called
+
+    This should be kept in sync with normcase_spec in util.h.'''
+    lower = -1
+    upper = 1
+    other = 0
 
 _jsonmap = {}
 

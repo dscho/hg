@@ -21,6 +21,9 @@ hidden by deduplication algorithm in the cycle detector, so fixing
 these may expose other cycles.
 
   $ hg locate 'mercurial/**.py' | sed 's-\\-/-g' | xargs python "$import_checker"
+  mercurial/crecord.py mixed imports
+     stdlib:    fcntl, termios
+     relative:  curses
   mercurial/dispatch.py mixed imports
      stdlib:    commands
      relative:  error, extensions, fancyopts, hg, hook, util
@@ -29,11 +32,11 @@ these may expose other cycles.
      relative:  error, merge, util
   mercurial/revset.py mixed imports
      stdlib:    parser
-     relative:  discovery, error, hbisect, phases, util
+     relative:  error, hbisect, phases, util
   mercurial/templater.py mixed imports
      stdlib:    parser
      relative:  config, error, templatefilters, templatekw, util
   mercurial/ui.py mixed imports
      stdlib:    formatter
      relative:  config, error, scmutil, util
-  Import cycle: mercurial.cmdutil -> mercurial.context -> mercurial.subrepo -> mercurial.cmdutil -> mercurial.cmdutil
+  Import cycle: mercurial.cmdutil -> mercurial.context -> mercurial.subrepo -> mercurial.cmdutil

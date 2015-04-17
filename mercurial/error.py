@@ -22,6 +22,10 @@ class FilteredIndexError(IndexError):
 class LookupError(RevlogError, KeyError):
     def __init__(self, name, index, message):
         self.name = name
+        self.index = index
+        # this can't be called 'message' because at least some installs of
+        # Python 2.6+ complain about the 'message' property being deprecated
+        self.lookupmessage = message
         if isinstance(name, str) and len(name) == 20:
             from node import short
             name = short(name)
@@ -61,7 +65,16 @@ class OutOfBandError(Exception):
     """Exception raised when a remote repo reports failure"""
 
 class ParseError(Exception):
-    """Exception raised when parsing config files (msg[, pos])"""
+    """Raised when parsing config files and {rev,file}sets (msg[, pos])"""
+
+class UnknownIdentifier(ParseError):
+    """Exception raised when a {rev,file}set references an unknown identifier"""
+
+    def __init__(self, function, symbols):
+        from i18n import _
+        ParseError.__init__(self, _("unknown identifier: %s") % function)
+        self.function = function
+        self.symbols = symbols
 
 class RepoError(Exception):
     def __init__(self, *args, **kw):
@@ -134,8 +147,20 @@ class ReadOnlyPartError(RuntimeError):
     pass
 
 class CensoredNodeError(RevlogError):
-    """error raised when content verification fails on a censored node"""
+    """error raised when content verification fails on a censored node
 
-    def __init__(self, filename, node):
+    Also contains the tombstone data substituted for the uncensored data.
+    """
+
+    def __init__(self, filename, node, tombstone):
         from node import short
         RevlogError.__init__(self, '%s:%s' % (filename, short(node)))
+        self.tombstone = tombstone
+
+class CensoredBaseError(RevlogError):
+    """error raised when a delta is rejected because its base is censored
+
+    A delta based on a censored revision must be formed as single patch
+    operation which replaces the entire base with new content. This ensures
+    the delta may be applied by clones which have not censored the base.
+    """

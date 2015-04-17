@@ -1541,6 +1541,9 @@ have 2 filelog topological heads in a linear changeset graph.
   $ testlog --follow
   []
   []
+  $ testlog -rnull
+  ['null']
+  []
   $ echo a > a
   $ echo aa > aa
   $ echo f > f
@@ -1763,6 +1766,13 @@ Test --follow and multiple files
   nodetag 2
   nodetag 1
   nodetag 0
+
+Test --follow null parent
+
+  $ hg up -q null
+  $ testlog -f
+  []
+  []
 
 Test --follow-first
 
@@ -2192,13 +2202,6 @@ Test --follow and forward --rev
       (func
         ('symbol', 'rev')
         ('symbol', '6'))))
-  --- log.nodes	* (glob)
-  +++ glog.nodes	* (glob)
-  @@ -1,3 +1,3 @@
-  -nodetag 6
-   nodetag 8
-   nodetag 7
-  +nodetag 6
 
 Test --follow-first and forward --rev
 
@@ -2239,6 +2242,14 @@ Test --follow-first and backward --rev
       (func
         ('symbol', 'rev')
         ('symbol', '6'))))
+
+Test --follow with --rev of graphlog extension
+
+  $ hg --config extensions.graphlog= glog -qfr1
+  o  1:216d4c92cf98
+  |
+  o  0:f8035bb17114
+  
 
 Test subdir
 
@@ -2352,6 +2363,16 @@ issue3772
   o  changeset:   -1:000000000000
      user:
      date:        Thu Jan 01 00:00:00 1970 +0000
+  
+
+should not draw line down to null due to the magic of fullreposet
+
+  $ hg log -G -r 'all()' | tail -6
+  |
+  o  changeset:   0:f8035bb17114
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     add a
   
 
   $ cd ..

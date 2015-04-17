@@ -87,7 +87,10 @@ class mercurial_sink(converter_sink):
         if not branch:
             branch = 'default'
         pbranches = [(b[0], b[1] and b[1] or 'default') for b in pbranches]
-        pbranch = pbranches and pbranches[0][1] or 'default'
+        if pbranches:
+            pbranch = pbranches[0][1]
+        else:
+            pbranch = 'default'
 
         branchpath = os.path.join(self.path, branch)
         if setbranch:
@@ -129,9 +132,14 @@ class mercurial_sink(converter_sink):
             fp.write('%s %s\n' % (revid, s[1]))
         return fp.getvalue()
 
-    def putcommit(self, files, copies, parents, commit, source, revmap, full):
+    def putcommit(self, files, copies, parents, commit, source, revmap, full,
+                  cleanp2):
         files = dict(files)
+
         def getfilectx(repo, memctx, f):
+            if p2ctx and f in cleanp2 and f not in copies:
+                self.ui.debug('reusing %s from p2\n' % f)
+                return p2ctx[f]
             try:
                 v = files[f]
             except KeyError:
@@ -196,6 +204,9 @@ class mercurial_sink(converter_sink):
         while parents:
             p1 = p2
             p2 = parents.pop(0)
+            p2ctx = None
+            if p2 != nullid:
+                p2ctx = self.repo[p2]
             fileset = set(files)
             if full:
                 fileset.update(self.repo[p1])
@@ -379,9 +390,13 @@ class mercurial_source(converter_source):
         # getcopies() is also run for roots and before filtering so missing
         # revlogs are detected early
         copies = self.getcopies(ctx, parents, copyfiles)
+        cleanp2 = set()
+        if len(parents) == 2:
+            cleanp2.update(self.repo.status(parents[1].node(), ctx.node(),
+                                            clean=True).clean)
         changes = [(f, rev) for f in files if f not in self.ignored]
         changes.sort()
-        return changes, copies
+        return changes, copies, cleanp2
 
     def getcopies(self, ctx, parents, files):
         copies = {}

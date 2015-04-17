@@ -226,9 +226,17 @@ def createcmd(ui, repo, pats, opts):
             raise util.Abort(_('shelved change names may not contain slashes'))
         if name.startswith('.'):
             raise util.Abort(_("shelved change names may not start with '.'"))
+        interactive = opts.get('interactive', False)
 
-        node = cmdutil.commit(ui, repo, commitfunc, pats, opts)
-
+        def interactivecommitfunc(ui, repo, *pats, **opts):
+            match = scmutil.match(repo['.'], pats, {})
+            message = opts['message']
+            return commitfunc(ui, repo, message, match, opts)
+        if not interactive:
+            node = cmdutil.commit(ui, repo, commitfunc, pats, opts)
+        else:
+            node = cmdutil.dorecord(ui, repo, interactivecommitfunc, 'commit',
+                                    False, cmdutil.recordfilter, *pats, **opts)
         if not node:
             stat = repo.status(match=scmutil.match(repo[None], pats, opts))
             if stat.deleted:
@@ -536,8 +544,8 @@ def unshelve(ui, repo, *shelved, **opts):
     oldquiet = ui.quiet
     wlock = lock = tr = None
     try:
-        lock = repo.lock()
         wlock = repo.wlock()
+        lock = repo.lock()
 
         tr = repo.transaction('unshelve', report=lambda x: None)
         oldtiprev = len(repo)
@@ -649,6 +657,8 @@ def unshelve(ui, repo, *shelved, **opts):
            _('use the given name for the shelved commit'), _('NAME')),
           ('p', 'patch', None,
            _('show patch')),
+          ('i', 'interactive', None,
+           _('interactive mode, only works while creating a shelve')),
           ('', 'stat', None,
            _('output diffstat-style summary of changes'))] + commands.walkopts,
          _('hg shelve [OPTION]... [FILE]...'))

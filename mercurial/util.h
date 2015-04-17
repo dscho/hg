@@ -172,6 +172,22 @@ static inline uint32_t getbe32(const char *c)
 		(d[3]));
 }
 
+static inline int16_t getbeint16(const char *c)
+{
+	const unsigned char *d = (const unsigned char *)c;
+
+	return ((d[0] << 8) |
+		(d[1]));
+}
+
+static inline uint16_t getbeuint16(const char *c)
+{
+	const unsigned char *d = (const unsigned char *)c;
+
+	return ((d[0] << 8) |
+		(d[1]));
+}
+
 static inline void putbe32(uint32_t x, char *c)
 {
 	c[0] = (x >> 24) & 0xff;
@@ -179,5 +195,35 @@ static inline void putbe32(uint32_t x, char *c)
 	c[2] = (x >> 8) & 0xff;
 	c[3] = (x) & 0xff;
 }
+
+static inline double getbefloat64(const char *c)
+{
+	const unsigned char *d = (const unsigned char *)c;
+	double ret;
+	int i;
+	uint64_t t = 0;
+	for (i = 0; i < 8; i++) {
+		t = (t<<8) + d[i];
+	}
+	memcpy(&ret, &t, sizeof(t));
+	return ret;
+}
+
+/* This should be kept in sync with normcasespecs in encoding.py. */
+enum normcase_spec {
+	NORMCASE_LOWER = -1,
+	NORMCASE_UPPER = 1,
+	NORMCASE_OTHER = 0
+};
+
+#define MIN(a, b) (((a)<(b))?(a):(b))
+/* VC9 doesn't include bool and lacks stdbool.h based on my searching */
+#ifdef _MSC_VER
+#define true 1
+#define false 0
+typedef unsigned char bool;
+#else
+#include <stdbool.h>
+#endif
 
 #endif /* _HG_UTIL_H_ */
