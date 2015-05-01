@@ -2370,6 +2370,7 @@ def debuginstall(ui):
     # editor
     ui.status(_("checking commit editor...\n"))
     editor = ui.geteditor()
+    editor = util.expandpath(editor)
     cmdpath = util.findexe(shlex.split(editor)[0])
     if not cmdpath:
         if editor == 'vi':
@@ -2484,7 +2485,7 @@ def debuglocks(ui, repo, **opts):
             l.release()
         else:
             try:
-                stat = repo.svfs.lstat(name)
+                stat = vfs.lstat(name)
                 age = now - stat.st_mtime
                 user = util.username(stat.st_uid)
                 locker = vfs.readlock(name)
@@ -5464,7 +5465,8 @@ def resolve(ui, repo, *pats, **opts):
     ('d', 'date', '', _('tipmost revision matching date'), _('DATE')),
     ('r', 'rev', '', _('revert to the specified revision'), _('REV')),
     ('C', 'no-backup', None, _('do not save backup copies of files')),
-    ('i', 'interactive', None, _('interactively select the changes')),
+    ('i', 'interactive', None,
+            _('interactively select the changes (EXPERIMENTAL)')),
     ] + walkopts + dryrunopts,
     _('[OPTION]... [-r REV] [NAME]...'))
 def revert(ui, repo, *pats, **opts):
@@ -5511,7 +5513,8 @@ def revert(ui, repo, *pats, **opts):
 
     ctx = scmutil.revsingle(repo, opts.get('rev'))
 
-    if not pats and not (opts.get('all') or opts.get('interactive')):
+    if (not (pats or opts.get('include') or opts.get('exclude') or
+             opts.get('all') or opts.get('interactive'))):
         msg = _("no files or directories specified")
         if p2 != nullid:
             hint = _("uncommitted merge, use --all to discard all changes,"
@@ -5837,14 +5840,15 @@ def status(ui, repo, *pats, **opts):
         else:
             show = states[:5]
 
-    stat = repo.status(node1, node2, scmutil.match(repo[node2], pats, opts),
+    m = scmutil.match(repo[node2], pats, opts)
+    stat = repo.status(node1, node2, m,
                        'ignored' in show, 'clean' in show, 'unknown' in show,
                        opts.get('subrepos'))
     changestates = zip(states, 'MAR!?IC', stat)
 
     if (opts.get('all') or opts.get('copies')
         or ui.configbool('ui', 'statuscopies')) and not opts.get('no_status'):
-        copy = copies.pathcopies(repo[node1], repo[node2])
+        copy = copies.pathcopies(repo[node1], repo[node2], m)
 
     fm = ui.formatter('status', opts)
     fmt = '%s' + end

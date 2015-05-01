@@ -305,6 +305,9 @@ def overridelog(orig, ui, repo, *pats, **opts):
         pats = set(p)
 
         def fixpats(pat, tostandin=lfutil.standin):
+            if pat.startswith('set:'):
+                return pat
+
             kindpat = match_._patsplit(pat, None)
 
             if kindpat[0] is not None:
@@ -837,6 +840,12 @@ def hgclone(orig, ui, opts, *args, **kwargs):
     if result is not None:
         sourcerepo, destrepo = result
         repo = destrepo.local()
+
+        # When cloning to a remote repo (like through SSH), no repo is available
+        # from the peer.   Therefore the largefiles can't be downloaded and the
+        # hgrc can't be updated.
+        if not repo:
+            return result
 
         # If largefiles is required for this repo, permanently enable it locally
         if 'largefiles' in repo.requirements:

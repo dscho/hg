@@ -145,10 +145,10 @@ repo, you can add a ``--force`` option.
 
 Histedit rule lines are truncated to 80 characters by default. You
 can customise this behaviour by setting a different length in your
-configuration file:
+configuration file::
 
-[histedit]
-linelen = 120      # truncate rule lines at 120 characters
+  [histedit]
+  linelen = 120      # truncate rule lines at 120 characters
 """
 
 try:
@@ -246,7 +246,8 @@ class histeditstate(object):
         fp.write('%s\n' % self.keep)
         fp.write('%d\n' % len(self.rules))
         for rule in self.rules:
-            fp.write('%s%s\n' % (rule[1], rule[0]))
+            fp.write('%s\n' % rule[0]) # action
+            fp.write('%s\n' % rule[1]) # remainder
         fp.write('%d\n' % len(self.replacements))
         for replacement in self.replacements:
             fp.write('%s%s\n' % (node.hex(replacement[0]), ''.join(node.hex(r)
@@ -276,11 +277,11 @@ class histeditstate(object):
         rulelen = int(lines[index])
         index += 1
         for i in xrange(rulelen):
-            rule = lines[index]
-            rulehash = rule[:40]
-            ruleaction = rule[40:]
-            rules.append((ruleaction, rulehash))
+            ruleaction = lines[index]
             index += 1
+            rule = lines[index]
+            index += 1
+            rules.append((ruleaction, rule))
 
         # Replacements
         replacements = []
@@ -412,7 +413,7 @@ def applychanges(ui, repo, ctx, opts):
             repo.ui.setconfig('ui', 'forcemerge', '', 'histedit')
     return stats
 
-def collapse(repo, first, last, commitopts):
+def collapse(repo, first, last, commitopts, skipprompt=False):
     """collapse the set of revisions from first to last as new one.
 
     Expected commit options are:
@@ -473,7 +474,7 @@ def collapse(repo, first, last, commitopts):
 
     parents = (first.p1().node(), first.p2().node())
     editor = None
-    if not commitopts.get('rollup'):
+    if not skipprompt:
         editor = cmdutil.getcommiteditor(edit=True, editform='histedit.fold')
     new = context.memctx(repo,
                          parents=parents,
@@ -574,7 +575,8 @@ class fold(histeditaction):
         try:
             phasemin = max(ctx.phase(), oldctx.phase())
             repo.ui.setconfig('phases', 'new-commit', phasemin, 'histedit')
-            n = collapse(repo, ctx, repo[newnode], commitopts)
+            n = collapse(repo, ctx, repo[newnode], commitopts,
+                         skipprompt=self.skipprompt())
         finally:
             repo.ui.restoreconfig(phasebackup)
         if n is None:
@@ -711,7 +713,7 @@ def _histedit(ui, repo, state, *freeargs, **opts):
         goal = 'abort'
     elif editplan:
         if util.any((outg, revs, freeargs)):
-            raise util.Abort(_('only --commands argument allowed with'
+            raise util.Abort(_('only --commands argument allowed with '
                                '--edit-plan'))
         goal = 'edit-plan'
     else:

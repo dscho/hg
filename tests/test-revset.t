@@ -1049,6 +1049,8 @@ aliases:
 
   $ echo '[revsetalias]' >> .hg/hgrc
   $ echo 'm = merge()' >> .hg/hgrc
+(revset aliases can override builtin revsets)
+  $ echo 'p2($1) = p1($1)' >> .hg/hgrc
   $ echo 'sincem = descendants(m)' >> .hg/hgrc
   $ echo 'd($1) = reverse(sort($1, date))' >> .hg/hgrc
   $ echo 'rs(ARG1, ARG2) = reverse(sort(ARG1, ARG2))' >> .hg/hgrc
@@ -1063,6 +1065,64 @@ aliases:
   <filteredset
     <fullreposet+ 0:9>>
   6
+
+  $ HGPLAIN=1
+  $ export HGPLAIN
+  $ try m
+  ('symbol', 'm')
+  abort: unknown revision 'm'!
+  [255]
+
+  $ HGPLAINEXCEPT=revsetalias
+  $ export HGPLAINEXCEPT
+  $ try m
+  ('symbol', 'm')
+  (func
+    ('symbol', 'merge')
+    None)
+  * set:
+  <filteredset
+    <fullreposet+ 0:9>>
+  6
+
+  $ unset HGPLAIN
+  $ unset HGPLAINEXCEPT
+
+  $ try 'p2(.)'
+  (func
+    ('symbol', 'p2')
+    ('symbol', '.'))
+  (func
+    ('symbol', 'p1')
+    ('symbol', '.'))
+  * set:
+  <baseset+ [8]>
+  8
+
+  $ HGPLAIN=1
+  $ export HGPLAIN
+  $ try 'p2(.)'
+  (func
+    ('symbol', 'p2')
+    ('symbol', '.'))
+  * set:
+  <baseset+ []>
+
+  $ HGPLAINEXCEPT=revsetalias
+  $ export HGPLAINEXCEPT
+  $ try 'p2(.)'
+  (func
+    ('symbol', 'p2')
+    ('symbol', '.'))
+  (func
+    ('symbol', 'p1')
+    ('symbol', '.'))
+  * set:
+  <baseset+ [8]>
+  8
+
+  $ unset HGPLAIN
+  $ unset HGPLAINEXCEPT
 
 test alias recursion
 

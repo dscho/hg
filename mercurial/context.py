@@ -806,6 +806,22 @@ class basefilectx(object):
         return self._adjustlinkrev(self._path, self._filelog, self._filenode,
                                    self.rev(), inclusive=True)
 
+    def _parentfilectx(self, path, fileid, filelog):
+        """create parent filectx keeping ancestry info for _adjustlinkrev()"""
+        fctx = filectx(self._repo, path, fileid=fileid, filelog=filelog)
+        if '_changeid' in vars(self) or '_changectx' in vars(self):
+            # If self is associated with a changeset (probably explicitly
+            # fed), ensure the created filectx is associated with a
+            # changeset that is an ancestor of self.changectx.
+            # This lets us later use _adjustlinkrev to get a correct link.
+            fctx._descendantrev = self.rev()
+            fctx._ancestrycontext = getattr(self, '_ancestrycontext', None)
+        elif '_descendantrev' in vars(self):
+            # Otherwise propagate _descendantrev if we have one associated.
+            fctx._descendantrev = self._descendantrev
+            fctx._ancestrycontext = getattr(self, '_ancestrycontext', None)
+        return fctx
+
     def parents(self):
         _path = self._path
         fl = self._filelog
@@ -824,25 +840,7 @@ class basefilectx(object):
             # first nullid parent with rename information.
             pl.insert(0, (r[0], r[1], self._repo.file(r[0])))
 
-        ret = []
-        for path, fnode, l in pl:
-            if '_changeid' in vars(self) or '_changectx' in vars(self):
-                # If self is associated with a changeset (probably explicitly
-                # fed), ensure the created filectx is associated with a
-                # changeset that is an ancestor of self.changectx.
-                # This lets us later use _adjustlinkrev to get a correct link.
-                fctx = filectx(self._repo, path, fileid=fnode, filelog=l)
-                fctx._descendantrev = self.rev()
-                fctx._ancestrycontext = getattr(self, '_ancestrycontext', None)
-            elif '_descendantrev' in vars(self):
-                # Otherwise propagate _descendantrev if we have one associated.
-                fctx = filectx(self._repo, path, fileid=fnode, filelog=l)
-                fctx._descendantrev = self._descendantrev
-                fctx._ancestrycontext = getattr(self, '_ancestrycontext', None)
-            else:
-                fctx = filectx(self._repo, path, fileid=fnode, filelog=l)
-            ret.append(fctx)
-        return ret
+        return [self._parentfilectx(path, fnode, l) for path, fnode, l in pl]
 
     def p1(self):
         return self.parents()[0]
@@ -889,6 +887,11 @@ class basefilectx(object):
         getlog = util.lrucachefunc(lambda x: self._repo.file(x))
 
         def parents(f):
+            # Cut _descendantrev here to mitigate the penalty of lazy linkrev
+            # adjustment. Otherwise, p._adjustlinkrev() would walk changelog
+            # from the topmost introrev (= srcrev) down to p.linkrev() if it
+            # isn't an ancestor of the srcrev.
+            f._changeid
             pl = f.parents()
 
             # Don't return renamed parents if we aren't following.
@@ -908,8 +911,15 @@ class basefilectx(object):
         introrev = self.introrev()
         if self.rev() != introrev:
             base = self.filectx(self.filenode(), changeid=introrev)
-        if introrev and getattr(base, '_ancestrycontext', None) is None:
-            ac = self._repo.changelog.ancestors([introrev], inclusive=True)
+        if getattr(base, '_ancestrycontext', None) is None:
+            cl = self._repo.changelog
+            if introrev is None:
+                # wctx is not inclusive, but works because _ancestrycontext
+                # is used to test filelog revisions
+                ac = cl.ancestors([p.rev() for p in base.parents()],
+                                  inclusive=True)
+            else:
+                ac = cl.ancestors([introrev], inclusive=True)
             base._ancestrycontext = ac
 
         # This algorithm would prefer to be recursive, but Python is a
@@ -1620,7 +1630,7 @@ class committablefilectx(basefilectx):
         for pc in pcl[1:]:
             pl.append((path, filenode(pc, path), fl))
 
-        return [filectx(self._repo, p, fileid=n, filelog=l)
+        return [self._parentfilectx(p, fileid=n, filelog=l)
                 for p, n, l in pl if n != nullid]
 
     def children(self):

@@ -17,19 +17,12 @@ Typical uses for censor are due to security or legal requirements, including::
  * Licensed data/code/libraries for which the license has expired
  * Personally Identifiable Information or other private data
 
-Censored file revisions are listed in a tracked file called .hgcensored stored
-in the repository root. The censor command adds an entry to the .hgcensored file
-in the working directory and commits it (much like ``hg tag`` and .hgtags). The
-censored file data is then replaced with a pointer to the new commit, enabling
-verification.
-
 Censored nodes can interrupt mercurial's typical operation whenever the excised
 data needs to be materialized. Some commands, like ``hg cat``/``hg revert``,
 simply fail when asked to produce censored data. Others, like ``hg verify`` and
 ``hg update``, must be capable of tolerating censored data to continue to
 function in a meaningful way. Such commands only tolerate censored file
-revisions if they are allowed by the policy specified by the "censor.allow"
-config option.
+revisions if they are allowed by the "censor.policy=ignore" config option.
 """
 
 from mercurial.node import short

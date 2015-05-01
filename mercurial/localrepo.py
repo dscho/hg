@@ -917,6 +917,10 @@ class localrepository(object):
         return self._filter(self._encodefilterpats, filename, data)
 
     def wwrite(self, filename, data, flags):
+        """write ``data`` into ``filename`` in the working directory
+
+        This returns length of written (maybe decoded) data.
+        """
         data = self._filter(self._decodefilterpats, filename, data)
         if 'l' in flags:
             self.wvfs.symlink(data, filename)
@@ -924,6 +928,7 @@ class localrepository(object):
             self.wvfs.write(filename, data)
             if 'x' in flags:
                 self.wvfs.setflags(filename, False, True)
+        return len(data)
 
     def wwritedata(self, filename, data):
         return self._filter(self._decodefilterpats, filename, data)
@@ -1194,13 +1199,16 @@ class localrepository(object):
         return l
 
     def _afterlock(self, callback):
-        """add a callback to the current repository lock.
+        """add a callback to be run when the repository is fully unlocked
 
-        The callback will be executed on lock release."""
-        l = self._lockref and self._lockref()
-        if l:
-            l.postrelease.append(callback)
-        else:
+        The callback will be executed when the outermost lock is released
+        (with wlock being higher level than 'lock')."""
+        for ref in (self._wlockref, self._lockref):
+            l = ref and ref()
+            if l and l.held:
+                l.postrelease.append(callback)
+                break
+        else: # no lock have been found.
             callback()
 
     def lock(self, wait=True):
@@ -1898,8 +1906,17 @@ class localrepository(object):
 
     def pushkey(self, namespace, key, old, new):
         try:
-            self.hook('prepushkey', throw=True, namespace=namespace, key=key,
-                      old=old, new=new)
+            tr = self.currenttransaction()
+            hookargs = {}
+            if tr is not None:
+                hookargs.update(tr.hookargs)
+                pending = lambda: tr.writepending() and self.root or ""
+                hookargs['pending'] = pending
+            hookargs['namespace'] = namespace
+            hookargs['key'] = key
+            hookargs['old'] = old
+            hookargs['new'] = new
+            self.hook('prepushkey', throw=True, **hookargs)
         except error.HookAbort, exc:
             self.ui.write_err(_("pushkey-abort: %s\n") % exc)
             if exc.hint:

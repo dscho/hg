@@ -104,6 +104,14 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
         except patch.PatchError, err:
             raise util.Abort(_('error parsing patch: %s') % err)
 
+        # We need to keep a backup of files that have been newly added and
+        # modified during the recording process because there is a previous
+        # version without the edit in the workdir
+        newlyaddedandmodifiedfiles = set()
+        for chunk in chunks:
+            if ishunk(chunk) and chunk.header.isnewfile() and chunk not in \
+                originalchunks:
+                newlyaddedandmodifiedfiles.add(chunk.header.filename())
         contenders = set()
         for h in chunks:
             try:
@@ -117,12 +125,6 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
             ui.status(_('no changes to record\n'))
             return 0
 
-        newandmodifiedfiles = set()
-        for h in chunks:
-            isnew = h.filename() in status.added
-            if ishunk(h) and isnew and not h in originalchunks:
-                newandmodifiedfiles.add(h.filename())
-
         modified = set(status.modified)
 
         # 2. backup changed files, so we can restore them in the end
@@ -130,9 +132,8 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
         if backupall:
             tobackup = changed
         else:
-            tobackup = [f for f in newfiles
-                        if f in modified or f in newandmodifiedfiles]
-
+            tobackup = [f for f in newfiles if f in modified or f in \
+                    newlyaddedandmodifiedfiles]
         backups = {}
         if tobackup:
             backupdir = repo.join('record-backups')
@@ -155,13 +156,12 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
             fp = cStringIO.StringIO()
             for c in chunks:
                 fname = c.filename()
-                if fname in backups or fname in newandmodifiedfiles:
+                if fname in backups:
                     c.write(fp)
             dopatch = fp.tell()
             fp.seek(0)
 
-            [os.unlink(c) for c in newandmodifiedfiles]
-
+            [os.unlink(repo.wjoin(c)) for c in newlyaddedandmodifiedfiles]
             # 3a. apply filtered patch to clean repo  (clean)
             if backups:
                 # Equivalent to hg.revert
@@ -1142,7 +1142,7 @@ class changeset_printer(object):
                               label='log.%s' % ns.colorname)
         if self.ui.debugflag:
             # i18n: column positioning for "hg log"
-            self.ui.write(_("phase:       %s\n") % _(ctx.phasestr()),
+            self.ui.write(_("phase:       %s\n") % ctx.phasestr(),
                           label='log.phase')
         for pctx in self._meaningful_parentrevs(ctx):
             label = 'log.parent changeset.%s' % pctx.phasestr()
@@ -3077,14 +3077,17 @@ def _performrevert(repo, parents, ctx, actions, interactive=False):
     node = ctx.node()
     def checkout(f):
         fc = ctx[f]
-        repo.wwrite(f, fc.data(), fc.flags())
+        return repo.wwrite(f, fc.data(), fc.flags())
 
     audit_path = pathutil.pathauditor(repo.root)
     for f in actions['forget'][0]:
         repo.dirstate.drop(f)
     for f in actions['remove'][0]:
         audit_path(f)
-        util.unlinkpath(repo.wjoin(f))
+        try:
+            util.unlinkpath(repo.wjoin(f))
+        except OSError:
+            pass
         repo.dirstate.remove(f)
     for f in actions['drop'][0]:
         audit_path(f)
@@ -3125,9 +3128,13 @@ def _performrevert(repo, parents, ctx, actions, interactive=False):
         del fp
     else:
         for f in actions['revert'][0]:
-            checkout(f)
+            wsize = checkout(f)
             if normal:
                 normal(f)
+            elif wsize == repo.dirstate._map[f][2]:
+                # changes may be overlooked without normallookup,
+                # if size isn't changed at reverting
+                repo.dirstate.normallookup(f)
 
     for f in actions['add'][0]:
         checkout(f)

@@ -1284,6 +1284,12 @@ def unbundle(repo, cg, heads, source, url):
     r = 0
     # need a transaction when processing a bundle2 stream
     wlock = lock = tr = None
+    recordout = None
+    # quick fix for output mismatch with bundle2 in 3.4
+    captureoutput = repo.ui.configbool('experimental', 'bundle2-output-capture',
+                                       False)
+    if url.startswith('remote:http:') or url.startswith('remote:https:'):
+        captureoutput = True
     try:
         check_heads(repo, heads, 'uploading changes')
         # push can proceed
@@ -1296,16 +1302,31 @@ def unbundle(repo, cg, heads, source, url):
                 tr.hookargs['source'] = source
                 tr.hookargs['url'] = url
                 tr.hookargs['bundle2'] = '1'
-                r = bundle2.processbundle(repo, cg, lambda: tr).reply
+                op = bundle2.bundleoperation(repo, lambda: tr,
+                                             captureoutput=captureoutput)
+                try:
+                    r = bundle2.processbundle(repo, cg, op=op)
+                finally:
+                    r = op.reply
+                    if captureoutput and r is not None:
+                        repo.ui.pushbuffer(error=True, subproc=True)
+                        def recordout(output):
+                            r.newpart('output', data=output, mandatory=False)
                 tr.close()
             except Exception, exc:
                 exc.duringunbundle2 = True
-                if r is not None:
-                    exc._bundle2salvagedoutput = r.salvageoutput()
+                if captureoutput and r is not None:
+                    parts = exc._bundle2salvagedoutput = r.salvageoutput()
+                    def recordout(output):
+                        part = bundle2.bundlepart('output', data=output,
+                                                  mandatory=False)
+                        parts.append(part)
                 raise
         else:
             lock = repo.lock()
             r = changegroup.addchangegroup(repo, cg, source, url)
     finally:
         lockmod.release(tr, lock, wlock)
+        if recordout is not None:
+            recordout(repo.ui.popbuffer())
     return r

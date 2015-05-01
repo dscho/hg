@@ -16,6 +16,7 @@ from i18n import _
 import os, tempfile, shutil
 import changegroup, util, mdiff, discovery, cmdutil, scmutil, exchange
 import localrepo, changelog, manifest, filelog, revlog, error, phases, bundle2
+import pathutil
 
 class bundlerevlog(revlog.revlog):
     def __init__(self, opener, indexfile, bundle, linkmapper):
@@ -156,7 +157,15 @@ class bundlechangelog(bundlerevlog, changelog.changelog):
         # Although changelog doesn't override 'revision' method, some extensions
         # may replace this class with another that does. Same story with
         # manifest and filelog classes.
-        return changelog.changelog.revision(self, nodeorrev)
+
+        # This bypasses filtering on changelog.node() and rev() because we need
+        # revision text of the bundle base even if it is hidden.
+        oldfilter = self.filteredrevs
+        try:
+            self.filteredrevs = ()
+            return changelog.changelog.revision(self, nodeorrev)
+        finally:
+            self.filteredrevs = oldfilter
 
 class bundlemanifest(bundlerevlog, manifest.manifest):
     def __init__(self, opener, bundle, linkmapper):
@@ -352,7 +361,7 @@ def instance(ui, path, create):
         if parentpath == cwd:
             parentpath = ''
         else:
-            cwd = os.path.join(cwd,'')
+            cwd = pathutil.normasprefix(cwd)
             if parentpath.startswith(cwd):
                 parentpath = parentpath[len(cwd):]
     u = util.url(path)

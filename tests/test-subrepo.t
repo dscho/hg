@@ -598,6 +598,26 @@ committing into a subrepo makes its store (but not its parent's store) dirty
 
   $ echo foo >> s/ss/a
   $ hg -R s/ss commit -m 'test dirty store detection'
+
+  $ hg out -S -r `hg log -r tip -T "{node|short}"`
+  comparing with $TESTTMP/t (glob)
+  searching for changes
+  no changes found
+  comparing with $TESTTMP/t/s
+  searching for changes
+  no changes found
+  comparing with $TESTTMP/t/s/ss
+  searching for changes
+  changeset:   1:79ea5566a333
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     test dirty store detection
+  
+  comparing with $TESTTMP/t/t
+  searching for changes
+  no changes found
+
   $ hg push
   pushing to $TESTTMP/t (glob)
   pushing subrepo s/ss to $TESTTMP/t/s/ss (glob)
@@ -668,6 +688,24 @@ pull
   (run 'hg update' to get a working copy)
 
 should pull t
+
+  $ hg incoming -S -r `hg log -r tip -T "{node|short}"`
+  comparing with $TESTTMP/t (glob)
+  no changes found
+  comparing with $TESTTMP/t/s
+  searching for changes
+  no changes found
+  comparing with $TESTTMP/t/s/ss
+  searching for changes
+  no changes found
+  comparing with $TESTTMP/t/t
+  searching for changes
+  changeset:   5:52c0adc0515a
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     13
+  
 
   $ hg up
   pulling subrepo t from $TESTTMP/t/t
@@ -1025,6 +1063,45 @@ Incoming and outgoing should not use the default path:
   searching for changes
   no changes found
   [1]
+
+Check that merge of a new subrepo doesn't write the uncommitted state to
+.hgsubstate (issue4622)
+
+  $ hg init issue1852a/addedsub
+  $ echo zzz > issue1852a/addedsub/zz.txt
+  $ hg -R issue1852a/addedsub ci -Aqm "initial ZZ"
+
+  $ hg clone issue1852a/addedsub issue1852d/addedsub
+  updating to branch default
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
+  $ echo def > issue1852a/sub/repo/foo
+  $ hg -R issue1852a ci -SAm 'tweaked subrepo'
+  adding tmp/sub/repo/foo_p
+  committing subrepository sub/repo (glob)
+
+  $ echo 'addedsub = addedsub' >> issue1852d/.hgsub
+  $ echo xyz > issue1852d/sub/repo/foo
+  $ hg -R issue1852d pull -u
+  pulling from $TESTTMP/issue1852a (glob)
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 2 changes to 2 files
+   subrepository sub/repo diverged (local revision: f42d5c7504a8, remote revision: 46cd4aac504c)
+  (M)erge, keep (l)ocal or keep (r)emote? m
+  pulling subrepo sub/repo from $TESTTMP/issue1852a/sub/repo (glob)
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
+   subrepository sources for sub/repo differ (glob)
+  use (l)ocal source (f42d5c7504a8) or (r)emote source (46cd4aac504c)? l
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ cat issue1852d/.hgsubstate
+  f42d5c7504a811dda50f5cf3e5e16c3330b87172 sub/repo
 
 Check status of files when none of them belong to the first
 subrepository:

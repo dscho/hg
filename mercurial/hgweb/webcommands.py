@@ -338,7 +338,7 @@ def changelog(web, req, tmpl, shortlog=False):
 
     The argument for ``rev`` can be a single revision, a revision set,
     or a literal keyword to search for in changeset data (equivalent to
-    :hg:`log -k`.
+    :hg:`log -k`).
 
     The ``revcount`` query string argument defines the maximum numbers of
     changesets to render.
@@ -459,7 +459,7 @@ def manifest(web, req, tmpl):
 
     Show information about a directory.
 
-    If the URL path arguments are defined, information about the root
+    If the URL path arguments are omitted, information about the root
     directory for the ``tip`` changeset will be shown.
 
     Because this handler can only show information for directories, it
@@ -1318,3 +1318,6 @@ def help(web, req, tmpl):
     except error.UnknownCommand:
         raise ErrorResponse(HTTP_NOT_FOUND)
     return tmpl('help', topic=topicname, doc=doc)
+
+# tell hggettext to extract docstrings from these functions:
+i18nfunctions = commands.values()

@@ -94,27 +94,59 @@ Template should precede style option
   $ hg log -l1 --style default -T '{rev}\n'
   8
 
-Default style is like normal output:
+Add a commit with empty description, to ensure that the templates
+following below omit it properly.
 
   $ echo c >> c
   $ hg add c
   $ hg commit -qm ' '
 
+Default style is like normal output. Phases style should be the same
+as default style, except for extra phase lines.
+
   $ hg log > log.out
   $ hg log --style default > style.out
   $ cmp log.out style.out || diff -u log.out style.out
+  $ hg log -T phases > phases.out
+  $ diff -u log.out phases.out | grep "phase:"
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
 
   $ hg log -v > log.out
   $ hg log -v --style default > style.out
   $ cmp log.out style.out || diff -u log.out style.out
+  $ hg log -v -T phases > phases.out
+  $ diff -u log.out phases.out | grep phase:
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
+  +phase:       draft
 
   $ hg log -q > log.out
   $ hg log -q --style default > style.out
   $ cmp log.out style.out || diff -u log.out style.out
+  $ hg log -q -T phases > phases.out
+  $ cmp log.out phases.out || diff -u log.out phases.out
 
   $ hg log --debug > log.out
   $ hg log --debug --style default > style.out
   $ cmp log.out style.out || diff -u log.out style.out
+  $ hg log --debug -T phases > phases.out
+  $ cmp log.out phases.out || diff -u log.out phases.out
 
 Default style should also preserve color information (issue2866):
 
@@ -127,17 +159,51 @@ Default style should also preserve color information (issue2866):
   $ hg --color=debug log > log.out
   $ hg --color=debug log --style default > style.out
   $ cmp log.out style.out || diff -u log.out style.out
+  $ hg --color=debug log -T phases > phases.out
+  $ diff -u log.out phases.out | grep phase:
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+
   $ hg --color=debug -v log > log.out
   $ hg --color=debug -v log --style default > style.out
   $ cmp log.out style.out || diff -u log.out style.out
+  $ hg --color=debug -v log -T phases > phases.out
+  $ diff -u log.out phases.out | grep phase:
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+  +[log.phase|phase:       draft]
+
   $ hg --color=debug -q log > log.out
   $ hg --color=debug -q log --style default > style.out
   $ cmp log.out style.out || diff -u log.out style.out
+  $ hg --color=debug -q log -T phases > phases.out
+  $ cmp log.out phases.out || diff -u log.out phases.out
+
   $ hg --color=debug --debug log > log.out
   $ hg --color=debug --debug log --style default > style.out
   $ cmp log.out style.out || diff -u log.out style.out
+  $ hg --color=debug --debug log -T phases > phases.out
+  $ cmp log.out phases.out || diff -u log.out phases.out
 
   $ mv $HGRCPATH-bak $HGRCPATH
+
+Remove commit with empty commit message, so as to not pollute further
+tests.
 
   $ hg --config extensions.strip= strip -q .
 
@@ -2553,4 +2619,10 @@ Test word error messages for not enough and too many arguments
 
   $ hg log -Gv -R a --template "{word('0', desc, 'o', 'h', 'b', 'o', 'y')}"
   hg: parse error: word expects two or three arguments, got 7
+  [255]
+
+Test word for invalid numbers
+
+  $ hg log -Gv -R a --template "{word(2, desc)}"
+  hg: parse error: Use strings like '3' for numbers passed to word function
   [255]

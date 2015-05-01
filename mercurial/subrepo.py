@@ -153,7 +153,8 @@ def state(ctx, ui):
 
 def writestate(repo, state):
     """rewrite .hgsubstate in (outer) repo with these subrepo states"""
-    lines = ['%s %s\n' % (state[s][1], s) for s in sorted(state)]
+    lines = ['%s %s\n' % (state[s][1], s) for s in sorted(state)
+                                                if state[s][1] != nullstate[1]]
     repo.wwrite('.hgsubstate', ''.join(lines), '')
 
 def submerge(repo, wctx, mctx, actx, overwrite):
@@ -568,6 +569,11 @@ class hgsubrepo(abstractsubrepo):
         root = r.wjoin(path)
         create = not r.wvfs.exists('%s/.hg' % path)
         self._repo = hg.repository(r.baseui, root, create=create)
+
+        # Propagate the parent's --hidden option
+        if r is r.unfiltered():
+            self._repo = self._repo.unfiltered()
+
         self.ui = self._repo.ui
         for s, k in [('ui', 'commitsubrepos')]:
             v = r.ui.config(s, k)
@@ -872,10 +878,18 @@ class hgsubrepo(abstractsubrepo):
 
     @annotatesubrepoerror
     def outgoing(self, ui, dest, opts):
+        if 'rev' in opts or 'branch' in opts:
+            opts = copy.copy(opts)
+            opts.pop('rev', None)
+            opts.pop('branch', None)
         return hg.outgoing(ui, self._repo, _abssource(self._repo, True), opts)
 
     @annotatesubrepoerror
     def incoming(self, ui, source, opts):
+        if 'rev' in opts or 'branch' in opts:
+            opts = copy.copy(opts)
+            opts.pop('rev', None)
+            opts.pop('branch', None)
         return hg.incoming(ui, self._repo, _abssource(self._repo, False), opts)
 
     @annotatesubrepoerror

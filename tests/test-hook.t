@@ -1,4 +1,5 @@
 commit hooks can see env vars
+(and post-transaction one are run unlocked)
 
   $ hg init a
   $ cd a
@@ -16,6 +17,7 @@ commit hooks can see env vars
   > pretxnclose = sh -c "HG_LOCAL= HG_TAG= python \"$TESTDIR/printenv.py\" pretxnclose"
   > txnclose = sh -c "HG_LOCAL= HG_TAG= python \"$TESTDIR/printenv.py\" txnclose"
   > txnabort = sh -c "HG_LOCAL= HG_TAG= python \"$TESTDIR/printenv.py\" txnabort"
+  > txnclose.checklock = sh -c "hg debuglock > /dev/null"
   > EOF
   $ echo a > a
   $ hg add a
@@ -611,7 +613,9 @@ make sure --traceback works on hook import failure
 
 Issue1827: Hooks Update & Commit not completely post operation
 
-commit and update hooks should run after command completion
+commit and update hooks should run after command completion.  The largefiles
+use demonstrates a recursive wlock, showing the hook doesn't run until the
+final release (and dirstate flush).
 
   $ echo '[hooks]' > .hg/hgrc
   $ echo 'commit = hg id' >> .hg/hgrc
@@ -619,7 +623,7 @@ commit and update hooks should run after command completion
   $ echo bb > a
   $ hg ci -ma
   223eafe2750c tip
-  $ hg up 0
+  $ hg up 0 --config extensions.largefiles=
   cb9a9f314b8b
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 

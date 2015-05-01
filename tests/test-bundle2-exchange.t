@@ -16,6 +16,7 @@ enable obsolescence
   > [experimental]
   > evolution=createmarkers,exchange
   > bundle2-exp=True
+  > bundle2-output-capture=True
   > [ui]
   > ssh=python "$TESTDIR/dummyssh"
   > logtemplate={rev}:{node|short} {phase} {author} {bookmarks} {desc|firstline}
@@ -72,7 +73,7 @@ Add more obsolescence information
 clone --pull
 
   $ hg -R main phase --public cd010b8cd998
-  pre-close-tip:000000000000 public 
+  pre-close-tip:02de42196ebe draft 
   postclose-tip:02de42196ebe draft 
   txnclose hook: HG_PHASES_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=phase (glob)
   $ hg clone main other --pull --rev 9520eea781bc
@@ -98,7 +99,7 @@ clone --pull
 pull
 
   $ hg -R main phase --public 9520eea781bc
-  pre-close-tip:000000000000 public 
+  pre-close-tip:02de42196ebe draft 
   postclose-tip:02de42196ebe draft 
   txnclose hook: HG_PHASES_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=phase (glob)
   $ hg -R other pull -r 24b6387c8c8c
@@ -128,13 +129,13 @@ pull
 pull empty (with phase movement)
 
   $ hg -R main phase --public 24b6387c8c8c
-  pre-close-tip:000000000000 public 
+  pre-close-tip:02de42196ebe draft 
   postclose-tip:02de42196ebe draft 
   txnclose hook: HG_PHASES_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=phase (glob)
   $ hg -R other pull -r 24b6387c8c8c
   pulling from $TESTTMP/main (glob)
   no changes found
-  pre-close-tip:000000000000 public 
+  pre-close-tip:24b6387c8c8c public 
   postclose-tip:24b6387c8c8c public 
   txnclose hook: HG_NEW_OBSMARKERS=0 HG_PHASES_MOVED=1 HG_SOURCE=pull HG_TXNID=TXN:* HG_TXNNAME=pull (glob)
   file:/*/$TESTTMP/main HG_URL=file:$TESTTMP/main (glob)
@@ -204,7 +205,7 @@ add extra data to test their exchange during push
   $ hg -R other bookmark --rev cd010b8cd998 book_32af
 
   $ hg -R main phase --public eea13746799a
-  pre-close-tip:000000000000 public 
+  pre-close-tip:02de42196ebe draft book_02de
   postclose-tip:02de42196ebe draft book_02de
   txnclose hook: HG_PHASES_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=phase (glob)
 
@@ -212,20 +213,20 @@ push
   $ hg -R main push other --rev eea13746799a --bookmark book_eea1
   pushing to other
   searching for changes
-  pre-close-tip:eea13746799a public book_eea1
-  pushkey: lock state after "phases"
-  lock:  free
-  wlock: free
-  pushkey: lock state after "bookmarks"
-  lock:  free
-  wlock: free
-  postclose-tip:eea13746799a public book_eea1
-  txnclose hook: HG_BOOKMARK_MOVED=1 HG_BUNDLE2=1 HG_NEW_OBSMARKERS=1 HG_NODE=eea13746799a9e0bfd88f29d3c2e9dc9389f524f HG_PHASES_MOVED=1 HG_SOURCE=push HG_TXNID=TXN:* HG_TXNNAME=push HG_URL=push (glob)
   remote: adding changesets
   remote: adding manifests
   remote: adding file changes
   remote: added 1 changesets with 0 changes to 0 files (-1 heads)
   remote: 1 new obsolescence markers
+  remote: pre-close-tip:eea13746799a public book_eea1
+  remote: pushkey: lock state after "phases"
+  remote: lock:  free
+  remote: wlock: free
+  remote: pushkey: lock state after "bookmarks"
+  remote: lock:  free
+  remote: wlock: free
+  remote: postclose-tip:eea13746799a public book_eea1
+  remote: txnclose hook: HG_BOOKMARK_MOVED=1 HG_BUNDLE2=1 HG_NEW_OBSMARKERS=1 HG_NODE=eea13746799a9e0bfd88f29d3c2e9dc9389f524f HG_PHASES_MOVED=1 HG_SOURCE=push HG_TXNID=TXN:* HG_TXNNAME=push HG_URL=push (glob)
   updating bookmark book_eea1
   pre-close-tip:02de42196ebe draft book_02de
   postclose-tip:02de42196ebe draft book_02de
@@ -304,13 +305,13 @@ push over ssh
   remote: adding file changes
   remote: added 1 changesets with 1 changes to 1 files
   remote: 1 new obsolescence markers
-  updating bookmark book_5fdd
   remote: pre-close-tip:5fddd98957c8 draft book_5fdd
   remote: pushkey: lock state after "bookmarks"
   remote: lock:  free
   remote: wlock: free
   remote: postclose-tip:5fddd98957c8 draft book_5fdd
   remote: txnclose hook: HG_BOOKMARK_MOVED=1 HG_BUNDLE2=1 HG_NEW_OBSMARKERS=1 HG_NODE=5fddd98957c8a54a4d436dfe1da9d87f21a1b97b HG_SOURCE=serve HG_TXNID=TXN:* HG_TXNNAME=serve HG_URL=remote:ssh:127.0.0.1 (glob)
+  updating bookmark book_5fdd
   pre-close-tip:02de42196ebe draft book_02de
   postclose-tip:02de42196ebe draft book_02de
   txnclose hook: HG_SOURCE=push-response HG_TXNID=TXN:* HG_TXNNAME=push-response (glob)
@@ -344,7 +345,7 @@ push over http
   $ cat other.pid >> $DAEMON_PIDS
 
   $ hg -R main phase --public 32af7686d403
-  pre-close-tip:000000000000 public 
+  pre-close-tip:02de42196ebe draft book_02de
   postclose-tip:02de42196ebe draft book_02de
   txnclose hook: HG_PHASES_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=phase (glob)
   $ hg -R main push http://localhost:$HGPORT2/ -r 32af7686d403 --bookmark book_32af
@@ -355,6 +356,15 @@ push over http
   remote: adding file changes
   remote: added 1 changesets with 1 changes to 1 files
   remote: 1 new obsolescence markers
+  remote: pre-close-tip:32af7686d403 public book_32af
+  remote: pushkey: lock state after "phases"
+  remote: lock:  free
+  remote: wlock: free
+  remote: pushkey: lock state after "bookmarks"
+  remote: lock:  free
+  remote: wlock: free
+  remote: postclose-tip:32af7686d403 public book_32af
+  remote: txnclose hook: HG_BOOKMARK_MOVED=1 HG_BUNDLE2=1 HG_NEW_OBSMARKERS=1 HG_NODE=32af7686d403cf45b5d95f2d70cebea587ac806a HG_PHASES_MOVED=1 HG_SOURCE=serve HG_TXNID=TXN:* HG_TXNNAME=serve HG_URL=remote:http:127.0.0.1: (glob)
   updating bookmark book_32af
   pre-close-tip:02de42196ebe draft book_02de
   postclose-tip:02de42196ebe draft book_02de
@@ -548,7 +558,8 @@ Doing the actual push: hook abort
   > [failpush]
   > reason =
   > [hooks]
-  > pretxnclose.failpush = false
+  > pretxnclose.failpush = sh -c "echo 'You shall not pass!'; false"
+  > txnabort.failpush = sh -c "echo 'Cleaning up the mess...'"
   > EOF
 
   $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
@@ -558,13 +569,15 @@ Doing the actual push: hook abort
   $ hg -R main push other -r e7ec4e813ba6
   pushing to other
   searching for changes
-  pre-close-tip:e7ec4e813ba6 draft 
-  transaction abort!
-  rollback completed
   remote: adding changesets
   remote: adding manifests
   remote: adding file changes
   remote: added 1 changesets with 1 changes to 1 files
+  remote: pre-close-tip:e7ec4e813ba6 draft 
+  remote: You shall not pass!
+  remote: transaction abort!
+  remote: Cleaning up the mess...
+  remote: rollback completed
   abort: pretxnclose.failpush hook exited with status 1
   [255]
 
@@ -575,10 +588,12 @@ Doing the actual push: hook abort
   remote: adding manifests
   remote: adding file changes
   remote: added 1 changesets with 1 changes to 1 files
-  abort: pretxnclose.failpush hook exited with status 1
   remote: pre-close-tip:e7ec4e813ba6 draft 
+  remote: You shall not pass!
   remote: transaction abort!
+  remote: Cleaning up the mess...
   remote: rollback completed
+  abort: pretxnclose.failpush hook exited with status 1
   [255]
 
   $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
@@ -588,6 +603,11 @@ Doing the actual push: hook abort
   remote: adding manifests
   remote: adding file changes
   remote: added 1 changesets with 1 changes to 1 files
+  remote: pre-close-tip:e7ec4e813ba6 draft 
+  remote: You shall not pass!
+  remote: transaction abort!
+  remote: Cleaning up the mess...
+  remote: rollback completed
   abort: pretxnclose.failpush hook exited with status 1
   [255]
 
@@ -600,3 +620,100 @@ Doing the actual push: hook abort
   $ ls -1 other/.hg/store/00changelog.i*
   other/.hg/store/00changelog.i
 
+Check error from hook during the unbundling process itself
+
+  $ cat << EOF >> $HGRCPATH
+  > pretxnchangegroup = sh -c "echo 'Fail early!'; false"
+  > EOF
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS # reload http config
+  $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
+  $ cat other.pid >> $DAEMON_PIDS
+
+  $ hg -R main push other -r e7ec4e813ba6
+  pushing to other
+  searching for changes
+  remote: adding changesets
+  remote: adding manifests
+  remote: adding file changes
+  remote: added 1 changesets with 1 changes to 1 files
+  remote: Fail early!
+  remote: transaction abort!
+  remote: Cleaning up the mess...
+  remote: rollback completed
+  abort: pretxnchangegroup hook exited with status 1
+  [255]
+  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
+  pushing to ssh://user@dummy/other
+  searching for changes
+  remote: adding changesets
+  remote: adding manifests
+  remote: adding file changes
+  remote: added 1 changesets with 1 changes to 1 files
+  remote: Fail early!
+  remote: transaction abort!
+  remote: Cleaning up the mess...
+  remote: rollback completed
+  abort: pretxnchangegroup hook exited with status 1
+  [255]
+  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
+  pushing to http://localhost:$HGPORT2/
+  searching for changes
+  remote: adding changesets
+  remote: adding manifests
+  remote: adding file changes
+  remote: added 1 changesets with 1 changes to 1 files
+  remote: Fail early!
+  remote: transaction abort!
+  remote: Cleaning up the mess...
+  remote: rollback completed
+  abort: pretxnchangegroup hook exited with status 1
+  [255]
+
+Check output capture control.
+
+(should be still forced for http, disabled for local and ssh)
+
+  $ cat >> $HGRCPATH << EOF
+  > [experimental]
+  > bundle2-output-capture=False
+  > EOF
+
+  $ hg -R main push other -r e7ec4e813ba6
+  pushing to other
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
+  Fail early!
+  transaction abort!
+  Cleaning up the mess...
+  rollback completed
+  abort: pretxnchangegroup hook exited with status 1
+  [255]
+  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
+  pushing to ssh://user@dummy/other
+  searching for changes
+  abort: pretxnchangegroup hook exited with status 1
+  remote: adding changesets
+  remote: adding manifests
+  remote: adding file changes
+  remote: added 1 changesets with 1 changes to 1 files
+  remote: Fail early!
+  remote: transaction abort!
+  remote: Cleaning up the mess...
+  remote: rollback completed
+  [255]
+  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
+  pushing to http://localhost:$HGPORT2/
+  searching for changes
+  remote: adding changesets
+  remote: adding manifests
+  remote: adding file changes
+  remote: added 1 changesets with 1 changes to 1 files
+  remote: Fail early!
+  remote: transaction abort!
+  remote: Cleaning up the mess...
+  remote: rollback completed
+  abort: pretxnchangegroup hook exited with status 1
+  [255]
