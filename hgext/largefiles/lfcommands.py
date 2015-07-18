@@ -16,6 +16,9 @@ from mercurial import util, match as match_, hg, node, context, error, \
 from mercurial.i18n import _
 from mercurial.lock import release
 
+from hgext.convert import convcmd
+from hgext.convert import filemap
+
 import lfutil
 import basestore
 
@@ -70,12 +73,6 @@ def lfconvert(ui, src, dest, *pats, **opts):
     success = False
     dstwlock = dstlock = None
     try:
-        # Lock destination to prevent modification while it is converted to.
-        # Don't need to lock src because we are just reading from its history
-        # which can't change.
-        dstwlock = rdst.wlock()
-        dstlock = rdst.lock()
-
         # Get a list of all changesets in the source.  The easy way to do this
         # is to simply walk the changelog, using changelog.nodesbetween().
         # Take a look at mercurial/revlog.py:639 for more details.
@@ -84,6 +81,12 @@ def lfconvert(ui, src, dest, *pats, **opts):
             rsrc.heads())[0])
         revmap = {node.nullid: node.nullid}
         if tolfile:
+            # Lock destination to prevent modification while it is converted to.
+            # Don't need to lock src because we are just reading from its
+            # history which can't change.
+            dstwlock = rdst.wlock()
+            dstlock = rdst.lock()
+
             lfiles = set()
             normalfiles = set()
             if not pats:
@@ -118,73 +121,59 @@ def lfconvert(ui, src, dest, *pats, **opts):
                 rdst.requirements.add('largefiles')
                 rdst._writerequirements()
         else:
-            for ctx in ctxs:
-                ui.progress(_('converting revisions'), ctx.rev(),
-                    unit=_('revision'), total=rsrc['tip'].rev())
-                _addchangeset(ui, rsrc, rdst, ctx, revmap)
+            class lfsource(filemap.filemap_source):
+                def __init__(self, ui, source):
+                    super(lfsource, self).__init__(ui, source, None)
+                    self.filemapper.rename[lfutil.shortname] = '.'
 
-            ui.progress(_('converting revisions'), None)
+                def getfile(self, name, rev):
+                    realname, realrev = rev
+                    f = super(lfsource, self).getfile(name, rev)
+
+                    if (not realname.startswith(lfutil.shortnameslash)
+                            or f[0] is None):
+                        return f
+
+                    # Substitute in the largefile data for the hash
+                    hash = f[0].strip()
+                    path = lfutil.findfile(rsrc, hash)
+
+                    if path is None:
+                        raise util.Abort(_("missing largefile for \'%s\' in %s")
+                                          % (realname, realrev))
+                    fp = open(path, 'rb')
+
+                    try:
+                        return (fp.read(), f[1])
+                    finally:
+                        fp.close()
+
+            class converter(convcmd.converter):
+                def __init__(self, ui, source, dest, revmapfile, opts):
+                    src = lfsource(ui, source)
+
+                    super(converter, self).__init__(ui, src, dest, revmapfile,
+                                                    opts)
+
+            found, missing = downloadlfiles(ui, rsrc)
+            if missing != 0:
+                raise util.Abort(_("all largefiles must be present locally"))
+
+            orig = convcmd.converter
+            convcmd.converter = converter
+
+            try:
+                convcmd.convert(ui, src, dest)
+            finally:
+                convcmd.converter = orig
         success = True
     finally:
-        rdst.dirstate.clear()
-        release(dstlock, dstwlock)
+        if tolfile:
+            rdst.dirstate.clear()
+            release(dstlock, dstwlock)
         if not success:
             # we failed, remove the new directory
             shutil.rmtree(rdst.root)
-
-def _addchangeset(ui, rsrc, rdst, ctx, revmap):
-    # Convert src parents to dst parents
-    parents = _convertparents(ctx, revmap)
-
-    # Generate list of changed files
-    files = _getchangedfiles(ctx, parents)
-
-    def getfilectx(repo, memctx, f):
-        if lfutil.standin(f) in files:
-            # if the file isn't in the manifest then it was removed
-            # or renamed, raise IOError to indicate this
-            try:
-                fctx = ctx.filectx(lfutil.standin(f))
-            except error.LookupError:
-                return None
-            renamed = fctx.renamed()
-            if renamed:
-                renamed = lfutil.splitstandin(renamed[0])
-
-            hash = fctx.data().strip()
-            path = lfutil.findfile(rsrc, hash)
-
-            # If one file is missing, likely all files from this rev are
-            if path is None:
-                cachelfiles(ui, rsrc, ctx.node())
-                path = lfutil.findfile(rsrc, hash)
-
-                if path is None:
-                    raise util.Abort(
-                        _("missing largefile \'%s\' from revision %s")
-                         % (f, node.hex(ctx.node())))
-
-            data = ''
-            fd = None
-            try:
-                fd = open(path, 'rb')
-                data = fd.read()
-            finally:
-                if fd:
-                    fd.close()
-            return context.memfilectx(repo, f, data, 'l' in fctx.flags(),
-                                      'x' in fctx.flags(), renamed)
-        else:
-            return _getnormalcontext(repo, ctx, f, revmap)
-
-    dstfiles = []
-    for file in files:
-        if lfutil.isstandin(file):
-            dstfiles.append(lfutil.splitstandin(file))
-        else:
-            dstfiles.append(file)
-    # Commit
-    _commitcontext(rdst, parents, ctx, dstfiles, getfilectx, revmap)
 
 def _lfconvert_addchangeset(rsrc, rdst, ctx, revmap, lfiles, normalfiles,
         matcher, size, lfiletohash):
@@ -380,9 +369,7 @@ def verifylfiles(ui, repo, all=False, contents=False):
     matches the revision ID).  With --all, check every changeset in
     this repository.'''
     if all:
-        # Pass a list to the function rather than an iterator because we know a
-        # list will work.
-        revs = range(len(repo))
+        revs = repo.revs('all()')
     else:
         revs = ['.']
 
@@ -404,7 +391,7 @@ def cachelfiles(ui, repo, node, filelist=None):
     for lfile in lfiles:
         try:
             expectedhash = repo[node][lfutil.standin(lfile)].data().strip()
-        except IOError, err:
+        except IOError as err:
             if err.errno == errno.ENOENT:
                 continue # node must be None and standin wasn't found in wctx
             raise

@@ -211,7 +211,7 @@ Make sure bundlerepo doesn't leak tempfiles (issue2491)
 Pull ../full.hg into empty (with hook)
 
   $ echo "[hooks]" >> .hg/hgrc
-  $ echo "changegroup = python \"$TESTDIR/printenv.py\" changegroup" >> .hg/hgrc
+  $ echo "changegroup = printenv.py changegroup" >> .hg/hgrc
 
 doesn't work (yet ?)
 
@@ -629,7 +629,7 @@ bundle single branch
 
 == bundling
 
-  $ hg bundle bundle.hg part --debug
+  $ hg bundle bundle.hg part --debug --config progress.debug=true
   query 1; heads
   searching for changes
   all remote heads known locally

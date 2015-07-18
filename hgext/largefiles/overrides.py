@@ -27,7 +27,7 @@ def composelargefilematcher(match, manifest):
     m = copy.copy(match)
     lfile = lambda f: lfutil.standin(f) in manifest
     m._files = filter(lfile, m._files)
-    m._fmap = set(m._files)
+    m._fileroots = set(m._files)
     m._always = False
     origmatchfn = m.matchfn
     m.matchfn = lambda f: lfile(f) and origmatchfn(f)
@@ -42,7 +42,7 @@ def composenormalfilematcher(match, manifest, exclude=None):
     notlfile = lambda f: not (lfutil.isstandin(f) or lfutil.standin(f) in
             manifest or f in excluded)
     m._files = filter(notlfile, m._files)
-    m._fmap = set(m._files)
+    m._fileroots = set(m._files)
     m._always = False
     origmatchfn = m.matchfn
     m.matchfn = lambda f: notlfile(f) and origmatchfn(f)
@@ -51,8 +51,8 @@ def composenormalfilematcher(match, manifest, exclude=None):
 def installnormalfilesmatchfn(manifest):
     '''installmatchfn with a matchfn that ignores all largefiles'''
     def overridematch(ctx, pats=[], opts={}, globbed=False,
-            default='relpath'):
-        match = oldmatch(ctx, pats, opts, globbed, default)
+            default='relpath', badfn=None):
+        match = oldmatch(ctx, pats, opts, globbed, default, badfn=badfn)
         return composenormalfilematcher(match, manifest)
     oldmatch = installmatchfn(overridematch)
 
@@ -100,10 +100,10 @@ def addlargefiles(ui, repo, isaddremove, matcher, **opts):
             lfmatcher = match_.match(repo.root, '', list(lfpats))
 
     lfnames = []
-    m = copy.copy(matcher)
-    m.bad = lambda x, y: None
+    m = matcher
+
     wctx = repo[None]
-    for f in repo.walk(m):
+    for f in repo.walk(match_.badmatch(m, lambda x, y: None)):
         exact = m.exact(f)
         lfile = lfutil.standin(f) in wctx
         nfile = f in wctx
@@ -288,13 +288,14 @@ def overridedirty(orig, repo, ignoreupdate=False):
 
 def overridelog(orig, ui, repo, *pats, **opts):
     def overridematchandpats(ctx, pats=[], opts={}, globbed=False,
-            default='relpath'):
+            default='relpath', badfn=None):
         """Matcher that merges root directory with .hglf, suitable for log.
         It is still possible to match .hglf directly.
         For any listed files run log on the standin too.
         matchfn tries both the given filename and with .hglf stripped.
         """
-        matchandpats = oldmatchandpats(ctx, pats, opts, globbed, default)
+        matchandpats = oldmatchandpats(ctx, pats, opts, globbed, default,
+                                       badfn=badfn)
         m, p = copy.copy(matchandpats)
 
         if m.always():
@@ -358,7 +359,7 @@ def overridelog(orig, ui, repo, *pats, **opts):
                     and repo.wvfs.isdir(standin):
                 m._files.append(standin)
 
-        m._fmap = set(m._files)
+        m._fileroots = set(m._files)
         m._always = False
         origmatchfn = m.matchfn
         def lfmatchfn(f):
@@ -377,9 +378,9 @@ def overridelog(orig, ui, repo, *pats, **opts):
     # (2) to determine what files to print out diffs for.
     # The magic matchandpats override should be used for case (1) but not for
     # case (2).
-    def overridemakelogfilematcher(repo, pats, opts):
+    def overridemakelogfilematcher(repo, pats, opts, badfn=None):
         wctx = repo[None]
-        match, pats = oldmatchandpats(wctx, pats, opts)
+        match, pats = oldmatchandpats(wctx, pats, opts, badfn=badfn)
         return lambda rev: match
 
     oldmatchandpats = installmatchandpatsfn(overridematchandpats)
@@ -578,14 +579,13 @@ def overridecopy(orig, ui, repo, pats, opts, rename=False):
     nolfiles = False
     installnormalfilesmatchfn(repo[None].manifest())
     try:
-        try:
-            result = orig(ui, repo, pats, opts, rename)
-        except util.Abort, e:
-            if str(e) != _('no files to copy'):
-                raise e
-            else:
-                nonormalfiles = True
-            result = 0
+        result = orig(ui, repo, pats, opts, rename)
+    except util.Abort as e:
+        if str(e) != _('no files to copy'):
+            raise e
+        else:
+            nonormalfiles = True
+        result = 0
     finally:
         restorematchfn()
 
@@ -608,86 +608,85 @@ def overridecopy(orig, ui, repo, pats, opts, rename=False):
             os.makedirs(makestandin(dest))
 
     try:
-        try:
-            # When we call orig below it creates the standins but we don't add
-            # them to the dir state until later so lock during that time.
-            wlock = repo.wlock()
+        # When we call orig below it creates the standins but we don't add
+        # them to the dir state until later so lock during that time.
+        wlock = repo.wlock()
 
-            manifest = repo[None].manifest()
-            def overridematch(ctx, pats=[], opts={}, globbed=False,
-                    default='relpath'):
-                newpats = []
-                # The patterns were previously mangled to add the standin
-                # directory; we need to remove that now
-                for pat in pats:
-                    if match_.patkind(pat) is None and lfutil.shortname in pat:
-                        newpats.append(pat.replace(lfutil.shortname, ''))
-                    else:
-                        newpats.append(pat)
-                match = oldmatch(ctx, newpats, opts, globbed, default)
-                m = copy.copy(match)
-                lfile = lambda f: lfutil.standin(f) in manifest
-                m._files = [lfutil.standin(f) for f in m._files if lfile(f)]
-                m._fmap = set(m._files)
-                origmatchfn = m.matchfn
-                m.matchfn = lambda f: (lfutil.isstandin(f) and
-                                    (f in manifest) and
-                                    origmatchfn(lfutil.splitstandin(f)) or
-                                    None)
-                return m
-            oldmatch = installmatchfn(overridematch)
-            listpats = []
+        manifest = repo[None].manifest()
+        def overridematch(ctx, pats=[], opts={}, globbed=False,
+                default='relpath', badfn=None):
+            newpats = []
+            # The patterns were previously mangled to add the standin
+            # directory; we need to remove that now
             for pat in pats:
-                if match_.patkind(pat) is not None:
-                    listpats.append(pat)
+                if match_.patkind(pat) is None and lfutil.shortname in pat:
+                    newpats.append(pat.replace(lfutil.shortname, ''))
                 else:
-                    listpats.append(makestandin(pat))
+                    newpats.append(pat)
+            match = oldmatch(ctx, newpats, opts, globbed, default, badfn=badfn)
+            m = copy.copy(match)
+            lfile = lambda f: lfutil.standin(f) in manifest
+            m._files = [lfutil.standin(f) for f in m._files if lfile(f)]
+            m._fileroots = set(m._files)
+            origmatchfn = m.matchfn
+            m.matchfn = lambda f: (lfutil.isstandin(f) and
+                                (f in manifest) and
+                                origmatchfn(lfutil.splitstandin(f)) or
+                                None)
+            return m
+        oldmatch = installmatchfn(overridematch)
+        listpats = []
+        for pat in pats:
+            if match_.patkind(pat) is not None:
+                listpats.append(pat)
+            else:
+                listpats.append(makestandin(pat))
 
-            try:
-                origcopyfile = util.copyfile
-                copiedfiles = []
-                def overridecopyfile(src, dest):
-                    if (lfutil.shortname in src and
-                        dest.startswith(repo.wjoin(lfutil.shortname))):
-                        destlfile = dest.replace(lfutil.shortname, '')
-                        if not opts['force'] and os.path.exists(destlfile):
-                            raise IOError('',
-                                _('destination largefile already exists'))
-                    copiedfiles.append((src, dest))
-                    origcopyfile(src, dest)
-
-                util.copyfile = overridecopyfile
-                result += orig(ui, repo, listpats, opts, rename)
-            finally:
-                util.copyfile = origcopyfile
-
-            lfdirstate = lfutil.openlfdirstate(ui, repo)
-            for (src, dest) in copiedfiles:
+        try:
+            origcopyfile = util.copyfile
+            copiedfiles = []
+            def overridecopyfile(src, dest):
                 if (lfutil.shortname in src and
                     dest.startswith(repo.wjoin(lfutil.shortname))):
-                    srclfile = src.replace(repo.wjoin(lfutil.standin('')), '')
-                    destlfile = dest.replace(repo.wjoin(lfutil.standin('')), '')
-                    destlfiledir = os.path.dirname(repo.wjoin(destlfile)) or '.'
-                    if not os.path.isdir(destlfiledir):
-                        os.makedirs(destlfiledir)
-                    if rename:
-                        os.rename(repo.wjoin(srclfile), repo.wjoin(destlfile))
+                    destlfile = dest.replace(lfutil.shortname, '')
+                    if not opts['force'] and os.path.exists(destlfile):
+                        raise IOError('',
+                            _('destination largefile already exists'))
+                copiedfiles.append((src, dest))
+                origcopyfile(src, dest)
 
-                        # The file is gone, but this deletes any empty parent
-                        # directories as a side-effect.
-                        util.unlinkpath(repo.wjoin(srclfile), True)
-                        lfdirstate.remove(srclfile)
-                    else:
-                        util.copyfile(repo.wjoin(srclfile),
-                                      repo.wjoin(destlfile))
+            util.copyfile = overridecopyfile
+            result += orig(ui, repo, listpats, opts, rename)
+        finally:
+            util.copyfile = origcopyfile
 
-                    lfdirstate.add(destlfile)
-            lfdirstate.write()
-        except util.Abort, e:
-            if str(e) != _('no files to copy'):
-                raise e
-            else:
-                nolfiles = True
+        lfdirstate = lfutil.openlfdirstate(ui, repo)
+        for (src, dest) in copiedfiles:
+            if (lfutil.shortname in src and
+                dest.startswith(repo.wjoin(lfutil.shortname))):
+                srclfile = src.replace(repo.wjoin(lfutil.standin('')), '')
+                destlfile = dest.replace(repo.wjoin(lfutil.standin('')), '')
+                destlfiledir = os.path.dirname(repo.wjoin(destlfile)) or '.'
+                if not os.path.isdir(destlfiledir):
+                    os.makedirs(destlfiledir)
+                if rename:
+                    os.rename(repo.wjoin(srclfile), repo.wjoin(destlfile))
+
+                    # The file is gone, but this deletes any empty parent
+                    # directories as a side-effect.
+                    util.unlinkpath(repo.wjoin(srclfile), True)
+                    lfdirstate.remove(srclfile)
+                else:
+                    util.copyfile(repo.wjoin(srclfile),
+                                  repo.wjoin(destlfile))
+
+                lfdirstate.add(destlfile)
+        lfdirstate.write()
+    except util.Abort as e:
+        if str(e) != _('no files to copy'):
+            raise e
+        else:
+            nolfiles = True
     finally:
         restorematchfn()
         wlock.release()
@@ -724,8 +723,8 @@ def overriderevert(orig, ui, repo, ctx, parents, *pats, **opts):
         oldstandins = lfutil.getstandinsstate(repo)
 
         def overridematch(mctx, pats=[], opts={}, globbed=False,
-                default='relpath'):
-            match = oldmatch(mctx, pats, opts, globbed, default)
+                default='relpath', badfn=None):
+            match = oldmatch(mctx, pats, opts, globbed, default, badfn=badfn)
             m = copy.copy(match)
 
             # revert supports recursing into subrepos, and though largefiles
@@ -744,7 +743,7 @@ def overriderevert(orig, ui, repo, ctx, parents, *pats, **opts):
                 return f
             m._files = [tostandin(f) for f in m._files]
             m._files = [f for f in m._files if f is not None]
-            m._fmap = set(m._files)
+            m._fileroots = set(m._files)
             origmatchfn = m.matchfn
             def matchfn(f):
                 if lfutil.isstandin(f):
@@ -879,11 +878,24 @@ def overriderebase(orig, ui, repo, **opts):
         repo._lfstatuswriters.pop()
         repo._lfcommithooks.pop()
 
+def overridearchivecmd(orig, ui, repo, dest, **opts):
+    repo.unfiltered().lfstatus = True
+
+    try:
+        return orig(ui, repo.unfiltered(), dest, **opts)
+    finally:
+        repo.unfiltered().lfstatus = False
+
 def overridearchive(orig, repo, dest, node, kind, decode=True, matchfn=None,
             prefix='', mtime=None, subrepos=None):
+    if not repo.lfstatus:
+        return orig(repo, dest, node, kind, decode, matchfn, prefix, mtime,
+                    subrepos)
+
     # No need to lock because we are only reading history and
     # largefile caches, neither of which are modified.
-    lfcommands.cachelfiles(repo.ui, repo, node)
+    if node is not None:
+        lfcommands.cachelfiles(repo.ui, repo, node)
 
     if kind not in archival.archivers:
         raise util.Abort(_("unknown archive type '%s'") % kind)
@@ -908,18 +920,23 @@ def overridearchive(orig, repo, dest, node, kind, decode=True, matchfn=None,
     archiver = archival.archivers[kind](dest, mtime or ctx.date()[0])
 
     if repo.ui.configbool("ui", "archivemeta", True):
-        write('.hg_archival.txt', 0644, False,
+        write('.hg_archival.txt', 0o644, False,
               lambda: archival.buildmetadata(ctx))
 
     for f in ctx:
         ff = ctx.flags(f)
         getdata = ctx[f].data
         if lfutil.isstandin(f):
-            path = lfutil.findfile(repo, getdata().strip())
-            if path is None:
-                raise util.Abort(
-                    _('largefile %s not found in repo store or system cache')
-                    % lfutil.splitstandin(f))
+            if node is not None:
+                path = lfutil.findfile(repo, getdata().strip())
+
+                if path is None:
+                    raise util.Abort(
+                       _('largefile %s not found in repo store or system cache')
+                       % lfutil.splitstandin(f))
+            else:
+                path = lfutil.splitstandin(f)
+
             f = lfutil.splitstandin(f)
 
             def getdatafn():
@@ -932,22 +949,27 @@ def overridearchive(orig, repo, dest, node, kind, decode=True, matchfn=None,
                         fd.close()
 
             getdata = getdatafn
-        write(f, 'x' in ff and 0755 or 0644, 'l' in ff, getdata)
+        write(f, 'x' in ff and 0o755 or 0o644, 'l' in ff, getdata)
 
     if subrepos:
         for subpath in sorted(ctx.substate):
-            sub = ctx.sub(subpath)
+            sub = ctx.workingsub(subpath)
             submatch = match_.narrowmatcher(subpath, matchfn)
+            sub._repo.lfstatus = True
             sub.archive(archiver, prefix, submatch)
 
     archiver.done()
 
 def hgsubrepoarchive(orig, repo, archiver, prefix, match=None):
+    if not repo._repo.lfstatus:
+        return orig(repo, archiver, prefix, match)
+
     repo._get(repo._state + ('hg',))
     rev = repo._state[1]
     ctx = repo._repo[rev]
 
-    lfcommands.cachelfiles(repo.ui, repo._repo, ctx.node())
+    if ctx.node() is not None:
+        lfcommands.cachelfiles(repo.ui, repo._repo, ctx.node())
 
     def write(name, mode, islink, getdata):
         # At this point, the standin has been replaced with the largefile name,
@@ -962,11 +984,16 @@ def hgsubrepoarchive(orig, repo, archiver, prefix, match=None):
         ff = ctx.flags(f)
         getdata = ctx[f].data
         if lfutil.isstandin(f):
-            path = lfutil.findfile(repo._repo, getdata().strip())
-            if path is None:
-                raise util.Abort(
-                    _('largefile %s not found in repo store or system cache')
-                    % lfutil.splitstandin(f))
+            if ctx.node() is not None:
+                path = lfutil.findfile(repo._repo, getdata().strip())
+
+                if path is None:
+                    raise util.Abort(
+                       _('largefile %s not found in repo store or system cache')
+                       % lfutil.splitstandin(f))
+            else:
+                path = lfutil.splitstandin(f)
+
             f = lfutil.splitstandin(f)
 
             def getdatafn():
@@ -980,12 +1007,13 @@ def hgsubrepoarchive(orig, repo, archiver, prefix, match=None):
 
             getdata = getdatafn
 
-        write(f, 'x' in ff and 0755 or 0644, 'l' in ff, getdata)
+        write(f, 'x' in ff and 0o755 or 0o644, 'l' in ff, getdata)
 
     for subpath in sorted(ctx.substate):
-        sub = ctx.sub(subpath)
+        sub = ctx.workingsub(subpath)
         submatch = match_.narrowmatcher(subpath, match)
-        sub.archive(archiver, os.path.join(prefix, repo._path) + '/', submatch)
+        sub._repo.lfstatus = True
+        sub.archive(archiver, prefix + repo._path + '/', submatch)
 
 # If a largefile is modified, the change is not reflected in its
 # standin until a commit. cmdutil.bailifchanged() raises an exception

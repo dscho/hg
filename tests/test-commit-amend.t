@@ -72,6 +72,7 @@ Check proper abort for empty message
   branch: default
   commit: 1 added, 1 unknown
   update: (current)
+  phases: 2 draft
   $ HGEDITOR="\"sh\" \"`pwd`/editor.sh\"" hg commit --amend
   transaction abort!
   rollback completed
@@ -83,6 +84,7 @@ Check proper abort for empty message
   branch: default
   commit: 1 added, 1 unknown
   update: (current)
+  phases: 2 draft
 
 Add new file:
   $ hg ci --amend -m 'amend base1 new file'
@@ -371,7 +373,6 @@ Moving branches:
   $ hg ci -m 'branch foo'
   $ hg branch default -f
   marked working directory as branch default
-  (branches are permanent and global, did you want a bookmark?)
   $ hg ci --amend -m 'back to default'
   saved backup bundle to $TESTTMP/.hg/strip-backup/8ac881fbf49d-fd962fef-amend-backup.hg (glob)
   $ hg branches
@@ -846,7 +847,6 @@ This shouldn't be possible:
   $ hg up -q default
   $ hg branch closewithamend
   marked working directory as branch closewithamend
-  (branches are permanent and global, did you want a bookmark?)
   $ echo foo > foo
   $ hg add foo
   $ hg ci -m..
@@ -858,7 +858,6 @@ This silliness fails:
 
   $ hg branch silliness
   marked working directory as branch silliness
-  (branches are permanent and global, did you want a bookmark?)
   $ echo b >> b
   $ hg ci --close-branch -m'open and close'
   abort: can only close branch heads

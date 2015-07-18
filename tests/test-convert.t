@@ -259,6 +259,10 @@
                     for large projects, and is only effective when
                     "convert.git.similarity" is greater than 0. The default is
                     False.
+      convert.git.remoteprefix
+                    remote refs are converted as bookmarks with
+                    "convert.git.remoteprefix" as a prefix followed by a /. The
+                    default is 'remote'.
   
       Perforce Source
       ###############
@@ -279,6 +283,12 @@
       Mercurial Destination
       #####################
   
+      The Mercurial destination will recognize Mercurial subrepositories in the
+      destination directory, and update the .hgsubstate file automatically if
+      the destination subrepositories contain the <dest>/<sub>/.hg/shamap file.
+      Converting a repository with subrepositories requires converting a single
+      repository at a time, from the bottom up.
+  
       The following options are supported:
   
       convert.hg.clonebranches
@@ -288,12 +298,25 @@
                     branch name for tag revisions, defaults to "default".
       convert.hg.usebranchnames
                     preserve branch names. The default is True.
+      convert.hg.sourcename
+                    records the given string as a 'convert_source' extra value
+                    on each commit made in the target repository. The default is
+                    None.
   
-  options:
+      All Destinations
+      ################
+  
+      All destination types accept the following options:
+  
+      convert.skiptags
+                    does not convert tags from the source repo to the target
+                    repo. The default is False.
+  
+  options ([+] can be repeated):
   
    -s --source-type TYPE source repository type
    -d --dest-type TYPE   destination repository type
-   -r --rev REV          import up to source revision REV
+   -r --rev REV [+]      import up to source revision REV
    -A --authormap FILE   remap usernames using this file
       --filemap FILE     remap file names using contents of file
       --full             apply filemap changes by converting all files again
@@ -488,3 +511,17 @@ test revset converted() lookup
   date:        Thu Jan 01 00:00:04 1970 +0000
   summary:     e
   
+
+test specifying a sourcename
+  $ echo g > a/g
+  $ hg -R a ci -d'0 0' -Amg
+  adding g
+  $ hg --config convert.hg.sourcename=mysource --config convert.hg.saverev=True convert a c
+  scanning source...
+  sorting...
+  converting...
+  0 g
+  $ hg -R c log -r tip --template '{extras % "{extra}\n"}'
+  branch=default
+  convert_revision=a3bc6100aa8ec03e00aaf271f1f50046fb432072
+  convert_source=mysource

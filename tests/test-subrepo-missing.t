@@ -23,8 +23,8 @@ abort more gracefully on .hgsubstate parsing error
 
   $ cp .hgsubstate .hgsubstate.old
   >>> file('.hgsubstate', 'wb').write('\ninvalid')
-  $ hg st --subrepos
-  abort: invalid subrepository revision specifier in '.hgsubstate' line 2
+  $ hg st --subrepos --cwd $TESTTMP -R $TESTTMP/repo
+  abort: invalid subrepository revision specifier in 'repo/.hgsubstate' line 2 (glob)
   [255]
   $ mv .hgsubstate.old .hgsubstate
 
@@ -44,9 +44,9 @@ delete .hgsubstate and revert it
 delete .hgsub and update
 
   $ rm .hgsub
-  $ hg up 0
-  warning: subrepo spec file '.hgsub' not found
-  warning: subrepo spec file '.hgsub' not found
+  $ hg up 0 --cwd $TESTTMP -R $TESTTMP/repo
+  warning: subrepo spec file 'repo/.hgsub' not found (glob)
+  warning: subrepo spec file 'repo/.hgsub' not found (glob)
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg st
   warning: subrepo spec file '.hgsub' not found
@@ -105,5 +105,20 @@ check that --hidden is propagated to the subrepo
   $ hg -R subrepo ci --amend -m "amend a (again)"
   $ hg --hidden cat subrepo/a
   foo
+
+verify will warn if locked-in subrepo revisions are hidden or missing
+
+  $ hg ci -m "amended subrepo (again)"
+  $ hg --config extensions.strip= --hidden strip -R subrepo -qr 'tip'
+  $ hg verify
+  checking changesets
+  checking manifests
+  crosschecking files in changesets and manifests
+  checking files
+  2 files, 5 changesets, 5 total revisions
+  checking subrepo links
+  subrepo 'subrepo' is hidden in revision a66de08943b6
+  subrepo 'subrepo' is hidden in revision 674d05939c1e
+  subrepo 'subrepo' not found in revision a7d05d9055a4
 
   $ cd ..

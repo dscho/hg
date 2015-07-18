@@ -8,7 +8,7 @@
 import os
 from mercurial.i18n import _
 from mercurial.node import hex, bin
-from mercurial import encoding, error, util, obsolete, lock as lockmod
+from mercurial import encoding, util, obsolete, lock as lockmod
 import errno
 
 class bmstore(dict):
@@ -22,7 +22,7 @@ class bmstore(dict):
     {hash}\s{name}\n (the same format as localtags) in
     .hg/bookmarks. The mapping is stored as {name: nodeid}.
 
-    This class does NOT handle the "current" bookmark state at this
+    This class does NOT handle the "active" bookmark state at this
     time.
     """
 
@@ -45,7 +45,7 @@ class bmstore(dict):
                     self[refspec] = repo.changelog.lookup(sha)
                 except LookupError:
                     pass
-        except IOError, inst:
+        except IOError as inst:
             if inst.errno != errno.ENOENT:
                 raise
 
@@ -54,7 +54,7 @@ class bmstore(dict):
         if 'HG_PENDING' in os.environ:
             try:
                 bkfile = repo.vfs('bookmarks.pending')
-            except IOError, inst:
+            except IOError as inst:
                 if inst.errno != errno.ENOENT:
                     raise
         if bkfile is None:
@@ -80,11 +80,12 @@ class bmstore(dict):
         '''
         repo = self._repo
         self._writerepo(repo)
+        repo.invalidatevolatilesets()
 
     def _writerepo(self, repo):
         """Factored out for extensibility"""
-        if repo._bookmarkcurrent not in self:
-            unsetcurrent(repo)
+        if repo._activebookmark not in self:
+            deactivate(repo)
 
         wlock = repo.wlock()
         try:
@@ -93,12 +94,6 @@ class bmstore(dict):
             self._write(file)
             file.close()
 
-            # touch 00changelog.i so hgweb reloads bookmarks (no lock needed)
-            try:
-                repo.svfs.utime('00changelog.i', None)
-            except OSError:
-                pass
-
         finally:
             wlock.release()
 
@@ -106,17 +101,16 @@ class bmstore(dict):
         for name, node in self.iteritems():
             fp.write("%s %s\n" % (hex(node), encoding.fromlocal(name)))
 
-def readcurrent(repo):
-    '''Get the current bookmark
-
-    If we use gittish branches we have a current bookmark that
-    we are on. This function returns the name of the bookmark. It
-    is stored in .hg/bookmarks.current
-    '''
+def readactive(repo):
+    """
+    Get the active bookmark. We can have an active bookmark that updates
+    itself as we commit. This function returns the name of that bookmark.
+    It is stored in .hg/bookmarks.current
+    """
     mark = None
     try:
         file = repo.vfs('bookmarks.current')
-    except IOError, inst:
+    except IOError as inst:
         if inst.errno != errno.ENOENT:
             raise
         return None
@@ -129,17 +123,17 @@ def readcurrent(repo):
         file.close()
     return mark
 
-def setcurrent(repo, mark):
-    '''Set the name of the bookmark that we are currently on
-
-    Set the name of the bookmark that we are on (hg update <bookmark>).
+def activate(repo, mark):
+    """
+    Set the given bookmark to be 'active', meaning that this bookmark will
+    follow new commits that are made.
     The name is recorded in .hg/bookmarks.current
-    '''
+    """
     if mark not in repo._bookmarks:
         raise AssertionError('bookmark %s does not exist!' % mark)
 
-    current = repo._bookmarkcurrent
-    if current == mark:
+    active = repo._activebookmark
+    if active == mark:
         return
 
     wlock = repo.wlock()
@@ -149,41 +143,35 @@ def setcurrent(repo, mark):
         file.close()
     finally:
         wlock.release()
-    repo._bookmarkcurrent = mark
+    repo._activebookmark = mark
 
-def unsetcurrent(repo):
+def deactivate(repo):
+    """
+    Unset the active bookmark in this reposiotry.
+    """
     wlock = repo.wlock()
     try:
-        try:
-            repo.vfs.unlink('bookmarks.current')
-            repo._bookmarkcurrent = None
-        except OSError, inst:
-            if inst.errno != errno.ENOENT:
-                raise
+        repo.vfs.unlink('bookmarks.current')
+        repo._activebookmark = None
+    except OSError as inst:
+        if inst.errno != errno.ENOENT:
+            raise
     finally:
         wlock.release()
 
-def iscurrent(repo, mark=None, parents=None):
-    '''Tell whether the current bookmark is also active
+def isactivewdirparent(repo):
+    """
+    Tell whether the 'active' bookmark (the one that follows new commits)
+    points to one of the parents of the current working directory (wdir).
 
-    I.e., the bookmark listed in .hg/bookmarks.current also points to a
-    parent of the working directory.
-    '''
-    if not mark:
-        mark = repo._bookmarkcurrent
-    if not parents:
-        parents = [p.node() for p in repo[None].parents()]
+    While this is normally the case, it can on occasion be false; for example,
+    immediately after a pull, the active bookmark can be moved to point
+    to a place different than the wdir. This is solved by running `hg update`.
+    """
+    mark = repo._activebookmark
     marks = repo._bookmarks
+    parents = [p.node() for p in repo[None].parents()]
     return (mark in marks and marks[mark] in parents)
-
-def updatecurrentbookmark(repo, oldnode, curbranch):
-    try:
-        return update(repo, oldnode, repo.branchtip(curbranch))
-    except error.RepoLookupError:
-        if curbranch == "default": # no default branch!
-            return update(repo, oldnode, repo.lookup("tip"))
-        else:
-            raise util.Abort(_("branch %s not found") % curbranch)
 
 def deletedivergent(repo, deletefrom, bm):
     '''Delete divergent versions of bm on nodes in deletefrom.
@@ -207,33 +195,33 @@ def calculateupdate(ui, repo, checkout):
     check out and where to move the active bookmark from, if needed.'''
     movemarkfrom = None
     if checkout is None:
-        curmark = repo._bookmarkcurrent
-        if iscurrent(repo):
+        activemark = repo._activebookmark
+        if isactivewdirparent(repo):
             movemarkfrom = repo['.'].node()
-        elif curmark:
-            ui.status(_("updating to active bookmark %s\n") % curmark)
-            checkout = curmark
+        elif activemark:
+            ui.status(_("updating to active bookmark %s\n") % activemark)
+            checkout = activemark
     return (checkout, movemarkfrom)
 
 def update(repo, parents, node):
     deletefrom = parents
     marks = repo._bookmarks
     update = False
-    cur = repo._bookmarkcurrent
-    if not cur:
+    active = repo._activebookmark
+    if not active:
         return False
 
-    if marks[cur] in parents:
+    if marks[active] in parents:
         new = repo[node]
         divs = [repo[b] for b in marks
-                if b.split('@', 1)[0] == cur.split('@', 1)[0]]
+                if b.split('@', 1)[0] == active.split('@', 1)[0]]
         anc = repo.changelog.ancestors([new.rev()])
         deletefrom = [b.node() for b in divs if b.rev() in anc or b == new]
-        if validdest(repo, repo[marks[cur]], new):
-            marks[cur] = new.node()
+        if validdest(repo, repo[marks[active]], new):
+            marks[active] = new.node()
             update = True
 
-    if deletedivergent(repo, deletefrom, cur):
+    if deletedivergent(repo, deletefrom, active):
         update = True
 
     if update:
@@ -408,6 +396,11 @@ def updatefromremote(ui, repo, remotemarks, path, trfunc, explicit=()):
         if scid in repo: # add remote bookmarks for changes we already have
             changed.append((b, bin(scid), status,
                             _("adding remote bookmark %s\n") % (b)))
+        elif b in explicit:
+            explicit.remove(b)
+            ui.warn(_("remote bookmark %s points to locally missing %s\n")
+                    % (b, scid[:12]))
+
     for b, scid, dcid in advsrc:
         changed.append((b, bin(scid), status,
                         _("updating bookmark %s\n") % (b)))
@@ -434,6 +427,11 @@ def updatefromremote(ui, repo, remotemarks, path, trfunc, explicit=()):
             explicit.discard(b)
             changed.append((b, bin(scid), status,
                             _("importing bookmark %s\n") % (b)))
+    for b, scid, dcid in differ:
+        if b in explicit:
+            explicit.remove(b)
+            ui.warn(_("remote bookmark %s points to locally missing %s\n")
+                    % (b, scid[:12]))
 
     if changed:
         tr = trfunc()

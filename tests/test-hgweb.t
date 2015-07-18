@@ -10,12 +10,15 @@ Some tests for hgweb. Tests static files, plain files and different 404's.
   $ hg ci -Ambase
   adding da/foo
   adding foo
+  $ hg bookmark -r0 '@'
+  $ hg bookmark -r0 'a b c'
+  $ hg bookmark -r0 'd/e/f'
   $ hg serve -n test -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log
   $ cat hg.pid >> $DAEMON_PIDS
 
 manifest
 
-  $ ("$TESTDIR/get-with-headers.py" localhost:$HGPORT 'file/tip/?style=raw')
+  $ (get-with-headers.py localhost:$HGPORT 'file/tip/?style=raw')
   200 Script output follows
   
   
@@ -23,7 +26,7 @@ manifest
   -rw-r--r-- 4 foo
   
   
-  $ ("$TESTDIR/get-with-headers.py" localhost:$HGPORT 'file/tip/da?style=raw')
+  $ (get-with-headers.py localhost:$HGPORT 'file/tip/da?style=raw')
   200 Script output follows
   
   
@@ -33,14 +36,14 @@ manifest
 
 plain file
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'file/tip/foo?style=raw'
+  $ get-with-headers.py localhost:$HGPORT 'file/tip/foo?style=raw'
   200 Script output follows
   
   foo
 
 should give a 404 - static file that does not exist
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'static/bogus'
+  $ get-with-headers.py localhost:$HGPORT 'static/bogus'
   404 Not Found
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -106,7 +109,7 @@ should give a 404 - static file that does not exist
 
 should give a 404 - bad revision
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'file/spam/foo?style=raw'
+  $ get-with-headers.py localhost:$HGPORT 'file/spam/foo?style=raw'
   404 Not Found
   
   
@@ -115,40 +118,40 @@ should give a 404 - bad revision
 
 should give a 400 - bad command
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'file/tip/foo?cmd=spam&style=raw'
+  $ get-with-headers.py localhost:$HGPORT 'file/tip/foo?cmd=spam&style=raw'
   400* (glob)
   
   
   error: no such method: spam
   [1]
 
-  $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT '?cmd=spam'
+  $ get-with-headers.py --headeronly localhost:$HGPORT '?cmd=spam'
   400 no such method: spam
   [1]
 
 should give a 400 - bad command as a part of url path (issue4071)
 
-  $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT 'spam'
+  $ get-with-headers.py --headeronly localhost:$HGPORT 'spam'
   400 no such method: spam
   [1]
 
-  $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT 'raw-spam'
+  $ get-with-headers.py --headeronly localhost:$HGPORT 'raw-spam'
   400 no such method: spam
   [1]
 
-  $ "$TESTDIR/get-with-headers.py" --headeronly localhost:$HGPORT 'spam/tip/foo'
+  $ get-with-headers.py --headeronly localhost:$HGPORT 'spam/tip/foo'
   400 no such method: spam
   [1]
 
 should give a 404 - file does not exist
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'file/tip/bork?style=raw'
+  $ get-with-headers.py localhost:$HGPORT 'file/tip/bork?style=raw'
   404 Not Found
   
   
   error: bork@2ef0ac749a14: not found in manifest
   [1]
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'file/tip/bork'
+  $ get-with-headers.py localhost:$HGPORT 'file/tip/bork'
   404 Not Found
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -211,7 +214,7 @@ should give a 404 - file does not exist
   </html>
   
   [1]
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'diff/tip/bork?style=raw'
+  $ get-with-headers.py localhost:$HGPORT 'diff/tip/bork?style=raw'
   404 Not Found
   
   
@@ -220,7 +223,7 @@ should give a 404 - file does not exist
 
 try bad style
 
-  $ ("$TESTDIR/get-with-headers.py" localhost:$HGPORT 'file/tip/?style=foobar')
+  $ (get-with-headers.py localhost:$HGPORT 'file/tip/?style=foobar')
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -242,14 +245,14 @@ try bad style
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-  <li><a href="/shortlog/2ef0ac749a14">log</a></li>
-  <li><a href="/graph/2ef0ac749a14">graph</a></li>
+  <li><a href="/shortlog/tip">log</a></li>
+  <li><a href="/graph/tip">graph</a></li>
   <li><a href="/tags">tags</a></li>
   <li><a href="/bookmarks">bookmarks</a></li>
   <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
-  <li><a href="/rev/2ef0ac749a14">changeset</a></li>
+  <li><a href="/rev/tip">changeset</a></li>
   <li class="active">browse</li>
   </ul>
   <ul>
@@ -262,7 +265,10 @@ try bad style
   
   <div class="main">
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>directory / @ 0:2ef0ac749a14 <span class="tag">tip</span> </h3>
+  <h3>
+   directory / @ 0:<a href="/rev/2ef0ac749a14">2ef0ac749a14</a>
+   <span class="tag">tip</span> <span class="tag">@</span> <span class="tag">a b c</span> <span class="tag">d/e/f</span> 
+  </h3>
   
   <form class="search" action="/log">
   
@@ -281,17 +287,17 @@ try bad style
   </thead>
   <tbody class="stripes2">
   <tr class="fileline">
-    <td class="name"><a href="/file/2ef0ac749a14/">[up]</a></td>
+    <td class="name"><a href="/file/tip/">[up]</a></td>
     <td class="size"></td>
     <td class="permissions">drwxr-xr-x</td>
   </tr>
   
   <tr class="fileline">
   <td class="name">
-  <a href="/file/2ef0ac749a14/da">
+  <a href="/file/tip/da">
   <img src="/static/coal-folder.png" alt="dir."/> da/
   </a>
-  <a href="/file/2ef0ac749a14/da/">
+  <a href="/file/tip/da/">
   
   </a>
   </td>
@@ -301,7 +307,7 @@ try bad style
   
   <tr class="fileline">
   <td class="filename">
-  <a href="/file/2ef0ac749a14/foo">
+  <a href="/file/tip/foo">
   <img src="/static/coal-file.png" alt="file"/> foo
   </a>
   </td>
@@ -321,7 +327,7 @@ try bad style
 
 stop and restart
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ hg serve -p $HGPORT -d --pid-file=hg.pid -A access.log
   $ cat hg.pid >> $DAEMON_PIDS
 
@@ -332,7 +338,7 @@ Test the access/error files are opened in append mode
 
 static file
 
-  $ "$TESTDIR/get-with-headers.py" --twice localhost:$HGPORT 'static/style-gitweb.css' - date etag server
+  $ get-with-headers.py --twice localhost:$HGPORT 'static/style-gitweb.css' - date etag server
   200 Script output follows
   content-length: 5372
   content-type: text/css
@@ -540,7 +546,7 @@ phase changes are refreshed (issue4061)
 
   $ echo bar >> foo
   $ hg ci -msecret --secret
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'log?style=raw'
+  $ get-with-headers.py localhost:$HGPORT 'log?style=raw'
   200 Script output follows
   
   
@@ -554,10 +560,13 @@ phase changes are refreshed (issue4061)
   summary:     base
   branch:      default
   tag:         tip
+  bookmark:    @
+  bookmark:    a b c
+  bookmark:    d/e/f
   
   
   $ hg phase --draft tip
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'log?style=raw'
+  $ get-with-headers.py localhost:$HGPORT 'log?style=raw'
   200 Script output follows
   
   
@@ -577,8 +586,29 @@ phase changes are refreshed (issue4061)
   user:        test
   date:        Thu, 01 Jan 1970 00:00:00 +0000
   summary:     base
+  bookmark:    @
+  bookmark:    a b c
+  bookmark:    d/e/f
   
   
+
+access bookmarks
+
+  $ get-with-headers.py localhost:$HGPORT 'rev/@?style=paper' | egrep '^200|changeset 0:'
+  200 Script output follows
+   changeset 0:<a href="/rev/2ef0ac749a14?style=paper">2ef0ac749a14</a>
+
+  $ get-with-headers.py localhost:$HGPORT 'rev/%40?style=paper' | egrep '^200|changeset 0:'
+  200 Script output follows
+   changeset 0:<a href="/rev/2ef0ac749a14?style=paper">2ef0ac749a14</a>
+
+  $ get-with-headers.py localhost:$HGPORT 'rev/a%20b%20c?style=paper' | egrep '^200|changeset 0:'
+  200 Script output follows
+   changeset 0:<a href="/rev/2ef0ac749a14?style=paper">2ef0ac749a14</a>
+
+  $ get-with-headers.py localhost:$HGPORT 'rev/d%252Fe%252Ff?style=paper' | egrep '^200|changeset 0:'
+  200 Script output follows
+   changeset 0:<a href="/rev/2ef0ac749a14?style=paper">2ef0ac749a14</a>
 
 no style can be loaded from directories other than the specified paths
 
@@ -594,27 +624,27 @@ no style can be loaded from directories other than the specified paths
   > mimetype = 'text/plain'
   > EOF
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ hg serve -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log \
   > --config web.style=fallback --config web.templates=x/templates
   $ cat hg.pid >> $DAEMON_PIDS
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT "?style=`pwd`/x"
+  $ get-with-headers.py localhost:$HGPORT "?style=`pwd`/x"
   200 Script output follows
   
   fall back to default
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT '?style=..'
+  $ get-with-headers.py localhost:$HGPORT '?style=..'
   200 Script output follows
   
   fall back to default
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT '?style=./..'
+  $ get-with-headers.py localhost:$HGPORT '?style=./..'
   200 Script output follows
   
   fall back to default
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT '?style=.../.../'
+  $ get-with-headers.py localhost:$HGPORT '?style=.../.../'
   200 Script output follows
   
   fall back to default
@@ -625,18 +655,18 @@ errors
 
 Uncaught exceptions result in a logged error and canned HTTP response
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ hg --config extensions.hgweberror=$TESTDIR/hgweberror.py serve -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log
   $ cat hg.pid >> $DAEMON_PIDS
 
-  $ $TESTDIR/get-with-headers.py localhost:$HGPORT 'raiseerror' transfer-encoding content-type
+  $ get-with-headers.py localhost:$HGPORT 'raiseerror' transfer-encoding content-type
   500 Internal Server Error
   transfer-encoding: chunked
   
   Internal Server Error (no-eol)
   [1]
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ head -1 errors.log
   .* Exception happened during processing request '/raiseerror': (re)
 
@@ -644,7 +674,7 @@ Uncaught exception after partial content sent
 
   $ hg --config extensions.hgweberror=$TESTDIR/hgweberror.py serve -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log
   $ cat hg.pid >> $DAEMON_PIDS
-  $ $TESTDIR/get-with-headers.py localhost:$HGPORT 'raiseerror?partialresponse=1' transfer-encoding content-type
+  $ get-with-headers.py localhost:$HGPORT 'raiseerror?partialresponse=1' transfer-encoding content-type
   200 Script output follows
   transfer-encoding: chunked
   content-type: text/plain
@@ -652,5 +682,5 @@ Uncaught exception after partial content sent
   partial content
   Internal Server Error (no-eol)
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ cd ..

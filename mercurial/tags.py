@@ -120,7 +120,7 @@ def readlocaltags(ui, repo, alltags, tagtypes):
     '''Read local tags in repo. Update alltags and tagtypes.'''
     try:
         data = repo.vfs.read("localtags")
-    except IOError, inst:
+    except IOError as inst:
         if inst.errno != errno.ENOENT:
             raise
         return
@@ -442,11 +442,13 @@ class hgtagsfnodescache(object):
                 self._raw.pop()
             self._dirtyoffset = len(self._raw)
 
-    def getfnode(self, node):
+    def getfnode(self, node, computemissing=True):
         """Obtain the filenode of the .hgtags file at a specified revision.
 
         If the value is in the cache, the entry will be validated and returned.
-        Otherwise, the filenode will be computed and returned.
+        Otherwise, the filenode will be computed and returned unless
+        "computemissing" is False, in which case None will be returned without
+        any potentially expensive computation being performed.
 
         If an .hgtags does not exist at the specified revision, nullid is
         returned.
@@ -470,20 +472,38 @@ class hgtagsfnodescache(object):
 
             # Fall through.
 
-        # If we get here, the entry is either missing or invalid. Populate it.
+        # If we get here, the entry is either missing or invalid.
+
+        if not computemissing:
+            return None
+
+        # Populate missing entry.
         try:
             fnode = ctx.filenode('.hgtags')
         except error.LookupError:
             # No .hgtags file on this revision.
             fnode = nullid
 
+        self._writeentry(offset, properprefix, fnode)
+        return fnode
+
+    def setfnode(self, node, fnode):
+        """Set the .hgtags filenode for a given changeset."""
+        assert len(fnode) == 20
+        ctx = self._repo[node]
+
+        # Do a lookup first to avoid writing if nothing has changed.
+        if self.getfnode(ctx.node(), computemissing=False) == fnode:
+            return
+
+        self._writeentry(ctx.rev() * _fnodesrecsize, node[0:4], fnode)
+
+    def _writeentry(self, offset, prefix, fnode):
         # Slices on array instances only accept other array.
-        entry = array('c', properprefix + fnode)
+        entry = array('c', prefix + fnode)
         self._raw[offset:offset + _fnodesrecsize] = entry
         # self._dirtyoffset could be None.
         self._dirtyoffset = min(self._dirtyoffset, offset) or 0
-
-        return fnode
 
     def write(self):
         """Perform all necessary writes to cache file.
@@ -509,26 +529,25 @@ class hgtagsfnodescache(object):
             return
 
         try:
+            f = repo.vfs.open(_fnodescachefile, 'ab')
             try:
-                f = repo.vfs.open(_fnodescachefile, 'ab')
-                try:
-                    # if the file has been truncated
-                    actualoffset = f.tell()
-                    if actualoffset < self._dirtyoffset:
-                        self._dirtyoffset = actualoffset
-                        data = self._raw[self._dirtyoffset:]
-                    f.seek(self._dirtyoffset)
-                    f.truncate()
-                    repo.ui.log('tagscache',
-                                'writing %d bytes to %s\n' % (
-                                len(data), _fnodescachefile))
-                    f.write(data)
-                    self._dirtyoffset = None
-                finally:
-                    f.close()
-            except (IOError, OSError), inst:
+                # if the file has been truncated
+                actualoffset = f.tell()
+                if actualoffset < self._dirtyoffset:
+                    self._dirtyoffset = actualoffset
+                    data = self._raw[self._dirtyoffset:]
+                f.seek(self._dirtyoffset)
+                f.truncate()
                 repo.ui.log('tagscache',
-                            "couldn't write %s: %s\n" % (
-                            _fnodescachefile, inst))
+                            'writing %d bytes to %s\n' % (
+                            len(data), _fnodescachefile))
+                f.write(data)
+                self._dirtyoffset = None
+            finally:
+                f.close()
+        except (IOError, OSError) as inst:
+            repo.ui.log('tagscache',
+                        "couldn't write %s: %s\n" % (
+                        _fnodescachefile, inst))
         finally:
             lock.release()

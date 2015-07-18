@@ -8,6 +8,7 @@
 from i18n import _
 import encoding
 import os, sys, errno, stat, getpass, pwd, grp, socket, tempfile, unicodedata
+import select
 import fcntl, re
 
 posixfile = open
@@ -70,7 +71,7 @@ def sshargs(sshcmd, host, user, port):
 
 def isexec(f):
     """check whether a file is executable"""
-    return (os.lstat(f).st_mode & 0100 != 0)
+    return (os.lstat(f).st_mode & 0o100 != 0)
 
 def setflags(f, l, x):
     s = os.lstat(f).st_mode
@@ -97,30 +98,30 @@ def setflags(f, l, x):
         fp = open(f, "w")
         fp.write(data)
         fp.close()
-        s = 0666 & ~umask # avoid restatting for chmod
+        s = 0o666 & ~umask # avoid restatting for chmod
 
-    sx = s & 0100
+    sx = s & 0o100
     if x and not sx:
         # Turn on +x for every +r bit when making a file executable
         # and obey umask.
-        os.chmod(f, s | (s & 0444) >> 2 & ~umask)
+        os.chmod(f, s | (s & 0o444) >> 2 & ~umask)
     elif not x and sx:
         # Turn off all +x bits
-        os.chmod(f, s & 0666)
+        os.chmod(f, s & 0o666)
 
 def copymode(src, dst, mode=None):
     '''Copy the file mode from the file at path src to dst.
     If src doesn't exist, we're using mode instead. If mode is None, we're
     using umask.'''
     try:
-        st_mode = os.lstat(src).st_mode & 0777
-    except OSError, inst:
+        st_mode = os.lstat(src).st_mode & 0o777
+    except OSError as inst:
         if inst.errno != errno.ENOENT:
             raise
         st_mode = mode
         if st_mode is None:
             st_mode = ~umask
-        st_mode &= 0666
+        st_mode &= 0o666
     os.chmod(dst, st_mode)
 
 def checkexec(path):
@@ -139,10 +140,10 @@ def checkexec(path):
         fh, fn = tempfile.mkstemp(dir=path, prefix='hg-checkexec-')
         try:
             os.close(fh)
-            m = os.stat(fn).st_mode & 0777
+            m = os.stat(fn).st_mode & 0o777
             new_file_has_exec = m & EXECFLAGS
             os.chmod(fn, m ^ EXECFLAGS)
-            exec_flags_cannot_flip = ((os.stat(fn).st_mode & 0777) == m)
+            exec_flags_cannot_flip = ((os.stat(fn).st_mode & 0o777) == m)
         finally:
             os.unlink(fn)
     except (IOError, OSError):
@@ -165,7 +166,7 @@ def checklink(path):
             fd.close()
     except AttributeError:
         return False
-    except OSError, inst:
+    except OSError as inst:
         # sshfs might report failure while successfully creating the link
         if inst[0] == errno.EIO and os.path.exists(name):
             os.unlink(name)
@@ -354,7 +355,7 @@ def testpid(pid):
     try:
         os.kill(pid, 0)
         return True
-    except OSError, inst:
+    except OSError as inst:
         return inst.errno != errno.ESRCH
 
 def explainexit(code):
@@ -409,7 +410,7 @@ def statfiles(files):
             st = lstat(nf)
             if getkind(st.st_mode) not in _wantedkinds:
                 st = None
-        except OSError, err:
+        except OSError as err:
             if err.errno not in (errno.ENOENT, errno.ENOTDIR):
                 raise
             st = None
@@ -476,7 +477,7 @@ def termwidth():
                     pass
             except ValueError:
                 pass
-            except IOError, e:
+            except IOError as e:
                 if e[0] == errno.EINVAL:
                     pass
                 else:
@@ -492,7 +493,7 @@ def unlinkpath(f, ignoremissing=False):
     """unlink and remove the directory if it is empty"""
     try:
         os.unlink(f)
-    except OSError, e:
+    except OSError as e:
         if not (ignoremissing and e.errno == errno.ENOENT):
             raise
     # try removing directories that might now be empty
@@ -559,7 +560,7 @@ class unixdomainserver(socket.socket):
                 os.unlink(self.path)
         try:
             self.bind(self.realpath)
-        except socket.error, err:
+        except socket.error as err:
             if err.args[0] == 'AF_UNIX path too long':
                 tmpdir = tempfile.mkdtemp(prefix='hg-%s-' % subsystem)
                 self.realpath = os.path.join(tmpdir, sockname)
@@ -577,7 +578,7 @@ class unixdomainserver(socket.socket):
         def okayifmissing(f, path):
             try:
                 f(path)
-            except OSError, err:
+            except OSError as err:
                 if err.errno != errno.ENOENT:
                     raise
 
@@ -592,7 +593,20 @@ def statislink(st):
 
 def statisexec(st):
     '''check whether a stat result is an executable file'''
-    return st and (st.st_mode & 0100 != 0)
+    return st and (st.st_mode & 0o100 != 0)
+
+def poll(fds):
+    """block until something happens on any file descriptor
+
+    This is a generic helper that will check for any activity
+    (read, write.  exception) and return the list of touched files.
+
+    In unsupported cases, it will raise a NotImplementedError"""
+    try:
+        res = select.select(fds, fds, fds)
+    except ValueError: # out of range file descriptor
+        raise NotImplementedError()
+    return sorted(list(set(sum(res, []))))
 
 def readpipe(pipe):
     """Read all available data from a pipe."""

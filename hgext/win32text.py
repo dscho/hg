@@ -46,6 +46,10 @@ from mercurial.node import short
 from mercurial import util
 import re
 
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 # regexp for single LF without CR preceding.
@@ -167,6 +171,7 @@ def reposetup(ui, repo):
         repo.adddatafilter(name, fn)
 
 def extsetup(ui):
+    # deprecated config: win32text.warn
     if ui.configbool('win32text', 'warn', True):
         ui.warn(_("win32text is deprecated: "
                   "http://mercurial.selenic.com/wiki/Win32TextExtension\n"))

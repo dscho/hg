@@ -63,13 +63,18 @@ pretty fast (at least faster than having to compare the entire tree).
 from mercurial.i18n import _
 from mercurial.node import short, nullid
 from mercurial import cmdutil, scmutil, util, commands, encoding, filemerge
+from mercurial import archival
 import os, shlex, shutil, tempfile, re
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
-def snapshot(ui, repo, files, node, tmproot):
+def snapshot(ui, repo, files, node, tmproot, listsubrepos):
     '''snapshot files as of some revision
     if not using snapshot, -I/-X does not work and recursive diff
     in tools like kdiff3 and meld displays too many files.'''
@@ -80,33 +85,35 @@ def snapshot(ui, repo, files, node, tmproot):
         dirname = '%s.%s' % (dirname, short(node))
     base = os.path.join(tmproot, dirname)
     os.mkdir(base)
+    fns_and_mtime = []
+
     if node is not None:
         ui.note(_('making snapshot of %d files from rev %s\n') %
                 (len(files), short(node)))
     else:
         ui.note(_('making snapshot of %d files from working directory\n') %
             (len(files)))
-    wopener = scmutil.opener(base)
-    fns_and_mtime = []
-    ctx = repo[node]
-    for fn in sorted(files):
-        wfn = util.pconvert(fn)
-        if wfn not in ctx:
-            # File doesn't exist; could be a bogus modify
-            continue
-        ui.note('  %s\n' % wfn)
-        dest = os.path.join(base, wfn)
-        fctx = ctx[wfn]
-        data = repo.wwritedata(wfn, fctx.data())
-        if 'l' in fctx.flags():
-            wopener.symlink(data, wfn)
-        else:
-            wopener.write(wfn, data)
-            if 'x' in fctx.flags():
-                util.setflags(dest, False, True)
-        if node is None:
-            fns_and_mtime.append((dest, repo.wjoin(fn),
-                                  os.lstat(dest).st_mtime))
+
+    if files:
+        repo.ui.setconfig("ui", "archivemeta", False)
+
+        archival.archive(repo, base, node, 'files',
+                         matchfn=scmutil.matchfiles(repo, files),
+                         subrepos=listsubrepos)
+
+        ctx = repo[node]
+        for fn in sorted(files):
+            wfn = util.pconvert(fn)
+            if wfn not in ctx:
+                # File doesn't exist; could be a bogus modify
+                continue
+            ui.note('  %s\n' % wfn)
+
+            if node is None:
+                dest = os.path.join(base, wfn)
+
+                fns_and_mtime.append((dest, repo.wjoin(fn),
+                                      os.lstat(dest).st_mtime))
     return dirname, fns_and_mtime
 
 def dodiff(ui, repo, cmdline, pats, opts):
@@ -140,10 +147,14 @@ def dodiff(ui, repo, cmdline, pats, opts):
         if node1b == nullid:
             do3way = False
 
+    subrepos=opts.get('subrepos')
+
     matcher = scmutil.match(repo[node2], pats, opts)
-    mod_a, add_a, rem_a = map(set, repo.status(node1a, node2, matcher)[:3])
+    mod_a, add_a, rem_a = map(set, repo.status(node1a, node2, matcher,
+                                               listsubrepos=subrepos)[:3])
     if do3way:
-        mod_b, add_b, rem_b = map(set, repo.status(node1b, node2, matcher)[:3])
+        mod_b, add_b, rem_b = map(set, repo.status(node1b, node2, matcher,
+                                                   listsubrepos=subrepos)[:3])
     else:
         mod_b, add_b, rem_b = set(), set(), set()
     modadd = mod_a | add_a | mod_b | add_b
@@ -155,11 +166,12 @@ def dodiff(ui, repo, cmdline, pats, opts):
     try:
         # Always make a copy of node1a (and node1b, if applicable)
         dir1a_files = mod_a | rem_a | ((mod_b | add_b) - add_a)
-        dir1a = snapshot(ui, repo, dir1a_files, node1a, tmproot)[0]
+        dir1a = snapshot(ui, repo, dir1a_files, node1a, tmproot, subrepos)[0]
         rev1a = '@%d' % repo[node1a].rev()
         if do3way:
             dir1b_files = mod_b | rem_b | ((mod_a | add_a) - add_b)
-            dir1b = snapshot(ui, repo, dir1b_files, node1b, tmproot)[0]
+            dir1b = snapshot(ui, repo, dir1b_files, node1b, tmproot,
+                             subrepos)[0]
             rev1b = '@%d' % repo[node1b].rev()
         else:
             dir1b = None
@@ -171,14 +183,15 @@ def dodiff(ui, repo, cmdline, pats, opts):
         dir2root = ''
         rev2 = ''
         if node2:
-            dir2 = snapshot(ui, repo, modadd, node2, tmproot)[0]
+            dir2 = snapshot(ui, repo, modadd, node2, tmproot, subrepos)[0]
             rev2 = '@%d' % repo[node2].rev()
         elif len(common) > 1:
             #we only actually need to get the files to copy back to
             #the working dir in this case (because the other cases
             #are: diffing 2 revisions or single file -- in which case
             #the file is already directly passed to the diff tool).
-            dir2, fns_and_mtime = snapshot(ui, repo, modadd, None, tmproot)
+            dir2, fns_and_mtime = snapshot(ui, repo, modadd, None, tmproot,
+                                           subrepos)
         else:
             # This lets the diff tool open the changed file directly
             dir2 = ''
@@ -246,7 +259,7 @@ def dodiff(ui, repo, cmdline, pats, opts):
      _('pass option to comparison program'), _('OPT')),
     ('r', 'rev', [], _('revision'), _('REV')),
     ('c', 'change', '', _('change made by revision'), _('REV')),
-    ] + commands.walkopts,
+    ] + commands.walkopts + commands.subrepoopts,
     _('hg extdiff [OPT]... [FILE]...'),
     inferrepo=True)
 def extdiff(ui, repo, *pats, **opts):

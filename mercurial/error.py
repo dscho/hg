@@ -13,7 +13,12 @@ imports.
 
 # Do not import anything here, please
 
-class RevlogError(Exception):
+class HintException(Exception):
+    def __init__(self, *args, **kw):
+        Exception.__init__(self, *args)
+        self.hint = kw.get('hint')
+
+class RevlogError(HintException):
     pass
 
 class FilteredIndexError(IndexError):
@@ -46,11 +51,9 @@ class CommandError(Exception):
 class InterventionRequired(Exception):
     """Exception raised when a command requires human intervention."""
 
-class Abort(Exception):
+class Abort(HintException):
     """Raised if a command needs to print an error and exit."""
-    def __init__(self, *args, **kw):
-        Exception.__init__(self, *args)
-        self.hint = kw.get('hint')
+    pass
 
 class HookAbort(Abort):
     """raised when a validation hook fails, aborting an operation
@@ -64,6 +67,10 @@ class ConfigError(Abort):
 class OutOfBandError(Exception):
     """Exception raised when a remote repo reports failure"""
 
+    def __init__(self, *args, **kw):
+        Exception.__init__(self, *args)
+        self.hint = kw.get('hint')
+
 class ParseError(Exception):
     """Raised when parsing config files and {rev,file}sets (msg[, pos])"""
 
@@ -76,10 +83,8 @@ class UnknownIdentifier(ParseError):
         self.function = function
         self.symbols = symbols
 
-class RepoError(Exception):
-    def __init__(self, *args, **kw):
-        Exception.__init__(self, *args)
-        self.hint = kw.get('hint')
+class RepoError(HintException):
+    pass
 
 class RepoLookupError(RepoError):
     pass
@@ -145,6 +150,21 @@ class UnsupportedPartError(BundleValueError):
 class ReadOnlyPartError(RuntimeError):
     """error raised when code tries to alter a part being generated"""
     pass
+
+class PushkeyFailed(Abort):
+    """error raised when a pushkey part failed to update a value"""
+
+    def __init__(self, partid, namespace=None, key=None, new=None, old=None,
+                 ret=None):
+        self.partid = partid
+        self.namespace = namespace
+        self.key = key
+        self.new = new
+        self.old = old
+        self.ret = ret
+        # no i18n expected to be processed into a better message
+        Abort.__init__(self, 'failed to update value for "%s/%s"'
+                       % (namespace, key))
 
 class CensoredNodeError(RevlogError):
     """error raised when content verification fails on a censored node

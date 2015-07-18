@@ -88,10 +88,10 @@ def has_executablebit():
         fh, fn = tempfile.mkstemp(dir='.', prefix=tempprefix)
         try:
             os.close(fh)
-            m = os.stat(fn).st_mode & 0777
+            m = os.stat(fn).st_mode & 0o777
             new_file_has_exec = m & EXECFLAGS
             os.chmod(fn, m ^ EXECFLAGS)
-            exec_flags_cannot_flip = ((os.stat(fn).st_mode & 0777) == m)
+            exec_flags_cannot_flip = ((os.stat(fn).st_mode & 0o777) == m)
         finally:
             os.unlink(fn)
     except (IOError, OSError):
@@ -225,12 +225,11 @@ def has_hardlink():
     os.close(fh)
     name = tempfile.mktemp(dir='.', prefix=tempprefix)
     try:
-        try:
-            util.oslink(fn, name)
-            os.unlink(name)
-            return True
-        except OSError:
-            return False
+        util.oslink(fn, name)
+        os.unlink(name)
+        return True
+    except OSError:
+        return False
     finally:
         os.unlink(fn)
 
@@ -247,13 +246,13 @@ def has_unix_permissions():
     d = tempfile.mkdtemp(dir='.', prefix=tempprefix)
     try:
         fname = os.path.join(d, 'foo')
-        for umask in (077, 007, 022):
+        for umask in (0o77, 0o07, 0o22):
             os.umask(umask)
             f = open(fname, 'w')
             f.close()
             mode = os.stat(fname).st_mode
             os.unlink(fname)
-            if mode & 0777 != ~umask & 0666:
+            if mode & 0o777 != ~umask & 0o666:
                 return False
         return True
     finally:
@@ -281,10 +280,6 @@ def has_pygments():
         return True
     except ImportError:
         return False
-
-@check("python243", "python >= 2.4.3")
-def has_python243():
-    return sys.version_info >= (2, 4, 3)
 
 @check("json", "some json module available")
 def has_json():
@@ -318,6 +313,15 @@ def has_ssl():
         OpenSSL.SSL.Context
         return True
     except ImportError:
+        return False
+
+@check("sslcontext", "python >= 2.7.9 ssl")
+def has_sslcontext():
+    try:
+        import ssl
+        ssl.SSLContext
+        return True
+    except (ImportError, AttributeError):
         return False
 
 @check("defaultcacerts", "can verify SSL certs by system's CA certs store")

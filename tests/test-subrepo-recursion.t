@@ -258,6 +258,7 @@ Enable progress extension for archive tests:
   > [extensions]
   > progress =
   > [progress]
+  > disable=False
   > assume-tty = 1
   > delay = 0
   > # set changedelay really large so we don't see nested topics
@@ -273,28 +274,18 @@ only show up in the test output, not in real usage):
   $ hg archive --subrepos ../archive
   \r (no-eol) (esc)
   archiving [                                           ] 0/3\r (no-eol) (esc)
-  archiving [                                           ] 0/3\r (no-eol) (esc)
-  archiving [=============>                             ] 1/3\r (no-eol) (esc)
   archiving [=============>                             ] 1/3\r (no-eol) (esc)
   archiving [===========================>               ] 2/3\r (no-eol) (esc)
-  archiving [===========================>               ] 2/3\r (no-eol) (esc)
-  archiving [==========================================>] 3/3\r (no-eol) (esc)
   archiving [==========================================>] 3/3\r (no-eol) (esc)
                                                               \r (no-eol) (esc)
   \r (no-eol) (esc)
   archiving (foo) [                                     ] 0/3\r (no-eol) (esc)
-  archiving (foo) [                                     ] 0/3\r (no-eol) (esc)
-  archiving (foo) [===========>                         ] 1/3\r (no-eol) (esc)
   archiving (foo) [===========>                         ] 1/3\r (no-eol) (esc)
   archiving (foo) [=======================>             ] 2/3\r (no-eol) (esc)
-  archiving (foo) [=======================>             ] 2/3\r (no-eol) (esc)
-  archiving (foo) [====================================>] 3/3\r (no-eol) (esc)
   archiving (foo) [====================================>] 3/3\r (no-eol) (esc)
                                                               \r (no-eol) (esc)
   \r (no-eol) (esc)
   archiving (foo/bar) [                                 ] 0/1\r (no-eol) (glob) (esc)
-  archiving (foo/bar) [                                 ] 0/1\r (no-eol) (glob) (esc)
-  archiving (foo/bar) [================================>] 1/1\r (no-eol) (glob) (esc)
   archiving (foo/bar) [================================>] 1/1\r (no-eol) (glob) (esc)
                                                               \r (no-eol) (esc)
   $ find ../archive | sort
@@ -312,33 +303,40 @@ only show up in the test output, not in real usage):
 
 Test archiving to zip file (unzip output is unstable):
 
-  $ hg archive --subrepos ../archive.zip
+  $ hg archive --subrepos --prefix '.' ../archive.zip
   \r (no-eol) (esc)
   archiving [                                           ] 0/3\r (no-eol) (esc)
-  archiving [                                           ] 0/3\r (no-eol) (esc)
-  archiving [=============>                             ] 1/3\r (no-eol) (esc)
   archiving [=============>                             ] 1/3\r (no-eol) (esc)
   archiving [===========================>               ] 2/3\r (no-eol) (esc)
-  archiving [===========================>               ] 2/3\r (no-eol) (esc)
-  archiving [==========================================>] 3/3\r (no-eol) (esc)
   archiving [==========================================>] 3/3\r (no-eol) (esc)
                                                               \r (no-eol) (esc)
   \r (no-eol) (esc)
   archiving (foo) [                                     ] 0/3\r (no-eol) (esc)
-  archiving (foo) [                                     ] 0/3\r (no-eol) (esc)
-  archiving (foo) [===========>                         ] 1/3\r (no-eol) (esc)
   archiving (foo) [===========>                         ] 1/3\r (no-eol) (esc)
   archiving (foo) [=======================>             ] 2/3\r (no-eol) (esc)
-  archiving (foo) [=======================>             ] 2/3\r (no-eol) (esc)
-  archiving (foo) [====================================>] 3/3\r (no-eol) (esc)
   archiving (foo) [====================================>] 3/3\r (no-eol) (esc)
                                                               \r (no-eol) (esc)
   \r (no-eol) (esc)
   archiving (foo/bar) [                                 ] 0/1\r (no-eol) (glob) (esc)
-  archiving (foo/bar) [                                 ] 0/1\r (no-eol) (glob) (esc)
-  archiving (foo/bar) [================================>] 1/1\r (no-eol) (glob) (esc)
   archiving (foo/bar) [================================>] 1/1\r (no-eol) (glob) (esc)
                                                               \r (no-eol) (esc)
+
+(unzip date formating is unstable, we do not care about it and glob it out)
+
+  $ unzip -l ../archive.zip
+  Archive:  ../archive.zip
+    Length [ ]* Date [ ]* Time [ ]* Name (re)
+  [\- ]* (re)
+        172  [0-9:\- ]*  .hg_archival.txt (re)
+         10  [0-9:\- ]*  .hgsub (re)
+         45  [0-9:\- ]*  .hgsubstate (re)
+          3  [0-9:\- ]*  x.txt (re)
+         10  [0-9:\- ]*  foo/.hgsub (re)
+         45  [0-9:\- ]*  foo/.hgsubstate (re)
+          9  [0-9:\- ]*  foo/y.txt (re)
+          9  [0-9:\- ]*  foo/bar/z.txt (re)
+  [\- ]* (re)
+        303  [ ]*        8 files (re)
 
 Test archiving a revision that references a subrepo that is not yet
 cloned:
@@ -363,15 +361,11 @@ cloned:
 
   $ cd ../empty
 #if hardlink
-  $ hg archive --subrepos -r tip ../archive.tar.gz
+  $ hg archive --subrepos -r tip --prefix './' ../archive.tar.gz
   \r (no-eol) (esc)
   archiving [                                           ] 0/3\r (no-eol) (esc)
-  archiving [                                           ] 0/3\r (no-eol) (esc)
-  archiving [=============>                             ] 1/3\r (no-eol) (esc)
   archiving [=============>                             ] 1/3\r (no-eol) (esc)
   archiving [===========================>               ] 2/3\r (no-eol) (esc)
-  archiving [===========================>               ] 2/3\r (no-eol) (esc)
-  archiving [==========================================>] 3/3\r (no-eol) (esc)
   archiving [==========================================>] 3/3\r (no-eol) (esc)
                                                               \r (no-eol) (esc)
   \r (no-eol) (esc)
@@ -386,12 +380,8 @@ cloned:
                                                               \r (no-eol) (esc)
   \r (no-eol) (esc)
   archiving (foo) [                                     ] 0/3\r (no-eol) (esc)
-  archiving (foo) [                                     ] 0/3\r (no-eol) (esc)
-  archiving (foo) [===========>                         ] 1/3\r (no-eol) (esc)
   archiving (foo) [===========>                         ] 1/3\r (no-eol) (esc)
   archiving (foo) [=======================>             ] 2/3\r (no-eol) (esc)
-  archiving (foo) [=======================>             ] 2/3\r (no-eol) (esc)
-  archiving (foo) [====================================>] 3/3\r (no-eol) (esc)
   archiving (foo) [====================================>] 3/3\r (no-eol) (esc)
                                                               \r (no-eol) (esc)
   \r (no-eol) (esc)
@@ -404,8 +394,6 @@ cloned:
                                                               \r (no-eol) (esc)
   \r (no-eol) (esc)
   archiving (foo/bar) [                                 ] 0/1\r (no-eol) (glob) (esc)
-  archiving (foo/bar) [                                 ] 0/1\r (no-eol) (glob) (esc)
-  archiving (foo/bar) [================================>] 1/1\r (no-eol) (glob) (esc)
   archiving (foo/bar) [================================>] 1/1\r (no-eol) (glob) (esc)
                                                               \r (no-eol) (esc)
   cloning subrepo foo from $TESTTMP/repo/foo
@@ -413,38 +401,29 @@ cloned:
 #else
 Note there's a slight output glitch on non-hardlink systems: the last
 "linking" progress topic never gets closed, leading to slight output corruption on that platform.
-  $ hg archive --subrepos -r tip ../archive.tar.gz
+  $ hg archive --subrepos -r tip --prefix './' ../archive.tar.gz
   \r (no-eol) (esc)
   archiving [                                           ] 0/3\r (no-eol) (esc)
-  archiving [                                           ] 0/3\r (no-eol) (esc)
-  archiving [=============>                             ] 1/3\r (no-eol) (esc)
   archiving [=============>                             ] 1/3\r (no-eol) (esc)
   archiving [===========================>               ] 2/3\r (no-eol) (esc)
-  archiving [===========================>               ] 2/3\r (no-eol) (esc)
-  archiving [==========================================>] 3/3\r (no-eol) (esc)
   archiving [==========================================>] 3/3\r (no-eol) (esc)
                                                               \r (no-eol) (esc)
   \r (no-eol) (esc)
   linking [ <=>                                           ] 1\r (no-eol) (esc)
-                                                              \r (no-eol) (esc)
-  \r (no-eol) (esc)
-                                                              \r (no-eol) (esc)
-  \r (no-eol) (esc)
-  linking [  <=>                                          ] 1cloning subrepo foo from $TESTTMP/repo/foo
   cloning subrepo foo/bar from $TESTTMP/repo/foo/bar (glob)
 #endif
 
 Archive + subrepos uses '/' for all component separators
 
   $ tar -tzf ../archive.tar.gz | sort
-  archive/.hg_archival.txt
-  archive/.hgsub
-  archive/.hgsubstate
-  archive/foo/.hgsub
-  archive/foo/.hgsubstate
-  archive/foo/bar/z.txt
-  archive/foo/y.txt
-  archive/x.txt
+  .hg_archival.txt
+  .hgsub
+  .hgsubstate
+  foo/.hgsub
+  foo/.hgsubstate
+  foo/bar/z.txt
+  foo/y.txt
+  x.txt
 
 The newly cloned subrepos contain no working copy:
 

@@ -129,7 +129,7 @@ def _readroots(repo, phasedefaults=None):
         if 'HG_PENDING' in os.environ:
             try:
                 f = repo.svfs('phaseroots.pending')
-            except IOError, inst:
+            except IOError as inst:
                 if inst.errno != errno.ENOENT:
                     raise
         if f is None:
@@ -140,7 +140,7 @@ def _readroots(repo, phasedefaults=None):
                 roots[int(phase)].add(bin(nh))
         finally:
             f.close()
-    except IOError, inst:
+    except IOError as inst:
         if inst.errno != errno.ENOENT:
             raise
         if phasedefaults:
@@ -155,6 +155,7 @@ class phasecache(object):
             # Cheap trick to allow shallow-copy without copy module
             self.phaseroots, self.dirty = _readroots(repo, phasedefaults)
             self._phaserevs = None
+            self._phasesets = None
             self.filterunknown(repo)
             self.opener = repo.svfs
 
@@ -166,10 +167,12 @@ class phasecache(object):
         ph.dirty = self.dirty
         ph.opener = self.opener
         ph._phaserevs = self._phaserevs
+        ph._phasesets = self._phasesets
         return ph
 
     def replace(self, phcache):
-        for a in 'phaseroots dirty opener _phaserevs'.split():
+        """replace all values in 'self' with content of phcache"""
+        for a in ('phaseroots', 'dirty', 'opener', '_phaserevs', '_phasesets'):
             setattr(self, a, getattr(phcache, a))
 
     def _getphaserevsnative(self, repo):
@@ -192,20 +195,22 @@ class phasecache(object):
                 for rev in repo.changelog.descendants(roots):
                     revs[rev] = phase
 
-    def getphaserevs(self, repo):
+    def loadphaserevs(self, repo):
+        """ensure phase information is loaded in the object"""
         if self._phaserevs is None:
             try:
                 if repo.ui.configbool('experimental',
                                       'nativephaseskillswitch'):
                     self._computephaserevspure(repo)
                 else:
-                    self._phaserevs = self._getphaserevsnative(repo)
+                    res = self._getphaserevsnative(repo)
+                    self._phaserevs, self._phasesets = res
             except AttributeError:
                 self._computephaserevspure(repo)
-        return self._phaserevs
 
     def invalidate(self):
         self._phaserevs = None
+        self._phasesets = None
 
     def _populatephaseroots(self, repo):
         """Fills the _phaserevs cache with phases for the roots.
@@ -229,7 +234,7 @@ class phasecache(object):
             raise ValueError(_('cannot lookup negative revision'))
         if self._phaserevs is None or rev >= len(self._phaserevs):
             self.invalidate()
-            self._phaserevs = self.getphaserevs(repo)
+            self.loadphaserevs(repo)
         return self._phaserevs[rev]
 
     def write(self):
@@ -355,7 +360,7 @@ def listphases(repo):
     for root in repo._phasecache.phaseroots[draft]:
         keys[hex(root)] = value
 
-    if repo.ui.configbool('phases', 'publish', True):
+    if repo.publishing():
         # Add an extra data to let remote know we are a publishing
         # repo. Publishing repo can't just pretend they are old repo.
         # When pushing to a publishing repo, the client still need to

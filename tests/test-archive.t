@@ -27,11 +27,11 @@
   >     hg serve -p $HGPORT -d --pid-file=hg.pid -E errors.log
   >     cat hg.pid >> $DAEMON_PIDS
   >     echo % $1 allowed should give 200
-  >     "$TESTDIR/get-with-headers.py" localhost:$HGPORT "archive/tip.$2" | head -n 1
+  >     get-with-headers.py localhost:$HGPORT "archive/tip.$2" | head -n 1
   >     echo % $3 and $4 disallowed should both give 403
-  >     "$TESTDIR/get-with-headers.py" localhost:$HGPORT "archive/tip.$3" | head -n 1
-  >     "$TESTDIR/get-with-headers.py" localhost:$HGPORT "archive/tip.$4" | head -n 1
-  >     "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  >     get-with-headers.py localhost:$HGPORT "archive/tip.$3" | head -n 1
+  >     get-with-headers.py localhost:$HGPORT "archive/tip.$4" | head -n 1
+  >     killdaemons.py
   >     cat errors.log
   >     cp .hg/hgrc-base .hg/hgrc
   > }
@@ -63,7 +63,7 @@ check http return codes
 
 invalid arch type should give 404
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT "archive/tip.invalid" | head -n 1
+  $ get-with-headers.py localhost:$HGPORT "archive/tip.invalid" | head -n 1
   404 Unsupported archive type: None
 
   $ TIP=`hg id -v | cut -f1 -d' '`
@@ -134,7 +134,7 @@ test that we reject unsafe patterns
   $ python getarchive.py "$TIP" gz relre:baz
   HTTP Error 404: file(s) not found: relre:baz
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
 
   $ hg archive -t tar test.tar
   $ tar tf test.tar
@@ -145,7 +145,7 @@ test that we reject unsafe patterns
   test/baz/bletch
   test/foo
 
-  $ hg archive --debug -t tbz2 -X baz test.tar.bz2
+  $ hg archive --debug -t tbz2 -X baz test.tar.bz2 --config progress.debug=true
   archiving: 0/4 files (0.00%)
   archiving: .hgsub 1/4 files (25.00%)
   archiving: .hgsubstate 2/4 files (50.00%)
@@ -282,18 +282,11 @@ enable progress extension:
   $ hg archive ../with-progress
   \r (no-eol) (esc)
   archiving [                                           ] 0/6\r (no-eol) (esc)
-  archiving [                                           ] 0/6\r (no-eol) (esc)
-  archiving [======>                                    ] 1/6\r (no-eol) (esc)
   archiving [======>                                    ] 1/6\r (no-eol) (esc)
   archiving [=============>                             ] 2/6\r (no-eol) (esc)
-  archiving [=============>                             ] 2/6\r (no-eol) (esc)
-  archiving [====================>                      ] 3/6\r (no-eol) (esc)
   archiving [====================>                      ] 3/6\r (no-eol) (esc)
   archiving [===========================>               ] 4/6\r (no-eol) (esc)
-  archiving [===========================>               ] 4/6\r (no-eol) (esc)
   archiving [==================================>        ] 5/6\r (no-eol) (esc)
-  archiving [==================================>        ] 5/6\r (no-eol) (esc)
-  archiving [==========================================>] 6/6\r (no-eol) (esc)
   archiving [==========================================>] 6/6\r (no-eol) (esc)
                                                               \r (no-eol) (esc)
 

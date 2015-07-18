@@ -442,6 +442,40 @@ convert author committer
   abort: --sourcesort is not supported by this data source
   [255]
 
+test converting certain branches
+
+  $ mkdir git-testrevs
+  $ cd git-testrevs
+  $ git init
+  Initialized empty Git repository in $TESTTMP/git-testrevs/.git/
+  $ echo a >> a ; git add a > /dev/null; git commit -m 'first' > /dev/null
+  $ echo a >> a ; git add a > /dev/null; git commit -m 'master commit' > /dev/null
+  $ git checkout -b goodbranch 'HEAD^'
+  Switched to a new branch 'goodbranch'
+  $ echo a >> b ; git add b > /dev/null; git commit -m 'good branch commit' > /dev/null
+  $ git checkout -b badbranch 'HEAD^'
+  Switched to a new branch 'badbranch'
+  $ echo a >> c ; git add c > /dev/null; git commit -m 'bad branch commit' > /dev/null
+  $ cd ..
+  $ hg convert git-testrevs hg-testrevs --rev master --rev goodbranch
+  initializing destination hg-testrevs repository
+  scanning source...
+  sorting...
+  converting...
+  2 first
+  1 good branch commit
+  0 master commit
+  updating bookmarks
+  $ cd hg-testrevs
+  $ hg log -G -T '{rev} {bookmarks}'
+  o  2 master
+  |
+  | o  1 goodbranch
+  |/
+  o  0
+  
+  $ cd ..
+
 test sub modules
 
   $ mkdir git-repo5
@@ -457,6 +491,53 @@ test sub modules
   $ git init-db >/dev/null 2>/dev/null
   $ git submodule add ${BASE} >/dev/null 2>/dev/null
   $ commit -a -m 'addsubmodule' >/dev/null 2>/dev/null
+
+test non-tab whitespace .gitmodules
+
+  $ cat >> .gitmodules <<EOF
+  > [submodule "git-repo5"]
+  >   path = git-repo5
+  >   url = git-repo5
+  > EOF
+  $ git commit -q -a -m "weird white space submodule"
+  $ cd ..
+  $ hg convert git-repo6 hg-repo6
+  initializing destination hg-repo6 repository
+  scanning source...
+  sorting...
+  converting...
+  1 addsubmodule
+  0 weird white space submodule
+  updating bookmarks
+
+  $ rm -rf hg-repo6
+  $ cd git-repo6
+  $ git reset --hard 'HEAD^' > /dev/null
+
+test missing .gitmodules
+
+  $ git submodule add ../git-repo4 >/dev/null 2>/dev/null
+  $ git checkout HEAD .gitmodules
+  $ git rm .gitmodules
+  rm '.gitmodules'
+  $ git commit -q -m "remove .gitmodules" .gitmodules
+  $ git commit -q -m "missing .gitmodules"
+  $ cd ..
+  $ hg convert git-repo6 hg-repo6 --traceback
+  fatal: Path '.gitmodules' does not exist in '*' (glob)
+  initializing destination hg-repo6 repository
+  scanning source...
+  sorting...
+  converting...
+  2 addsubmodule
+  1 remove .gitmodules
+  0 missing .gitmodules
+  warning: cannot read submodules config file in * (glob)
+  updating bookmarks
+  $ rm -rf hg-repo6
+  $ cd git-repo6
+  $ rm -rf git-repo4
+  $ git reset --hard 'HEAD^^' > /dev/null
   $ cd ..
 
 test invalid splicemap1
@@ -560,6 +641,30 @@ submodules)
   remove .gitmodules and submodule git-repo5
   $ hg -R git-repo6-hg tip -T "{file_dels}\n"
   .hgsub .hgsubstate
+
+convert using a different remote prefix
+  $ git init git-repo7
+  Initialized empty Git repository in $TESTTMP/git-repo7/.git/
+  $ cd git-repo7
+  $ touch a && git add a && git commit -am "commit a"
+  [master (root-commit) 8ae5f69] commit a
+   Author: nottest <test@example.org>
+   1 file changed, 0 insertions(+), 0 deletions(-)
+   create mode 100644 a
+  $ cd ..
+  $ git clone git-repo7 git-repo7-client
+  Cloning into 'git-repo7-client'...
+  done.
+  $ hg convert --config convert.git.remoteprefix=origin git-repo7-client hg-repo7
+  initializing destination hg-repo7 repository
+  scanning source...
+  sorting...
+  converting...
+  0 commit a
+  updating bookmarks
+  $ hg -R hg-repo7 bookmarks
+     master                    0:03bf38caa4c6
+     origin/master             0:03bf38caa4c6
 
 damaged git repository tests:
 In case the hard-coded hashes change, the following commands can be used to

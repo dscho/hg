@@ -168,7 +168,60 @@ Test relative path printing + subrepos
   A foo/bar/abc
   A sub1/foo
   R sub1/sub2/test.txt
+
+Archive wdir() with subrepos
+  $ hg rm main
+  $ hg archive -S -r 'wdir()' ../wdir
+  $ diff -r . ../wdir | grep -v '\.hg$'
+  Only in ../wdir: .hg_archival.txt
+
+  $ find ../wdir -type f | sort
+  ../wdir/.hg_archival.txt
+  ../wdir/.hgsub
+  ../wdir/.hgsubstate
+  ../wdir/foo/bar/abc
+  ../wdir/sub1/.hgsub
+  ../wdir/sub1/.hgsubstate
+  ../wdir/sub1/foo
+  ../wdir/sub1/sub1
+  ../wdir/sub1/sub2/folder/test.txt
+  ../wdir/sub1/sub2/sub2
+
+  $ cat ../wdir/.hg_archival.txt
+  repo: 7f491f53a367861f47ee64a80eb997d1f341b77a
+  node: 9bb10eebee29dc0f1201dcf5977b811a540255fd+
+  branch: default
+  latesttag: null
+  latesttagdistance: 4
+  changessincelatesttag: 4
+
+Attempting to archive 'wdir()' with a missing file is handled gracefully
+  $ rm sub1/sub1
+  $ rm -r ../wdir
+  $ hg archive -v -S -r 'wdir()' ../wdir
+  $ find ../wdir -type f | sort
+  ../wdir/.hg_archival.txt
+  ../wdir/.hgsub
+  ../wdir/.hgsubstate
+  ../wdir/foo/bar/abc
+  ../wdir/sub1/.hgsub
+  ../wdir/sub1/.hgsubstate
+  ../wdir/sub1/foo
+  ../wdir/sub1/sub2/folder/test.txt
+  ../wdir/sub1/sub2/sub2
+
+Continue relative path printing + subrepos
   $ hg update -Cq
+  $ rm -r ../wdir
+  $ hg archive -S -r 'wdir()' ../wdir
+  $ cat ../wdir/.hg_archival.txt
+  repo: 7f491f53a367861f47ee64a80eb997d1f341b77a
+  node: 9bb10eebee29dc0f1201dcf5977b811a540255fd
+  branch: default
+  latesttag: null
+  latesttagdistance: 4
+  changessincelatesttag: 4
+
   $ touch sub1/sub2/folder/bar
   $ hg addremove sub1/sub2
   adding sub1/sub2/folder/bar (glob)
@@ -209,14 +262,22 @@ Files sees uncommitted adds and removes in subrepos
   sub1/sub2/folder/bar (glob)
   sub1/sub2/x.txt (glob)
 
-  $ hg files -S -r '.^' sub1/sub2/folder
-  sub1/sub2/folder/test.txt (glob)
+  $ hg files -S "set:eol('dos') or eol('unix') or size('<= 0')"
+  .hgsub
+  .hgsubstate
+  foo/bar/abc (glob)
+  main
+  sub1/.hgsub (glob)
+  sub1/.hgsubstate (glob)
+  sub1/foo (glob)
+  sub1/sub1 (glob)
+  sub1/sub2/folder/bar (glob)
+  sub1/sub2/x.txt (glob)
 
-  $ hg files -S -r '.^' sub1/sub2/missing
-  sub1/sub2/missing: no such file in rev 78026e779ea6 (glob)
-  [1]
-
-  $ hg files -S -r '.^' sub1/
+  $ hg files -r '.^' -S "set:eol('dos') or eol('unix')"
+  .hgsub
+  .hgsubstate
+  main
   sub1/.hgsub (glob)
   sub1/.hgsubstate (glob)
   sub1/sub1 (glob)
@@ -224,7 +285,34 @@ Files sees uncommitted adds and removes in subrepos
   sub1/sub2/sub2 (glob)
   sub1/sub2/test.txt (glob)
 
-  $ hg files -S -r '.^' sub1/sub2
+  $ hg files sub1
+  sub1/.hgsub (glob)
+  sub1/.hgsubstate (glob)
+  sub1/foo (glob)
+  sub1/sub1 (glob)
+  sub1/sub2/folder/bar (glob)
+  sub1/sub2/x.txt (glob)
+
+  $ hg files sub1/sub2
+  sub1/sub2/folder/bar (glob)
+  sub1/sub2/x.txt (glob)
+
+  $ hg files -S -r '.^' sub1/sub2/folder
+  sub1/sub2/folder/test.txt (glob)
+
+  $ hg files -S -r '.^' sub1/sub2/missing
+  sub1/sub2/missing: no such file in rev 78026e779ea6 (glob)
+  [1]
+
+  $ hg files -r '.^' sub1/
+  sub1/.hgsub (glob)
+  sub1/.hgsubstate (glob)
+  sub1/sub1 (glob)
+  sub1/sub2/folder/test.txt (glob)
+  sub1/sub2/sub2 (glob)
+  sub1/sub2/test.txt (glob)
+
+  $ hg files -r '.^' sub1/sub2
   sub1/sub2/folder/test.txt (glob)
   sub1/sub2/sub2 (glob)
   sub1/sub2/test.txt (glob)
@@ -329,17 +417,17 @@ Exclude large files from main and sub-sub repo
 
 Exclude normal files from main and sub-sub repo
 
-  $ hg --config extensions.largefiles= archive -S -X '**.txt' ../archive_lf.tgz
+  $ hg --config extensions.largefiles= archive -S -X '**.txt' -p '.' ../archive_lf.tgz
   $ tar -tzf ../archive_lf.tgz | sort
-  archive_lf/.hgsub
-  archive_lf/.hgsubstate
-  archive_lf/large.bin
-  archive_lf/main
-  archive_lf/sub1/.hgsub
-  archive_lf/sub1/.hgsubstate
-  archive_lf/sub1/sub1
-  archive_lf/sub1/sub2/large.bin
-  archive_lf/sub1/sub2/sub2
+  .hgsub
+  .hgsubstate
+  large.bin
+  main
+  sub1/.hgsub
+  sub1/.hgsubstate
+  sub1/sub1
+  sub1/sub2/large.bin
+  sub1/sub2/sub2
 
 Include normal files from within a largefiles subrepo
 
@@ -434,7 +522,68 @@ largefile and a normal file.  Then a largefile that hasn't been committed yet.
   ? sub1/sub2/untracked.txt
   ? sub1/sub2/x.txt
   $ hg add sub1/sub2
+
+  $ hg archive -S -r 'wdir()' ../wdir2
+  $ diff -r . ../wdir2 | grep -v '\.hg$'
+  Only in ../wdir2: .hg_archival.txt
+  Only in .: .hglf
+  Only in .: foo
+  Only in ./sub1/sub2: large.bin
+  Only in ./sub1/sub2: test.txt
+  Only in ./sub1/sub2: untracked.txt
+  Only in ./sub1/sub2: x.txt
+  $ find ../wdir2 -type f | sort
+  ../wdir2/.hg_archival.txt
+  ../wdir2/.hgsub
+  ../wdir2/.hgsubstate
+  ../wdir2/large.bin
+  ../wdir2/main
+  ../wdir2/sub1/.hgsub
+  ../wdir2/sub1/.hgsubstate
+  ../wdir2/sub1/sub1
+  ../wdir2/sub1/sub2/folder/test.txt
+  ../wdir2/sub1/sub2/large.dat
+  ../wdir2/sub1/sub2/sub2
+  $ hg status -S -mac -n | sort
+  .hgsub
+  .hgsubstate
+  large.bin
+  main
+  sub1/.hgsub
+  sub1/.hgsubstate
+  sub1/sub1
+  sub1/sub2/folder/test.txt
+  sub1/sub2/large.dat
+  sub1/sub2/sub2
+
   $ hg ci -Sqm 'forget testing'
+
+Test 'wdir()' modified file archiving with largefiles
+  $ echo 'mod' > main
+  $ echo 'mod' > large.bin
+  $ echo 'mod' > sub1/sub2/large.dat
+  $ hg archive -S -r 'wdir()' ../wdir3
+  $ diff -r . ../wdir3 | grep -v '\.hg$'
+  Only in ../wdir3: .hg_archival.txt
+  Only in .: .hglf
+  Only in .: foo
+  Only in ./sub1/sub2: large.bin
+  Only in ./sub1/sub2: test.txt
+  Only in ./sub1/sub2: untracked.txt
+  Only in ./sub1/sub2: x.txt
+  $ find ../wdir3 -type f | sort
+  ../wdir3/.hg_archival.txt
+  ../wdir3/.hgsub
+  ../wdir3/.hgsubstate
+  ../wdir3/large.bin
+  ../wdir3/main
+  ../wdir3/sub1/.hgsub
+  ../wdir3/sub1/.hgsubstate
+  ../wdir3/sub1/sub1
+  ../wdir3/sub1/sub2/folder/test.txt
+  ../wdir3/sub1/sub2/large.dat
+  ../wdir3/sub1/sub2/sub2
+  $ hg up -Cq
 
 Test issue4330: commit a directory where only normal files have changed
   $ touch foo/bar/large.dat
@@ -559,5 +708,97 @@ Restore the trashed subrepo tracking
 
   $ hg rollback -q
   $ hg update -Cq .
+
+Interaction with extdiff, largefiles and subrepos
+
+  $ hg --config extensions.extdiff= extdiff -S
+
+  $ hg --config extensions.extdiff= extdiff -r '.^' -S
+  diff -Npru cloned.*/.hgsub cloned/.hgsub (glob)
+  --- cloned.*/.hgsub	* +0000 (glob)
+  +++ cloned/.hgsub	* +0000 (glob)
+  @@ -1,2 +1 @@
+   sub1 = ../sub1
+  -sub3 = sub3
+  diff -Npru cloned.*/.hgsubstate cloned/.hgsubstate (glob)
+  --- cloned.*/.hgsubstate	* +0000 (glob)
+  +++ cloned/.hgsubstate	* +0000 (glob)
+  @@ -1,2 +1 @@
+   7a36fa02b66e61f27f3d4a822809f159479b8ab2 sub1
+  -b1a26de6f2a045a9f079323693614ee322f1ff7e sub3
+  [1]
+
+  $ hg --config extensions.extdiff= extdiff -r 0 -r '.^' -S
+  diff -Npru cloned.*/.hglf/b.dat cloned.*/.hglf/b.dat (glob)
+  --- cloned.*/.hglf/b.dat	* (glob)
+  +++ cloned.*/.hglf/b.dat	* (glob)
+  @@ -0,0 +1 @@
+  +da39a3ee5e6b4b0d3255bfef95601890afd80709
+  diff -Npru cloned.*/.hglf/foo/bar/large.dat cloned.*/.hglf/foo/bar/large.dat (glob)
+  --- cloned.*/.hglf/foo/bar/large.dat	* (glob)
+  +++ cloned.*/.hglf/foo/bar/large.dat	* (glob)
+  @@ -0,0 +1 @@
+  +2f6933b5ee0f5fdd823d9717d8729f3c2523811b
+  diff -Npru cloned.*/.hglf/large.bin cloned.*/.hglf/large.bin (glob)
+  --- cloned.*/.hglf/large.bin	* (glob)
+  +++ cloned.*/.hglf/large.bin	* (glob)
+  @@ -0,0 +1 @@
+  +7f7097b041ccf68cc5561e9600da4655d21c6d18
+  diff -Npru cloned.*/.hgsub cloned.*/.hgsub (glob)
+  --- cloned.*/.hgsub	* (glob)
+  +++ cloned.*/.hgsub	* (glob)
+  @@ -1 +1,2 @@
+   sub1 = ../sub1
+  +sub3 = sub3
+  diff -Npru cloned.*/.hgsubstate cloned.*/.hgsubstate (glob)
+  --- cloned.*/.hgsubstate	* (glob)
+  +++ cloned.*/.hgsubstate	* (glob)
+  @@ -1 +1,2 @@
+  -fc3b4ce2696f7741438c79207583768f2ce6b0dd sub1
+  +7a36fa02b66e61f27f3d4a822809f159479b8ab2 sub1
+  +b1a26de6f2a045a9f079323693614ee322f1ff7e sub3
+  diff -Npru cloned.*/foo/bar/def cloned.*/foo/bar/def (glob)
+  --- cloned.*/foo/bar/def	* (glob)
+  +++ cloned.*/foo/bar/def	* (glob)
+  @@ -0,0 +1 @@
+  +changed
+  diff -Npru cloned.*/main cloned.*/main (glob)
+  --- cloned.*/main	* (glob)
+  +++ cloned.*/main	* (glob)
+  @@ -1 +1 @@
+  -main
+  +foo
+  diff -Npru cloned.*/sub1/.hgsubstate cloned.*/sub1/.hgsubstate (glob)
+  --- cloned.*/sub1/.hgsubstate	* (glob)
+  +++ cloned.*/sub1/.hgsubstate	* (glob)
+  @@ -1 +1 @@
+  -c57a0840e3badd667ef3c3ef65471609acb2ba3c sub2
+  +c77908c81ccea3794a896c79e98b0e004aee2e9e sub2
+  diff -Npru cloned.*/sub1/sub2/folder/test.txt cloned.*/sub1/sub2/folder/test.txt (glob)
+  --- cloned.*/sub1/sub2/folder/test.txt	* (glob)
+  +++ cloned.*/sub1/sub2/folder/test.txt	* (glob)
+  @@ -0,0 +1 @@
+  +subfolder
+  diff -Npru cloned.*/sub1/sub2/sub2 cloned.*/sub1/sub2/sub2 (glob)
+  --- cloned.*/sub1/sub2/sub2	* (glob)
+  +++ cloned.*/sub1/sub2/sub2	* (glob)
+  @@ -1 +1 @@
+  -sub2
+  +modified
+  diff -Npru cloned.*/sub3/a.txt cloned.*/sub3/a.txt (glob)
+  --- cloned.*/sub3/a.txt	* (glob)
+  +++ cloned.*/sub3/a.txt	* (glob)
+  @@ -0,0 +1 @@
+  +xyz
+  [1]
+
+  $ echo mod > sub1/sub2/sub2
+  $ hg --config extensions.extdiff= extdiff -S
+  --- */cloned.*/sub1/sub2/sub2	* (glob)
+  +++ */cloned/sub1/sub2/sub2	* (glob)
+  @@ -1 +1 @@
+  -modified
+  +mod
+  [1]
 
   $ cd ..

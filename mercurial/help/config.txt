@@ -376,8 +376,8 @@ one shown by default::
         HG: --
         HG: user: {author}\n{ifeq(p2rev, "-1", "",
        "HG: branch merge\n")
-       }HG: branch '{branch}'\n{if(currentbookmark,
-       "HG: bookmark '{currentbookmark}'\n")  }{subrepos %
+       }HG: branch '{branch}'\n{if(activebookmark,
+       "HG: bookmark '{activebookmark}'\n")   }{subrepos %
        "HG: subrepo {subrepo}\n"              }{file_adds %
        "HG: added {file}\n"                   }{file_mods %
        "HG: changed {file}\n"                 }{file_dels %
@@ -641,8 +641,8 @@ or ``foo = !`` when path is not supplied.
 Example for ``~/.hgrc``::
 
   [extensions]
-  # (the progress extension will get loaded from Mercurial's path)
-  progress =
+  # (the color extension will get loaded from Mercurial's path)
+  color =
   # (this extension will get loaded from the file specified)
   myfeature = ~/.hgext/myfeature.py
 
@@ -1093,6 +1093,11 @@ command or with Mercurial Queues extension.
     of line, patch line endings are preserved.
     Default: strict.
 
+``fuzz``
+    The number of lines of 'fuzz' to allow when applying patches. This
+    controls how much context the patcher is allowed to ignore when
+    trying to apply a patch.
+    Default: 2
 
 ``paths``
 ---------
@@ -1214,6 +1219,47 @@ profiling is done using lsprof.
     Specific to the ``ls`` instrumenting profiler.
     Default: 5.
 
+``progress``
+------------
+
+Mercurial commands can draw progress bars that are as informative as
+possible. Some progress bars only offer indeterminate information, while others
+have a definite end point.
+
+``delay``
+    Number of seconds (float) before showing the progress bar. (default: 3)
+
+``changedelay``
+    Minimum delay before showing a new topic. When set to less than 3 * refresh,
+    that value will be used instead. (default: 1)
+
+``refresh``
+    Time in seconds between refreshes of the progress bar. (default: 0.1)
+
+``format``
+    Format of the progress bar.
+
+    Valid entries for the format field are ``topic``, ``bar``, ``number``,
+    ``unit``, ``estimate``, speed, and item. item defaults to the last 20
+    characters of the item, but this can be changed by adding either ``-<num>``
+    which would take the last num characters, or ``+<num>`` for the first num
+    characters.
+
+    (default: Topic bar number estimate)
+
+``width``
+    If set, the maximum width of the progress information (that is, min(width,
+    term width) will be used)
+
+``clear-complete``
+    clear the progress bar after it's done (default to True)
+
+``disable``
+    If true, don't show a progress bar
+
+``assume-tty``
+    If true, ALWAYS show a progress bar, unless disable is given
+
 ``revsetalias``
 ---------------
 
@@ -1244,6 +1290,10 @@ Controls generic server settings.
     Whether to validate the completeness of pushed changesets by
     checking that all new file revisions specified in manifests are
     present. Default is False.
+
+``maxhttpheaderlen``
+    Instruct HTTP clients not to send request headers longer than this
+    many bytes. Default is 1024.
 
 ``smtp``
 --------
@@ -1405,6 +1455,19 @@ User interface controls.
     markers is different from the encoding of the merged files,
     serious problems may occur.
 
+``patch``
+    An optional external tool that ``hg import`` and some extensions
+    will use for applying patches. By default Mercurial uses an
+    internal patch utility. The external tool must work as the common
+    Unix ``patch`` program. In particular, it must accept a ``-p``
+    argument to strip patch headers, a ``-d`` argument to specify the
+    current directory, a file name to patch, and a patch file to take
+    from stdin.
+
+    It is possible to specify a patch tool together with extra
+    arguments. For example, setting this option to ``patch --merge``
+    will use the ``patch`` program with its 2-way merge option.
+
 ``portablefilenames``
     Check for portable filenames. Can be ``warn``, ``ignore`` or ``abort``.
     Default is ``warn``.
@@ -1422,10 +1485,6 @@ User interface controls.
 
 ``remotecmd``
     remote command to use for clone/push/pull operations. Default is ``hg``.
-
-``reportoldssl``
-    Warn if an SSL certificate is unable to be used due to using Python
-    2.5 or earlier. True or False. Default is True.
 
 ``report_untrusted``
     Warn if a ``.hg/hgrc`` file is ignored due to not being owned by a
@@ -1584,6 +1643,9 @@ The full set of options is:
 
 ``cache``
     Whether to support caching in hgweb. Defaults to True.
+
+``certificate``
+    Certificate to use when running :hg:`serve`.
 
 ``collapse``
     With ``descend`` enabled, repositories in subdirectories are shown at

@@ -40,7 +40,7 @@ Cloning with a password in the URL should not save the password in .hg/hgrc:
   [ui]
   # name and email (local to this repository, optional), e.g.
   # username = Jane Doe <jdoe@example.com>
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
 
 expect error, cloning not allowed
 
@@ -48,10 +48,14 @@ expect error, cloning not allowed
   $ echo 'allowpull = false' >> .hg/hgrc
   $ hg serve -p $HGPORT -d --pid-file=hg.pid -E errors.log
   $ cat hg.pid >> $DAEMON_PIDS
-  $ hg clone http://localhost:$HGPORT/ test4
+  $ hg clone http://localhost:$HGPORT/ test4 --config experimental.bundle2-exp=True
+  requesting all changes
   abort: authorization failed
   [255]
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ hg clone http://localhost:$HGPORT/ test4 --config experimental.bundle2-exp=False
+  abort: authorization failed
+  [255]
+  $ killdaemons.py
 
 serve errors
 
@@ -60,7 +64,7 @@ serve errors
   >     hg serve -p $HGPORT -d --pid-file=hg.pid -E errors.log
   >     cat hg.pid >> $DAEMON_PIDS
   >     hg --cwd ../test pull http://localhost:$HGPORT/
-  >     "$TESTDIR/killdaemons.py" hg.pid
+  >     killdaemons.py hg.pid
   >     echo % serve errors
   >     cat errors.log
   > }
@@ -69,6 +73,7 @@ expect error, pulling not allowed
 
   $ req
   pulling from http://localhost:$HGPORT/
+  searching for changes
   abort: authorization failed
   % serve errors
 

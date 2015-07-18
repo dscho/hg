@@ -55,7 +55,7 @@ hg serve
 
 hgweb filerevision, html
 
-  $ ("$TESTDIR/get-with-headers.py" localhost:$HGPORT 'file/tip/primes.py') \
+  $ (get-with-headers.py localhost:$HGPORT 'file/tip/primes.py') \
   >     | sed "s/class=\"k\"/class=\"kn\"/g" | sed "s/class=\"mf\"/class=\"mi\"/g"
   200 Script output follows
   
@@ -79,24 +79,24 @@ hgweb filerevision, html
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-  <li><a href="/shortlog/853dcd4de2a6">log</a></li>
-  <li><a href="/graph/853dcd4de2a6">graph</a></li>
+  <li><a href="/shortlog/tip">log</a></li>
+  <li><a href="/graph/tip">graph</a></li>
   <li><a href="/tags">tags</a></li>
   <li><a href="/bookmarks">bookmarks</a></li>
   <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
-  <li><a href="/rev/853dcd4de2a6">changeset</a></li>
-  <li><a href="/file/853dcd4de2a6/">browse</a></li>
+  <li><a href="/rev/tip">changeset</a></li>
+  <li><a href="/file/tip/">browse</a></li>
   </ul>
   <ul>
   <li class="active">file</li>
   <li><a href="/file/tip/primes.py">latest</a></li>
-  <li><a href="/diff/853dcd4de2a6/primes.py">diff</a></li>
-  <li><a href="/comparison/853dcd4de2a6/primes.py">comparison</a></li>
-  <li><a href="/annotate/853dcd4de2a6/primes.py">annotate</a></li>
-  <li><a href="/log/853dcd4de2a6/primes.py">file log</a></li>
-  <li><a href="/raw-file/853dcd4de2a6/primes.py">raw</a></li>
+  <li><a href="/diff/tip/primes.py">diff</a></li>
+  <li><a href="/comparison/tip/primes.py">comparison</a></li>
+  <li><a href="/annotate/tip/primes.py">annotate</a></li>
+  <li><a href="/log/tip/primes.py">file log</a></li>
+  <li><a href="/raw-file/tip/primes.py">raw</a></li>
   </ul>
   <ul>
   <li><a href="/help">help</a></li>
@@ -105,7 +105,10 @@ hgweb filerevision, html
   
   <div class="main">
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>view primes.py @ 0:853dcd4de2a6</h3>
+  <h3>
+   view primes.py @ 0:<a href="/rev/853dcd4de2a6">853dcd4de2a6</a>
+   <span class="tag">tip</span> 
+  </h3>
   
   <form class="search" action="/log">
   
@@ -185,7 +188,7 @@ hgweb filerevision, html
 
 hgweb fileannotate, html
 
-  $ ("$TESTDIR/get-with-headers.py" localhost:$HGPORT 'annotate/tip/primes.py') \
+  $ (get-with-headers.py localhost:$HGPORT 'annotate/tip/primes.py') \
   >     | sed "s/class=\"k\"/class=\"kn\"/g" | sed "s/class=\"mi\"/class=\"mf\"/g"
   200 Script output follows
   
@@ -209,25 +212,25 @@ hgweb fileannotate, html
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-  <li><a href="/shortlog/853dcd4de2a6">log</a></li>
-  <li><a href="/graph/853dcd4de2a6">graph</a></li>
+  <li><a href="/shortlog/tip">log</a></li>
+  <li><a href="/graph/tip">graph</a></li>
   <li><a href="/tags">tags</a></li>
   <li><a href="/bookmarks">bookmarks</a></li>
   <li><a href="/branches">branches</a></li>
   </ul>
   
   <ul>
-  <li><a href="/rev/853dcd4de2a6">changeset</a></li>
-  <li><a href="/file/853dcd4de2a6/">browse</a></li>
+  <li><a href="/rev/tip">changeset</a></li>
+  <li><a href="/file/tip/">browse</a></li>
   </ul>
   <ul>
-  <li><a href="/file/853dcd4de2a6/primes.py">file</a></li>
+  <li><a href="/file/tip/primes.py">file</a></li>
   <li><a href="/file/tip/primes.py">latest</a></li>
-  <li><a href="/diff/853dcd4de2a6/primes.py">diff</a></li>
-  <li><a href="/comparison/853dcd4de2a6/primes.py">comparison</a></li>
+  <li><a href="/diff/tip/primes.py">diff</a></li>
+  <li><a href="/comparison/tip/primes.py">comparison</a></li>
   <li class="active">annotate</li>
-  <li><a href="/log/853dcd4de2a6/primes.py">file log</a></li>
-  <li><a href="/raw-annotate/853dcd4de2a6/primes.py">raw</a></li>
+  <li><a href="/log/tip/primes.py">file log</a></li>
+  <li><a href="/raw-annotate/tip/primes.py">raw</a></li>
   </ul>
   <ul>
   <li><a href="/help">help</a></li>
@@ -236,7 +239,10 @@ hgweb fileannotate, html
   
   <div class="main">
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>annotate primes.py @ 0:853dcd4de2a6</h3>
+  <h3>
+   annotate primes.py @ 0:<a href="/rev/853dcd4de2a6">853dcd4de2a6</a>
+   <span class="tag">tip</span> 
+  </h3>
   
   <form class="search" action="/log">
   
@@ -515,7 +521,7 @@ hgweb fileannotate, html
 
 hgweb fileannotate, raw
 
-  $ ("$TESTDIR/get-with-headers.py" localhost:$HGPORT 'annotate/tip/primes.py?style=raw') \
+  $ (get-with-headers.py localhost:$HGPORT 'annotate/tip/primes.py?style=raw') \
   >     | sed "s/test@//" > a
   $ echo "200 Script output follows" > b
   $ echo "" >> b
@@ -529,7 +535,7 @@ hgweb fileannotate, raw
 
 hgweb filerevision, raw
 
-  $ ("$TESTDIR/get-with-headers.py" localhost:$HGPORT 'file/tip/primes.py?style=raw') \
+  $ (get-with-headers.py localhost:$HGPORT 'file/tip/primes.py?style=raw') \
   >     > a
   $ echo "200 Script output follows" > b
   $ echo "" >> b
@@ -538,7 +544,7 @@ hgweb filerevision, raw
 
 hgweb highlightcss friendly
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'highlightcss' > out
+  $ get-with-headers.py localhost:$HGPORT 'highlightcss' > out
   $ head -n 4 out
   200 Script output follows
   
@@ -549,7 +555,7 @@ hgweb highlightcss friendly
 errors encountered
 
   $ cat errors.log
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
 
 Change the pygments style
 
@@ -565,7 +571,7 @@ hg serve again
 
 hgweb highlightcss fruity
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'highlightcss' > out
+  $ get-with-headers.py localhost:$HGPORT 'highlightcss' > out
   $ head -n 4 out
   200 Script output follows
   
@@ -583,13 +589,13 @@ errors encountered
   $ hg ci -Ama
   adding eucjp.txt
   $ hgserveget () {
-  >     "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  >     killdaemons.py
   >     echo % HGENCODING="$1" hg serve
   >     HGENCODING="$1" hg serve -p $HGPORT -d -n test --pid-file=hg.pid -E errors.log
   >     cat hg.pid >> $DAEMON_PIDS
   > 
   >     echo % hgweb filerevision, html
-  >     "$TESTDIR/get-with-headers.py" localhost:$HGPORT "file/tip/$2" \
+  >     get-with-headers.py localhost:$HGPORT "file/tip/$2" \
   >         | grep '<div class="parity0 source">'
   >     echo % errors encountered
   >     cat errors.log

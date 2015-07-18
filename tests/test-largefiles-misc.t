@@ -228,6 +228,7 @@ verify that large files in subrepos handled properly
   branch: default
   commit: 1 subrepos
   update: (current)
+  phases: 2 draft
   $ hg st
   $ hg st -S
   A subrepo/large.txt
@@ -245,6 +246,7 @@ verify that large files in subrepos handled properly
   branch: default
   commit: (clean)
   update: (current)
+  phases: 3 draft
   $ echo "rev 2" > subrepo/large.txt
   $ hg st -S
   M subrepo/large.txt
@@ -254,6 +256,7 @@ verify that large files in subrepos handled properly
   branch: default
   commit: 1 subrepos
   update: (current)
+  phases: 3 draft
   $ hg ci -m "this commit should fail without -S"
   abort: uncommitted changes in subrepository 'subrepo'
   (use --subrepos for recursive commit)
@@ -567,6 +570,7 @@ because it can't be reproduced easily.
   branch: default
   commit: (clean)
   update: (current)
+  phases: 1 draft
   largefiles: (no remote repo)
 
 check messages when there is no files to upload:
@@ -581,6 +585,7 @@ check messages when there is no files to upload:
   branch: default
   commit: (clean)
   update: (current)
+  phases: 1 draft
   largefiles: (no files to upload)
   $ hg -R clone2 outgoing --large
   comparing with $TESTTMP/issue3651/src (glob)
@@ -608,6 +613,7 @@ check messages when there are files to upload:
   branch: default
   commit: (clean)
   update: (current)
+  phases: 2 draft
   largefiles: 1 entities for 1 files to upload
   $ hg -R clone2 outgoing --large
   comparing with $TESTTMP/issue3651/src (glob)
@@ -643,6 +649,7 @@ check messages when there are files to upload:
   branch: default
   commit: (clean)
   update: (current)
+  phases: 3 draft
   largefiles: 1 entities for 3 files to upload
   $ hg -R clone2 outgoing --large -T "{rev}:{node|short}\n"
   comparing with $TESTTMP/issue3651/src (glob)
@@ -656,7 +663,7 @@ check messages when there are files to upload:
   
   $ hg -R clone2 cat -r 1 clone2/.hglf/b
   89e6c98d92887913cadf06b2adb97f26cde4849b
-  $ hg -R clone2 outgoing --large -T "{rev}:{node|short}\n" --debug
+  $ hg -R clone2 outgoing --large -T "{rev}:{node|short}\n" --debug --config progress.debug=true
   comparing with $TESTTMP/issue3651/src (glob)
   query 1; heads
   searching for changes
@@ -692,6 +699,7 @@ check messages when there are files to upload:
   branch: default
   commit: (clean)
   update: (current)
+  phases: 6 draft
   largefiles: 3 entities for 3 files to upload
   $ hg -R clone2 outgoing --large -T "{rev}:{node|short}\n"
   comparing with $TESTTMP/issue3651/src (glob)
@@ -710,7 +718,7 @@ check messages when there are files to upload:
   c801c9cfe94400963fcb683246217d5db77f9a9a
   $ hg -R clone2 cat -r 4 clone2/.hglf/b
   13f9ed0898e315bf59dc2973fec52037b6f441a2
-  $ hg -R clone2 outgoing --large -T "{rev}:{node|short}\n" --debug
+  $ hg -R clone2 outgoing --large -T "{rev}:{node|short}\n" --debug --config progress.debug=true
   comparing with $TESTTMP/issue3651/src (glob)
   query 1; heads
   searching for changes
@@ -750,6 +758,7 @@ and #5 refer it.
   branch: default
   commit: (clean)
   update: (current)
+  phases: 6 draft
   largefiles: 2 entities for 1 files to upload
   $ hg -R clone2 outgoing --large -T "{rev}:{node|short}\n"
   comparing with $TESTTMP/issue3651/src (glob)
@@ -761,7 +770,7 @@ and #5 refer it.
   largefiles to upload (2 entities):
   b
   
-  $ hg -R clone2 outgoing --large -T "{rev}:{node|short}\n" --debug
+  $ hg -R clone2 outgoing --large -T "{rev}:{node|short}\n" --debug --config progress.debug=true
   comparing with $TESTTMP/issue3651/src (glob)
   query 1; heads
   searching for changes
@@ -975,7 +984,7 @@ locally (issue4109)
   > EOF
   $ hg -R pull-dst -q pull -u http://localhost:$HGPORT
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
 #endif
 
 Test overridden functions work correctly even for repos disabling
@@ -999,10 +1008,6 @@ largefiles (issue4547)
   > EOF
   $ hg clone -q enabled-but-no-largefiles no-largefiles
 
-(test rebasing implied by pull: precommit while rebasing unexpectedly
-shows "normal3" as "?", because lfdirstate isn't yet written out at
-that time)
-
   $ echo normal2 > enabled-but-no-largefiles/normal2
   $ hg -R enabled-but-no-largefiles add enabled-but-no-largefiles/normal2
   $ hg -R enabled-but-no-largefiles commit -m '#1@enabled-but-no-largefiles'
@@ -1017,7 +1022,7 @@ that time)
 
   $ hg -R no-largefiles -q pull --rebase
   Invoking status precommit hook
-  ? normal3
+  A normal3
 
 (test reverting)
 

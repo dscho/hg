@@ -438,7 +438,7 @@ Test rebuilding of map with unknown revisions in shamap - it used to crash
   $ hg ci -m 'merging something'
   $ cd ..
   $ echo "53792d18237d2b64971fa571936869156655338d 6d955580116e82c4b029bd30f321323bae71a7f0" >> branchpruning-hg2/.hg/shamap
-  $ hg convert --filemap branchpruning/filemap branchpruning branchpruning-hg2 --debug
+  $ hg convert --filemap branchpruning/filemap branchpruning branchpruning-hg2 --debug --config progress.debug=true
   run hg source pre-conversion action
   run hg sink pre-conversion action
   scanning source...
@@ -477,7 +477,7 @@ filemap rename undoing revision rename
   2 add
   1 rename
   filtering out empty revision
-  repository tip rolled back to revision 0 (undo commit)
+  repository tip rolled back to revision 0 (undo convert)
   0 modify
   $ glog -R renameundo2
   o  1 "modify" files: a c

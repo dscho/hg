@@ -44,6 +44,13 @@
   > EOF
   > }
 
+  $ cat << EOF >> $HGRCPATH
+  > [experimental]
+  > # drop me once bundle2 is the default,
+  > # added to get test change early.
+  > bundle2-exp = True
+  > EOF
+
   $ hg init a
   $ cd a
   $ mkdir foo foo/Bar quux
@@ -91,37 +98,40 @@ Extension disabled for lack of a hook
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
+  bundle2-input-part: total payload size 1606
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:911600dab2ae7a9baff75958b84fe606851ce955"
+  bundle2-input-bundle: 3 parts total
   updating the branch cache
+  bundle2-output-bundle: "HG20", 2 parts total
+  bundle2-output-part: "reply:changegroup" (advisory) (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "reply:changegroup" (advisory) (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-bundle: 1 parts total
   listing keys for "phases"
-  try to push obsolete markers to remote
   repository tip rolled back to revision 0 (undo push)
   0:6675d58eff77
   
@@ -151,39 +161,42 @@ Extension disabled for lack of acl.sources
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: changes have source "push" - skipping
+  bundle2-input-part: total payload size 1606
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:911600dab2ae7a9baff75958b84fe606851ce955"
+  bundle2-input-bundle: 3 parts total
   updating the branch cache
+  bundle2-output-bundle: "HG20", 2 parts total
+  bundle2-output-part: "reply:changegroup" (advisory) (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "reply:changegroup" (advisory) (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-bundle: 1 parts total
   listing keys for "phases"
-  try to push obsolete markers to remote
   repository tip rolled back to revision 0 (undo push)
   0:6675d58eff77
   
@@ -214,33 +227,26 @@ No [acl.allow]/[acl.deny]
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "fred"
@@ -254,9 +260,19 @@ No [acl.allow]/[acl.deny]
   acl: path access granted: "f9cafe1212c8"
   acl: branch access granted: "911600dab2ae" on branch "default"
   acl: path access granted: "911600dab2ae"
+  bundle2-input-part: total payload size 1606
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:911600dab2ae7a9baff75958b84fe606851ce955"
+  bundle2-input-bundle: 3 parts total
   updating the branch cache
+  bundle2-output-bundle: "HG20", 2 parts total
+  bundle2-output-part: "reply:changegroup" (advisory) (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "reply:changegroup" (advisory) (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-bundle: 1 parts total
   listing keys for "phases"
-  try to push obsolete markers to remote
   repository tip rolled back to revision 0 (undo push)
   0:6675d58eff77
   
@@ -287,33 +303,26 @@ Empty [acl.allow]
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "fred"
@@ -323,6 +332,8 @@ Empty [acl.allow]
   acl: acl.deny not enabled
   acl: branch access granted: "ef1ea85a6374" on branch "default"
   error: pretxnchangegroup.acl hook failed: acl: user "fred" not allowed on "foo/file.txt" (changeset "ef1ea85a6374")
+  bundle2-input-part: total payload size 1606
+  bundle2-input-bundle: 3 parts total
   transaction abort!
   rollback completed
   abort: acl: user "fred" not allowed on "foo/file.txt" (changeset "ef1ea85a6374")
@@ -357,33 +368,26 @@ fred is allowed inside foo/
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "fred"
@@ -397,6 +401,8 @@ fred is allowed inside foo/
   acl: path access granted: "f9cafe1212c8"
   acl: branch access granted: "911600dab2ae" on branch "default"
   error: pretxnchangegroup.acl hook failed: acl: user "fred" not allowed on "quux/file.py" (changeset "911600dab2ae")
+  bundle2-input-part: total payload size 1606
+  bundle2-input-bundle: 3 parts total
   transaction abort!
   rollback completed
   abort: acl: user "fred" not allowed on "quux/file.py" (changeset "911600dab2ae")
@@ -432,33 +438,26 @@ Empty [acl.deny]
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "barney"
@@ -468,6 +467,8 @@ Empty [acl.deny]
   acl: acl.deny enabled, 0 entries for user barney
   acl: branch access granted: "ef1ea85a6374" on branch "default"
   error: pretxnchangegroup.acl hook failed: acl: user "barney" not allowed on "foo/file.txt" (changeset "ef1ea85a6374")
+  bundle2-input-part: total payload size 1606
+  bundle2-input-bundle: 3 parts total
   transaction abort!
   rollback completed
   abort: acl: user "barney" not allowed on "foo/file.txt" (changeset "ef1ea85a6374")
@@ -504,33 +505,26 @@ fred is allowed inside foo/, but not foo/bar/ (case matters)
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "fred"
@@ -544,6 +538,8 @@ fred is allowed inside foo/, but not foo/bar/ (case matters)
   acl: path access granted: "f9cafe1212c8"
   acl: branch access granted: "911600dab2ae" on branch "default"
   error: pretxnchangegroup.acl hook failed: acl: user "fred" not allowed on "quux/file.py" (changeset "911600dab2ae")
+  bundle2-input-part: total payload size 1606
+  bundle2-input-bundle: 3 parts total
   transaction abort!
   rollback completed
   abort: acl: user "fred" not allowed on "quux/file.py" (changeset "911600dab2ae")
@@ -581,33 +577,26 @@ fred is allowed inside foo/, but not foo/Bar/
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "fred"
@@ -619,6 +608,8 @@ fred is allowed inside foo/, but not foo/Bar/
   acl: path access granted: "ef1ea85a6374"
   acl: branch access granted: "f9cafe1212c8" on branch "default"
   error: pretxnchangegroup.acl hook failed: acl: user "fred" denied on "foo/Bar/file.txt" (changeset "f9cafe1212c8")
+  bundle2-input-part: total payload size 1606
+  bundle2-input-bundle: 3 parts total
   transaction abort!
   rollback completed
   abort: acl: user "fred" denied on "foo/Bar/file.txt" (changeset "f9cafe1212c8")
@@ -655,33 +646,26 @@ fred is allowed inside foo/, but not foo/Bar/
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "barney"
@@ -691,6 +675,8 @@ fred is allowed inside foo/, but not foo/Bar/
   acl: acl.deny enabled, 0 entries for user barney
   acl: branch access granted: "ef1ea85a6374" on branch "default"
   error: pretxnchangegroup.acl hook failed: acl: user "barney" not allowed on "foo/file.txt" (changeset "ef1ea85a6374")
+  bundle2-input-part: total payload size 1606
+  bundle2-input-bundle: 3 parts total
   transaction abort!
   rollback completed
   abort: acl: user "barney" not allowed on "foo/file.txt" (changeset "ef1ea85a6374")
@@ -731,33 +717,26 @@ barney is allowed everywhere
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "barney"
@@ -771,9 +750,19 @@ barney is allowed everywhere
   acl: path access granted: "f9cafe1212c8"
   acl: branch access granted: "911600dab2ae" on branch "default"
   acl: path access granted: "911600dab2ae"
+  bundle2-input-part: total payload size 1606
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:911600dab2ae7a9baff75958b84fe606851ce955"
+  bundle2-input-bundle: 3 parts total
   updating the branch cache
+  bundle2-output-bundle: "HG20", 2 parts total
+  bundle2-output-part: "reply:changegroup" (advisory) (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "reply:changegroup" (advisory) (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-bundle: 1 parts total
   listing keys for "phases"
-  try to push obsolete markers to remote
   repository tip rolled back to revision 0 (undo push)
   0:6675d58eff77
   
@@ -811,33 +800,26 @@ wilma can change files with a .txt extension
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "wilma"
@@ -851,6 +833,8 @@ wilma can change files with a .txt extension
   acl: path access granted: "f9cafe1212c8"
   acl: branch access granted: "911600dab2ae" on branch "default"
   error: pretxnchangegroup.acl hook failed: acl: user "wilma" not allowed on "quux/file.py" (changeset "911600dab2ae")
+  bundle2-input-part: total payload size 1606
+  bundle2-input-bundle: 3 parts total
   transaction abort!
   rollback completed
   abort: acl: user "wilma" not allowed on "quux/file.py" (changeset "911600dab2ae")
@@ -894,37 +878,32 @@ file specified by acl.config does not exist
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "barney"
   error: pretxnchangegroup.acl hook raised an exception: [Errno 2] No such file or directory: '../acl.config'
+  bundle2-input-part: total payload size 1606
+  bundle2-input-bundle: 3 parts total
   transaction abort!
   rollback completed
   abort: No such file or directory: ../acl.config
@@ -972,33 +951,26 @@ betty is allowed inside foo/ by a acl.config file
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "betty"
@@ -1012,6 +984,8 @@ betty is allowed inside foo/ by a acl.config file
   acl: path access granted: "f9cafe1212c8"
   acl: branch access granted: "911600dab2ae" on branch "default"
   error: pretxnchangegroup.acl hook failed: acl: user "betty" not allowed on "quux/file.py" (changeset "911600dab2ae")
+  bundle2-input-part: total payload size 1606
+  bundle2-input-bundle: 3 parts total
   transaction abort!
   rollback completed
   abort: acl: user "betty" not allowed on "quux/file.py" (changeset "911600dab2ae")
@@ -1061,33 +1035,26 @@ acl.config can set only [acl.allow]/[acl.deny]
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "barney"
@@ -1101,9 +1068,19 @@ acl.config can set only [acl.allow]/[acl.deny]
   acl: path access granted: "f9cafe1212c8"
   acl: branch access granted: "911600dab2ae" on branch "default"
   acl: path access granted: "911600dab2ae"
+  bundle2-input-part: total payload size 1606
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:911600dab2ae7a9baff75958b84fe606851ce955"
+  bundle2-input-bundle: 3 parts total
   updating the branch cache
+  bundle2-output-bundle: "HG20", 2 parts total
+  bundle2-output-part: "reply:changegroup" (advisory) (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "reply:changegroup" (advisory) (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-bundle: 1 parts total
   listing keys for "phases"
-  try to push obsolete markers to remote
   repository tip rolled back to revision 0 (undo push)
   0:6675d58eff77
   
@@ -1144,33 +1121,26 @@ fred is always allowed
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "fred"
@@ -1184,9 +1154,19 @@ fred is always allowed
   acl: path access granted: "f9cafe1212c8"
   acl: branch access granted: "911600dab2ae" on branch "default"
   acl: path access granted: "911600dab2ae"
+  bundle2-input-part: total payload size 1606
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:911600dab2ae7a9baff75958b84fe606851ce955"
+  bundle2-input-bundle: 3 parts total
   updating the branch cache
+  bundle2-output-bundle: "HG20", 2 parts total
+  bundle2-output-part: "reply:changegroup" (advisory) (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "reply:changegroup" (advisory) (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-bundle: 1 parts total
   listing keys for "phases"
-  try to push obsolete markers to remote
   repository tip rolled back to revision 0 (undo push)
   0:6675d58eff77
   
@@ -1223,33 +1203,26 @@ no one is allowed inside foo/Bar/
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "fred"
@@ -1261,6 +1234,8 @@ no one is allowed inside foo/Bar/
   acl: path access granted: "ef1ea85a6374"
   acl: branch access granted: "f9cafe1212c8" on branch "default"
   error: pretxnchangegroup.acl hook failed: acl: user "fred" denied on "foo/Bar/file.txt" (changeset "f9cafe1212c8")
+  bundle2-input-part: total payload size 1606
+  bundle2-input-bundle: 3 parts total
   transaction abort!
   rollback completed
   abort: acl: user "fred" denied on "foo/Bar/file.txt" (changeset "f9cafe1212c8")
@@ -1304,33 +1279,26 @@ OS-level groups
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "fred"
@@ -1345,9 +1313,19 @@ OS-level groups
   acl: path access granted: "f9cafe1212c8"
   acl: branch access granted: "911600dab2ae" on branch "default"
   acl: path access granted: "911600dab2ae"
+  bundle2-input-part: total payload size 1606
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:911600dab2ae7a9baff75958b84fe606851ce955"
+  bundle2-input-bundle: 3 parts total
   updating the branch cache
+  bundle2-output-bundle: "HG20", 2 parts total
+  bundle2-output-part: "reply:changegroup" (advisory) (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "reply:changegroup" (advisory) (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-bundle: 1 parts total
   listing keys for "phases"
-  try to push obsolete markers to remote
   repository tip rolled back to revision 0 (undo push)
   0:6675d58eff77
   
@@ -1384,33 +1362,26 @@ OS-level groups
   ef1ea85a6374b77d6da9dcda9541f498f2d17df7
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
-  bundling: 1/3 changesets (33.33%)
-  bundling: 2/3 changesets (66.67%)
-  bundling: 3/3 changesets (100.00%)
-  bundling: 1/3 manifests (33.33%)
-  bundling: 2/3 manifests (66.67%)
-  bundling: 3/3 manifests (100.00%)
-  bundling: foo/Bar/file.txt 1/3 files (33.33%)
-  bundling: foo/file.txt 2/3 files (66.67%)
-  bundling: quux/file.py 3/3 files (100.00%)
+  bundle2-output-bundle: "HG20", 4 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
   adding manifests
-  manifests: 1/3 chunks (33.33%)
-  manifests: 2/3 chunks (66.67%)
-  manifests: 3/3 chunks (100.00%)
   adding file changes
   adding foo/Bar/file.txt revisions
-  files: 1/3 chunks (33.33%)
   adding foo/file.txt revisions
-  files: 2/3 chunks (66.67%)
   adding quux/file.py revisions
-  files: 3/3 chunks (100.00%)
   added 3 changesets with 3 changes to 3 files
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "fred"
@@ -1424,6 +1395,8 @@ OS-level groups
   acl: path access granted: "ef1ea85a6374"
   acl: branch access granted: "f9cafe1212c8" on branch "default"
   error: pretxnchangegroup.acl hook failed: acl: user "fred" denied on "foo/Bar/file.txt" (changeset "f9cafe1212c8")
+  bundle2-input-part: total payload size 1606
+  bundle2-input-bundle: 3 parts total
   transaction abort!
   rollback completed
   abort: acl: user "fred" denied on "foo/Bar/file.txt" (changeset "f9cafe1212c8")
@@ -1504,41 +1477,29 @@ No branch acls specified
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
   e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
-  bundling: 1/4 changesets (25.00%)
-  bundling: 2/4 changesets (50.00%)
-  bundling: 3/4 changesets (75.00%)
-  bundling: 4/4 changesets (100.00%)
-  bundling: 1/4 manifests (25.00%)
-  bundling: 2/4 manifests (50.00%)
-  bundling: 3/4 manifests (75.00%)
-  bundling: 4/4 manifests (100.00%)
-  bundling: abc.txt 1/4 files (25.00%)
-  bundling: foo/Bar/file.txt 2/4 files (50.00%)
-  bundling: foo/file.txt 3/4 files (75.00%)
-  bundling: quux/file.py 4/4 files (100.00%)
+  bundle2-output-bundle: "HG20", 5 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
-  changesets: 4 chunks
   add changeset e8fc755d4d82
   adding manifests
-  manifests: 1/4 chunks (25.00%)
-  manifests: 2/4 chunks (50.00%)
-  manifests: 3/4 chunks (75.00%)
-  manifests: 4/4 chunks (100.00%)
   adding file changes
   adding abc.txt revisions
-  files: 1/4 chunks (25.00%)
   adding foo/Bar/file.txt revisions
-  files: 2/4 chunks (50.00%)
   adding foo/file.txt revisions
-  files: 3/4 chunks (75.00%)
   adding quux/file.py revisions
-  files: 4/4 chunks (100.00%)
   added 4 changesets with 4 changes to 4 files (+1 heads)
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "astro"
@@ -1554,9 +1515,23 @@ No branch acls specified
   acl: path access granted: "911600dab2ae"
   acl: branch access granted: "e8fc755d4d82" on branch "foobar"
   acl: path access granted: "e8fc755d4d82"
+  bundle2-input-part: total payload size 2101
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:911600dab2ae7a9baff75958b84fe606851ce955"
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:e8fc755d4d8217ee5b0c2bb41558c40d43b92c01"
+  bundle2-input-bundle: 4 parts total
   updating the branch cache
+  bundle2-output-bundle: "HG20", 3 parts total
+  bundle2-output-part: "reply:changegroup" (advisory) (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "reply:changegroup" (advisory) (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-bundle: 2 parts total
   listing keys for "phases"
-  try to push obsolete markers to remote
   repository tip rolled back to revision 2 (undo push)
   2:fb35475503ef
   
@@ -1590,41 +1565,29 @@ Branch acl deny test
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
   e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
-  bundling: 1/4 changesets (25.00%)
-  bundling: 2/4 changesets (50.00%)
-  bundling: 3/4 changesets (75.00%)
-  bundling: 4/4 changesets (100.00%)
-  bundling: 1/4 manifests (25.00%)
-  bundling: 2/4 manifests (50.00%)
-  bundling: 3/4 manifests (75.00%)
-  bundling: 4/4 manifests (100.00%)
-  bundling: abc.txt 1/4 files (25.00%)
-  bundling: foo/Bar/file.txt 2/4 files (50.00%)
-  bundling: foo/file.txt 3/4 files (75.00%)
-  bundling: quux/file.py 4/4 files (100.00%)
+  bundle2-output-bundle: "HG20", 5 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
-  changesets: 4 chunks
   add changeset e8fc755d4d82
   adding manifests
-  manifests: 1/4 chunks (25.00%)
-  manifests: 2/4 chunks (50.00%)
-  manifests: 3/4 chunks (75.00%)
-  manifests: 4/4 chunks (100.00%)
   adding file changes
   adding abc.txt revisions
-  files: 1/4 chunks (25.00%)
   adding foo/Bar/file.txt revisions
-  files: 2/4 chunks (50.00%)
   adding foo/file.txt revisions
-  files: 3/4 chunks (75.00%)
   adding quux/file.py revisions
-  files: 4/4 chunks (100.00%)
   added 4 changesets with 4 changes to 4 files (+1 heads)
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "astro"
@@ -1639,6 +1602,8 @@ Branch acl deny test
   acl: branch access granted: "911600dab2ae" on branch "default"
   acl: path access granted: "911600dab2ae"
   error: pretxnchangegroup.acl hook failed: acl: user "astro" denied on branch "foobar" (changeset "e8fc755d4d82")
+  bundle2-input-part: total payload size 2101
+  bundle2-input-bundle: 4 parts total
   transaction abort!
   rollback completed
   abort: acl: user "astro" denied on branch "foobar" (changeset "e8fc755d4d82")
@@ -1674,41 +1639,29 @@ Branch acl empty allow test
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
   e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
-  bundling: 1/4 changesets (25.00%)
-  bundling: 2/4 changesets (50.00%)
-  bundling: 3/4 changesets (75.00%)
-  bundling: 4/4 changesets (100.00%)
-  bundling: 1/4 manifests (25.00%)
-  bundling: 2/4 manifests (50.00%)
-  bundling: 3/4 manifests (75.00%)
-  bundling: 4/4 manifests (100.00%)
-  bundling: abc.txt 1/4 files (25.00%)
-  bundling: foo/Bar/file.txt 2/4 files (50.00%)
-  bundling: foo/file.txt 3/4 files (75.00%)
-  bundling: quux/file.py 4/4 files (100.00%)
+  bundle2-output-bundle: "HG20", 5 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
-  changesets: 4 chunks
   add changeset e8fc755d4d82
   adding manifests
-  manifests: 1/4 chunks (25.00%)
-  manifests: 2/4 chunks (50.00%)
-  manifests: 3/4 chunks (75.00%)
-  manifests: 4/4 chunks (100.00%)
   adding file changes
   adding abc.txt revisions
-  files: 1/4 chunks (25.00%)
   adding foo/Bar/file.txt revisions
-  files: 2/4 chunks (50.00%)
   adding foo/file.txt revisions
-  files: 3/4 chunks (75.00%)
   adding quux/file.py revisions
-  files: 4/4 chunks (100.00%)
   added 4 changesets with 4 changes to 4 files (+1 heads)
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "astro"
@@ -1717,6 +1670,8 @@ Branch acl empty allow test
   acl: acl.allow not enabled
   acl: acl.deny not enabled
   error: pretxnchangegroup.acl hook failed: acl: user "astro" not allowed on branch "default" (changeset "ef1ea85a6374")
+  bundle2-input-part: total payload size 2101
+  bundle2-input-bundle: 4 parts total
   transaction abort!
   rollback completed
   abort: acl: user "astro" not allowed on branch "default" (changeset "ef1ea85a6374")
@@ -1754,41 +1709,29 @@ Branch acl allow other
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
   e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
-  bundling: 1/4 changesets (25.00%)
-  bundling: 2/4 changesets (50.00%)
-  bundling: 3/4 changesets (75.00%)
-  bundling: 4/4 changesets (100.00%)
-  bundling: 1/4 manifests (25.00%)
-  bundling: 2/4 manifests (50.00%)
-  bundling: 3/4 manifests (75.00%)
-  bundling: 4/4 manifests (100.00%)
-  bundling: abc.txt 1/4 files (25.00%)
-  bundling: foo/Bar/file.txt 2/4 files (50.00%)
-  bundling: foo/file.txt 3/4 files (75.00%)
-  bundling: quux/file.py 4/4 files (100.00%)
+  bundle2-output-bundle: "HG20", 5 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
-  changesets: 4 chunks
   add changeset e8fc755d4d82
   adding manifests
-  manifests: 1/4 chunks (25.00%)
-  manifests: 2/4 chunks (50.00%)
-  manifests: 3/4 chunks (75.00%)
-  manifests: 4/4 chunks (100.00%)
   adding file changes
   adding abc.txt revisions
-  files: 1/4 chunks (25.00%)
   adding foo/Bar/file.txt revisions
-  files: 2/4 chunks (50.00%)
   adding foo/file.txt revisions
-  files: 3/4 chunks (75.00%)
   adding quux/file.py revisions
-  files: 4/4 chunks (100.00%)
   added 4 changesets with 4 changes to 4 files (+1 heads)
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "astro"
@@ -1797,6 +1740,8 @@ Branch acl allow other
   acl: acl.allow not enabled
   acl: acl.deny not enabled
   error: pretxnchangegroup.acl hook failed: acl: user "astro" not allowed on branch "default" (changeset "ef1ea85a6374")
+  bundle2-input-part: total payload size 2101
+  bundle2-input-bundle: 4 parts total
   transaction abort!
   rollback completed
   abort: acl: user "astro" not allowed on branch "default" (changeset "ef1ea85a6374")
@@ -1828,41 +1773,29 @@ Branch acl allow other
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
   e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
-  bundling: 1/4 changesets (25.00%)
-  bundling: 2/4 changesets (50.00%)
-  bundling: 3/4 changesets (75.00%)
-  bundling: 4/4 changesets (100.00%)
-  bundling: 1/4 manifests (25.00%)
-  bundling: 2/4 manifests (50.00%)
-  bundling: 3/4 manifests (75.00%)
-  bundling: 4/4 manifests (100.00%)
-  bundling: abc.txt 1/4 files (25.00%)
-  bundling: foo/Bar/file.txt 2/4 files (50.00%)
-  bundling: foo/file.txt 3/4 files (75.00%)
-  bundling: quux/file.py 4/4 files (100.00%)
+  bundle2-output-bundle: "HG20", 5 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
-  changesets: 4 chunks
   add changeset e8fc755d4d82
   adding manifests
-  manifests: 1/4 chunks (25.00%)
-  manifests: 2/4 chunks (50.00%)
-  manifests: 3/4 chunks (75.00%)
-  manifests: 4/4 chunks (100.00%)
   adding file changes
   adding abc.txt revisions
-  files: 1/4 chunks (25.00%)
   adding foo/Bar/file.txt revisions
-  files: 2/4 chunks (50.00%)
   adding foo/file.txt revisions
-  files: 3/4 chunks (75.00%)
   adding quux/file.py revisions
-  files: 4/4 chunks (100.00%)
   added 4 changesets with 4 changes to 4 files (+1 heads)
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "george"
@@ -1878,9 +1811,23 @@ Branch acl allow other
   acl: path access granted: "911600dab2ae"
   acl: branch access granted: "e8fc755d4d82" on branch "foobar"
   acl: path access granted: "e8fc755d4d82"
+  bundle2-input-part: total payload size 2101
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:911600dab2ae7a9baff75958b84fe606851ce955"
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:e8fc755d4d8217ee5b0c2bb41558c40d43b92c01"
+  bundle2-input-bundle: 4 parts total
   updating the branch cache
+  bundle2-output-bundle: "HG20", 3 parts total
+  bundle2-output-part: "reply:changegroup" (advisory) (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "reply:changegroup" (advisory) (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-bundle: 2 parts total
   listing keys for "phases"
-  try to push obsolete markers to remote
   repository tip rolled back to revision 2 (undo push)
   2:fb35475503ef
   
@@ -1919,41 +1866,29 @@ push foobar into the remote
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
   e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
-  bundling: 1/4 changesets (25.00%)
-  bundling: 2/4 changesets (50.00%)
-  bundling: 3/4 changesets (75.00%)
-  bundling: 4/4 changesets (100.00%)
-  bundling: 1/4 manifests (25.00%)
-  bundling: 2/4 manifests (50.00%)
-  bundling: 3/4 manifests (75.00%)
-  bundling: 4/4 manifests (100.00%)
-  bundling: abc.txt 1/4 files (25.00%)
-  bundling: foo/Bar/file.txt 2/4 files (50.00%)
-  bundling: foo/file.txt 3/4 files (75.00%)
-  bundling: quux/file.py 4/4 files (100.00%)
+  bundle2-output-bundle: "HG20", 5 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
-  changesets: 4 chunks
   add changeset e8fc755d4d82
   adding manifests
-  manifests: 1/4 chunks (25.00%)
-  manifests: 2/4 chunks (50.00%)
-  manifests: 3/4 chunks (75.00%)
-  manifests: 4/4 chunks (100.00%)
   adding file changes
   adding abc.txt revisions
-  files: 1/4 chunks (25.00%)
   adding foo/Bar/file.txt revisions
-  files: 2/4 chunks (50.00%)
   adding foo/file.txt revisions
-  files: 3/4 chunks (75.00%)
   adding quux/file.py revisions
-  files: 4/4 chunks (100.00%)
   added 4 changesets with 4 changes to 4 files (+1 heads)
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "george"
@@ -1969,9 +1904,23 @@ push foobar into the remote
   acl: path access granted: "911600dab2ae"
   acl: branch access granted: "e8fc755d4d82" on branch "foobar"
   acl: path access granted: "e8fc755d4d82"
+  bundle2-input-part: total payload size 2101
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:911600dab2ae7a9baff75958b84fe606851ce955"
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:e8fc755d4d8217ee5b0c2bb41558c40d43b92c01"
+  bundle2-input-bundle: 4 parts total
   updating the branch cache
+  bundle2-output-bundle: "HG20", 3 parts total
+  bundle2-output-part: "reply:changegroup" (advisory) (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "reply:changegroup" (advisory) (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-bundle: 2 parts total
   listing keys for "phases"
-  try to push obsolete markers to remote
   repository tip rolled back to revision 2 (undo push)
   2:fb35475503ef
   
@@ -2009,41 +1958,29 @@ Branch acl conflicting deny
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
   e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
-  bundling: 1/4 changesets (25.00%)
-  bundling: 2/4 changesets (50.00%)
-  bundling: 3/4 changesets (75.00%)
-  bundling: 4/4 changesets (100.00%)
-  bundling: 1/4 manifests (25.00%)
-  bundling: 2/4 manifests (50.00%)
-  bundling: 3/4 manifests (75.00%)
-  bundling: 4/4 manifests (100.00%)
-  bundling: abc.txt 1/4 files (25.00%)
-  bundling: foo/Bar/file.txt 2/4 files (50.00%)
-  bundling: foo/file.txt 3/4 files (75.00%)
-  bundling: quux/file.py 4/4 files (100.00%)
+  bundle2-output-bundle: "HG20", 5 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
-  changesets: 4 chunks
   add changeset e8fc755d4d82
   adding manifests
-  manifests: 1/4 chunks (25.00%)
-  manifests: 2/4 chunks (50.00%)
-  manifests: 3/4 chunks (75.00%)
-  manifests: 4/4 chunks (100.00%)
   adding file changes
   adding abc.txt revisions
-  files: 1/4 chunks (25.00%)
   adding foo/Bar/file.txt revisions
-  files: 2/4 chunks (50.00%)
   adding foo/file.txt revisions
-  files: 3/4 chunks (75.00%)
   adding quux/file.py revisions
-  files: 4/4 chunks (100.00%)
   added 4 changesets with 4 changes to 4 files (+1 heads)
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "george"
@@ -2052,6 +1989,8 @@ Branch acl conflicting deny
   acl: acl.allow not enabled
   acl: acl.deny not enabled
   error: pretxnchangegroup.acl hook failed: acl: user "george" denied on branch "default" (changeset "ef1ea85a6374")
+  bundle2-input-part: total payload size 2101
+  bundle2-input-bundle: 4 parts total
   transaction abort!
   rollback completed
   abort: acl: user "george" denied on branch "default" (changeset "ef1ea85a6374")
@@ -2088,41 +2027,29 @@ User 'astro' must not be denied
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
   e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
-  bundling: 1/4 changesets (25.00%)
-  bundling: 2/4 changesets (50.00%)
-  bundling: 3/4 changesets (75.00%)
-  bundling: 4/4 changesets (100.00%)
-  bundling: 1/4 manifests (25.00%)
-  bundling: 2/4 manifests (50.00%)
-  bundling: 3/4 manifests (75.00%)
-  bundling: 4/4 manifests (100.00%)
-  bundling: abc.txt 1/4 files (25.00%)
-  bundling: foo/Bar/file.txt 2/4 files (50.00%)
-  bundling: foo/file.txt 3/4 files (75.00%)
-  bundling: quux/file.py 4/4 files (100.00%)
+  bundle2-output-bundle: "HG20", 5 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
-  changesets: 4 chunks
   add changeset e8fc755d4d82
   adding manifests
-  manifests: 1/4 chunks (25.00%)
-  manifests: 2/4 chunks (50.00%)
-  manifests: 3/4 chunks (75.00%)
-  manifests: 4/4 chunks (100.00%)
   adding file changes
   adding abc.txt revisions
-  files: 1/4 chunks (25.00%)
   adding foo/Bar/file.txt revisions
-  files: 2/4 chunks (50.00%)
   adding foo/file.txt revisions
-  files: 3/4 chunks (75.00%)
   adding quux/file.py revisions
-  files: 4/4 chunks (100.00%)
   added 4 changesets with 4 changes to 4 files (+1 heads)
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "astro"
@@ -2138,9 +2065,23 @@ User 'astro' must not be denied
   acl: path access granted: "911600dab2ae"
   acl: branch access granted: "e8fc755d4d82" on branch "foobar"
   acl: path access granted: "e8fc755d4d82"
+  bundle2-input-part: total payload size 2101
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:911600dab2ae7a9baff75958b84fe606851ce955"
+  bundle2-input-part: "pushkey" (params: 4 mandatory) supported
+  pushing key for "phases:e8fc755d4d8217ee5b0c2bb41558c40d43b92c01"
+  bundle2-input-bundle: 4 parts total
   updating the branch cache
+  bundle2-output-bundle: "HG20", 3 parts total
+  bundle2-output-part: "reply:changegroup" (advisory) (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-output-part: "reply:pushkey" (params: 0 advisory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "reply:changegroup" (advisory) (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-part: "reply:pushkey" (params: 0 advisory) supported
+  bundle2-input-bundle: 2 parts total
   listing keys for "phases"
-  try to push obsolete markers to remote
   repository tip rolled back to revision 2 (undo push)
   2:fb35475503ef
   
@@ -2172,41 +2113,29 @@ Non-astro users must be denied
   f9cafe1212c8c6fa1120d14a556e18cc44ff8bdd
   911600dab2ae7a9baff75958b84fe606851ce955
   e8fc755d4d8217ee5b0c2bb41558c40d43b92c01
-  bundling: 1/4 changesets (25.00%)
-  bundling: 2/4 changesets (50.00%)
-  bundling: 3/4 changesets (75.00%)
-  bundling: 4/4 changesets (100.00%)
-  bundling: 1/4 manifests (25.00%)
-  bundling: 2/4 manifests (50.00%)
-  bundling: 3/4 manifests (75.00%)
-  bundling: 4/4 manifests (100.00%)
-  bundling: abc.txt 1/4 files (25.00%)
-  bundling: foo/Bar/file.txt 2/4 files (50.00%)
-  bundling: foo/file.txt 3/4 files (75.00%)
-  bundling: quux/file.py 4/4 files (100.00%)
+  bundle2-output-bundle: "HG20", 5 parts total
+  bundle2-output-part: "replycaps" 155 bytes payload
+  bundle2-output-part: "check:heads" streamed payload
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-output-part: "pushkey" (params: 4 mandatory) empty payload
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "replycaps" supported
+  bundle2-input-part: total payload size 155
+  bundle2-input-part: "check:heads" supported
+  bundle2-input-part: total payload size 20
+  bundle2-input-part: "changegroup" (params: 1 mandatory) supported
   adding changesets
-  changesets: 1 chunks
   add changeset ef1ea85a6374
-  changesets: 2 chunks
   add changeset f9cafe1212c8
-  changesets: 3 chunks
   add changeset 911600dab2ae
-  changesets: 4 chunks
   add changeset e8fc755d4d82
   adding manifests
-  manifests: 1/4 chunks (25.00%)
-  manifests: 2/4 chunks (50.00%)
-  manifests: 3/4 chunks (75.00%)
-  manifests: 4/4 chunks (100.00%)
   adding file changes
   adding abc.txt revisions
-  files: 1/4 chunks (25.00%)
   adding foo/Bar/file.txt revisions
-  files: 2/4 chunks (50.00%)
   adding foo/file.txt revisions
-  files: 3/4 chunks (75.00%)
   adding quux/file.py revisions
-  files: 4/4 chunks (100.00%)
   added 4 changesets with 4 changes to 4 files (+1 heads)
   calling hook pretxnchangegroup.acl: hgext.acl.hook
   acl: checking access for user "george"
@@ -2215,6 +2144,8 @@ Non-astro users must be denied
   acl: acl.allow not enabled
   acl: acl.deny not enabled
   error: pretxnchangegroup.acl hook failed: acl: user "george" denied on branch "default" (changeset "ef1ea85a6374")
+  bundle2-input-part: total payload size 2101
+  bundle2-input-bundle: 4 parts total
   transaction abort!
   rollback completed
   abort: acl: user "george" denied on branch "default" (changeset "ef1ea85a6374")

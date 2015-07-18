@@ -40,6 +40,7 @@ nodes that will maximize the number of nodes that will be
 classified with it (since all ancestors or descendants will be marked as well).
 """
 
+import collections
 from node import nullid, nullrev
 from i18n import _
 import random
@@ -65,7 +66,7 @@ def _updatesample(dag, nodes, sample, quicksamplesize=0):
     else:
         heads = dag.heads()
     dist = {}
-    visit = util.deque(heads)
+    visit = collections.deque(heads)
     seen = set()
     factor = 1
     while visit:
@@ -168,7 +169,7 @@ def findcommonheads(ui, local, remote,
         ui.debug("all remote heads known locally\n")
         return (srvheadhashes, False, srvheadhashes,)
 
-    if sample and len(ownheads) <= initialsamplesize and util.all(yesno):
+    if sample and len(ownheads) <= initialsamplesize and all(yesno):
         ui.note(_("all local heads known remotely\n"))
         ownheadhashes = dag.externalizeall(ownheads)
         return (ownheadhashes, True, srvheadhashes,)

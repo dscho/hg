@@ -70,11 +70,7 @@ def readauthforuri(ui, uri, user):
         gdict[setting] = val
 
     # Find the best match
-    if '://' in uri:
-        scheme, hostpath = uri.split('://', 1)
-    else:
-        # Python 2.4.1 doesn't provide the full URI
-        scheme, hostpath = 'http', uri
+    scheme, hostpath = uri.split('://', 1)
     bestuser = None
     bestlen = 0
     bestauth = None
@@ -130,6 +126,7 @@ class http2handler(urllib2.HTTPHandler, urllib2.HTTPSHandler):
         self.ui = ui
         self.pwmgr = pwmgr
         self._connections = {}
+        # developer config: ui.http2debuglevel
         loglevel = ui.config('ui', 'http2debuglevel', default=None)
         if loglevel and not _configuredlogging:
             _configuredlogging = True
@@ -215,7 +212,7 @@ class http2handler(urllib2.HTTPHandler, urllib2.HTTPSHandler):
                 path = '/' + path
             h.request(req.get_method(), path, req.data, headers)
             r = h.getresponse()
-        except socket.error, err: # XXX what error?
+        except socket.error as err: # XXX what error?
             raise urllib2.URLError(err)
 
         # Pick apart the HTTPResponse object to get the addinfourl
@@ -281,7 +278,7 @@ class http2handler(urllib2.HTTPHandler, urllib2.HTTPSHandler):
         kwargs.update(sslutil.sslkwargs(self.ui, host))
 
         con = HTTPConnection(host, port, use_ssl=True,
-                             ssl_wrap_socket=sslutil.ssl_wrap_socket,
+                             ssl_wrap_socket=sslutil.wrapsocket,
                              ssl_validator=sslutil.validator(self.ui, host),
                              **kwargs)
         return con

@@ -108,7 +108,7 @@ def _verify(repo):
             if p2 not in seen and p2 != nullid:
                 err(lr, _("unknown parent 2 %s of %s") %
                     (short(p2), short(node)), f)
-        except Exception, inst:
+        except Exception as inst:
             exc(lr, _("checking parents of %s") % short(node), inst, f)
 
         if node in seen:
@@ -144,7 +144,7 @@ def _verify(repo):
                 refersmf = True
             for f in changes[3]:
                 filelinkrevs.setdefault(_normpath(f), []).append(i)
-        except Exception, inst:
+        except Exception as inst:
             refersmf = True
             exc(i, _("unpacking changeset %s") % short(n), inst)
     ui.progress(_('checking'), None)
@@ -171,7 +171,7 @@ def _verify(repo):
                     err(lr, _("file without name in manifest"))
                 elif f != "/dev/null": # ignore this in very old repos
                     filenodes.setdefault(_normpath(f), {}).setdefault(fn, lr)
-        except Exception, inst:
+        except Exception as inst:
             exc(lr, _("reading manifest delta %s") % short(n), inst)
     ui.progress(_('checking'), None)
 
@@ -219,6 +219,7 @@ def _verify(repo):
         elif size > 0 or not revlogv1:
             storefiles.add(_normpath(f))
 
+    fncachewarned = False
     files = sorted(set(filenodes) | set(filelinkrevs))
     total = len(files)
     for i, f in enumerate(files):
@@ -236,7 +237,7 @@ def _verify(repo):
 
         try:
             fl = repo.file(f)
-        except error.RevlogError, e:
+        except error.RevlogError as e:
             err(lr, _("broken revlog! (%s)") % e, f)
             continue
 
@@ -244,7 +245,8 @@ def _verify(repo):
             try:
                 storefiles.remove(ff)
             except KeyError:
-                err(lr, _("missing revlog!"), ff)
+                warn(_(" warning: revlog '%s' not in fncache!") % ff)
+                fncachewarned = True
 
         checklog(fl, f, lr)
         seen = {}
@@ -268,9 +270,10 @@ def _verify(repo):
                         err(lr, _("unpacked size is %s, %s expected") %
                             (l, fl.size(i)), f)
             except error.CensoredNodeError:
+                # experimental config: censor.policy
                 if ui.config("censor", "policy", "abort") == "abort":
                     err(lr, _("censored file data"), f)
-            except Exception, inst:
+            except Exception as inst:
                 exc(lr, _("unpacking %s") % short(n), inst, f)
 
             # check renames
@@ -296,7 +299,7 @@ def _verify(repo):
                             % (f, lr, rp[0], short(rp[1])))
                     else:
                         fl2.rev(rp[1])
-            except Exception, inst:
+            except Exception as inst:
                 exc(lr, _("checking rename of %s") % short(n), inst, f)
 
         # cross-check
@@ -313,6 +316,9 @@ def _verify(repo):
                    (len(files), len(cl), revisions))
     if warnings[0]:
         ui.warn(_("%d warnings encountered!\n") % warnings[0])
+    if fncachewarned:
+        ui.warn(_('hint: run "hg debugrebuildfncache" to recover from '
+                  'corrupt fncache\n'))
     if errors[0]:
         ui.warn(_("%d integrity errors encountered!\n") % errors[0])
         if badrevs:

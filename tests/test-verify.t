@@ -44,17 +44,19 @@ introduce some bugs in repo
   checking manifests
   crosschecking files in changesets and manifests
   checking files
-   data/FOO.txt.i@0: missing revlog!
+   warning: revlog 'data/FOO.txt.i' not in fncache!
    0: empty or missing FOO.txt
    FOO.txt@0: f62022d3d590 in manifests not found
-   data/QUICK.txt.i@0: missing revlog!
+   warning: revlog 'data/QUICK.txt.i' not in fncache!
    0: empty or missing QUICK.txt
    QUICK.txt@0: 88b857db8eba in manifests not found
-   data/bar.txt.i@0: missing revlog!
+   warning: revlog 'data/bar.txt.i' not in fncache!
    0: empty or missing bar.txt
    bar.txt@0: 256559129457 in manifests not found
   3 files, 1 changesets, 0 total revisions
-  9 integrity errors encountered!
+  3 warnings encountered!
+  hint: run "hg debugrebuildfncache" to recover from corrupt fncache
+  6 integrity errors encountered!
   (first damaged changeset appears to be 0)
   [1]
 
@@ -103,7 +105,7 @@ test revlog corruption
 
 test revlog format 0
 
-  $ "$TESTDIR/revlog-formatv0.py"
+  $ revlog-formatv0.py
   $ cd formatv0
   $ hg verify
   repository uses revlog format 0

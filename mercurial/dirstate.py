@@ -7,8 +7,9 @@
 
 from node import nullid
 from i18n import _
-import scmutil, util, ignore, osutil, parsers, encoding, pathutil
+import scmutil, util, osutil, parsers, encoding, pathutil
 import os, stat, errno
+import match as matchmod
 
 propertycache = util.propertycache
 filecache = scmutil.filecache
@@ -47,6 +48,7 @@ class dirstate(object):
         self._ui = ui
         self._filecache = {}
         self._parentwriters = 0
+        self._filename = 'dirstate'
 
     def beginparentchange(self):
         '''Marks the beginning of a set of changes that involve changing
@@ -113,7 +115,7 @@ class dirstate(object):
     def _branch(self):
         try:
             return self._opener.read("branch").strip() or "default"
-        except IOError, inst:
+        except IOError as inst:
             if inst.errno != errno.ENOENT:
                 raise
             return "default"
@@ -121,7 +123,7 @@ class dirstate(object):
     @propertycache
     def _pl(self):
         try:
-            fp = self._opener("dirstate")
+            fp = self._opener(self._filename)
             st = fp.read(40)
             fp.close()
             l = len(st)
@@ -129,7 +131,7 @@ class dirstate(object):
                 return st[:20], st[20:40]
             elif l > 0 and l < 40:
                 raise util.Abort(_('working directory state appears damaged!'))
-        except IOError, err:
+        except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
         return [nullid, nullid]
@@ -143,13 +145,20 @@ class dirstate(object):
 
     @rootcache('.hgignore')
     def _ignore(self):
-        files = [self._join('.hgignore')]
+        files = []
+        if os.path.exists(self._join('.hgignore')):
+            files.append(self._join('.hgignore'))
         for name, path in self._ui.configitems("ui"):
             if name == 'ignore' or name.startswith('ignore.'):
                 # we need to use os.path.join here rather than self._join
                 # because path is arbitrary and user-specified
                 files.append(os.path.join(self._rootdir, util.expandpath(path)))
-        return ignore.ignore(self._root, files, self._ui.warn)
+
+        if not files:
+            return util.never
+
+        pats = ['include:%s' % f for f in files]
+        return matchmod.match(self._root, '', [], pats, warn=self._ui.warn)
 
     @propertycache
     def _slash(self):
@@ -317,13 +326,30 @@ class dirstate(object):
         self._map = {}
         self._copymap = {}
         try:
-            st = self._opener.read("dirstate")
-        except IOError, err:
+            fp = self._opener.open(self._filename)
+            try:
+                st = fp.read()
+            finally:
+                fp.close()
+        except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
             return
         if not st:
             return
+
+        if util.safehasattr(parsers, 'dict_new_presized'):
+            # Make an estimate of the number of files in the dirstate based on
+            # its size. From a linear regression on a set of real-world repos,
+            # all over 10,000 files, the size of a dirstate entry is 85
+            # bytes. The cost of resizing is significantly higher than the cost
+            # of filling in a larger presized dict, so subtract 20% from the
+            # size.
+            #
+            # This heuristic is imperfect in many ways, so in a future dirstate
+            # format update it makes sense to just record the number of entries
+            # on write.
+            self._map = parsers.dict_new_presized(len(st) / 71)
 
         # Python's garbage collector triggers a GC each time a certain number
         # of container objects (the number being defined by
@@ -559,7 +585,8 @@ class dirstate(object):
         self._dirty = True
 
     def rebuild(self, parent, allfiles, changedfiles=None):
-        changedfiles = changedfiles or allfiles
+        if changedfiles is None:
+            changedfiles = allfiles
         oldmap = self._map
         self.clear()
         for f in allfiles:
@@ -567,9 +594,9 @@ class dirstate(object):
                 self._map[f] = oldmap[f]
             else:
                 if 'x' in allfiles.flags(f):
-                    self._map[f] = dirstatetuple('n', 0777, -1, 0)
+                    self._map[f] = dirstatetuple('n', 0o777, -1, 0)
                 else:
-                    self._map[f] = dirstatetuple('n', 0666, -1, 0)
+                    self._map[f] = dirstatetuple('n', 0o666, -1, 0)
         self._pl = (parent, nullid)
         self._dirty = True
 
@@ -584,7 +611,7 @@ class dirstate(object):
             import time # to avoid useless import
             time.sleep(delaywrite)
 
-        st = self._opener("dirstate", "w", atomictemp=True)
+        st = self._opener(self._filename, "w", atomictemp=True)
         # use the modification time of the newly created temporary file as the
         # filesystem's notion of 'now'
         now = util.fstat(st).st_mtime
@@ -690,7 +717,7 @@ class dirstate(object):
                     badfn(ff, badtype(kind))
                     if nf in dmap:
                         results[nf] = None
-            except OSError, inst: # nf not found on disk - it is dirstate only
+            except OSError as inst: # nf not found on disk - it is dirstate only
                 if nf in dmap: # does it exactly match a missing file?
                     results[nf] = None
                 else: # does it match a missing directory?
@@ -746,7 +773,7 @@ class dirstate(object):
         if match.isexact(): # match.exact
             exact = True
             dirignore = util.always # skip step 2
-        elif match.files() and not match.anypats(): # match.match, no patterns
+        elif match.prefix(): # match.match, no patterns
             skipstep3 = True
 
         if not exact and self._checkcase:
@@ -775,7 +802,7 @@ class dirstate(object):
                     skip = '.hg'
                 try:
                     entries = listdir(join(nd), stat=True, skip=skip)
-                except OSError, inst:
+                except OSError as inst:
                     if inst.errno in (errno.EACCES, errno.ENOENT):
                         match.bad(self.pathto(nd), inst.strerror)
                         continue
@@ -936,7 +963,7 @@ class dirstate(object):
                 mtime = int(st.st_mtime)
                 if (size >= 0 and
                     ((size != st.st_size and size != st.st_size & _rangemask)
-                     or ((mode ^ st.st_mode) & 0100 and checkexec))
+                     or ((mode ^ st.st_mode) & 0o100 and checkexec))
                     or size == -2 # other parent
                     or fn in copymap):
                     madd(fn)
@@ -972,7 +999,7 @@ class dirstate(object):
             # fast path -- filter the other way around, since typically files is
             # much smaller than dmap
             return [f for f in files if f in dmap]
-        if not match.anypats() and util.all(fn in dmap for fn in files):
+        if match.prefix() and all(fn in dmap for fn in files):
             # fast path -- all the values are known to be files, so just return
             # that
             return list(files)

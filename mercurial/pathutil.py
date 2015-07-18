@@ -1,4 +1,4 @@
-import os, errno, stat
+import os, errno, stat, posixpath
 
 import encoding
 import util
@@ -76,7 +76,7 @@ class pathauditor(object):
             curpath = os.path.join(self.root, prefix)
             try:
                 st = os.lstat(curpath)
-            except OSError, err:
+            except OSError as err:
                 # EINVAL can be raised as invalid path syntax under win32.
                 # They must be ignored for patterns can be checked too.
                 if err.errno not in (errno.ENOENT, errno.ENOTDIR, errno.EINVAL):
@@ -152,7 +152,19 @@ def canonpath(root, cwd, myname, auditor=None):
                 break
             name = dirname
 
-        raise util.Abort(_("%s not under root '%s'") % (myname, root))
+        # A common mistake is to use -R, but specify a file relative to the repo
+        # instead of cwd.  Detect that case, and provide a hint to the user.
+        hint = None
+        try:
+            if cwd != root:
+                canonpath(root, root, myname, auditor)
+                hint = (_("consider using '--cwd %s'")
+                        % os.path.relpath(root, cwd))
+        except util.Abort:
+            pass
+
+        raise util.Abort(_("%s not under root '%s'") % (myname, root),
+                         hint=hint)
 
 def normasprefix(path):
     '''normalize the specified path as path prefix
@@ -175,3 +187,9 @@ def normasprefix(path):
         return path + os.sep
     else:
         return path
+
+# forward two methods from posixpath that do what we need, but we'd
+# rather not let our internals know that we're thinking in posix terms
+# - instead we'll let them be oblivious.
+join = posixpath.join
+dirname = posixpath.dirname

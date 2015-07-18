@@ -393,6 +393,7 @@ test summary
   bookmarks: *Z Y x  y
   commit: (clean)
   update: 1 new changesets, 2 branch heads (merge)
+  phases: 3 draft
 
 test id
 
@@ -402,10 +403,15 @@ test id
 test rollback
 
   $ echo foo > f1
+  $ hg bookmark tmp-rollback
   $ hg ci -Amr
   adding f1
-  $ hg bookmark -f Y -r 1
-  $ hg bookmark -f Z -r 1
+  $ hg bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+     Z                         2:db815d6d32e6
+   * tmp-rollback              3:2bf5cfec5864
+     x  y                      2:db815d6d32e6
   $ hg rollback
   repository tip rolled back to revision 2 (undo commit)
   working directory now based on revision 2
@@ -413,7 +419,18 @@ test rollback
      X2                        1:925d80f479bb
      Y                         2:db815d6d32e6
      Z                         2:db815d6d32e6
+   * tmp-rollback              2:db815d6d32e6
      x  y                      2:db815d6d32e6
+  $ hg bookmark -f Z -r 1
+  $ hg rollback
+  repository tip rolled back to revision 2 (undo bookmark)
+  $ hg bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+     Z                         2:db815d6d32e6
+   * tmp-rollback              2:db815d6d32e6
+     x  y                      2:db815d6d32e6
+  $ hg bookmark -d tmp-rollback
 
 activate bookmark on working dir parent without --force
 
@@ -529,7 +546,7 @@ create bundle with two heads
   added 2 changesets with 2 changes to 2 files (+1 heads)
   (run 'hg heads' to see heads, 'hg merge' to merge)
 
-update to current bookmark if it's not the parent
+update to active bookmark if it's not the parent
 
   $ hg summary
   parent: 2:db815d6d32e6 
@@ -538,6 +555,7 @@ update to current bookmark if it's not the parent
   bookmarks: *Z Y x  y
   commit: 1 added, 1 unknown (new branch head)
   update: 2 new changesets (update)
+  phases: 5 draft
   $ hg update
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   updating bookmark Z
@@ -655,6 +673,31 @@ tipmost surviving ancestor of the stripped revision.
      date:        Thu Jan 01 00:00:00 1970 +0000
      summary:     0
   
+test non-linear update not clearing active bookmark
+
+  $ hg up 1
+  1 files updated, 0 files merged, 2 files removed, 0 files unresolved
+  (leaving bookmark four)
+  $ hg book drop
+  $ hg up -C
+  1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  (leaving bookmark drop)
+  $ hg sum
+  parent: 2:db815d6d32e6 
+   2
+  branch: default
+  bookmarks: should-end-on-two
+  commit: 2 unknown (clean)
+  update: 1 new changesets, 2 branch heads (merge)
+  phases: 4 draft
+  $ hg book
+     drop                      1:925d80f479bb
+     four                      3:9ba5f110a0b3
+     should-end-on-two         2:db815d6d32e6
+  $ hg book -d drop
+  $ hg up four
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  (activating bookmark four)
 
 test clearing divergent bookmarks of linear ancestors
 

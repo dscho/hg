@@ -59,10 +59,6 @@ You can set patchbomb to always ask for confirmation by setting
 
 import os, errno, socket, tempfile, cStringIO
 import email
-# On python2.4 you have to import these by name or they fail to
-# load. This was not a problem on Python 2.7.
-import email.Generator
-import email.MIMEMultipart
 
 from mercurial import cmdutil, commands, hg, mail, patch, util
 from mercurial import scmutil
@@ -71,6 +67,10 @@ from mercurial.node import bin
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 def prompt(ui, prompt, default=None, rest=':'):
@@ -514,6 +514,7 @@ def patchbomb(ui, repo, *revs, **opts):
     def genmsgid(id):
         return '<%s.%s@%s>' % (id[:20], int(start_time[0]), socket.getfqdn())
 
+    # deprecated config: patchbomb.from
     sender = (opts.get('from') or ui.config('email', 'from') or
               ui.config('patchbomb', 'from') or
               prompt(ui, 'From', ui.username()))
@@ -628,14 +629,14 @@ def patchbomb(ui, repo, *revs, **opts):
             try:
                 generator.flatten(m, 0)
                 fp.write('\n')
-            except IOError, inst:
+            except IOError as inst:
                 if inst.errno != errno.EPIPE:
                     raise
             if fp is not ui:
                 fp.close()
         else:
             if not sendmail:
-                verifycert = ui.config('smtp', 'verifycert')
+                verifycert = ui.config('smtp', 'verifycert', 'strict')
                 if opts.get('insecure'):
                     ui.setconfig('smtp', 'verifycert', 'loose', 'patchbomb')
                 try:

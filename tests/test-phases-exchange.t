@@ -1,5 +1,12 @@
 #require killdaemons
 
+  $ cat << EOF >> $HGRCPATH
+  > [experimental]
+  > # drop me once bundle2 is the default,
+  > # added to get test change early.
+  > bundle2-exp = True
+  > EOF
+
   $ hgph() { hg log -G --template "{rev} {phase} {desc} - {node|short}\n" $*; }
 
   $ mkcommit() {
@@ -765,9 +772,9 @@ Bare push with next changeset and common changeset needing sync (issue3575)
   searching for changes
   1 changesets found
   uncompressed size of bundle content:
-       172 (changelog)
-       145 (manifests)
-       111  a-H
+       192 (changelog)
+       165 (manifests)
+       131  a-H
   adding changesets
   adding manifests
   adding file changes
@@ -1041,7 +1048,16 @@ same over the wire
   $ cat ../beta.pid >> $DAEMON_PIDS
   $ cd ../gamma
 
-  $ hg pull http://localhost:$HGPORT/
+  $ hg pull http://localhost:$HGPORT/ --config experimental.bundle2-exp=True
+  pulling from http://localhost:$HGPORT/
+  searching for changes
+  no changes found
+  $ hg phase f54f1bb90ff3
+  2: draft
+
+enforce bundle1
+
+  $ hg pull http://localhost:$HGPORT/ --config experimental.bundle2-exp=False
   pulling from http://localhost:$HGPORT/
   searching for changes
   no changes found
@@ -1177,6 +1193,6 @@ server won't turn changeset public.
 
   $ cd ..
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
 
 #endif

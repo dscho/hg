@@ -26,6 +26,15 @@ perms = {
     'pushkey': 'push',
 }
 
+## Files of interest
+# Used to check if the repository has changed looking at mtime and size of
+# theses files. This should probably be relocated a bit higher in core.
+foi = [('spath', '00changelog.i'),
+       ('spath', 'phaseroots'), # ! phase can change content at the same size
+       ('spath', 'obsstore'),
+       ('path', 'bookmarks'), # ! bookmark can change content at the same size
+      ]
+
 def makebreadcrumb(url, prefix=''):
     '''Return a 'URL breadcrumb' list
 
@@ -69,6 +78,10 @@ class hgweb(object):
         r.baseui.setconfig('ui', 'report_untrusted', 'off', 'hgweb')
         r.ui.setconfig('ui', 'nontty', 'true', 'hgweb')
         r.baseui.setconfig('ui', 'nontty', 'true', 'hgweb')
+        # displaying bundling progress bar while serving feel wrong and may
+        # break some wsgi implementation.
+        r.ui.setconfig('progress', 'disable', 'true', 'hgweb')
+        r.baseui.setconfig('progress', 'disable', 'true', 'hgweb')
         self.repo = r
         hook.redirect(True)
         self.repostate = ((-1, -1), (-1, -1))
@@ -96,6 +109,16 @@ class hgweb(object):
                                        untrusted=untrusted)
 
     def _getview(self, repo):
+        """The 'web.view' config controls changeset filter to hgweb. Possible
+        values are ``served``, ``visible`` and ``all``. Default is ``served``.
+        The ``served`` filter only shows changesets that can be pulled from the
+        hgweb instance.  The``visible`` filter includes secret changesets but
+        still excludes "hidden" one.
+
+        See the repoview module for details.
+
+        The option has been around undocumented since Mercurial 2.5, but no
+        user ever asked about it. So we better keep it undocumented for now."""
         viewconfig = repo.ui.config('web', 'view', 'served',
                                     untrusted=True)
         if viewconfig == 'all':
@@ -106,10 +129,13 @@ class hgweb(object):
             return repo.filtered('served')
 
     def refresh(self, request=None):
-        st = get_stat(self.repo.spath)
-        pst = get_stat(self.repo.spath, 'phaseroots')
-        # changelog mtime and size, phaseroots mtime and size
-        repostate = ((st.st_mtime, st.st_size), (pst.st_mtime, pst.st_size))
+        repostate = []
+        # file of interrests mtime and size
+        for meth, fname in foi:
+            prefix = getattr(self.repo, meth)
+            st = get_stat(prefix, fname)
+            repostate.append((st.st_mtime, st.st_size))
+        repostate = tuple(repostate)
         # we need to compare file size in addition to mtime to catch
         # changes made less than a second ago
         if repostate != self.repostate:
@@ -176,7 +202,7 @@ class hgweb(object):
                 if cmd in perms:
                     self.check_perm(req, perms[cmd])
                 return protocol.call(self.repo, req, cmd)
-            except ErrorResponse, inst:
+            except ErrorResponse as inst:
                 # A client that sends unbundle without 100-continue will
                 # break if we respond early.
                 if (cmd == 'unbundle' and
@@ -209,7 +235,7 @@ class hgweb(object):
                 req.form['file'] = ['/'.join(args)]
             else:
                 if args and args[0]:
-                    node = args.pop(0)
+                    node = args.pop(0).replace('%2F', '/')
                     req.form['node'] = [node]
                 if args:
                     req.form['file'] = args
@@ -255,17 +281,17 @@ class hgweb(object):
 
             return content
 
-        except (error.LookupError, error.RepoLookupError), err:
+        except (error.LookupError, error.RepoLookupError) as err:
             req.respond(HTTP_NOT_FOUND, ctype)
             msg = str(err)
             if (util.safehasattr(err, 'name') and
                 not isinstance(err,  error.ManifestLookupError)):
                 msg = 'revision not found: %s' % err.name
             return tmpl('error', error=msg)
-        except (error.RepoError, error.RevlogError), inst:
+        except (error.RepoError, error.RevlogError) as inst:
             req.respond(HTTP_SERVER_ERROR, ctype)
             return tmpl('error', error=str(inst))
-        except ErrorResponse, inst:
+        except ErrorResponse as inst:
             req.respond(inst, ctype)
             if inst.code == HTTP_NOT_MODIFIED:
                 # Not allowed to return a body on a 304

@@ -41,6 +41,10 @@ from mercurial import cmdutil, context, patch, scmutil, util, hg
 from mercurial.i18n import _
 from mercurial.node import nullrev, nullid, short
 
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 cmdtable = {}
@@ -249,7 +253,7 @@ def synthesize(ui, repo, descpath, **opts):
     '''
     try:
         fp = hg.openpath(ui, descpath)
-    except Exception, err:
+    except Exception as err:
         raise util.Abort('%s: %s' % (descpath, err[0].strerror))
     desc = json.load(fp)
     fp.close()
@@ -281,7 +285,7 @@ def synthesize(ui, repo, descpath, **opts):
     dictfile = opts.get('dict') or '/usr/share/dict/words'
     try:
         fp = open(dictfile, 'rU')
-    except IOError, err:
+    except IOError as err:
         raise util.Abort('%s: %s' % (dictfile, err.strerror))
     words = fp.read().splitlines()
     fp.close()

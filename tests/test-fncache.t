@@ -48,13 +48,28 @@ Testing verify:
   checking manifests
   crosschecking files in changesets and manifests
   checking files
-   data/a.i@0: missing revlog!
-   data/a.i.hg/c.i@2: missing revlog!
-   data/a.i/b.i@1: missing revlog!
+   warning: revlog 'data/a.i' not in fncache!
+   warning: revlog 'data/a.i.hg/c.i' not in fncache!
+   warning: revlog 'data/a.i/b.i' not in fncache!
   3 files, 3 changesets, 3 total revisions
-  3 integrity errors encountered!
-  (first damaged changeset appears to be 0)
-  [1]
+  3 warnings encountered!
+  hint: run "hg debugrebuildfncache" to recover from corrupt fncache
+
+Follow the hint to make sure it works
+
+  $ hg debugrebuildfncache
+  adding data/a.i
+  adding data/a.i.hg/c.i
+  adding data/a.i/b.i
+  3 items added, 0 removed from fncache
+
+  $ hg verify
+  checking changesets
+  checking manifests
+  crosschecking files in changesets and manifests
+  checking files
+  3 files, 3 changesets, 3 total revisions
+
   $ cd ..
 
 Non store repo:
@@ -285,3 +300,98 @@ Aborted transactions can be recovered later
   1 files, 1 changesets, 1 total revisions
   $ cat .hg/store/fncache
   data/y.i
+
+  $ cd ..
+
+debugrebuildfncache does nothing unless repo has fncache requirement
+
+  $ hg --config format.usefncache=false init nofncache
+  $ cd nofncache
+  $ hg debugrebuildfncache
+  (not rebuilding fncache because repository does not support fncache
+
+  $ cd ..
+
+debugrebuildfncache works on empty repository
+
+  $ hg init empty
+  $ cd empty
+  $ hg debugrebuildfncache
+  fncache already up to date
+  $ cd ..
+
+debugrebuildfncache on an up to date repository no-ops
+
+  $ hg init repo
+  $ cd repo
+  $ echo initial > foo
+  $ echo initial > .bar
+  $ hg commit -A -m initial
+  adding .bar
+  adding foo
+
+  $ cat .hg/store/fncache | sort
+  data/.bar.i
+  data/foo.i
+
+  $ hg debugrebuildfncache
+  fncache already up to date
+
+debugrebuildfncache restores deleted fncache file
+
+  $ rm -f .hg/store/fncache
+  $ hg debugrebuildfncache
+  adding data/.bar.i
+  adding data/foo.i
+  2 items added, 0 removed from fncache
+
+  $ cat .hg/store/fncache | sort
+  data/.bar.i
+  data/foo.i
+
+Rebuild after rebuild should no-op
+
+  $ hg debugrebuildfncache
+  fncache already up to date
+
+A single missing file should get restored, an extra file should be removed
+
+  $ cat > .hg/store/fncache << EOF
+  > data/foo.i
+  > data/bad-entry.i
+  > EOF
+
+  $ hg debugrebuildfncache
+  removing data/bad-entry.i
+  adding data/.bar.i
+  1 items added, 1 removed from fncache
+
+  $ cat .hg/store/fncache | sort
+  data/.bar.i
+  data/foo.i
+
+  $ cd ..
+
+Try a simple variation without dotencode to ensure fncache is ignorant of encoding
+
+  $ hg --config format.dotencode=false init nodotencode
+  $ cd nodotencode
+  $ echo initial > foo
+  $ echo initial > .bar
+  $ hg commit -A -m initial
+  adding .bar
+  adding foo
+
+  $ cat .hg/store/fncache | sort
+  data/.bar.i
+  data/foo.i
+
+  $ rm .hg/store/fncache
+  $ hg debugrebuildfncache
+  adding data/.bar.i
+  adding data/foo.i
+  2 items added, 0 removed from fncache
+
+  $ cat .hg/store/fncache | sort
+  data/.bar.i
+  data/foo.i

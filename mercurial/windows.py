@@ -25,8 +25,7 @@ termwidth = win32.termwidth
 testpid = win32.testpid
 unlink = win32.unlink
 
-umask = 0022
-_SEEK_END = 2 # os.SEEK_END was introduced in Python 2.5
+umask = 0o022
 
 def posixfile(name, mode='r', buffering=-1):
     '''Open a file with even more POSIX-like semantics'''
@@ -36,10 +35,10 @@ def posixfile(name, mode='r', buffering=-1):
         # The position when opening in append mode is implementation defined, so
         # make it consistent with other platforms, which position at EOF.
         if 'a' in mode:
-            fp.seek(0, _SEEK_END)
+            fp.seek(0, os.SEEK_END)
 
         return fp
-    except WindowsError, err:
+    except WindowsError as err:
         # convert to a friendlier exception
         raise IOError(err.errno, '%s: %s' % (name, err.strerror))
 
@@ -70,7 +69,7 @@ class winstdout(object):
                 end = start + limit
                 self.fp.write(s[start:end])
                 start = end
-        except IOError, inst:
+        except IOError as inst:
             if inst.errno != 0:
                 raise
             self.close()
@@ -79,7 +78,7 @@ class winstdout(object):
     def flush(self):
         try:
             return self.fp.flush()
-        except IOError, inst:
+        except IOError as inst:
             if inst.errno != errno.EINVAL:
                 raise
             self.close()
@@ -139,7 +138,7 @@ def normpath(path):
     return pconvert(os.path.normpath(path))
 
 def normcase(path):
-    return encoding.upper(path)
+    return encoding.upper(path) # NTFS compares via upper()
 
 # see posix.py for definitions
 normcasespec = encoding.normcasespecs.upper
@@ -162,6 +161,18 @@ def samestat(s1, s2):
 _quotere = None
 _needsshellquote = None
 def shellquote(s):
+    r"""
+    >>> shellquote(r'C:\Users\xyz')
+    '"C:\\Users\\xyz"'
+    >>> shellquote(r'C:\Users\xyz/mixed')
+    '"C:\\Users\\xyz/mixed"'
+    >>> # Would be safe not to quote too, since it is all double backslashes
+    >>> shellquote(r'C:\\Users\\xyz')
+    '"C:\\\\Users\\\\xyz"'
+    >>> # But this must be quoted
+    >>> shellquote(r'C:\\Users\\xyz/abc')
+    '"C:\\\\Users\\\\xyz/abc"'
+    """
     global _quotere
     if _quotere is None:
         _quotere = re.compile(r'(\\*)("|\\$)')
@@ -248,12 +259,10 @@ def statfiles(files):
                 dmap = dict([(normcase(n), s)
                              for n, k, s in osutil.listdir(dir, True)
                              if getkind(s.st_mode) in _wantedkinds])
-            except OSError, err:
-                # handle directory not found in Python version prior to 2.5
-                # Python <= 2.4 returns native Windows code 3 in errno
+            except OSError as err:
                 # Python >= 2.5 returns ENOENT and adds winerror field
                 # EINVAL is raised if dir is not a directory.
-                if err.errno not in (3, errno.ENOENT, errno.EINVAL,
+                if err.errno not in (errno.ENOENT, errno.EINVAL,
                                      errno.ENOTDIR):
                     raise
                 dmap = {}
@@ -294,7 +303,7 @@ def unlinkpath(f, ignoremissing=False):
     """unlink and remove the directory if it is empty"""
     try:
         unlink(f)
-    except OSError, e:
+    except OSError as e:
         if not (ignoremissing and e.errno == errno.ENOENT):
             raise
     # try removing directories that might now be empty
@@ -307,7 +316,7 @@ def rename(src, dst):
     '''atomically rename file src to dst, replacing dst if it exists'''
     try:
         os.rename(src, dst)
-    except OSError, e:
+    except OSError as e:
         if e.errno != errno.EEXIST:
             raise
         unlink(dst)
@@ -360,6 +369,10 @@ def statislink(st):
 def statisexec(st):
     '''check whether a stat result is an executable file'''
     return False
+
+def poll(fds):
+    # see posix.py for description
+    raise NotImplementedError()
 
 def readpipe(pipe):
     """Read all available data from a pipe."""

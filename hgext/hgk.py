@@ -22,7 +22,7 @@ to work, hgk must be in your search path. Alternately, you can specify
 the path to hgk in your configuration file::
 
   [hgk]
-  path=/location/of/hgk
+  path = /location/of/hgk
 
 hgk can make use of the extdiff extension to visualize revisions.
 Assuming you had already configured extdiff vdiff command, just add::
@@ -41,6 +41,10 @@ from mercurial.i18n import _
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 @command('debug-diff-tree',

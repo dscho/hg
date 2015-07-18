@@ -6,16 +6,12 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+import collections
 import cStringIO, email, os, errno, re, posixpath, copy
 import tempfile, zlib, shutil
-# On python2.4 you have to import these by name or they fail to
-# load. This was not a problem on Python 2.7.
-import email.Generator
-import email.Parser
 
 from i18n import _
 from node import hex, short
-import cStringIO
 import base85, mdiff, scmutil, util, diffhelpers, copies, encoding, error
 import pathutil
 
@@ -292,8 +288,8 @@ class patchmeta(object):
         self.binary = False
 
     def setmode(self, mode):
-        islink = mode & 020000
-        isexec = mode & 0100
+        islink = mode & 0o20000
+        isexec = mode & 0o100
         self.mode = (islink, isexec)
 
     def copy(self):
@@ -434,13 +430,13 @@ class fsbackend(abstractbackend):
 
         isexec = False
         try:
-            isexec = self.opener.lstat(fname).st_mode & 0100 != 0
-        except OSError, e:
+            isexec = self.opener.lstat(fname).st_mode & 0o100 != 0
+        except OSError as e:
             if e.errno != errno.ENOENT:
                 raise
         try:
             return (self.opener.read(fname), (False, isexec))
-        except IOError, e:
+        except IOError as e:
             if e.errno != errno.ENOENT:
                 raise
             return None, None
@@ -773,7 +769,7 @@ class patchfile(object):
         for x, s in enumerate(self.lines):
             self.hash.setdefault(s, []).append(x)
 
-        for fuzzlen in xrange(3):
+        for fuzzlen in xrange(self.ui.configint("patch", "fuzz", 2) + 1):
             for toponly in [True, False]:
                 old, oldstart, new, newstart = h.fuzzit(fuzzlen, toponly)
                 oldstart = oldstart + self.offset + self.skew
@@ -830,7 +826,7 @@ class header(object):
         self.hunks = []
 
     def binary(self):
-        return util.any(h.startswith('index ') for h in self.header)
+        return any(h.startswith('index ') for h in self.header)
 
     def pretty(self, fp):
         for h in self.header:
@@ -853,7 +849,7 @@ class header(object):
         fp.write(''.join(self.header))
 
     def allhunks(self):
-        return util.any(self.allhunks_re.match(h) for h in self.header)
+        return any(self.allhunks_re.match(h) for h in self.header)
 
     def files(self):
         match = self.diffgit_re.match(self.header[0])
@@ -872,7 +868,7 @@ class header(object):
         return '<header %s>' % (' '.join(map(repr, self.files())))
 
     def isnewfile(self):
-        return util.any(self.newfile_re.match(h) for h in self.header)
+        return any(self.newfile_re.match(h) for h in self.header)
 
     def special(self):
         # Special files are shown only at the header level and not at the hunk
@@ -885,7 +881,7 @@ class header(object):
         nocontent = len(self.header) == 2
         emptynewfile = self.isnewfile() and nocontent
         return emptynewfile or \
-                util.any(self.special_re.match(h) for h in self.header)
+                any(self.special_re.match(h) for h in self.header)
 
 class recordhunk(object):
     """patch hunk
@@ -948,8 +944,10 @@ class recordhunk(object):
     def __repr__(self):
         return '<hunk %r@%d>' % (self.filename(), self.fromline)
 
-def filterpatch(ui, headers):
+def filterpatch(ui, headers, operation=None):
     """Interactively filter patch chunks into applied-only chunks"""
+    if operation is None:
+        operation = _('record')
 
     def prompt(skipfile, skipall, query, chunk):
         """prompt query, and process base inputs
@@ -1021,9 +1019,11 @@ the hunk is left unchanged.
                     f.close()
                     # Start the editor and wait for it to complete
                     editor = ui.geteditor()
-                    ui.system("%s \"%s\"" % (editor, patchfn),
-                              environ={'HGUSER': ui.username()},
-                              onerr=util.Abort, errprefix=_("edit failed"))
+                    ret = ui.system("%s \"%s\"" % (editor, patchfn),
+                                    environ={'HGUSER': ui.username()})
+                    if ret != 0:
+                        ui.warn(_("editor exited with exit code %d\n") % ret)
+                        continue
                     # Remove comment lines
                     patchfp = open(patchfn)
                     ncpatchfp = cStringIO.StringIO()
@@ -1363,7 +1363,7 @@ class binhunk(object):
                 l = ord(l) - ord('a') + 27
             try:
                 dec.append(base85.b85decode(line[1:])[:l])
-            except ValueError, e:
+            except ValueError as e:
                 raise PatchError(_('could not decode "%s" binary patch: %s')
                                  % (self._fname, str(e)))
             line = getline(lr, self.hunk)
@@ -1382,6 +1382,77 @@ def parsefilename(str):
         if i < 0:
             return s
     return s[:i]
+
+def reversehunks(hunks):
+    '''reverse the signs in the hunks given as argument
+
+    This function operates on hunks coming out of patch.filterpatch, that is
+    a list of the form: [header1, hunk1, hunk2, header2...]. Example usage:
+
+    >>> rawpatch = """diff --git a/folder1/g b/folder1/g
+    ... --- a/folder1/g
+    ... +++ b/folder1/g
+    ... @@ -1,7 +1,7 @@
+    ... +firstline
+    ...  c
+    ...  1
+    ...  2
+    ... + 3
+    ... -4
+    ...  5
+    ...  d
+    ... +lastline"""
+    >>> hunks = parsepatch(rawpatch)
+    >>> hunkscomingfromfilterpatch = []
+    >>> for h in hunks:
+    ...     hunkscomingfromfilterpatch.append(h)
+    ...     hunkscomingfromfilterpatch.extend(h.hunks)
+
+    >>> reversedhunks = reversehunks(hunkscomingfromfilterpatch)
+    >>> fp = cStringIO.StringIO()
+    >>> for c in reversedhunks:
+    ...      c.write(fp)
+    >>> fp.seek(0)
+    >>> reversedpatch = fp.read()
+    >>> print reversedpatch
+    diff --git a/folder1/g b/folder1/g
+    --- a/folder1/g
+    +++ b/folder1/g
+    @@ -1,4 +1,3 @@
+    -firstline
+     c
+     1
+     2
+    @@ -1,6 +2,6 @@
+     c
+     1
+     2
+    - 3
+    +4
+     5
+     d
+    @@ -5,3 +6,2 @@
+     5
+     d
+    -lastline
+
+    '''
+
+    import crecord as crecordmod
+    newhunks = []
+    for c in hunks:
+        if isinstance(c, crecordmod.uihunk):
+            # curses hunks encapsulate the record hunk in _hunk
+            c = c._hunk
+        if isinstance(c, recordhunk):
+            for j, line in enumerate(c.hunk):
+                if line.startswith("-"):
+                    c.hunk[j] = "+" + c.hunk[j][1:]
+                elif line.startswith("+"):
+                    c.hunk[j] = "-" + c.hunk[j][1:]
+            c.added, c.removed = c.removed, c.added
+        newhunks.append(c)
+    return newhunks
 
 def parsepatch(originalchunks):
     """patch -> [] of headers -> [] of hunks """
@@ -1867,7 +1938,7 @@ def _applydiff(ui, fp, patcher, backend, store, strip=1, prefix='',
             try:
                 current_file = patcher(ui, gp, backend, store,
                                        eolmode=eolmode)
-            except PatchError, inst:
+            except PatchError as inst:
                 ui.warn(str(inst) + '\n')
                 current_file = None
                 rejects += 1
@@ -2102,7 +2173,7 @@ def diff(repo, node1=None, node2=None, match=None, changes=None, opts=None,
 
     def lrugetfilectx():
         cache = {}
-        order = util.deque()
+        order = collections.deque()
         def getfilectx(f, ctx):
             fctx = ctx.filectx(f, filelog=cache.get(f))
             if f not in cache:

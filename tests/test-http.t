@@ -119,7 +119,7 @@ pull
 
   $ cd copy-pull
   $ echo '[hooks]' >> .hg/hgrc
-  $ echo "changegroup = python \"$TESTDIR/printenv.py\" changegroup" >> .hg/hgrc
+  $ echo "changegroup = printenv.py changegroup" >> .hg/hgrc
   $ hg pull
   pulling from http://localhost:$HGPORT1/
   searching for changes
@@ -166,7 +166,6 @@ test http authentication
   > getpass.getpass = newgetpass
   > EOF
 
-#if python243
   $ hg id http://localhost:$HGPORT2/
   abort: http authorization required for http://localhost:$HGPORT2/
   [255]
@@ -180,7 +179,6 @@ test http authentication
   password: 5fed3813f7f5
   $ hg id http://user:pass@localhost:$HGPORT2/
   5fed3813f7f5
-#endif
   $ echo '[auth]' >> .hg/hgrc
   $ echo 'l.schemes=http' >> .hg/hgrc
   $ echo 'l.prefix=lo' >> .hg/hgrc
@@ -192,7 +190,6 @@ test http authentication
   5fed3813f7f5
   $ hg id http://user@localhost:$HGPORT2/
   5fed3813f7f5
-#if python243
   $ hg clone http://user:pass@localhost:$HGPORT2/ dest 2>&1
   streaming all changes
   7 files to transfer, 916 bytes of data
@@ -264,14 +261,13 @@ test http authentication
   "GET /?cmd=branchmap HTTP/1.1" 200 -
   "GET /?cmd=stream_out HTTP/1.1" 401 -
   "GET /?cmd=stream_out HTTP/1.1" 200 -
-  "GET /?cmd=listkeys HTTP/1.1" 200 - x-hgarg-1:namespace=bookmarks
   "GET /?cmd=batch HTTP/1.1" 200 - x-hgarg-1:cmds=heads+%3Bknown+nodes%3D5fed3813f7f5e1824344fdc9cf8f63bb662c292d
+  "GET /?cmd=getbundle HTTP/1.1" 200 - x-hgarg-1:bundlecaps=HG20%2Cbundle2%3DHG20%250Achangegroup%253D01%252C02%250Adigests%253Dmd5%252Csha1%252Csha512%250Aerror%253Dabort%252Cunsupportedcontent%252Cpushraced%252Cpushkey%250Ahgtagsfnodes%250Alistkeys%250Apushkey%250Aremote-changegroup%253Dhttp%252Chttps&cg=0&common=5fed3813f7f5e1824344fdc9cf8f63bb662c292d&heads=5fed3813f7f5e1824344fdc9cf8f63bb662c292d&listkeys=phase%2Cbookmarks
   "GET /?cmd=listkeys HTTP/1.1" 200 - x-hgarg-1:namespace=phases
   "GET /?cmd=capabilities HTTP/1.1" 200 -
-  "GET /?cmd=listkeys HTTP/1.1" 401 - x-hgarg-1:namespace=bookmarks
-  "GET /?cmd=listkeys HTTP/1.1" 200 - x-hgarg-1:namespace=bookmarks
   "GET /?cmd=batch HTTP/1.1" 200 - x-hgarg-1:cmds=heads+%3Bknown+nodes%3D
-  "GET /?cmd=getbundle HTTP/1.1" 200 - x-hgarg-1:common=0000000000000000000000000000000000000000&heads=5fed3813f7f5e1824344fdc9cf8f63bb662c292d
+  "GET /?cmd=getbundle HTTP/1.1" 401 - x-hgarg-1:bundlecaps=HG20%2Cbundle2%3DHG20%250Achangegroup%253D01%252C02%250Adigests%253Dmd5%252Csha1%252Csha512%250Aerror%253Dabort%252Cunsupportedcontent%252Cpushraced%252Cpushkey%250Ahgtagsfnodes%250Alistkeys%250Apushkey%250Aremote-changegroup%253Dhttp%252Chttps&cg=1&common=0000000000000000000000000000000000000000&heads=5fed3813f7f5e1824344fdc9cf8f63bb662c292d&listkeys=phase%2Cbookmarks
+  "GET /?cmd=getbundle HTTP/1.1" 200 - x-hgarg-1:bundlecaps=HG20%2Cbundle2%3DHG20%250Achangegroup%253D01%252C02%250Adigests%253Dmd5%252Csha1%252Csha512%250Aerror%253Dabort%252Cunsupportedcontent%252Cpushraced%252Cpushkey%250Ahgtagsfnodes%250Alistkeys%250Apushkey%250Aremote-changegroup%253Dhttp%252Chttps&cg=1&common=0000000000000000000000000000000000000000&heads=5fed3813f7f5e1824344fdc9cf8f63bb662c292d&listkeys=phase%2Cbookmarks
   "GET /?cmd=listkeys HTTP/1.1" 200 - x-hgarg-1:namespace=phases
   "GET /?cmd=capabilities HTTP/1.1" 200 -
   "GET /?cmd=lookup HTTP/1.1" 200 - x-hgarg-1:key=tip
@@ -288,10 +284,9 @@ test http authentication
   "GET /?cmd=branchmap HTTP/1.1" 200 -
   "GET /?cmd=branchmap HTTP/1.1" 200 -
   "GET /?cmd=listkeys HTTP/1.1" 200 - x-hgarg-1:namespace=bookmarks
-  "POST /?cmd=unbundle HTTP/1.1" 200 - x-hgarg-1:heads=686173686564+5eb5abfefeea63c80dd7553bcc3783f37e0c5524
+  "POST /?cmd=unbundle HTTP/1.1" 200 - x-hgarg-1:heads=666f726365
   "GET /?cmd=listkeys HTTP/1.1" 200 - x-hgarg-1:namespace=phases
 
-#endif
   $ cd ..
 
 clone of serve with repo in root and unserved subrepo (issue2970)

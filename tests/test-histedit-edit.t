@@ -246,6 +246,7 @@ check histedit_source
   branch: default
   commit: 1 added (new branch head)
   update: 1 new changesets (update)
+  phases: 7 draft
   hist:   1 remaining (histedit --continue)
 
 (test also that editor is invoked if histedit is continued for
@@ -435,3 +436,32 @@ rollback should not work after a histedit
   $ HGEDITOR=true hg histedit --continue
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   saved backup bundle to $TESTTMP/r0/.hg/strip-backup/cb9a9f314b8b-cc5ccb0b-backup.hg (glob)
+
+  $ hg log -G
+  @  changeset:   0:0efcea34f18a
+     tag:         tip
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     a
+  
+  $ echo foo >> b
+  $ hg addr
+  adding b
+  $ hg ci -m 'add b'
+  $ echo foo >> a
+  $ hg ci -m 'extend a'
+  $ hg phase --public 1
+Attempting to fold a change into a public change should not work:
+  $ cat > ../edit.sh <<EOF
+  > cat "\$1" | sed s/pick/fold/ > tmp
+  > mv tmp "\$1"
+  > EOF
+  $ HGEDITOR="sh ../edit.sh" hg histedit 2
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  reverting a
+  1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  abort: cannot fold into public change 18aa70c8ad22
+  [255]
+TODO: this abort shouldn't be required, but it is for now to leave the repo in
+a clean state.
+  $ hg histedit --abort

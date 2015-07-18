@@ -92,6 +92,10 @@ def _peerlookup(path):
     try:
         return thing(path)
     except TypeError:
+        # we can't test callable(thing) because 'thing' can be an unloaded
+        # module that implements __call__
+        if not util.safehasattr(thing, 'instance'):
+            raise
         return thing
 
 def islocal(repo):
@@ -198,7 +202,7 @@ def share(ui, source, dest=None, update=True, bookmarks=True):
     requirements = ''
     try:
         requirements = srcrepo.vfs.read('requires')
-    except IOError, inst:
+    except IOError as inst:
         if inst.errno != errno.ENOENT:
             raise
 
@@ -249,7 +253,7 @@ def copystore(ui, srcrepo, destpath):
                 closetopic[0] = topic
             else:
                 ui.progress(topic, pos + num)
-        srcpublishing = srcrepo.ui.configbool('phases', 'publish', True)
+        srcpublishing = srcrepo.publishing()
         srcvfs = scmutil.vfs(srcrepo.sharedpath)
         dstvfs = scmutil.vfs(destpath)
         for f in srcrepo.store.copylist():
@@ -280,8 +284,50 @@ def copystore(ui, srcrepo, destpath):
         release(destlock)
         raise
 
+def clonewithshare(ui, peeropts, sharepath, source, srcpeer, dest, pull=False,
+                   rev=None, update=True, stream=False):
+    """Perform a clone using a shared repo.
+
+    The store for the repository will be located at <sharepath>/.hg. The
+    specified revisions will be cloned or pulled from "source". A shared repo
+    will be created at "dest" and a working copy will be created if "update" is
+    True.
+    """
+    revs = None
+    if rev:
+        if not srcpeer.capable('lookup'):
+            raise util.Abort(_("src repository does not support "
+                               "revision lookup and so doesn't "
+                               "support clone by revision"))
+        revs = [srcpeer.lookup(r) for r in rev]
+
+    basename = os.path.basename(sharepath)
+
+    if os.path.exists(sharepath):
+        ui.status(_('(sharing from existing pooled repository %s)\n') %
+                  basename)
+    else:
+        ui.status(_('(sharing from new pooled repository %s)\n') % basename)
+        # Always use pull mode because hardlinks in share mode don't work well.
+        # Never update because working copies aren't necessary in share mode.
+        clone(ui, peeropts, source, dest=sharepath, pull=True,
+              rev=rev, update=False, stream=stream)
+
+    sharerepo = repository(ui, path=sharepath)
+    share(ui, sharerepo, dest=dest, update=update, bookmarks=False)
+
+    # We need to perform a pull against the dest repo to fetch bookmarks
+    # and other non-store data that isn't shared by default. In the case of
+    # non-existing shared repo, this means we pull from the remote twice. This
+    # is a bit weird. But at the time it was implemented, there wasn't an easy
+    # way to pull just non-changegroup data.
+    destrepo = repository(ui, path=dest)
+    exchange.pull(destrepo, srcpeer, heads=revs)
+
+    return srcpeer, peer(ui, peeropts, dest)
+
 def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
-          update=True, stream=False, branch=None):
+          update=True, stream=False, branch=None, shareopts=None):
     """Make a copy of an existing repository.
 
     Create a copy of an existing repository in a new directory.  The
@@ -316,6 +362,13 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
     anything else is treated as a revision)
 
     branch: branches to clone
+
+    shareopts: dict of options to control auto sharing behavior. The "pool" key
+    activates auto sharing mode and defines the directory for stores. The
+    "mode" key determines how to construct the directory name of the shared
+    repository. "identity" means the name is derived from the node of the first
+    changeset in the repository. "remote" means the name is derived from the
+    remote's path/URL. Defaults to "identity."
     """
 
     if isinstance(source, str):
@@ -347,6 +400,36 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
             raise util.Abort(_("destination '%s' already exists") % dest)
         elif destvfs.listdir():
             raise util.Abort(_("destination '%s' is not empty") % dest)
+
+    shareopts = shareopts or {}
+    sharepool = shareopts.get('pool')
+    sharenamemode = shareopts.get('mode')
+    if sharepool:
+        sharepath = None
+        if sharenamemode == 'identity':
+            # Resolve the name from the initial changeset in the remote
+            # repository. This returns nullid when the remote is empty. It
+            # raises RepoLookupError if revision 0 is filtered or otherwise
+            # not available. If we fail to resolve, sharing is not enabled.
+            try:
+                rootnode = srcpeer.lookup('0')
+                if rootnode != node.nullid:
+                    sharepath = os.path.join(sharepool, node.hex(rootnode))
+                else:
+                    ui.status(_('(not using pooled storage: '
+                                'remote appears to be empty)\n'))
+            except error.RepoLookupError:
+                ui.status(_('(not using pooled storage: '
+                            'unable to resolve identity of remote)\n'))
+        elif sharenamemode == 'remote':
+            sharepath = os.path.join(sharepool, util.sha1(source).hexdigest())
+        else:
+            raise util.Abort('unknown share naming mode: %s' % sharenamemode)
+
+        if sharepath:
+            return clonewithshare(ui, peeropts, sharepath, source, srcpeer,
+                                  dest, pull=pull, rev=rev, update=update,
+                                  stream=stream)
 
     srclock = destlock = cleandir = None
     srcrepo = srcpeer.local()
@@ -384,7 +467,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
             try:
                 destpath = hgdir
                 util.makedir(destpath, notindexed=True)
-            except OSError, inst:
+            except OSError as inst:
                 if inst.errno == errno.EEXIST:
                     cleandir = None
                     raise util.Abort(_("destination '%s' already exists")
@@ -424,7 +507,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
             try:
                 destpeer = peer(srcrepo or ui, peeropts, dest, create=True)
                                 # only pass ui when no srcrepo
-            except OSError, inst:
+            except OSError as inst:
                 if inst.errno == errno.EEXIST:
                     cleandir = None
                     raise util.Abort(_("destination '%s' already exists")
@@ -497,7 +580,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
                 destrepo.ui.status(status)
                 _update(destrepo, uprev)
                 if update in destrepo._bookmarks:
-                    bookmarks.setcurrent(destrepo, update)
+                    bookmarks.activate(destrepo, update)
     finally:
         release(srclock, destlock)
         if cleandir is not None:
@@ -660,7 +743,28 @@ def revert(repo, node, choose):
 
 def verify(repo):
     """verify the consistency of a repository"""
-    return verifymod.verify(repo)
+    ret = verifymod.verify(repo)
+
+    # Broken subrepo references in hidden csets don't seem worth worrying about,
+    # since they can't be pushed/pulled, and --hidden can be used if they are a
+    # concern.
+
+    # pathto() is needed for -R case
+    revs = repo.revs("filelog(%s)",
+                     util.pathto(repo.root, repo.getcwd(), '.hgsubstate'))
+
+    if revs:
+        repo.ui.status(_('checking subrepo links\n'))
+        for rev in revs:
+            ctx = repo[rev]
+            try:
+                for subpath in ctx.substate:
+                    ret = ctx.sub(subpath).verify() or ret
+            except Exception:
+                repo.ui.warn(_('.hgsubstate is corrupt in revision %s\n') %
+                             node.short(ctx.node()))
+
+    return ret
 
 def remoteui(src, opts):
     'build a remote ui from ui or repo and opts'

@@ -5,6 +5,8 @@
   > [defaults]
   > diff = --nodates --git
   > qnew = --date '0 0'
+  > [shelve]
+  > maxbackups = 2
   > EOF
 
   $ hg init repo
@@ -60,6 +62,7 @@ shelve has a help message
    -m --message TEXT        use text as shelve message
    -n --name NAME           use the given name for the shelved commit
    -p --patch               show patch
+   -i --interactive         interactive mode, only works while creating a shelve
       --stat                output diffstat-style summary of changes
    -I --include PATTERN [+] include names matching the given patterns
    -X --exclude PATTERN [+] exclude names matching the given patterns
@@ -83,6 +86,12 @@ specified)
   $ hg shelve
   nothing changed
   [1]
+
+make sure shelve files were backed up
+
+  $ ls .hg/shelve-backup
+  default.hg
+  default.patch
 
 create an mq patch - shelving should work fine with a patch applied
 
@@ -153,6 +162,14 @@ delete our older shelved change
   $ hg shelve -d default
   $ hg qfinish -a -q
 
+ensure shelve backups aren't overwritten
+
+  $ ls .hg/shelve-backup/
+  default-1.hg
+  default-1.patch
+  default.hg
+  default.patch
+
 local edits should not prevent a shelved change from applying
 
   $ printf "z\na\n" > a/a
@@ -168,6 +185,16 @@ local edits should not prevent a shelved change from applying
 
 apply it and make sure our state is as expected
 
+(this also tests that same timestamp prevents backups from being
+removed, even though there are more than 'maxbackups' backups)
+
+  $ f -t .hg/shelve-backup/default.hg
+  .hg/shelve-backup/default.hg: file
+  $ touch -t 200001010000 .hg/shelve-backup/default.hg
+  $ f -t .hg/shelve-backup/default-1.hg
+  .hg/shelve-backup/default-1.hg: file
+  $ touch -t 200001010000 .hg/shelve-backup/default-1.hg
+
   $ hg unshelve
   unshelving change 'default-01'
   $ hg status -C
@@ -178,6 +205,17 @@ apply it and make sure our state is as expected
     c
   R b/b
   $ hg shelve -l
+
+(both of default.hg and default-1.hg should be still kept, because it
+is difficult to decide actual order of them from same timestamp)
+
+  $ ls .hg/shelve-backup/
+  default-01.hg
+  default-01.patch
+  default-1.hg
+  default-1.patch
+  default.hg
+  default.patch
 
   $ hg unshelve
   abort: no shelved changes to apply!
@@ -232,6 +270,14 @@ and now "a/a" should reappear
   A c.copy
     c
   R b/b
+
+ensure old shelve backups are being deleted automatically
+
+  $ ls .hg/shelve-backup/
+  default-01.hg
+  default-01.patch
+  wibble.hg
+  wibble.patch
 
 cause unshelving to result in a merge with 'a' conflicting
 
@@ -782,6 +828,7 @@ is a no-op), works (issue4398)
   bookmarks: *test
   commit: 2 unknown (clean)
   update: (current)
+  phases: 5 draft
 
   $ hg shelve --delete --stat
   abort: options '--delete' and '--stat' may not be used together
@@ -813,6 +860,9 @@ Test interactive shelve
   $ cat foo/foo
   foo
   a
+  $ hg shelve --interactive --config ui.interactive=false
+  abort: running non-interactively
+  [255]
   $ hg shelve --interactive << EOF
   > y
   > y
@@ -862,4 +912,45 @@ Test interactive shelve
   c
   x
   x
-  $ cd ..
+
+shelve --patch and shelve --stat should work with a single valid shelfname
+
+  $ hg up --clean .
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg shelve --list
+  $ echo 'patch a' > shelf-patch-a
+  $ hg add shelf-patch-a
+  $ hg shelve
+  shelved as default
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo 'patch b' > shelf-patch-b
+  $ hg add shelf-patch-b
+  $ hg shelve
+  shelved as default-01
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg shelve --patch default default-01
+  abort: --patch expects a single shelf
+  [255]
+  $ hg shelve --stat default default-01
+  abort: --stat expects a single shelf
+  [255]
+  $ hg shelve --patch default
+  default         (* ago)    changes to 'create conflict' (glob)
+  
+  diff --git a/shelf-patch-a b/shelf-patch-a
+  new file mode 100644
+  --- /dev/null
+  +++ b/shelf-patch-a
+  @@ -0,0 +1,1 @@
+  +patch a
+  $ hg shelve --stat default
+  default         (* ago)    changes to 'create conflict' (glob)
+   shelf-patch-a |  1 +
+   1 files changed, 1 insertions(+), 0 deletions(-)
+  $ hg shelve --patch nonexistentshelf
+  abort: cannot find shelf nonexistentshelf
+  [255]
+  $ hg shelve --stat nonexistentshelf
+  abort: cannot find shelf nonexistentshelf
+  [255]
+

@@ -29,6 +29,39 @@ def recode(s):
     else:
         return s.decode('utf-8').encode(orig_encoding, 'replace')
 
+def mapbranch(branch, branchmap):
+    '''
+    >>> bmap = {'default': 'branch1'}
+    >>> for i in ['', None]:
+    ...     mapbranch(i, bmap)
+    'branch1'
+    'branch1'
+    >>> bmap = {'None': 'branch2'}
+    >>> for i in ['', None]:
+    ...     mapbranch(i, bmap)
+    'branch2'
+    'branch2'
+    >>> bmap = {'None': 'branch3', 'default': 'branch4'}
+    >>> for i in ['None', '', None, 'default', 'branch5']:
+    ...     mapbranch(i, bmap)
+    'branch3'
+    'branch4'
+    'branch4'
+    'branch4'
+    'branch5'
+    '''
+    # If branch is None or empty, this commit is coming from the source
+    # repository's default branch and destined for the default branch in the
+    # destination repository. For such commits, using a literal "default"
+    # in branchmap below allows the user to map "default" to an alternate
+    # default branch in the destination repository.
+    branch = branchmap.get(branch or 'default', branch)
+    # At some point we used "None" literal to denote the default branch,
+    # attempt to use that for backward compatibility.
+    if (not branch):
+        branch = branchmap.get(str(None), branch)
+    return branch
+
 source_converters = [
     ('cvs', convert_cvs, 'branchsort'),
     ('git', convert_git, 'branchsort'),
@@ -46,15 +79,15 @@ sink_converters = [
     ('svn', svn_sink),
     ]
 
-def convertsource(ui, path, type, rev):
+def convertsource(ui, path, type, revs):
     exceptions = []
     if type and type not in [s[0] for s in source_converters]:
         raise util.Abort(_('%s: invalid source repository type') % type)
     for name, source, sortmode in source_converters:
         try:
             if not type or name == type:
-                return source(ui, path, rev), sortmode
-        except (NoRepo, MissingTool), inst:
+                return source(ui, path, revs), sortmode
+        except (NoRepo, MissingTool) as inst:
             exceptions.append(inst)
     if not ui.quiet:
         for inst in exceptions:
@@ -68,9 +101,9 @@ def convertsink(ui, path, type):
         try:
             if not type or name == type:
                 return sink(ui, path)
-        except NoRepo, inst:
+        except NoRepo as inst:
             ui.note(_("convert: %s\n") % inst)
-        except MissingTool, inst:
+        except MissingTool as inst:
             raise util.Abort('%s\n' % inst)
     raise util.Abort(_('%s: unknown repository type') % path)
 
@@ -377,12 +410,7 @@ class converter(object):
     def cachecommit(self, rev):
         commit = self.source.getcommit(rev)
         commit.author = self.authors.get(commit.author, commit.author)
-        # If commit.branch is None, this commit is coming from the source
-        # repository's default branch and destined for the default branch in the
-        # destination repository. For such commits, passing a literal "None"
-        # string to branchmap.get() below allows the user to map "None" to an
-        # alternate default branch in the destination repository.
-        commit.branch = self.branchmap.get(str(commit.branch), commit.branch)
+        commit.branch = mapbranch(commit.branch, self.branchmap)
         self.commitcache[rev] = commit
         return commit
 
@@ -460,22 +488,23 @@ class converter(object):
                 self.copy(c)
             self.ui.progress(_('converting'), None)
 
-            tags = self.source.gettags()
-            ctags = {}
-            for k in tags:
-                v = tags[k]
-                if self.map.get(v, SKIPREV) != SKIPREV:
-                    ctags[k] = self.map[v]
+            if not self.ui.configbool('convert', 'skiptags'):
+                tags = self.source.gettags()
+                ctags = {}
+                for k in tags:
+                    v = tags[k]
+                    if self.map.get(v, SKIPREV) != SKIPREV:
+                        ctags[k] = self.map[v]
 
-            if c and ctags:
-                nrev, tagsparent = self.dest.puttags(ctags)
-                if nrev and tagsparent:
-                    # write another hash correspondence to override the previous
-                    # one so we don't end up with extra tag heads
-                    tagsparents = [e for e in self.map.iteritems()
-                                   if e[1] == tagsparent]
-                    if tagsparents:
-                        self.map[tagsparents[0][0]] = nrev
+                if c and ctags:
+                    nrev, tagsparent = self.dest.puttags(ctags)
+                    if nrev and tagsparent:
+                        # write another hash correspondence to override the
+                        # previous one so we don't end up with extra tag heads
+                        tagsparents = [e for e in self.map.iteritems()
+                                       if e[1] == tagsparent]
+                        if tagsparents:
+                            self.map[tagsparents[0][0]] = nrev
 
             bookmarks = self.source.getbookmarks()
             cbookmarks = {}

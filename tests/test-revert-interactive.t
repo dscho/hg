@@ -52,12 +52,12 @@ Revert interactive tests
   reverting folder1/g (glob)
   removing folder1/i (glob)
   reverting folder2/h (glob)
-  diff -r 89ac3d72e4a4 f
+  diff --git a/f b/f
   2 hunks, 2 lines changed
   examine changes to 'f'? [Ynesfdaq?] y
   
-  @@ -1,6 +1,5 @@
-  -a
+  @@ -1,5 +1,6 @@
+  +a
    1
    2
    3
@@ -65,21 +65,21 @@ Revert interactive tests
    5
   record change 1/6 to 'f'? [Ynesfdaq?] y
   
-  @@ -2,6 +1,5 @@
+  @@ -1,5 +2,6 @@
    1
    2
    3
    4
    5
-  -b
+  +b
   record change 2/6 to 'f'? [Ynesfdaq?] y
   
-  diff -r 89ac3d72e4a4 folder1/g
+  diff --git a/folder1/g b/folder1/g
   2 hunks, 2 lines changed
   examine changes to 'folder1/g'? [Ynesfdaq?] y
   
-  @@ -1,6 +1,5 @@
-  -c
+  @@ -1,5 +1,6 @@
+  +c
    1
    2
    3
@@ -87,16 +87,16 @@ Revert interactive tests
    5
   record change 3/6 to 'folder1/g'? [Ynesfdaq?] y
   
-  @@ -2,6 +1,5 @@
+  @@ -1,5 +2,6 @@
    1
    2
    3
    4
    5
-  -d
+  +d
   record change 4/6 to 'folder1/g'? [Ynesfdaq?] n
   
-  diff -r 89ac3d72e4a4 folder2/h
+  diff --git a/folder2/h b/folder2/h
   2 hunks, 2 lines changed
   examine changes to 'folder2/h'? [Ynesfdaq?] n
   
@@ -127,7 +127,7 @@ Test that --interactive lift the need for --all
   $ echo q | hg revert -i -r 2
   reverting folder1/g (glob)
   reverting folder2/h (glob)
-  diff -r 89ac3d72e4a4 folder1/g
+  diff --git a/folder1/g b/folder1/g
   1 hunks, 1 lines changed
   examine changes to 'folder1/g'? [Ynesfdaq?] q
   
@@ -151,12 +151,12 @@ Test that --interactive lift the need for --all
   reverting folder1/g (glob)
   removing folder1/i (glob)
   reverting folder2/h (glob)
-  diff -r 89ac3d72e4a4 f
+  diff --git a/f b/f
   2 hunks, 2 lines changed
   examine changes to 'f'? [Ynesfdaq?] y
   
-  @@ -1,6 +1,5 @@
-  -a
+  @@ -1,5 +1,6 @@
+  +a
    1
    2
    3
@@ -164,21 +164,21 @@ Test that --interactive lift the need for --all
    5
   record change 1/6 to 'f'? [Ynesfdaq?] y
   
-  @@ -2,6 +1,5 @@
+  @@ -1,5 +2,6 @@
    1
    2
    3
    4
    5
-  -b
+  +b
   record change 2/6 to 'f'? [Ynesfdaq?] y
   
-  diff -r 89ac3d72e4a4 folder1/g
+  diff --git a/folder1/g b/folder1/g
   2 hunks, 2 lines changed
   examine changes to 'folder1/g'? [Ynesfdaq?] y
   
-  @@ -1,6 +1,5 @@
-  -c
+  @@ -1,5 +1,6 @@
+  +c
    1
    2
    3
@@ -186,16 +186,16 @@ Test that --interactive lift the need for --all
    5
   record change 3/6 to 'folder1/g'? [Ynesfdaq?] y
   
-  @@ -2,6 +1,5 @@
+  @@ -1,5 +2,6 @@
    1
    2
    3
    4
    5
-  -d
+  +d
   record change 4/6 to 'folder1/g'? [Ynesfdaq?] n
   
-  diff -r 89ac3d72e4a4 folder2/h
+  diff --git a/folder2/h b/folder2/h
   2 hunks, 2 lines changed
   examine changes to 'folder2/h'? [Ynesfdaq?] n
   
@@ -230,12 +230,12 @@ Test that --interactive lift the need for --all
   > n
   > n
   > EOF
-  diff -r 59dd6e4ab63a f
+  diff --git a/f b/f
   2 hunks, 2 lines changed
   examine changes to 'f'? [Ynesfdaq?] y
   
-  @@ -1,5 +1,6 @@
-  +a
+  @@ -1,6 +1,5 @@
+  -a
    1
    2
    3
@@ -243,13 +243,13 @@ Test that --interactive lift the need for --all
    5
   record change 1/2 to 'f'? [Ynesfdaq?] y
   
-  @@ -1,5 +2,6 @@
+  @@ -2,6 +1,5 @@
    1
    2
    3
    4
    5
-  +b
+  -b
   record change 2/2 to 'f'? [Ynesfdaq?] n
   
   $ hg st
@@ -270,3 +270,110 @@ Test that --interactive lift the need for --all
   3
   4
   5
+  $ rm f.orig
+  $ hg update -C .
+  3 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
+Check editing files newly added by a revert
+
+1) Create a dummy editor changing 1 to 42
+  $ cat > $TESTTMP/editor.sh << '__EOF__'
+  > cat "$1"  | sed "s/1/42/g"  > tt
+  > mv tt  "$1"
+  > __EOF__
+
+2) Add k
+  $ printf "1\n" > k
+  $ hg add k
+  $ hg commit -m "add k"
+
+3) Use interactive revert with editing (replacing +1 with +42):
+  $ printf "0\n2\n" > k
+  $ HGEDITOR="\"sh\" \"${TESTTMP}/editor.sh\"" hg revert -i  <<EOF
+  > y
+  > e
+  > EOF
+  reverting k
+  diff --git a/k b/k
+  1 hunks, 2 lines changed
+  examine changes to 'k'? [Ynesfdaq?] y
+  
+  @@ -1,1 +1,2 @@
+  -1
+  +0
+  +2
+  record this change to 'k'? [Ynesfdaq?] e
+  
+  $ cat k
+  42
+
+Check the experimental config to invert the selection:
+  $ cat <<EOF >> $HGRCPATH
+  > [experimental]
+  > revertalternateinteractivemode=False
+  > EOF
+
+
+  $ hg up -C .
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ printf 'firstline\nc\n1\n2\n3\n 3\n5\nd\nlastline\n' > folder1/g
+  $ hg diff --nodates
+  diff -r a3d963a027aa folder1/g
+  --- a/folder1/g
+  +++ b/folder1/g
+  @@ -1,7 +1,9 @@
+  +firstline
+   c
+   1
+   2
+   3
+  -4
+  + 3
+   5
+   d
+  +lastline
+  $ hg revert -i <<EOF
+  > y
+  > y
+  > y
+  > n
+  > EOF
+  reverting folder1/g (glob)
+  diff --git a/folder1/g b/folder1/g
+  3 hunks, 3 lines changed
+  examine changes to 'folder1/g'? [Ynesfdaq?] y
+  
+  @@ -1,5 +1,4 @@
+  -firstline
+   c
+   1
+   2
+   3
+  record change 1/3 to 'folder1/g'? [Ynesfdaq?] y
+  
+  @@ -2,7 +1,7 @@
+   c
+   1
+   2
+   3
+  - 3
+  +4
+   5
+   d
+  record change 2/3 to 'folder1/g'? [Ynesfdaq?] y
+  
+  @@ -7,3 +6,2 @@
+   5
+   d
+  -lastline
+  record change 3/3 to 'folder1/g'? [Ynesfdaq?] n
+  
+  $ hg diff --nodates
+  diff -r a3d963a027aa folder1/g
+  --- a/folder1/g
+  +++ b/folder1/g
+  @@ -5,3 +5,4 @@
+   4
+   5
+   d
+  +lastline

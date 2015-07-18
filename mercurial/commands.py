@@ -21,7 +21,7 @@ import minirst, revset, fileset
 import dagparser, context, simplemerge, graphmod, copies
 import random
 import setdiscovery, treediscovery, dagutil, pvec, localrepo
-import phases, obsolete, exchange, bundle2
+import phases, obsolete, exchange, bundle2, repair, lock as lockmod
 import ui as uimod
 
 table = {}
@@ -39,6 +39,12 @@ optionalrepo = ''
 # a repository. This should be populated by passing inferrepo=True into the
 # @command decorator.
 inferrepo = ''
+
+# label constants
+# until 3.5, bookmarks.current was the advertised name, not
+# bookmarks.active, so we must use both to avoid breaking old
+# custom styles
+activebookmarklabel = 'bookmarks.active bookmarks.current'
 
 # common command options
 
@@ -344,8 +350,8 @@ def annotate(ui, repo, *pats, **opts):
     def bad(x, y):
         raise util.Abort("%s: %s" % (x, y))
 
-    m = scmutil.match(ctx, pats, opts)
-    m.bad = bad
+    m = scmutil.match(ctx, pats, opts, badfn=bad)
+
     follow = not opts.get('no_follow')
     diffopts = patch.difffeatureopts(ui, opts, section='annotate',
                                      whitespace=True)
@@ -970,21 +976,24 @@ def bookmark(ui, repo, *names, **opts):
         raise util.Abort(_("bookmark name required"))
 
     if delete or rename or names or inactive:
-        wlock = repo.wlock()
+        wlock = lock = tr = None
         try:
+            wlock = repo.wlock()
+            lock = repo.lock()
             cur = repo.changectx('.').node()
             marks = repo._bookmarks
             if delete:
+                tr = repo.transaction('bookmark')
                 for mark in names:
                     if mark not in marks:
                         raise util.Abort(_("bookmark '%s' does not exist") %
                                          mark)
-                    if mark == repo._bookmarkcurrent:
-                        bookmarks.unsetcurrent(repo)
+                    if mark == repo._activebookmark:
+                        bookmarks.deactivate(repo)
                     del marks[mark]
-                marks.write()
 
             elif rename:
+                tr = repo.transaction('bookmark')
                 if not names:
                     raise util.Abort(_("new bookmark name required"))
                 elif len(names) > 1:
@@ -994,19 +1003,18 @@ def bookmark(ui, repo, *names, **opts):
                     raise util.Abort(_("bookmark '%s' does not exist") % rename)
                 checkconflict(repo, mark, cur, force)
                 marks[mark] = marks[rename]
-                if repo._bookmarkcurrent == rename and not inactive:
-                    bookmarks.setcurrent(repo, mark)
+                if repo._activebookmark == rename and not inactive:
+                    bookmarks.activate(repo, mark)
                 del marks[rename]
-                marks.write()
-
             elif names:
+                tr = repo.transaction('bookmark')
                 newact = None
                 for mark in names:
                     mark = checkformat(mark)
                     if newact is None:
                         newact = mark
-                    if inactive and mark == repo._bookmarkcurrent:
-                        bookmarks.unsetcurrent(repo)
+                    if inactive and mark == repo._activebookmark:
+                        bookmarks.deactivate(repo)
                         return
                     tgt = cur
                     if rev:
@@ -1014,20 +1022,21 @@ def bookmark(ui, repo, *names, **opts):
                     checkconflict(repo, mark, cur, force, tgt)
                     marks[mark] = tgt
                 if not inactive and cur == marks[newact] and not rev:
-                    bookmarks.setcurrent(repo, newact)
-                elif cur != tgt and newact == repo._bookmarkcurrent:
-                    bookmarks.unsetcurrent(repo)
-                marks.write()
-
+                    bookmarks.activate(repo, newact)
+                elif cur != tgt and newact == repo._activebookmark:
+                    bookmarks.deactivate(repo)
             elif inactive:
                 if len(marks) == 0:
                     ui.status(_("no bookmarks set\n"))
-                elif not repo._bookmarkcurrent:
+                elif not repo._activebookmark:
                     ui.status(_("no active bookmark\n"))
                 else:
-                    bookmarks.unsetcurrent(repo)
+                    bookmarks.deactivate(repo)
+            if tr is not None:
+                marks.recordchange(tr)
+                tr.close()
         finally:
-            wlock.release()
+            lockmod.release(tr, lock, wlock)
     else: # show bookmarks
         fm = ui.formatter('bookmarks', opts)
         hexfn = fm.hexfunc
@@ -1035,9 +1044,9 @@ def bookmark(ui, repo, *names, **opts):
         if len(marks) == 0 and not fm:
             ui.status(_("no bookmarks set\n"))
         for bmark, n in sorted(marks.iteritems()):
-            current = repo._bookmarkcurrent
-            if bmark == current:
-                prefix, label = '*', 'bookmarks.current'
+            active = repo._activebookmark
+            if bmark == active:
+                prefix, label = '*', activebookmarklabel
             else:
                 prefix, label = ' ', ''
 
@@ -1048,7 +1057,7 @@ def bookmark(ui, repo, *names, **opts):
             pad = " " * (25 - encoding.colwidth(bmark))
             fm.condwrite(not ui.quiet, 'rev node', pad + ' %d:%s',
                          repo.changelog.rev(n), hexfn(n), label=label)
-            fm.data(active=(bmark == current))
+            fm.data(active=(bmark == active))
             fm.plain('\n')
         fm.end()
 
@@ -1080,7 +1089,9 @@ def branch(ui, repo, label=None, **opts):
     change.
 
     Use the command :hg:`update` to switch to an existing branch. Use
-    :hg:`commit --close-branch` to mark this branch as closed.
+    :hg:`commit --close-branch` to mark this branch head as closed.
+    When all heads of the branch are closed, the branch will be
+    considered closed.
 
     Returns 0 on success.
     """
@@ -1107,8 +1118,13 @@ def branch(ui, repo, label=None, **opts):
             scmutil.checknewlabel(repo, label, 'branch')
             repo.dirstate.setbranch(label)
             ui.status(_('marked working directory as branch %s\n') % label)
-            ui.status(_('(branches are permanent and global, '
-                        'did you want a bookmark?)\n'))
+
+            # find any open named branches aside from default
+            others = [n for n, h, t, c in repo.branchmap().iterbranches()
+                      if n != "default" and not c]
+            if not others:
+                ui.status(_('(branches are permanent and global, '
+                            'did you want a bookmark?)\n'))
     finally:
         wlock.release()
 
@@ -1405,7 +1421,8 @@ def clone(ui, source, dest=None, **opts):
                  stream=opts.get('uncompressed'),
                  rev=opts.get('rev'),
                  update=opts.get('updaterev') or not opts.get('noupdate'),
-                 branch=opts.get('branch'))
+                 branch=opts.get('branch'),
+                 shareopts=opts.get('shareopts'))
 
     return r is None
 
@@ -1413,7 +1430,7 @@ def clone(ui, source, dest=None, **opts):
     [('A', 'addremove', None,
      _('mark new/missing files as added/removed before committing')),
     ('', 'close-branch', None,
-     _('mark a branch as closed, hiding it from the branch list')),
+     _('mark a branch head as closed')),
     ('', 'amend', None, _('amend the parent of the working directory')),
     ('s', 'secret', None, _('use the secret phase for committing')),
     ('e', 'edit', None, _('invoke editor on commit messages')),
@@ -1439,6 +1456,10 @@ def commit(ui, repo, *pats, **opts):
     commit fails, you will find a backup of your message in
     ``.hg/last-message.txt``.
 
+    The --close-branch flag can be used to mark the current branch
+    head closed. When all heads of a branch are closed, the branch
+    will be considered closed and no longer listed.
+
     The --amend flag can be used to amend the parent of the
     working directory with a new commit that contains the changes
     in the parent in addition to those currently reported by :hg:`status`,
@@ -1459,7 +1480,7 @@ def commit(ui, repo, *pats, **opts):
     """
     if opts.get('interactive'):
         opts.pop('interactive')
-        cmdutil.dorecord(ui, repo, commit, 'commit', False,
+        cmdutil.dorecord(ui, repo, commit, None, False,
                         cmdutil.recordfilter, *pats, **opts)
         return
 
@@ -1506,21 +1527,10 @@ def commit(ui, repo, *pats, **opts):
                                match,
                                extra=extra)
 
-        current = repo._bookmarkcurrent
-        marks = old.bookmarks()
         node = cmdutil.amend(ui, repo, commitfunc, old, extra, pats, opts)
         if node == old.node():
             ui.status(_("nothing changed\n"))
             return 1
-        elif marks:
-            ui.debug('moving bookmarks %r from %s to %s\n' %
-                     (marks, old.hex(), hex(node)))
-            newmarks = repo._bookmarks
-            for bm in marks:
-                newmarks[bm] = node
-                if bm == current:
-                    bookmarks.setcurrent(repo, bm)
-            newmarks.write()
     else:
         def commitfunc(ui, repo, message, match, opts):
             backup = ui.backupconfig('phases', 'new-commit')
@@ -2056,7 +2066,8 @@ def debugdag(ui, repo, file_=None, *revs, **opts):
 
 @command('debugdata',
     [('c', 'changelog', False, _('open changelog')),
-     ('m', 'manifest', False, _('open manifest'))],
+     ('m', 'manifest', False, _('open manifest')),
+     ('', 'dir', False, _('open directory manifest'))],
     _('-c|-m|FILE REV'))
 def debugdata(ui, repo, file_, rev=None, **opts):
     """dump the contents of a data file revision"""
@@ -2163,8 +2174,8 @@ def debugfileset(ui, repo, expr, **opts):
     '''parse and apply a fileset specification'''
     ctx = scmutil.revsingle(repo, opts.get('rev'), None)
     if ui.verbose:
-        tree = fileset.parse(expr)[0]
-        ui.note(tree, "\n")
+        tree = fileset.parse(expr)
+        ui.note(fileset.prettyformat(tree), "\n")
 
     for f in ctx.getfileset(expr):
         ui.write("%s\n" % f)
@@ -2227,6 +2238,7 @@ def debugignore(ui, repo, *values, **opts):
 @command('debugindex',
     [('c', 'changelog', False, _('open changelog')),
      ('m', 'manifest', False, _('open manifest')),
+     ('', 'dir', False, _('open directory manifest')),
      ('f', 'format', 0, _('revlog format'), _('FORMAT'))],
     _('[-f FORMAT] -c|-m|FILE'),
     optionalrepo=True)
@@ -2321,7 +2333,7 @@ def debuginstall(ui):
     ui.status(_("checking encoding (%s)...\n") % encoding.encoding)
     try:
         encoding.fromlocal("test")
-    except util.Abort, inst:
+    except util.Abort as inst:
         ui.write(" %s\n" % inst)
         ui.write(_(" (check that your locale is properly set)\n"))
         problems += 1
@@ -2339,7 +2351,7 @@ def debuginstall(ui):
     try:
         import bdiff, mpatch, base85, osutil
         dir(bdiff), dir(mpatch), dir(base85), dir(osutil) # quiet pyflakes
-    except Exception, inst:
+    except Exception as inst:
         ui.write(" %s\n" % inst)
         ui.write(_(" One or more extensions could not be found"))
         ui.write(_(" (check that you compiled the extensions)\n"))
@@ -2355,7 +2367,7 @@ def debuginstall(ui):
             # template found, check if it is working
             try:
                 templater.templater(m)
-            except Exception, inst:
+            except Exception as inst:
                 ui.write(" %s\n" % inst)
                 p = None
         else:
@@ -2387,7 +2399,7 @@ def debuginstall(ui):
     ui.status(_("checking username...\n"))
     try:
         ui.username()
-    except util.Abort, e:
+    except util.Abort as e:
         ui.write(" %s\n" % e)
         ui.write(_(" (specify a username in your configuration file)\n"))
         problems += 1
@@ -2498,7 +2510,7 @@ def debuglocks(ui, repo, **opts):
                                  % (user, pid, host)
                 ui.write("%-6s %s (%ds)\n" % (name + ":", locker, age))
                 return 1
-            except OSError, e:
+            except OSError as e:
                 if e.errno != errno.ENOENT:
                     raise
 
@@ -2545,26 +2557,25 @@ def debugobsolete(ui, repo, precursor=None, *successors, **opts):
         try:
             tr = repo.transaction('debugobsolete')
             try:
-                try:
-                    date = opts.get('date')
-                    if date:
-                        date = util.parsedate(date)
-                    else:
-                        date = None
-                    prec = parsenodeid(precursor)
-                    parents = None
-                    if opts['record_parents']:
-                        if prec not in repo.unfiltered():
-                            raise util.Abort('cannot used --record-parents on '
-                                             'unknown changesets')
-                        parents = repo.unfiltered()[prec].parents()
-                        parents = tuple(p.node() for p in parents)
-                    repo.obsstore.create(tr, prec, succs, opts['flags'],
-                                         parents=parents, date=date,
-                                         metadata=metadata)
-                    tr.close()
-                except ValueError, exc:
-                    raise util.Abort(_('bad obsmarker input: %s') % exc)
+                date = opts.get('date')
+                if date:
+                    date = util.parsedate(date)
+                else:
+                    date = None
+                prec = parsenodeid(precursor)
+                parents = None
+                if opts['record_parents']:
+                    if prec not in repo.unfiltered():
+                        raise util.Abort('cannot used --record-parents on '
+                                         'unknown changesets')
+                    parents = repo.unfiltered()[prec].parents()
+                    parents = tuple(p.node() for p in parents)
+                repo.obsstore.create(tr, prec, succs, opts['flags'],
+                                     parents=parents, date=date,
+                                     metadata=metadata)
+                tr.close()
+            except ValueError as exc:
+                raise util.Abort(_('bad obsmarker input: %s') % exc)
             finally:
                 tr.release()
         finally:
@@ -2710,6 +2721,11 @@ def debugrebuilddirstate(ui, repo, rev):
     finally:
         wlock.release()
 
+@command('debugrebuildfncache', [], '')
+def debugrebuildfncache(ui, repo):
+    """rebuild the fncache file"""
+    repair.rebuildfncache(ui, repo)
+
 @command('debugrename',
     [('r', 'rev', '', _('revision to debug'), _('REV'))],
     _('[-r REV] FILE'))
@@ -2730,6 +2746,7 @@ def debugrename(ui, repo, file1, *pats, **opts):
 @command('debugrevlog',
     [('c', 'changelog', False, _('open changelog')),
      ('m', 'manifest', False, _('open manifest')),
+     ('', 'dir', False, _('open directory manifest')),
      ('d', 'dump', False, _('dump index data'))],
     _('-c|-m|FILE'),
     optionalrepo=True)
@@ -2916,7 +2933,7 @@ def debugrevspec(ui, repo, expr, **opts):
     expansion.
     """
     if ui.verbose:
-        tree = revset.parse(expr)[0]
+        tree = revset.parse(expr)
         ui.note(revset.prettyformat(tree), "\n")
         newtree = revset.findaliases(ui, tree)
         if newtree != tree:
@@ -2977,10 +2994,10 @@ def debugstate(ui, repo, nodates=None, datesort=None):
         else:
             timestr = time.strftime("%Y-%m-%d %H:%M:%S ",
                                     time.localtime(ent[3]))
-        if ent[1] & 020000:
+        if ent[1] & 0o20000:
             mode = 'lnk'
         else:
-            mode = '%3o' % (ent[1] & 0777 & ~util.umask)
+            mode = '%3o' % (ent[1] & 0o777 & ~util.umask)
         ui.write("%c %s %10d %s%s\n" % (ent[0], mode, ent[2], timestr, file_))
     for f in repo.dirstate.copies():
         ui.write(_("copy: %s -> %s\n") % (repo.dirstate.copied(f), f))
@@ -3448,7 +3465,7 @@ def graft(ui, repo, *revs, **opts):
         try:
             nodes = repo.vfs.read('graftstate').splitlines()
             revs = [repo[node].rev() for node in nodes]
-        except IOError, inst:
+        except IOError as inst:
             if inst.errno != errno.ENOENT:
                 raise
             raise util.Abort(_("no graft state found, can't continue"))
@@ -3642,7 +3659,7 @@ def grep(ui, repo, pattern, *pats, **opts):
         reflags |= re.I
     try:
         regexp = util.re.compile(pattern, reflags)
-    except re.error, inst:
+    except re.error as inst:
         ui.warn(_("grep: invalid match pattern: %s\n") % inst)
         return 1
     sep, eol = ':', '\n'
@@ -4042,13 +4059,19 @@ def identify(ui, repo, source=None, rev=None,
             if bm:
                 output.append(bm)
     else:
-        if not rev:
+        ctx = scmutil.revsingle(repo, rev, None)
+
+        if ctx.rev() is None:
             ctx = repo[None]
             parents = ctx.parents()
+            taglist = []
+            for p in parents:
+                taglist.extend(p.tags())
+
             changed = ""
             if default or id or num:
-                if (util.any(repo.status())
-                    or util.any(ctx.sub(s).dirty() for s in ctx.substate)):
+                if (any(repo.status())
+                    or any(ctx.sub(s).dirty() for s in ctx.substate)):
                     changed = '+'
             if default or id:
                 output = ["%s%s" %
@@ -4057,11 +4080,11 @@ def identify(ui, repo, source=None, rev=None,
                 output.append("%s%s" %
                   ('+'.join([str(p.rev()) for p in parents]), changed))
         else:
-            ctx = scmutil.revsingle(repo, rev)
             if default or id:
                 output = [hexfunc(ctx.node())]
             if num:
                 output.append(str(ctx.rev()))
+            taglist = ctx.tags()
 
         if default and not ui.quiet:
             b = ctx.branch()
@@ -4069,7 +4092,7 @@ def identify(ui, repo, source=None, rev=None,
                 output.append("(%s)" % b)
 
             # multiple tags for a single parent separated by '/'
-            t = '/'.join(ctx.tags())
+            t = '/'.join(taglist)
             if t:
                 output.append(t)
 
@@ -4082,7 +4105,7 @@ def identify(ui, repo, source=None, rev=None,
                 output.append(ctx.branch())
 
             if tags:
-                output.extend(ctx.tags())
+                output.extend(taglist)
 
             if bookmarks:
                 output.extend(ctx.bookmarks())
@@ -4156,6 +4179,12 @@ def import_(ui, repo, patch1=None, *patches, **opts):
     cleanly, :hg:`import --partial` will create an empty changeset,
     importing only the patch metadata.
 
+    It is possible to use external patch programs to perform the patch
+    by setting the ``ui.patch`` configuration option. For the default
+    internal tool, the fuzz can also be configured via ``patch.fuzz``.
+    See :hg:`help config` for more information about configuration
+    files and how to use these options.
+
     To read a patch from standard input, use "-" as the patch name. If
     a URL is specified, the patch will be downloaded from it.
     See :hg:`help dates` for a list of formats valid for -d/--date.
@@ -4180,6 +4209,15 @@ def import_(ui, repo, patch1=None, *patches, **opts):
         possible)::
 
           hg import --exact proposed-fix.patch
+
+      - use an external tool to apply a patch which is too fuzzy for
+        the default internal tool.
+
+          hg import --config ui.patch="patch --merge" fuzzy.patch
+
+      - change the default fuzzing from 2 to a less strict 7
+
+          hg import --config ui.fuzz=7 fuzz.patch
 
     Returns 0 on success, 1 on partial success (see --partial).
     """
@@ -4215,7 +4253,7 @@ def import_(ui, repo, patch1=None, *patches, **opts):
         cmdutil.bailifchanged(repo)
 
     base = opts["base"]
-    wlock = lock = tr = None
+    wlock = dsguard = lock = tr = None
     msgs = []
     ret = 0
 
@@ -4223,7 +4261,7 @@ def import_(ui, repo, patch1=None, *patches, **opts):
     try:
         try:
             wlock = repo.wlock()
-            repo.dirstate.beginparentchange()
+            dsguard = cmdutil.dirstateguard(repo, 'import')
             if not opts.get('no_commit'):
                 lock = repo.lock()
                 tr = repo.transaction('import')
@@ -4264,18 +4302,16 @@ def import_(ui, repo, patch1=None, *patches, **opts):
                 tr.close()
             if msgs:
                 repo.savecommitmessage('\n* * *\n'.join(msgs))
-            repo.dirstate.endparentchange()
+            dsguard.close()
             return ret
-        except: # re-raises
-            # wlock.release() indirectly calls dirstate.write(): since
-            # we're crashing, we do not want to change the working dir
-            # parent after all, so make sure it writes nothing
-            repo.dirstate.invalidate()
-            raise
+        finally:
+            # TODO: get rid of this meaningless try/finally enclosing.
+            # this is kept only to reduce changes in a patch.
+            pass
     finally:
         if tr:
             tr.release()
-        release(lock, wlock)
+        release(lock, dsguard, wlock)
 
 @command('incoming|in',
     [('f', 'force', None,
@@ -4427,8 +4463,8 @@ def locate(ui, repo, *pats, **opts):
 
     ret = 1
     ctx = repo[rev]
-    m = scmutil.match(ctx, pats, opts, default='relglob')
-    m.bad = lambda x, y: False
+    m = scmutil.match(ctx, pats, opts, default='relglob',
+                      badfn=lambda x, y: False)
 
     for abs in ctx.matches(m):
         if opts.get('fullpath'):
@@ -4591,7 +4627,7 @@ def log(ui, repo, *pats, **opts):
         else:
             revmatchfn = None
         displayer.show(ctx, copies=copies, matchfn=revmatchfn)
-        if displayer.flush(rev):
+        if displayer.flush(ctx):
             count += 1
 
     displayer.close()
@@ -4704,9 +4740,9 @@ def merge(ui, repo, node=None, **opts):
     if node:
         node = scmutil.revsingle(repo, node).node()
 
-    if not node and repo._bookmarkcurrent:
-        bmheads = repo.bookmarkheads(repo._bookmarkcurrent)
-        curhead = repo[repo._bookmarkcurrent].node()
+    if not node and repo._activebookmark:
+        bmheads = repo.bookmarkheads(repo._activebookmark)
+        curhead = repo[repo._activebookmark].node()
         if len(bmheads) == 2:
             if curhead == bmheads[0]:
                 node = bmheads[1]
@@ -4721,7 +4757,7 @@ def merge(ui, repo, node=None, **opts):
                 "please merge with an explicit rev or bookmark"),
                 hint=_("run 'hg heads' to see all heads"))
 
-    if not node and not repo._bookmarkcurrent:
+    if not node and not repo._activebookmark:
         branch = repo[None].branch()
         bheads = repo.branchheads(branch)
         nbhs = [bh for bh in bheads if not repo[bh].bookmarks()]
@@ -4954,11 +4990,11 @@ def paths(ui, repo, search=None):
      ('f', 'force', False, _('allow to move boundary backward')),
      ('r', 'rev', [], _('target revision'), _('REV')),
     ],
-    _('[-p|-d|-s] [-f] [-r] REV...'))
+    _('[-p|-d|-s] [-f] [-r] [REV...]'))
 def phase(ui, repo, *revs, **opts):
     """set or show the current phase name
 
-    With no argument, show the phase name of specified revisions.
+    With no argument, show the phase name of the current revision(s).
 
     With one of -p/--public, -d/--draft or -s/--secret, change the
     phase value of the specified revisions.
@@ -4970,6 +5006,8 @@ def phase(ui, repo, *revs, **opts):
 
     Returns 0 on success, 1 if no phases were changed or some could not
     be changed.
+
+    (For more information about the phases concept, see :hg:`help phases`.)
     """
     # search for a unique phase argument
     targetphase = None
@@ -4983,7 +5021,9 @@ def phase(ui, repo, *revs, **opts):
     revs = list(revs)
     revs.extend(opts['rev'])
     if not revs:
-        raise util.Abort(_('no revisions specified'))
+        # display both parents as the second parent phase can influence
+        # the phase of a merge commit
+        revs = [c.rev() for c in repo[None].parents()]
 
     revs = scmutil.revrange(repo, revs)
 
@@ -5044,14 +5084,14 @@ def postincoming(ui, repo, modheads, optupdate, checkout):
         checkout, movemarkfrom = bookmarks.calculateupdate(ui, repo, checkout)
         try:
             ret = hg.update(repo, checkout)
-        except util.Abort, inst:
+        except util.Abort as inst:
             ui.warn(_("not updating: %s\n") % str(inst))
             if inst.hint:
                 ui.warn(_("(%s)\n") % inst.hint)
             return 0
         if not ret and not checkout:
             if bookmarks.update(repo, [movemarkfrom], repo['.'].node()):
-                ui.status(_("updating bookmark %s\n") % repo._bookmarkcurrent)
+                ui.status(_("updating bookmark %s\n") % repo._activebookmark)
         return ret
     if modheads > 1:
         currentbranchheads = len(repo.branchheads())
@@ -5102,11 +5142,17 @@ def pull(ui, repo, source="default", **opts):
         revs, checkout = hg.addbranchrevs(repo, other, branches,
                                           opts.get('rev'))
 
-        remotebookmarks = other.listkeys('bookmarks')
 
+        pullopargs = {}
         if opts.get('bookmark'):
             if not revs:
                 revs = []
+            # The list of bookmark used here is not the one used to actually
+            # update the bookmark name. This can result in the revision pulled
+            # not ending up with the name of the bookmark because of a race
+            # condition on the server. (See issue 4689 for details)
+            remotebookmarks = other.listkeys('bookmarks')
+            pullopargs['remotebookmarks'] = remotebookmarks
             for b in opts['bookmark']:
                 if b not in remotebookmarks:
                     raise util.Abort(_('remote bookmark %s not found!') % b)
@@ -5114,6 +5160,9 @@ def pull(ui, repo, source="default", **opts):
 
         if revs:
             try:
+                # When 'rev' is a bookmark name, we cannot guarantee that it
+                # will be updated with that name because of a race condition
+                # server side. (See issue 4689 for details)
                 oldrevs = revs
                 revs = [] # actually, nodes
                 for r in oldrevs:
@@ -5128,7 +5177,8 @@ def pull(ui, repo, source="default", **opts):
 
         modheads = exchange.pull(repo, other, heads=revs,
                                  force=opts.get('force'),
-                                 bookmarks=opts.get('bookmark', ())).cgresult
+                                 bookmarks=opts.get('bookmark', ()),
+                                 opargs=pullopargs).cgresult
         if checkout:
             checkout = str(repo.changelog.rev(checkout))
         repo._subtoppath = source
@@ -5528,7 +5578,7 @@ def revert(ui, repo, *pats, **opts):
             hint = _("uncommitted merge, use --all to discard all changes,"
                      " or 'hg update -C .' to abort the merge")
             raise util.Abort(msg, hint=hint)
-        dirty = util.any(repo.status())
+        dirty = any(repo.status())
         node = ctx.node()
         if node != parent:
             if dirty:
@@ -5880,7 +5930,7 @@ def summary(ui, repo, **opts):
     """summarize working directory state
 
     This generates a brief summary of the working directory state,
-    including parents, branch, commit status, and available updates.
+    including parents, branch, commit status, phase and available updates.
 
     With the --remote option, this will check the default paths for
     incoming and outgoing changes. This can be time-consuming.
@@ -5922,15 +5972,15 @@ def summary(ui, repo, **opts):
         ui.status(m, label='log.branch')
 
     if marks:
-        current = repo._bookmarkcurrent
+        active = repo._activebookmark
         # i18n: column positioning for "hg summary"
         ui.write(_('bookmarks:'), label='log.bookmark')
-        if current is not None:
-            if current in marks:
-                ui.write(' *' + current, label='bookmarks.current')
-                marks.remove(current)
+        if active is not None:
+            if active in marks:
+                ui.write(' *' + active, label=activebookmarklabel)
+                marks.remove(active)
             else:
-                ui.write(' [%s]' % current, label='bookmarks.current')
+                ui.write(' [%s]' % active, label=activebookmarklabel)
         for m in marks:
             ui.write(' ' + m, label='log.bookmark')
         ui.write('\n', label='log.bookmark')
@@ -5986,6 +6036,14 @@ def summary(ui, repo, **opts):
     elif pnode not in bheads:
         t += _(' (new branch head)')
 
+    if parents:
+        pendingphase = max(p.phase() for p in parents)
+    else:
+        pendingphase = phases.public
+
+    if pendingphase > phases.newcommitphase(ui):
+        t += ' (%s)' % phases.phasenames[pendingphase]
+
     if cleanworkdir:
         # i18n: column positioning for "hg summary"
         ui.status(_('commit: %s\n') % t.strip())
@@ -6007,6 +6065,17 @@ def summary(ui, repo, **opts):
         # i18n: column positioning for "hg summary"
         ui.write(_('update: %d new changesets, %d branch heads (merge)\n') %
                  (new, len(bheads)))
+
+    t = []
+    draft = len(repo.revs('draft()'))
+    if draft:
+        t.append(_('%d draft') % draft)
+    secret = len(repo.revs('secret()'))
+    if secret:
+        t.append(_('%d secret') % secret)
+
+    if draft or secret:
+        ui.status(_('phases: %s\n') % ', '.join(t))
 
     cmdutil.summaryhooks(ui, repo)
 
@@ -6331,7 +6400,7 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False,
 
     Update the repository's working directory to the specified
     changeset. If no changeset is specified, update to the tip of the
-    current named branch and move the current bookmark (see :hg:`help
+    current named branch and move the active bookmark (see :hg:`help
     bookmarks`).
 
     Update sets the working directory's parent revision to the specified
@@ -6384,7 +6453,7 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False,
 
     cmdutil.clearunfinished(repo)
 
-    # with no argument, we also move the current bookmark, if any
+    # with no argument, we also move the active bookmark, if any
     rev, movemarkfrom = bookmarks.calculateupdate(ui, repo, rev)
 
     # if we defined a bookmark, we have to remember the original bookmark name
@@ -6413,15 +6482,20 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False,
 
     if not ret and movemarkfrom:
         if bookmarks.update(repo, [movemarkfrom], repo['.'].node()):
-            ui.status(_("updating bookmark %s\n") % repo._bookmarkcurrent)
+            ui.status(_("updating bookmark %s\n") % repo._activebookmark)
+        else:
+            # this can happen with a non-linear update
+            ui.status(_("(leaving bookmark %s)\n") %
+                      repo._activebookmark)
+            bookmarks.deactivate(repo)
     elif brev in repo._bookmarks:
-        bookmarks.setcurrent(repo, brev)
+        bookmarks.activate(repo, brev)
         ui.status(_("(activating bookmark %s)\n") % brev)
     elif brev:
-        if repo._bookmarkcurrent:
+        if repo._activebookmark:
             ui.status(_("(leaving bookmark %s)\n") %
-                      repo._bookmarkcurrent)
-        bookmarks.unsetcurrent(repo)
+                      repo._activebookmark)
+        bookmarks.deactivate(repo)
 
     return ret
 

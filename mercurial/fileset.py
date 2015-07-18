@@ -10,20 +10,21 @@ import parser, error, util, merge
 from i18n import _
 
 elements = {
-    "(": (20, ("group", 1, ")"), ("func", 1, ")")),
-    "-": (5, ("negate", 19), ("minus", 5)),
-    "not": (10, ("not", 10)),
-    "!": (10, ("not", 10)),
-    "and": (5, None, ("and", 5)),
-    "&": (5, None, ("and", 5)),
-    "or": (4, None, ("or", 4)),
-    "|": (4, None, ("or", 4)),
-    "+": (4, None, ("or", 4)),
-    ",": (2, None, ("list", 2)),
-    ")": (0, None, None),
-    "symbol": (0, ("symbol",), None),
-    "string": (0, ("string",), None),
-    "end": (0, None, None),
+    # token-type: binding-strength, primary, prefix, infix, suffix
+    "(": (20, None, ("group", 1, ")"), ("func", 1, ")"), None),
+    "-": (5, None, ("negate", 19), ("minus", 5), None),
+    "not": (10, None, ("not", 10), None, None),
+    "!": (10, None, ("not", 10), None, None),
+    "and": (5, None, None, ("and", 5), None),
+    "&": (5, None, None, ("and", 5), None),
+    "or": (4, None, None, ("or", 4), None),
+    "|": (4, None, None, ("or", 4), None),
+    "+": (4, None, None, ("or", 4), None),
+    ",": (2, None, None, ("list", 2), None),
+    ")": (0, None, None, None, None),
+    "symbol": (0, "symbol", None, None, None),
+    "string": (0, "string", None, None, None),
+    "end": (0, None, None, None, None),
 }
 
 keywords = set(['and', 'or', 'not'])
@@ -80,8 +81,11 @@ def tokenize(program):
     yield ('end', None, pos)
 
 def parse(expr):
-    p = parser.parser(tokenize, elements)
-    return p.parse(expr)
+    p = parser.parser(elements)
+    tree, pos = p.parse(tokenize(expr))
+    if pos != len(expr):
+        raise error.ParseError(_("invalid token"), pos)
+    return tree
 
 def getstring(x, err):
     if x and (x[0] == 'string' or x[0] == 'symbol'):
@@ -186,7 +190,11 @@ def clean(mctx, x):
 def func(mctx, a, b):
     if a[0] == 'symbol' and a[1] in symbols:
         return symbols[a[1]](mctx, b)
-    raise error.UnknownIdentifier(a[1], symbols.keys())
+
+    keep = lambda fn: getattr(fn, '__doc__', None) is not None
+
+    syms = [s for (s, fn) in symbols.items() if keep(fn)]
+    raise error.UnknownIdentifier(a[1], syms)
 
 def getlist(x):
     if not x:
@@ -273,7 +281,7 @@ def grep(mctx, x):
     try:
         # i18n: "grep" is a keyword
         r = re.compile(getstring(x, _("grep requires a pattern")))
-    except re.error, e:
+    except re.error as e:
         raise error.ParseError(_('invalid match pattern: %s') % e)
     return [f for f in mctx.existing() if r.search(mctx.ctx[f].data())]
 
@@ -491,9 +499,7 @@ _existingcallers = [
 ]
 
 def getfileset(ctx, expr):
-    tree, pos = parse(expr)
-    if (pos != len(expr)):
-        raise error.ParseError(_("invalid token"), pos)
+    tree = parse(expr)
 
     # do we need status info?
     if (_intree(['modified', 'added', 'removed', 'deleted',
@@ -515,6 +521,9 @@ def getfileset(ctx, expr):
         subset = list(ctx.walk(ctx.match([])))
 
     return getset(matchctx(ctx, subset, status), tree)
+
+def prettyformat(tree):
+    return parser.prettyformat(tree, ('string', 'symbol'))
 
 # tell hggettext to extract docstrings from these functions:
 i18nfunctions = symbols.values()

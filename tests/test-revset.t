@@ -1,5 +1,27 @@
   $ HGENCODING=utf-8
   $ export HGENCODING
+  $ cat > testrevset.py << EOF
+  > import mercurial.revset
+  > 
+  > baseset = mercurial.revset.baseset
+  > 
+  > def r3232(repo, subset, x):
+  >     """"simple revset that return [3,2,3,2]
+  > 
+  >     revisions duplicated on purpose.
+  >     """
+  >     if 3 not in subset:
+  >        if 2 in subset:
+  >            return baseset([2,2])
+  >        return baseset()
+  >     return baseset([3,3,2,2])
+  > 
+  > mercurial.revset.symbols['r3232'] = r3232
+  > EOF
+  $ cat >> $HGRCPATH << EOF
+  > [extensions]
+  > testrevset=$TESTTMP/testrevset.py
+  > EOF
 
   $ try() {
   >   hg debugrevspec --debug "$@"
@@ -21,13 +43,11 @@
   $ echo b > b
   $ hg branch b
   marked working directory as branch b
-  (branches are permanent and global, did you want a bookmark?)
   $ hg ci -Aqm1
 
   $ rm a
   $ hg branch a-b-c-
   marked working directory as branch a-b-c-
-  (branches are permanent and global, did you want a bookmark?)
   $ hg ci -Aqm2 -u Bob
 
   $ hg log -r "extra('branch', 'a-b-c-')" --template '{rev}\n'
@@ -44,7 +64,6 @@
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg branch +a+b+c+
   marked working directory as branch +a+b+c+
-  (branches are permanent and global, did you want a bookmark?)
   $ hg ci -Aqm3
 
   $ hg co 2  # interleave
@@ -52,14 +71,12 @@
   $ echo bb > b
   $ hg branch -- -a-b-c-
   marked working directory as branch -a-b-c-
-  (branches are permanent and global, did you want a bookmark?)
   $ hg ci -Aqm4 -d "May 12 2005"
 
   $ hg co 3
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg branch !a/b/c/
   marked working directory as branch !a/b/c/
-  (branches are permanent and global, did you want a bookmark?)
   $ hg ci -Aqm"5 bug"
 
   $ hg merge 4
@@ -67,23 +84,19 @@
   (branch merge, don't forget to commit)
   $ hg branch _a_b_c_
   marked working directory as branch _a_b_c_
-  (branches are permanent and global, did you want a bookmark?)
   $ hg ci -Aqm"6 issue619"
 
   $ hg branch .a.b.c.
   marked working directory as branch .a.b.c.
-  (branches are permanent and global, did you want a bookmark?)
   $ hg ci -Aqm7
 
   $ hg branch all
   marked working directory as branch all
-  (branches are permanent and global, did you want a bookmark?)
 
   $ hg co 4
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg branch é
   marked working directory as branch \xc3\xa9 (esc)
-  (branches are permanent and global, did you want a bookmark?)
   $ hg ci -Aqm9
 
   $ hg tag -r6 1.0
@@ -104,6 +117,25 @@ trivial
   <spanset+ 0:1>
   0
   1
+  $ try --optimize :
+  (rangeall
+    None)
+  * optimized:
+  (range
+    ('string', '0')
+    ('string', 'tip'))
+  * set:
+  <spanset+ 0:9>
+  0
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
   $ try 3::6
   (dagrange
     ('symbol', '3')
@@ -115,16 +147,11 @@ trivial
   6
   $ try '0|1|2'
   (or
-    (or
-      ('symbol', '0')
-      ('symbol', '1'))
+    ('symbol', '0')
+    ('symbol', '1')
     ('symbol', '2'))
   * set:
-  <addset
-    <addset
-      <baseset [0]>,
-      <baseset [1]>>,
-    <baseset [2]>>
+  <baseset [0, 1, 2]>
   0
   1
   2
@@ -260,9 +287,7 @@ quoting needed
   * set:
   <addset
     <baseset [1]>,
-    <addset
-      <baseset [2]>,
-      <baseset [3]>>>
+    <baseset [2, 3]>>
   1
   2
   3
@@ -281,7 +306,7 @@ quoting needed
   hg: parse error: date requires a string
   [255]
   $ log 'date'
-  hg: parse error: can't use date here
+  abort: unknown revision 'date'!
   [255]
   $ log 'date('
   hg: parse error at 5: not a prefix: end
@@ -289,11 +314,70 @@ quoting needed
   $ log 'date(tip)'
   abort: invalid date: 'tip'
   [255]
-  $ log '"date"'
+  $ log '0:date'
   abort: unknown revision 'date'!
   [255]
+  $ log '::"date"'
+  abort: unknown revision 'date'!
+  [255]
+  $ hg book date -r 4
+  $ log '0:date'
+  0
+  1
+  2
+  3
+  4
+  $ log '::date'
+  0
+  1
+  2
+  4
+  $ log '::"date"'
+  0
+  1
+  2
+  4
   $ log 'date(2005) and 1::'
   4
+  $ hg book -d date
+
+keyword arguments
+
+  $ log 'extra(branch, value=a)'
+  0
+
+  $ log 'extra(branch, a, b)'
+  hg: parse error: extra takes at most 2 arguments
+  [255]
+  $ log 'extra(a, label=b)'
+  hg: parse error: extra got multiple values for keyword argument 'label'
+  [255]
+  $ log 'extra(label=branch, default)'
+  hg: parse error: extra got an invalid argument
+  [255]
+  $ log 'extra(branch, foo+bar=baz)'
+  hg: parse error: extra got an invalid argument
+  [255]
+  $ log 'extra(unknown=branch)'
+  hg: parse error: extra got an unexpected keyword argument 'unknown'
+  [255]
+
+  $ try 'foo=bar|baz'
+  (keyvalue
+    ('symbol', 'foo')
+    (or
+      ('symbol', 'bar')
+      ('symbol', 'baz')))
+  hg: parse error: can't use a key-value pair in this context
+  [255]
+
+Test that symbols only get parsed as functions if there's an opening
+parenthesis.
+
+  $ hg book only -r 9
+  $ log 'only(only)'   # Outer "only" is a function, inner "only" is the bookmark
+  8
+  9
 
 ancestor can accept 0 or more arguments
 
@@ -311,6 +395,9 @@ ancestor can accept 0 or more arguments
   0
   $ log 'ancestor(1,2,3,4,5)'
   1
+
+test ancestors
+
   $ log 'ancestors(5)'
   0
   1
@@ -318,6 +405,12 @@ ancestor can accept 0 or more arguments
   5
   $ log 'ancestor(ancestors(5))'
   0
+  $ log '::r3232()'
+  0
+  1
+  2
+  3
+
   $ log 'author(bob)'
   2
   $ log 'author("re:bob|test")'
@@ -555,6 +648,24 @@ Test opreand of '%' is optimized recursively (issue4670)
   <baseset+ [8, 9]>
   8
   9
+  $ try --optimize '(9)%(5)'
+  (only
+    (group
+      ('symbol', '9'))
+    (group
+      ('symbol', '5')))
+  * optimized:
+  (func
+    ('symbol', 'only')
+    (list
+      ('symbol', '9')
+      ('symbol', '5')))
+  * set:
+  <baseset+ [8, 9, 2, 4]>
+  2
+  4
+  8
+  9
 
 Test the order of operations
 
@@ -629,11 +740,29 @@ BROKEN: should be '-1'
 
 Test working-directory revision
   $ hg debugrevspec 'wdir()'
-  None
-BROKEN: should include 'None'
+  2147483647
   $ hg debugrevspec 'tip or wdir()'
   9
+  2147483647
   $ hg debugrevspec '0:tip and wdir()'
+  $ log '0:wdir()' | tail -3
+  8
+  9
+  2147483647
+  $ log 'wdir():0' | head -3
+  2147483647
+  9
+  8
+  $ log 'wdir():wdir()'
+  2147483647
+  $ log '(all() + wdir()) & min(. + wdir())'
+  9
+  $ log '(all() + wdir()) & max(. + wdir())'
+  2147483647
+  $ log '(all() + wdir()) & first(wdir() + .)'
+  2147483647
+  $ log '(all() + wdir()) & last(. + wdir())'
+  2147483647
 
   $ log 'outgoing()'
   8
@@ -795,6 +924,239 @@ test that `or` operation combines elements in the right order:
   3
   4
   5
+
+test that more than one `-r`s are combined in the right order and deduplicated:
+
+  $ hg log -T '{rev}\n' -r 3 -r 3 -r 4 -r 5:2 -r 'ancestors(4)'
+  3
+  4
+  5
+  2
+  0
+  1
+
+test that `or` operation skips duplicated revisions from right-hand side
+
+  $ try 'reverse(1::5) or ancestors(4)'
+  (or
+    (func
+      ('symbol', 'reverse')
+      (dagrange
+        ('symbol', '1')
+        ('symbol', '5')))
+    (func
+      ('symbol', 'ancestors')
+      ('symbol', '4')))
+  * set:
+  <addset
+    <baseset [5, 3, 1]>,
+    <generatorset+>>
+  5
+  3
+  1
+  0
+  2
+  4
+  $ try 'sort(ancestors(4) or reverse(1::5))'
+  (func
+    ('symbol', 'sort')
+    (or
+      (func
+        ('symbol', 'ancestors')
+        ('symbol', '4'))
+      (func
+        ('symbol', 'reverse')
+        (dagrange
+          ('symbol', '1')
+          ('symbol', '5')))))
+  * set:
+  <addset+
+    <generatorset+>,
+    <baseset [5, 3, 1]>>
+  0
+  1
+  2
+  3
+  4
+  5
+
+test optimization of trivial `or` operation
+
+  $ try --optimize '0|(1)|"2"|-2|tip|null'
+  (or
+    ('symbol', '0')
+    (group
+      ('symbol', '1'))
+    ('string', '2')
+    (negate
+      ('symbol', '2'))
+    ('symbol', 'tip')
+    ('symbol', 'null'))
+  * optimized:
+  (func
+    ('symbol', '_list')
+    ('string', '0\x001\x002\x00-2\x00tip\x00null'))
+  * set:
+  <baseset [0, 1, 2, 8, 9, -1]>
+  0
+  1
+  2
+  8
+  9
+  -1
+
+  $ try --optimize '0|1|2:3'
+  (or
+    ('symbol', '0')
+    ('symbol', '1')
+    (range
+      ('symbol', '2')
+      ('symbol', '3')))
+  * optimized:
+  (or
+    (func
+      ('symbol', '_list')
+      ('string', '0\x001'))
+    (range
+      ('symbol', '2')
+      ('symbol', '3')))
+  * set:
+  <addset
+    <baseset [0, 1]>,
+    <spanset+ 2:3>>
+  0
+  1
+  2
+  3
+
+  $ try --optimize '0:1|2|3:4|5|6'
+  (or
+    (range
+      ('symbol', '0')
+      ('symbol', '1'))
+    ('symbol', '2')
+    (range
+      ('symbol', '3')
+      ('symbol', '4'))
+    ('symbol', '5')
+    ('symbol', '6'))
+  * optimized:
+  (or
+    (range
+      ('symbol', '0')
+      ('symbol', '1'))
+    ('symbol', '2')
+    (range
+      ('symbol', '3')
+      ('symbol', '4'))
+    (func
+      ('symbol', '_list')
+      ('string', '5\x006')))
+  * set:
+  <addset
+    <addset
+      <spanset+ 0:1>,
+      <baseset [2]>>,
+    <addset
+      <spanset+ 3:4>,
+      <baseset [5, 6]>>>
+  0
+  1
+  2
+  3
+  4
+  5
+  6
+
+test that `_list` should be narrowed by provided `subset`
+
+  $ log '0:2 and (null|1|2|3)'
+  1
+  2
+
+test that `_list` should remove duplicates
+
+  $ log '0|1|2|1|2|-1|tip'
+  0
+  1
+  2
+  9
+
+test unknown revision in `_list`
+
+  $ log '0|unknown'
+  abort: unknown revision 'unknown'!
+  [255]
+
+test integer range in `_list`
+
+  $ log '-1|-10'
+  9
+  0
+
+  $ log '-10|-11'
+  abort: unknown revision '-11'!
+  [255]
+
+  $ log '9|10'
+  abort: unknown revision '10'!
+  [255]
+
+test '0000' != '0' in `_list`
+
+  $ log '0|0000'
+  0
+  -1
+
+test that chained `or` operations make balanced addsets
+
+  $ try '0:1|1:2|2:3|3:4|4:5'
+  (or
+    (range
+      ('symbol', '0')
+      ('symbol', '1'))
+    (range
+      ('symbol', '1')
+      ('symbol', '2'))
+    (range
+      ('symbol', '2')
+      ('symbol', '3'))
+    (range
+      ('symbol', '3')
+      ('symbol', '4'))
+    (range
+      ('symbol', '4')
+      ('symbol', '5')))
+  * set:
+  <addset
+    <addset
+      <spanset+ 0:1>,
+      <spanset+ 1:2>>,
+    <addset
+      <spanset+ 2:3>,
+      <addset
+        <spanset+ 3:4>,
+        <spanset+ 4:5>>>>
+  0
+  1
+  2
+  3
+  4
+  5
+
+test that chained `or` operations never eat up stack (issue4624)
+(uses `0:1` instead of `0` to avoid future optimization of trivial revisions)
+
+  $ hg log -T '{rev}\n' -r "`python -c "print '|'.join(['0:1'] * 500)"`"
+  0
+  1
+
+test that repeated `-r` options never eat up stack (issue4565)
+(uses `-r 0::1` to avoid possible optimization at old-style parser)
+
+  $ hg log -T '{rev}\n' `python -c "for i in xrange(500): print '-r 0::1 ',"`
+  0
+  1
 
 check that conversion to only works
   $ try --optimize '::3 - ::1'
@@ -1039,6 +1401,17 @@ Bogus function gets suggestions
   hg: parse error: unknown identifier: babar
   [255]
 
+Bogus function with a similar internal name doesn't suggest the internal name
+  $ log 'matches()'
+  hg: parse error: unknown identifier: matches
+  (did you mean 'matching'?)
+  [255]
+
+Undocumented functions aren't suggested as similar either
+  $ log 'wdir2()'
+  hg: parse error: unknown identifier: wdir2
+  [255]
+
 multiple revspecs
 
   $ hg log -r 'tip~1:tip' -r 'tip~2:tip~1' --template '{rev}\n'
@@ -1211,9 +1584,7 @@ test infinite recursion
   * set:
   <addset
     <baseset [3]>,
-    <addset
-      <baseset [1]>,
-      <baseset [2]>>>
+    <baseset [1, 2]>>
   3
   1
   2
@@ -1237,6 +1608,44 @@ test nesting and variable passing
   * set:
   <baseset [5]>
   5
+
+test chained `or` operations are flattened at parsing phase
+
+  $ echo 'chainedorops($1, $2, $3) = $1|$2|$3' >> .hg/hgrc
+  $ try 'chainedorops(0:1, 1:2, 2:3)'
+  (func
+    ('symbol', 'chainedorops')
+    (list
+      (list
+        (range
+          ('symbol', '0')
+          ('symbol', '1'))
+        (range
+          ('symbol', '1')
+          ('symbol', '2')))
+      (range
+        ('symbol', '2')
+        ('symbol', '3'))))
+  (or
+    (range
+      ('symbol', '0')
+      ('symbol', '1'))
+    (range
+      ('symbol', '1')
+      ('symbol', '2'))
+    (range
+      ('symbol', '2')
+      ('symbol', '3')))
+  * set:
+  <addset
+    <spanset+ 0:1>,
+    <addset
+      <spanset+ 1:2>,
+      <spanset+ 2:3>>>
+  0
+  1
+  2
+  3
 
 test variable isolation, variable placeholders are rewritten as string
 then parsed and matched again as string. Check they do not leak too
@@ -1306,8 +1715,7 @@ far away.
   <addset
     <baseset [9]>,
     <filteredset
-      <filteredset
-        <fullreposet+ 0:9>>>>
+      <fullreposet+ 0:9>>>
   9
 
   $ try 'd(2:5)'

@@ -31,6 +31,10 @@ from mercurial.i18n import _
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 @command('censor',
@@ -43,6 +47,12 @@ def censor(ui, repo, path, rev='', tombstone='', **opts):
     if not rev:
         raise util.Abort(_('must specify revision to censor'))
 
+    wctx = repo[None]
+
+    m = scmutil.match(wctx, (path,))
+    if m.anypats() or len(m.files()) != 1:
+        raise util.Abort(_('can only specify an explicit filename'))
+    path = m.files()[0]
     flog = repo.file(path)
     if not len(flog):
         raise util.Abort(_('cannot censor file with no history'))
@@ -66,7 +76,6 @@ def censor(ui, repo, path, rev='', tombstone='', **opts):
         raise util.Abort(_('cannot censor file in heads (%s)') % headlist,
             hint=_('clean/delete and commit first'))
 
-    wctx = repo[None]
     wp = wctx.parents()
     if ctx.node() in [p.node() for p in wp]:
         raise util.Abort(_('cannot censor working directory'),
@@ -143,7 +152,7 @@ def censor(ui, repo, path, rev='', tombstone='', **opts):
             # Immediate children of censored node must be re-added as fulltext.
             try:
                 revdata = flog.revision(srev)
-            except error.CensoredNodeError, e:
+            except error.CensoredNodeError as e:
                 revdata = e.tombstone
             dlen = rewrite(srev, offset, revdata)
         else:

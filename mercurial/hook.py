@@ -35,10 +35,7 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
             if modpath and modfile:
                 sys.path = sys.path[:] + [modpath]
                 modname = modfile
-        demandimportenabled = demandimport.isenabled()
-        if demandimportenabled:
-            demandimport.disable()
-        try:
+        with demandimport.deactivated():
             try:
                 obj = __import__(modname)
             except ImportError:
@@ -59,9 +56,6 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
                     raise util.Abort(_('%s hook is invalid '
                                        '(import of "%s" failed)') %
                                      (hname, modname))
-        finally:
-            if demandimportenabled:
-                demandimport.enable()
         sys.path = oldpaths
         try:
             for p in funcname.split('.')[1:]:
@@ -79,27 +73,24 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
     starttime = time.time()
 
     try:
-        try:
-            # redirect IO descriptors to the ui descriptors so hooks
-            # that write directly to these don't mess up the command
-            # protocol when running through the command server
-            old = sys.stdout, sys.stderr, sys.stdin
-            sys.stdout, sys.stderr, sys.stdin = ui.fout, ui.ferr, ui.fin
+        # redirect IO descriptors to the ui descriptors so hooks
+        # that write directly to these don't mess up the command
+        # protocol when running through the command server
+        old = sys.stdout, sys.stderr, sys.stdin
+        sys.stdout, sys.stderr, sys.stdin = ui.fout, ui.ferr, ui.fin
 
-            r = obj(ui=ui, repo=repo, hooktype=name, **args)
-        except KeyboardInterrupt:
+        r = obj(ui=ui, repo=repo, hooktype=name, **args)
+    except Exception as exc:
+        if isinstance(exc, util.Abort):
+            ui.warn(_('error: %s hook failed: %s\n') %
+                         (hname, exc.args[0]))
+        else:
+            ui.warn(_('error: %s hook raised an exception: '
+                           '%s\n') % (hname, exc))
+        if throw:
             raise
-        except Exception, exc:
-            if isinstance(exc, util.Abort):
-                ui.warn(_('error: %s hook failed: %s\n') %
-                             (hname, exc.args[0]))
-            else:
-                ui.warn(_('error: %s hook raised an exception: '
-                               '%s\n') % (hname, exc))
-            if throw:
-                raise
-            ui.traceback()
-            return True
+        ui.traceback()
+        return True
     finally:
         sys.stdout, sys.stderr, sys.stdin = old
         duration = time.time() - starttime

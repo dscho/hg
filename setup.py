@@ -5,8 +5,8 @@
 # 'python setup.py --help' for more options
 
 import sys, platform
-if getattr(sys, 'version_info', (0, 0, 0)) < (2, 4, 0, 'final'):
-    raise SystemExit("Mercurial requires Python 2.4 or later.")
+if getattr(sys, 'version_info', (0, 0, 0)) < (2, 6, 0, 'final'):
+    raise SystemExit("Mercurial requires Python 2.6 or later.")
 
 if sys.version_info[0] >= 3:
     def b(s):
@@ -106,25 +106,24 @@ def hasfunction(cc, funcname):
     tmpdir = tempfile.mkdtemp(prefix='hg-install-')
     devnull = oldstderr = None
     try:
-        try:
-            fname = os.path.join(tmpdir, 'funcname.c')
-            f = open(fname, 'w')
-            f.write('int main(void) {\n')
-            f.write('    %s();\n' % funcname)
-            f.write('}\n')
-            f.close()
-            # Redirect stderr to /dev/null to hide any error messages
-            # from the compiler.
-            # This will have to be changed if we ever have to check
-            # for a function on Windows.
-            devnull = open('/dev/null', 'w')
-            oldstderr = os.dup(sys.stderr.fileno())
-            os.dup2(devnull.fileno(), sys.stderr.fileno())
-            objects = cc.compile([fname], output_dir=tmpdir)
-            cc.link_executable(objects, os.path.join(tmpdir, "a.out"))
-        except Exception:
-            return False
+        fname = os.path.join(tmpdir, 'funcname.c')
+        f = open(fname, 'w')
+        f.write('int main(void) {\n')
+        f.write('    %s();\n' % funcname)
+        f.write('}\n')
+        f.close()
+        # Redirect stderr to /dev/null to hide any error messages
+        # from the compiler.
+        # This will have to be changed if we ever have to check
+        # for a function on Windows.
+        devnull = open('/dev/null', 'w')
+        oldstderr = os.dup(sys.stderr.fileno())
+        os.dup2(devnull.fileno(), sys.stderr.fileno())
+        objects = cc.compile([fname], output_dir=tmpdir)
+        cc.link_executable(objects, os.path.join(tmpdir, "a.out"))
         return True
+    except Exception:
+        return False
     finally:
         if oldstderr is not None:
             os.dup2(oldstderr, sys.stderr.fileno())
@@ -408,11 +407,12 @@ class hginstalllib(install_lib):
                 # Persist executable bit (apply it to group and other if user
                 # has it)
                 if st[stat.ST_MODE] & stat.S_IXUSR:
-                    setmode = 0755
+                    setmode = int('0755', 8)
                 else:
-                    setmode = 0644
-                os.chmod(dst, (stat.S_IMODE(st[stat.ST_MODE]) & ~0777) |
-                         setmode)
+                    setmode = int('0644', 8)
+                m = stat.S_IMODE(st[stat.ST_MODE])
+                m = (m & ~int('0777', 8)) | setmode
+                os.chmod(dst, m)
         file_util.copy_file = copyfileandsetmode
         try:
             install_lib.run(self)
@@ -483,6 +483,11 @@ pymodules = []
 
 common_depends = ['mercurial/util.h']
 
+osutil_ldflags = []
+
+if sys.platform == 'darwin':
+    osutil_ldflags += ['-framework', 'ApplicationServices']
+
 extmodules = [
     Extension('mercurial.base85', ['mercurial/base85.c'],
               depends=common_depends),
@@ -497,20 +502,10 @@ extmodules = [
                                     'mercurial/parsers.c',
                                     'mercurial/pathencode.c'],
               depends=common_depends),
+    Extension('mercurial.osutil', ['mercurial/osutil.c'],
+              extra_link_args=osutil_ldflags,
+              depends=common_depends),
     ]
-
-osutil_ldflags = []
-
-if sys.platform == 'darwin':
-    osutil_ldflags += ['-framework', 'ApplicationServices']
-
-# disable osutil.c under windows + python 2.4 (issue1364)
-if sys.platform == 'win32' and sys.version_info < (2, 5, 0, 'final'):
-    pymodules.append('mercurial.pure.osutil')
-else:
-    extmodules.append(Extension('mercurial.osutil', ['mercurial/osutil.c'],
-                                extra_link_args=osutil_ldflags,
-                                depends=common_depends))
 
 try:
     from distutils import cygwinccompiler
@@ -562,6 +557,8 @@ if py2exeloaded:
          'product_version':version}]
     # sub command of 'build' because 'py2exe' does not handle sub_commands
     build.sub_commands.insert(0, ('build_hgextindex', None))
+    # put dlls in sub directory so that they won't pollute PATH
+    extra['zipfile'] = 'lib/library.zip'
 
 if os.name == 'nt':
     # Windows binary file versions for exe/dll files must have the
@@ -572,6 +569,8 @@ if sys.platform == 'darwin' and os.path.exists('/usr/bin/xcodebuild'):
     version = runcmd(['/usr/bin/xcodebuild', '-version'], {})[0].splitlines()
     if version:
         version = version[0]
+        if sys.version_info[0] == 3:
+            version = version.decode('utf-8')
         xcode4 = (version.startswith('Xcode') and
                   StrictVersion(version.split()[1]) >= StrictVersion('4.0'))
         xcode51 = re.match(r'^Xcode\s+5\.1', version) is not None

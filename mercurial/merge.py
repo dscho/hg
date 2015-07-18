@@ -145,7 +145,7 @@ class mergestate(object):
                 else:
                     records.append(('F', l[:-1]))
             f.close()
-        except IOError, err:
+        except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
         return records
@@ -170,7 +170,7 @@ class mergestate(object):
                 off += length
                 records.append((rtype, record))
             f.close()
-        except IOError, err:
+        except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
         return records
@@ -605,7 +605,7 @@ def calculateupdates(repo, wctx, mctx, ancestors, branchmerge, force, partial,
             # Consensus?
             if len(bids) == 1: # all bids are the same kind of method
                 m, l = bids.items()[0]
-                if util.all(a == l[0] for a in l[1:]): # len(bids) is > 1
+                if all(a == l[0] for a in l[1:]): # len(bids) is > 1
                     repo.ui.note(" %s: consensus for %s\n" % (f, m))
                     actions[f] = l[0]
                     continue
@@ -617,7 +617,7 @@ def calculateupdates(repo, wctx, mctx, ancestors, branchmerge, force, partial,
             # If there are gets and they all agree [how could they not?], do it.
             if 'g' in bids:
                 ga0 = bids['g'][0]
-                if util.all(a == ga0 for a in bids['g'][1:]):
+                if all(a == ga0 for a in bids['g'][1:]):
                     repo.ui.note(" %s: picking 'get' action\n" % f)
                     actions[f] = ga0
                     continue
@@ -660,7 +660,7 @@ def batchremove(repo, actions):
         audit(f)
         try:
             unlink(wjoin(f), ignoremissing=True)
-        except OSError, inst:
+        except OSError as inst:
             repo.ui.warn(_("update failed to remove %s: %s!\n") %
                          (f, inst.strerror))
         if i == 100:
@@ -741,15 +741,7 @@ def applyupdates(repo, actions, wctx, mctx, overwrite, labels=None):
 
     numupdates = sum(len(l) for m, l in actions.items() if m != 'k')
 
-    def dirtysubstate():
-        # mark '.hgsubstate' as possibly dirty forcibly, because
-        # modified '.hgsubstate' is misunderstood as clean,
-        # when both st_size/st_mtime of '.hgsubstate' aren't changed,
-        # even if "submerge" fails and '.hgsubstate' is inconsistent
-        repo.dirstate.normallookup('.hgsubstate')
-
     if [a for a in actions['r'] if a[0] == '.hgsubstate']:
-        dirtysubstate()
         subrepo.submerge(repo, wctx, mctx, wctx, overwrite)
 
     # remove in parallel (must come first)
@@ -768,7 +760,6 @@ def applyupdates(repo, actions, wctx, mctx, overwrite, labels=None):
     updated = len(actions['g'])
 
     if [a for a in actions['g'] if a[0] == '.hgsubstate']:
-        dirtysubstate()
         subrepo.submerge(repo, wctx, mctx, wctx, overwrite)
 
     # forget (manifest only, just log it) (must come first)
@@ -794,7 +785,6 @@ def applyupdates(repo, actions, wctx, mctx, overwrite, labels=None):
         z += 1
         progress(_updating, z, item=f, total=numupdates, unit=_files)
         if f == '.hgsubstate': # subrepo states need updating
-            dirtysubstate()
             subrepo.submerge(repo, wctx, mctx, wctx.ancestor(mctx),
                              overwrite)
             continue
@@ -1021,7 +1011,7 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
 
         p2 = repo[node]
         if pas[0] is None:
-            if repo.ui.config('merge', 'preferancestor', '*') == '*':
+            if repo.ui.configlist('merge', 'preferancestor', ['*']) == ['*']:
                 cahs = repo.changelog.commonancestorsheads(p1.node(), p2.node())
                 pas = [repo[anc] for anc in (sorted(cahs) or [nullid])]
             else:
@@ -1080,6 +1070,7 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
                     # Allow jumping branches if clean and specific rev given
                     pas = [p1]
 
+        # deprecated config: merge.followcopies
         followcopies = False
         if overwrite:
             pas = [wc]

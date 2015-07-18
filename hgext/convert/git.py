@@ -7,7 +7,7 @@
 
 import os
 import subprocess
-from mercurial import util, config
+from mercurial import util, config, error
 from mercurial.node import hex, nullid
 from mercurial.i18n import _
 
@@ -86,8 +86,8 @@ class convert_git(converter_source):
         data = fh.read()
         return data, fh.close()
 
-    def __init__(self, ui, path, rev=None):
-        super(convert_git, self).__init__(ui, path, rev=rev)
+    def __init__(self, ui, path, revs=None):
+        super(convert_git, self).__init__(ui, path, revs=revs)
 
         if os.path.isdir(path + "/.git"):
             path += "/.git"
@@ -119,14 +119,18 @@ class convert_git(converter_source):
             f.close()
 
     def getheads(self):
-        if not self.rev:
+        if not self.revs:
             heads, ret = self.gitread('git rev-parse --branches --remotes')
             heads = heads.splitlines()
+            if ret:
+                raise util.Abort(_('cannot retrieve git heads'))
         else:
-            heads, ret = self.gitread("git rev-parse --verify %s" % self.rev)
-            heads = [heads[:-1]]
-        if ret:
-            raise util.Abort(_('cannot retrieve git heads'))
+            heads = []
+            for rev in self.revs:
+                rawhead, ret = self.gitread("git rev-parse --verify %s" % rev)
+                heads.append(rawhead[:-1])
+                if ret:
+                    raise util.Abort(_('cannot retrieve git head "%s"') % rev)
         return heads
 
     def catfile(self, rev, type):
@@ -174,8 +178,9 @@ class convert_git(converter_source):
         """
         self.submodules = []
         c = config.config()
-        # Each item in .gitmodules starts with \t that cant be parsed
-        c.parse('.gitmodules', content.replace('\t',''))
+        # Each item in .gitmodules starts with whitespace that cant be parsed
+        c.parse('.gitmodules', '\n'.join(line.strip() for line in
+                               content.split('\n')))
         for sec in c.sections():
             s = c[sec]
             if 'url' in s and 'path' in s:
@@ -184,9 +189,19 @@ class convert_git(converter_source):
     def retrievegitmodules(self, version):
         modules, ret = self.gitread("git show %s:%s" % (version, '.gitmodules'))
         if ret:
-            raise util.Abort(_('cannot read submodules config file in %s') %
-                             version)
-        self.parsegitmodules(modules)
+            # This can happen if a file is in the repo that has permissions
+            # 160000, but there is no .gitmodules file.
+            self.ui.warn(_("warning: cannot read submodules config file in "
+                           "%s\n") % version)
+            return
+
+        try:
+            self.parsegitmodules(modules)
+        except error.ParseError:
+            self.ui.warn(_("warning: unable to parse .gitmodules in %s\n")
+                         % version)
+            return
+
         for m in self.submodules:
             node, ret = self.gitread("git rev-parse %s:%s" % (version, m.path))
             if ret:
@@ -361,8 +376,9 @@ class convert_git(converter_source):
         prefixlen = len(prefix)
 
         # factor two commands
-        gitcmd = { 'remote/': 'git ls-remote --heads origin',
-                          '': 'git show-ref'}
+        remoteprefix = self.ui.config('convert', 'git.remoteprefix', 'remote')
+        gitcmd = { remoteprefix + '/': 'git ls-remote --heads origin',
+                                   '': 'git show-ref'}
 
         # Origin heads
         for reftype in gitcmd:

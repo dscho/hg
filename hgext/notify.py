@@ -134,13 +134,14 @@ web.baseurl
 '''
 
 import email, socket, time
-# On python2.4 you have to import this by name or they fail to
-# load. This was not a problem on Python 2.7.
-import email.Parser
 from mercurial.i18n import _
-from mercurial import patch, cmdutil, templater, util, mail
+from mercurial import patch, cmdutil, util, mail
 import fnmatch
 
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 # template for single changeset can include email headers.
@@ -190,8 +191,6 @@ class notifier(object):
                     self.ui.config('notify', 'template'))
         if not mapfile and not template:
             template = deftemplates.get(hooktype) or single_template
-        if template:
-            template = templater.parsestring(template, quoted=False)
         self.t = cmdutil.changeset_templater(self.ui, self.repo, False, None,
                                              template, mapfile, False)
 
@@ -277,7 +276,7 @@ class notifier(object):
         p = email.Parser.Parser()
         try:
             msg = p.parsestr(data)
-        except email.Errors.MessageParseError, inst:
+        except email.Errors.MessageParseError as inst:
             raise util.Abort(inst)
 
         # store sender and subject

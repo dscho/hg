@@ -60,7 +60,7 @@ check for HTTP opener failures when cachefile does not exist
   $ rm .hg/cache/*
   $ cd ../local
   $ echo '[hooks]' >> .hg/hgrc
-  $ echo "changegroup = python \"$TESTDIR/printenv.py\" changegroup" >> .hg/hgrc
+  $ echo "changegroup = printenv.py changegroup" >> .hg/hgrc
   $ hg pull
   pulling from static-http://localhost:$HGPORT/remote
   searching for changes
@@ -129,6 +129,7 @@ test with "/" URI (issue747) and subrepo
   crosschecking files in changesets and manifests
   checking files
   3 files, 1 changesets, 3 total revisions
+  checking subrepo links
   $ cat a
   a
   $ hg paths
@@ -159,4 +160,4 @@ test with non-repo
   $ hg clone static-http://localhost:$HGPORT/notarepo local3
   abort: 'http://localhost:$HGPORT/notarepo' does not appear to be an hg repository!
   [255]
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py

@@ -84,7 +84,7 @@ effects may be overridden from your configuration file::
   resolve.unresolved = red bold
   resolve.resolved = green bold
 
-  bookmarks.current = green
+  bookmarks.active = green
 
   branches.active = none
   branches.closed = black bold
@@ -162,6 +162,10 @@ from mercurial.i18n import _
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 # start and stop parameters for effects
@@ -190,7 +194,7 @@ def _terminfosetup(ui, mode):
 
     try:
         curses.setupterm()
-    except curses.error, e:
+    except curses.error as e:
         _terminfo_params = {}
         return
 
@@ -309,7 +313,7 @@ _styles = {'grep.match': 'red bold',
            'grep.filename': 'magenta',
            'grep.user': 'magenta',
            'grep.date': 'magenta',
-           'bookmarks.current': 'green',
+           'bookmarks.active': 'green',
            'branches.active': 'none',
            'branches.closed': 'black bold',
            'branches.current': 'green',
@@ -492,14 +496,14 @@ def templatelabel(context, mapping, args):
     # etc. don't need to be quoted
     mapping.update(dict([(k, k) for k in _effects]))
 
-    thing = templater._evalifliteral(args[1], context, mapping)
+    thing = args[1][0](context, mapping, args[1][1])
 
     # apparently, repo could be a string that is the favicon?
     repo = mapping.get('repo', '')
     if isinstance(repo, str):
         return thing
 
-    label = templater._evalifliteral(args[0], context, mapping)
+    label = args[0][0](context, mapping, args[0][1])
 
     thing = templater.stringify(thing)
     label = templater.stringify(label)
@@ -527,6 +531,7 @@ def uisetup(ui):
         return orig(gitsub, commands, env, stream, cwd)
     extensions.wrapfunction(dispatch, '_runcommand', colorcmd)
     extensions.wrapfunction(subrepo.gitsubrepo, '_gitnodir', colorgit)
+    templatelabel.__doc__ = templater.funcs['label'].__doc__
     templater.funcs['label'] = templatelabel
 
 def extsetup(ui):

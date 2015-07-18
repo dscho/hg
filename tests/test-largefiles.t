@@ -19,6 +19,10 @@ It contains all the testing of the basic concepts of large file in a single bloc
   > usercache=${USERCACHE}
   > [hooks]
   > precommit=sh -c "echo \\"Invoking status precommit hook\\"; hg status"
+  > [experimental]
+  > # drop me once bundle2 is the default,
+  > # added to get test change early.
+  > bundle2-exp = True
   > EOF
 
 Create the repo with a couple of revisions of both large and normal
@@ -67,6 +71,7 @@ Test status and dirstate of largefiles and that summary output is correct.
   branch: default
   commit: (clean)
   update: (current)
+  phases: 2 draft
   largefiles: (no remote repo)
 
 Commit preserved largefile contents.
@@ -191,7 +196,7 @@ Test display of largefiles in hgweb
 
   $ hg serve -d -p $HGPORT --pid-file ../hg.pid
   $ cat ../hg.pid >> $DAEMON_PIDS
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'file/tip/?style=raw'
+  $ get-with-headers.py 127.0.0.1:$HGPORT 'file/tip/?style=raw'
   200 Script output follows
   
   
@@ -200,7 +205,7 @@ Test display of largefiles in hgweb
   -rw-r--r-- 9 normal3
   
   
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'file/tip/sub/?style=raw'
+  $ get-with-headers.py 127.0.0.1:$HGPORT 'file/tip/sub/?style=raw'
   200 Script output follows
   
   
@@ -208,7 +213,7 @@ Test display of largefiles in hgweb
   -rw-r--r-- 9 normal4
   
   
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
 #endif
 
 Test archiving the various revisions.  These hit corner cases known with
@@ -999,6 +1004,7 @@ Test cloning with --all-largefiles flag
   branch: default
   commit: (clean)
   update: 7 new changesets (update)
+  phases: 8 draft
 
   $ rm "${USERCACHE}"/*
   $ hg clone --all-largefiles -u 1 a a-clone1
@@ -1021,6 +1027,7 @@ Test cloning with --all-largefiles flag
   branch: default
   commit: (clean)
   update: 6 new changesets (update)
+  phases: 8 draft
 
   $ rm "${USERCACHE}"/*
   $ hg clone --all-largefiles -U a a-clone-u
@@ -1030,6 +1037,7 @@ Test cloning with --all-largefiles flag
   branch: default
   commit: (clean)
   update: 8 new changesets (update)
+  phases: 8 draft
 
 Show computed destination directory:
 
@@ -1094,18 +1102,18 @@ redo pull with --lfrev and check it pulls largefiles for the right revs
   searching for changes
   all local heads known remotely
   6 changesets found
-  adding changesets
   uncompressed size of bundle content:
-      1213 (changelog)
-      1479 (manifests)
-       234  .hglf/large1
-       504  .hglf/large3
-       512  .hglf/sub/large4
-       162  .hglf/sub2/large6
-       162  .hglf/sub2/large7
-       192  normal1
-       397  normal3
-       405  sub/normal4
+      1333 (changelog)
+      1599 (manifests)
+       254  .hglf/large1
+       564  .hglf/large3
+       572  .hglf/sub/large4
+       182  .hglf/sub2/large6
+       182  .hglf/sub2/large7
+       212  normal1
+       457  normal3
+       465  sub/normal4
+  adding changesets
   adding manifests
   adding file changes
   added 6 changesets with 16 changes to 8 files

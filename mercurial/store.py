@@ -187,7 +187,7 @@ _maxshortdirslen = 8 * (_dirprefixlen + 1) - 4
 
 def _hashencode(path, dotencode):
     digest = _sha(path).hexdigest()
-    le = lowerencode(path).split('/')[1:]
+    le = lowerencode(path[5:]).split('/') # skips prefix 'data/' or 'meta/'
     parts = _auxencode(le, dotencode)
     basename = parts[-1]
     _root, ext = os.path.splitext(basename)
@@ -274,7 +274,7 @@ def _calcmode(vfs):
         # files in .hg/ will be created using this mode
         mode = vfs.stat().st_mode
             # avoid some useless chmods
-        if (0777 & ~util.umask) == (0777 & mode):
+        if (0o777 & ~util.umask) == (0o777 & mode):
             mode = None
     except OSError:
         mode = None
@@ -489,7 +489,7 @@ class fncachestore(basicstore):
             ef = self.encode(f)
             try:
                 yield f, ef, self.getsize(ef)
-            except OSError, err:
+            except OSError as err:
                 if err.errno != errno.ENOENT:
                     raise
 
@@ -513,7 +513,7 @@ class fncachestore(basicstore):
         try:
             self.getsize(ef)
             return True
-        except OSError, err:
+        except OSError as err:
             if err.errno != errno.ENOENT:
                 raise
             # nonexistent entry

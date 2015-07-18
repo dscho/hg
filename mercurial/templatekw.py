@@ -6,7 +6,7 @@
 # GNU General Public License version 2 or any later version.
 
 from node import hex
-import patch, util, error
+import patch, scmutil, util, error
 import hbisect
 
 # This helper class allows us to handle both:
@@ -40,24 +40,25 @@ class _hybrid(object):
             raise AttributeError(name)
         return getattr(self.values, name)
 
-def showlist(name, values, plural=None, element=None, **args):
+def showlist(name, values, plural=None, element=None, separator=' ', **args):
     if not element:
         element = name
-    f = _showlist(name, values, plural, **args)
+    f = _showlist(name, values, plural, separator, **args)
     return _hybrid(f, values, lambda x: {element: x})
 
-def _showlist(name, values, plural=None, **args):
+def _showlist(name, values, plural=None, separator=' ', **args):
     '''expand set of values.
     name is name of key in template map.
     values is list of strings or dicts.
     plural is plural of name, if not simply name + 's'.
+    separator is used to join values as a string
 
     expansion works like this, given name 'foo'.
 
     if values is empty, expand 'no_foos'.
 
     if 'foo' not in template map, return values as a string,
-    joined by space.
+    joined by 'separator'.
 
     expand 'start_foos'.
 
@@ -77,7 +78,7 @@ def _showlist(name, values, plural=None, **args):
         return
     if name not in templ:
         if isinstance(values[0], str):
-            yield ' '.join(values)
+            yield separator.join(values)
         else:
             for v in values:
                 yield dict(v, **args)
@@ -120,7 +121,7 @@ def getlatesttags(repo, ctx, cache):
     if 'latesttags' not in cache:
         # Cache mapping from rev to a tuple with tag date, tag
         # distance and tag name
-        cache['latesttags'] = {-1: (0, 0, 'null')}
+        cache['latesttags'] = {-1: (0, 0, ['null'])}
     latesttags = cache['latesttags']
 
     rev = ctx.rev()
@@ -133,7 +134,7 @@ def getlatesttags(repo, ctx, cache):
         tags = [t for t in ctx.tags()
                 if (repo.tagtype(t) and repo.tagtype(t) != 'local')]
         if tags:
-            latesttags[rev] = ctx.date()[0], 0, ':'.join(sorted(tags))
+            latesttags[rev] = ctx.date()[0], 0, [t for t in sorted(tags)]
             continue
         try:
             # The tuples are laid out so the right one can be found by
@@ -206,12 +207,12 @@ def showbranches(**args):
 
 def showbookmarks(**args):
     """:bookmarks: List of strings. Any bookmarks associated with the
-    changeset.
+    changeset. Also sets 'active', the name of the active bookmark.
     """
     repo = args['ctx']._repo
     bookmarks = args['ctx'].bookmarks()
-    current = repo._bookmarkcurrent
-    makemap = lambda v: {'bookmark': v, 'current': current}
+    active = repo._activebookmark
+    makemap = lambda v: {'bookmark': v, 'active': active, 'current': active}
     f = _showlist('bookmark', bookmarks, **args)
     return _hybrid(f, bookmarks, makemap, lambda x: x['bookmark'])
 
@@ -221,15 +222,18 @@ def showchildren(**args):
     childrevs = ['%d:%s' % (cctx, cctx) for cctx in ctx.children()]
     return showlist('children', childrevs, element='child', **args)
 
+# Deprecated, but kept alive for help generation a purpose.
 def showcurrentbookmark(**args):
     """:currentbookmark: String. The active bookmark, if it is
+    associated with the changeset (DEPRECATED)"""
+    return showactivebookmark(**args)
+
+def showactivebookmark(**args):
+    """:activebookmark: String. The active bookmark, if it is
     associated with the changeset"""
-    import bookmarks as bookmarks # to avoid circular import issues
-    repo = args['repo']
-    if bookmarks.iscurrent(repo):
-        current = repo._bookmarkcurrent
-        if current in args['ctx'].bookmarks():
-            return current
+    active = args['repo']._activebookmark
+    if active and active in args['ctx'].bookmarks():
+        return active
     return ''
 
 def showdate(repo, ctx, templ, **args):
@@ -321,19 +325,39 @@ def showfiles(**args):
     """
     return showlist('file', args['ctx'].files(), **args)
 
-def showlatesttag(repo, ctx, templ, cache, **args):
-    """:latesttag: String. Most recent global tag in the ancestors of this
-    changeset.
+def showlatesttag(**args):
+    """:latesttag: List of strings. The global tags on the most recent globally
+    tagged ancestor of this changeset.
     """
-    return getlatesttags(repo, ctx, cache)[2]
+    repo, ctx = args['repo'], args['ctx']
+    cache = args['cache']
+    latesttags = getlatesttags(repo, ctx, cache)[2]
+
+    return showlist('latesttag', latesttags, separator=':', **args)
 
 def showlatesttagdistance(repo, ctx, templ, cache, **args):
     """:latesttagdistance: Integer. Longest path to the latest tag."""
     return getlatesttags(repo, ctx, cache)[1]
 
+def showchangessincelatesttag(repo, ctx, templ, cache, **args):
+    """:changessincelatesttag: Integer. All ancestors not in the latest tag."""
+    latesttag = getlatesttags(repo, ctx, cache)[2][0]
+    offset = 0
+    revs = [ctx.rev()]
+
+    # The only() revset doesn't currently support wdir()
+    if ctx.rev() is None:
+        offset = 1
+        revs = [p.rev() for p in ctx.parents()]
+
+    return len(repo.revs('only(%ld, %s)', revs, latesttag)) + offset
+
 def showmanifest(**args):
     repo, ctx, templ = args['repo'], args['ctx'], args['templ']
     mnode = ctx.manifestnode()
+    if mnode is None:
+        # just avoid crash, we might want to use the 'ff...' hash in future
+        return
     args = args.copy()
     args.update({'rev': repo.manifest.rev(mnode), 'node': hex(mnode)})
     return templ('manifest', **args)
@@ -376,7 +400,7 @@ def showphaseidx(repo, ctx, templ, **args):
 
 def showrev(repo, ctx, templ, **args):
     """:rev: Integer. The repository-local changeset revision number."""
-    return ctx.rev()
+    return scmutil.intrev(ctx.rev())
 
 def showsubrepos(**args):
     """:subrepos: List of strings. Updated subrepositories in the changeset."""
@@ -418,12 +442,15 @@ def showtags(**args):
 # cache - a cache dictionary for the whole templater run
 # revcache - a cache dictionary for the current revision
 keywords = {
+    'activebookmark': showactivebookmark,
     'author': showauthor,
     'bisect': showbisect,
     'branch': showbranch,
     'branches': showbranches,
     'bookmarks': showbookmarks,
+    'changessincelatesttag': showchangessincelatesttag,
     'children': showchildren,
+    # currentbookmark is deprecated
     'currentbookmark': showcurrentbookmark,
     'date': showdate,
     'desc': showdescription,

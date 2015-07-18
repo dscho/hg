@@ -89,7 +89,7 @@ o  (0) root
   >         if opts.get('print_revset'):
   >             expr = cmdutil.getgraphlogrevs(repo, pats, opts)[1]
   >             if expr:
-  >                 tree = revset.parse(expr)[0]
+  >                 tree = revset.parse(expr)
   >             else:
   >                 tree = []
   >             ui.write('%r\n' % (opts.get('rev', []),))
@@ -1469,13 +1469,12 @@ glog always reorders nodes which explains the difference with log
   (group
     (group
       (or
-        (or
-          (func
-            ('symbol', 'branch')
-            ('string', 'default'))
-          (func
-            ('symbol', 'branch')
-            ('string', 'branch')))
+        (func
+          ('symbol', 'branch')
+          ('string', 'default'))
+        (func
+          ('symbol', 'branch')
+          ('string', 'branch'))
         (func
           ('symbol', 'branch')
           ('string', 'branch')))))
@@ -2392,5 +2391,13 @@ should not draw line down to null due to the magic of fullreposet
      date:        Thu Jan 01 00:00:00 1970 +0000
      summary:     add a
   
+
+working-directory revision
+
+  $ hg log -G -qr '. + wdir()'
+  o  2147483647:ffffffffffff
+  |
+  @  3:5918b8d165d1
+  |
 
   $ cd ..

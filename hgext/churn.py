@@ -9,21 +9,24 @@
 '''command to display statistics about repository history'''
 
 from mercurial.i18n import _
-from mercurial import patch, cmdutil, scmutil, util, templater, commands
+from mercurial import patch, cmdutil, scmutil, util, commands
 from mercurial import encoding
 import os
 import time, datetime
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 def maketemplater(ui, repo, tmpl):
-    tmpl = templater.parsestring(tmpl, quoted=False)
     try:
         t = cmdutil.changeset_templater(ui, repo, False, None, tmpl,
                                         None, False)
-    except SyntaxError, inst:
+    except SyntaxError as inst:
         raise util.Abort(inst.args[0])
     return t
 

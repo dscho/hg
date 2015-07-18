@@ -264,7 +264,6 @@ Test extension help:
        notify        hooks for sending email push notifications
        pager         browse command output with an external pager
        patchbomb     command to send changesets as (a series of) patch emails
-       progress      show progress bars for some actions
        purge         command to delete untracked files from the working
                      directory
        record        commands to interactively select changes for
@@ -797,6 +796,8 @@ Test list of internal help commands
    debugrebuilddirstate
                  rebuild the dirstate as it would look like for the given
                  revision
+   debugrebuildfncache
+                 rebuild the fncache file
    debugrename   dump rename information
    debugrevlog   show data and statistics about a revlog
    debugrevspec  parse and apply a revision specification
@@ -1116,6 +1117,10 @@ Test section lookup
   abort: help section not found
   [255]
 
+  $ hg help template.files
+      files         List of strings. All files modified, added, or removed by
+                    this changeset.
+
 Test dynamic list of merge tools only shows up once
   $ hg help merge-tools
   Merge Tools
@@ -1251,7 +1256,7 @@ Dish up an empty repo; serve it cold.
   $ hg serve -R "$TESTTMP/test" -n test -p $HGPORT -d --pid-file=hg.pid
   $ cat hg.pid >> $DAEMON_PIDS
 
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT "help"
+  $ get-with-headers.py 127.0.0.1:$HGPORT "help"
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -1802,7 +1807,7 @@ Dish up an empty repo; serve it cold.
   </html>
   
 
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT "help/add"
+  $ get-with-headers.py 127.0.0.1:$HGPORT "help/add"
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -1962,7 +1967,7 @@ Dish up an empty repo; serve it cold.
   </html>
   
 
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT "help/remove"
+  $ get-with-headers.py 127.0.0.1:$HGPORT "help/remove"
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -2155,7 +2160,7 @@ Dish up an empty repo; serve it cold.
   </html>
   
 
-  $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT "help/revisions"
+  $ get-with-headers.py 127.0.0.1:$HGPORT "help/revisions"
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -2250,6 +2255,6 @@ Dish up an empty repo; serve it cold.
   </html>
   
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
 
 #endif

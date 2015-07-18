@@ -3,7 +3,7 @@
   > """A small extension that acquire locks in the wrong order
   > """
   > 
-  > from mercurial import cmdutil
+  > from mercurial import cmdutil, repair, revset
   > 
   > cmdtable = {}
   > command = cmdutil.command(cmdtable)
@@ -38,13 +38,27 @@
   >     wl = repo.wlock(wait=False)
   >     wl.release()
   >     lo.release()
+  > 
+  > @command('stripintr', [], '')
+  > def stripintr(ui, repo):
+  >     lo = repo.lock()
+  >     tr = repo.transaction('foobar')
+  >     try:
+  >         repair.strip(repo.ui, repo, [repo['.'].node()])
+  >     finally:
+  >         lo.release()
+  > 
+  > def oldstylerevset(repo, subset, x):
+  >     return list(subset)
+  > 
+  > revset.symbols['oldstyle'] = oldstylerevset
   > EOF
 
   $ cat << EOF >> $HGRCPATH
   > [extensions]
   > buggylocking=$TESTTMP/buggylocking.py
   > [devel]
-  > all=1
+  > all-warnings=1
   > EOF
 
   $ hg init lock-checker
@@ -87,4 +101,18 @@
    $TESTTMP/buggylocking.py:* in buggylocking (glob)
   $ hg properlocking
   $ hg nowaitlocking
+
+  $ echo a > a
+  $ hg add a
+  $ hg commit -m a
+  $ hg stripintr
+  saved backup bundle to $TESTTMP/lock-checker/.hg/strip-backup/cb9a9f314b8b-cc5ccb0b-backup.hg (glob)
+  abort: programming error: cannot strip from inside a transaction
+  (contact your extension maintainer)
+  [255]
+
+  $ hg log -r "oldstyle()" -T '{rev}\n'
+  devel-warn: revset "oldstyle" use list instead of smartset, (upgrade your code) at: */mercurial/revset.py:* (mfunc) (glob)
+  0
+
   $ cd ..

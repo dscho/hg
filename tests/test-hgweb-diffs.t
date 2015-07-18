@@ -36,7 +36,7 @@ set up hgweb
 
 revision
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'rev/0'
+  $ get-with-headers.py localhost:$HGPORT 'rev/0'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -57,16 +57,16 @@ revision
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-   <li><a href="/shortlog/0cd96de13884">log</a></li>
-   <li><a href="/graph/0cd96de13884">graph</a></li>
+   <li><a href="/shortlog/0">log</a></li>
+   <li><a href="/graph/0">graph</a></li>
    <li><a href="/tags">tags</a></li>
    <li><a href="/bookmarks">bookmarks</a></li>
    <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
    <li class="active">changeset</li>
-   <li><a href="/raw-rev/0cd96de13884">raw</a></li>
-   <li><a href="/file/0cd96de13884">browse</a></li>
+   <li><a href="/raw-rev/0">raw</a></li>
+   <li><a href="/file/0">browse</a></li>
   </ul>
   <ul>
    
@@ -79,7 +79,10 @@ revision
   <div class="main">
   
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>changeset 0:0cd96de13884   </h3>
+  <h3>
+   changeset 0:<a href="/rev/0cd96de13884">0cd96de13884</a>
+   
+  </h3>
   
   <form class="search" action="/log">
   
@@ -168,7 +171,7 @@ revision
 
 raw revision
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'raw-rev/0'
+  $ get-with-headers.py localhost:$HGPORT 'raw-rev/0'
   200 Script output follows
   
   
@@ -201,7 +204,7 @@ diff removed file
   $ hg parents --template "{node|short}\n" -r tip b
   0cd96de13884
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'diff/tip/b'
+  $ get-with-headers.py localhost:$HGPORT 'diff/tip/b'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -223,24 +226,24 @@ diff removed file
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-  <li><a href="/shortlog/559edbd9ed20">log</a></li>
-  <li><a href="/graph/559edbd9ed20">graph</a></li>
+  <li><a href="/shortlog/tip">log</a></li>
+  <li><a href="/graph/tip">graph</a></li>
   <li><a href="/tags">tags</a></li>
   <li><a href="/bookmarks">bookmarks</a></li>
   <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
-  <li><a href="/rev/559edbd9ed20">changeset</a></li>
-  <li><a href="/file/559edbd9ed20">browse</a></li>
+  <li><a href="/rev/tip">changeset</a></li>
+  <li><a href="/file/tip">browse</a></li>
   </ul>
   <ul>
-  <li><a href="/file/559edbd9ed20/b">file</a></li>
+  <li><a href="/file/tip/b">file</a></li>
   <li><a href="/file/tip/b">latest</a></li>
   <li class="active">diff</li>
-  <li><a href="/comparison/559edbd9ed20/b">comparison</a></li>
-  <li><a href="/annotate/559edbd9ed20/b">annotate</a></li>
-  <li><a href="/log/559edbd9ed20/b">file log</a></li>
-  <li><a href="/raw-file/559edbd9ed20/b">raw</a></li>
+  <li><a href="/comparison/tip/b">comparison</a></li>
+  <li><a href="/annotate/tip/b">annotate</a></li>
+  <li><a href="/log/tip/b">file log</a></li>
+  <li><a href="/raw-file/tip/b">raw</a></li>
   </ul>
   <ul>
   <li><a href="/help">help</a></li>
@@ -249,7 +252,10 @@ diff removed file
   
   <div class="main">
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>diff b @ 1:559edbd9ed20</h3>
+  <h3>
+   diff b @ 1:<a href="/rev/559edbd9ed20">559edbd9ed20</a>
+   <span class="tag">tip</span> 
+  </h3>
   
   <form class="search" action="/log">
   <p></p>
@@ -302,13 +308,13 @@ diff removed file
 
 set up hgweb with git diffs
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ hg serve --config 'diff.git=1' -n test -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log
   $ cat hg.pid >> $DAEMON_PIDS
 
 revision
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'rev/0'
+  $ get-with-headers.py localhost:$HGPORT 'rev/0'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -329,16 +335,16 @@ revision
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-   <li><a href="/shortlog/0cd96de13884">log</a></li>
-   <li><a href="/graph/0cd96de13884">graph</a></li>
+   <li><a href="/shortlog/0">log</a></li>
+   <li><a href="/graph/0">graph</a></li>
    <li><a href="/tags">tags</a></li>
    <li><a href="/bookmarks">bookmarks</a></li>
    <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
    <li class="active">changeset</li>
-   <li><a href="/raw-rev/0cd96de13884">raw</a></li>
-   <li><a href="/file/0cd96de13884">browse</a></li>
+   <li><a href="/raw-rev/0">raw</a></li>
+   <li><a href="/file/0">browse</a></li>
   </ul>
   <ul>
    
@@ -351,7 +357,10 @@ revision
   <div class="main">
   
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>changeset 0:0cd96de13884   </h3>
+  <h3>
+   changeset 0:<a href="/rev/0cd96de13884">0cd96de13884</a>
+   
+  </h3>
   
   <form class="search" action="/log">
   
@@ -442,7 +451,7 @@ revision
 
 revision
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'raw-rev/0'
+  $ get-with-headers.py localhost:$HGPORT 'raw-rev/0'
   200 Script output follows
   
   
@@ -477,7 +486,7 @@ diff modified file
   $ hg parents --template "{node|short}\n" -r tip a
   0cd96de13884
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'diff/tip/a'
+  $ get-with-headers.py localhost:$HGPORT 'diff/tip/a'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -499,24 +508,24 @@ diff modified file
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-  <li><a href="/shortlog/559edbd9ed20">log</a></li>
-  <li><a href="/graph/559edbd9ed20">graph</a></li>
+  <li><a href="/shortlog/tip">log</a></li>
+  <li><a href="/graph/tip">graph</a></li>
   <li><a href="/tags">tags</a></li>
   <li><a href="/bookmarks">bookmarks</a></li>
   <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
-  <li><a href="/rev/559edbd9ed20">changeset</a></li>
-  <li><a href="/file/559edbd9ed20">browse</a></li>
+  <li><a href="/rev/tip">changeset</a></li>
+  <li><a href="/file/tip">browse</a></li>
   </ul>
   <ul>
-  <li><a href="/file/559edbd9ed20/a">file</a></li>
+  <li><a href="/file/tip/a">file</a></li>
   <li><a href="/file/tip/a">latest</a></li>
   <li class="active">diff</li>
-  <li><a href="/comparison/559edbd9ed20/a">comparison</a></li>
-  <li><a href="/annotate/559edbd9ed20/a">annotate</a></li>
-  <li><a href="/log/559edbd9ed20/a">file log</a></li>
-  <li><a href="/raw-file/559edbd9ed20/a">raw</a></li>
+  <li><a href="/comparison/tip/a">comparison</a></li>
+  <li><a href="/annotate/tip/a">annotate</a></li>
+  <li><a href="/log/tip/a">file log</a></li>
+  <li><a href="/raw-file/tip/a">raw</a></li>
   </ul>
   <ul>
   <li><a href="/help">help</a></li>
@@ -525,7 +534,10 @@ diff modified file
   
   <div class="main">
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>diff a @ 1:559edbd9ed20</h3>
+  <h3>
+   diff a @ 1:<a href="/rev/559edbd9ed20">559edbd9ed20</a>
+   <span class="tag">tip</span> 
+  </h3>
   
   <form class="search" action="/log">
   <p></p>
@@ -580,7 +592,7 @@ comparison new file
   $ hg log --template "{rev}:{node|short}\n" -r 0
   0:0cd96de13884
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'comparison/0/a'
+  $ get-with-headers.py localhost:$HGPORT 'comparison/0/a'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -602,24 +614,24 @@ comparison new file
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-  <li><a href="/shortlog/0cd96de13884">log</a></li>
-  <li><a href="/graph/0cd96de13884">graph</a></li>
+  <li><a href="/shortlog/0">log</a></li>
+  <li><a href="/graph/0">graph</a></li>
   <li><a href="/tags">tags</a></li>
   <li><a href="/bookmarks">bookmarks</a></li>
   <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
-  <li><a href="/rev/0cd96de13884">changeset</a></li>
-  <li><a href="/file/0cd96de13884">browse</a></li>
+  <li><a href="/rev/0">changeset</a></li>
+  <li><a href="/file/0">browse</a></li>
   </ul>
   <ul>
-  <li><a href="/file/0cd96de13884/a">file</a></li>
+  <li><a href="/file/0/a">file</a></li>
   <li><a href="/file/tip/a">latest</a></li>
-  <li><a href="/diff/0cd96de13884/a">diff</a></li>
+  <li><a href="/diff/0/a">diff</a></li>
   <li class="active">comparison</li>
-  <li><a href="/annotate/0cd96de13884/a">annotate</a></li>
-  <li><a href="/log/0cd96de13884/a">file log</a></li>
-  <li><a href="/raw-file/0cd96de13884/a">raw</a></li>
+  <li><a href="/annotate/0/a">annotate</a></li>
+  <li><a href="/log/0/a">file log</a></li>
+  <li><a href="/raw-file/0/a">raw</a></li>
   </ul>
   <ul>
   <li><a href="/help">help</a></li>
@@ -628,7 +640,10 @@ comparison new file
   
   <div class="main">
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>comparison a @ 0:0cd96de13884</h3>
+  <h3>
+   comparison a @ 0:<a href="/rev/0cd96de13884">0cd96de13884</a>
+   
+  </h3>
   
   <form class="search" action="/log">
   <p></p>
@@ -707,7 +722,7 @@ comparison existing file
   $ hg log --template "{rev}:{node|short}\n" -r tip
   2:d73db4d812ff
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'comparison/tip/a'
+  $ get-with-headers.py localhost:$HGPORT 'comparison/tip/a'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -729,24 +744,24 @@ comparison existing file
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-  <li><a href="/shortlog/d73db4d812ff">log</a></li>
-  <li><a href="/graph/d73db4d812ff">graph</a></li>
+  <li><a href="/shortlog/tip">log</a></li>
+  <li><a href="/graph/tip">graph</a></li>
   <li><a href="/tags">tags</a></li>
   <li><a href="/bookmarks">bookmarks</a></li>
   <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
-  <li><a href="/rev/d73db4d812ff">changeset</a></li>
-  <li><a href="/file/d73db4d812ff">browse</a></li>
+  <li><a href="/rev/tip">changeset</a></li>
+  <li><a href="/file/tip">browse</a></li>
   </ul>
   <ul>
-  <li><a href="/file/d73db4d812ff/a">file</a></li>
+  <li><a href="/file/tip/a">file</a></li>
   <li><a href="/file/tip/a">latest</a></li>
-  <li><a href="/diff/d73db4d812ff/a">diff</a></li>
+  <li><a href="/diff/tip/a">diff</a></li>
   <li class="active">comparison</li>
-  <li><a href="/annotate/d73db4d812ff/a">annotate</a></li>
-  <li><a href="/log/d73db4d812ff/a">file log</a></li>
-  <li><a href="/raw-file/d73db4d812ff/a">raw</a></li>
+  <li><a href="/annotate/tip/a">annotate</a></li>
+  <li><a href="/log/tip/a">file log</a></li>
+  <li><a href="/raw-file/tip/a">raw</a></li>
   </ul>
   <ul>
   <li><a href="/help">help</a></li>
@@ -755,7 +770,10 @@ comparison existing file
   
   <div class="main">
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>comparison a @ 2:d73db4d812ff</h3>
+  <h3>
+   comparison a @ 2:<a href="/rev/d73db4d812ff">d73db4d812ff</a>
+   <span class="tag">tip</span> 
+  </h3>
   
   <form class="search" action="/log">
   <p></p>
@@ -836,7 +854,7 @@ comparison removed file
   $ hg log --template "{rev}:{node|short}\n" -r tip
   3:20e80271eb7a
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'comparison/tip/a'
+  $ get-with-headers.py localhost:$HGPORT 'comparison/tip/a'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -858,24 +876,24 @@ comparison removed file
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-  <li><a href="/shortlog/20e80271eb7a">log</a></li>
-  <li><a href="/graph/20e80271eb7a">graph</a></li>
+  <li><a href="/shortlog/tip">log</a></li>
+  <li><a href="/graph/tip">graph</a></li>
   <li><a href="/tags">tags</a></li>
   <li><a href="/bookmarks">bookmarks</a></li>
   <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
-  <li><a href="/rev/20e80271eb7a">changeset</a></li>
-  <li><a href="/file/20e80271eb7a">browse</a></li>
+  <li><a href="/rev/tip">changeset</a></li>
+  <li><a href="/file/tip">browse</a></li>
   </ul>
   <ul>
-  <li><a href="/file/20e80271eb7a/a">file</a></li>
+  <li><a href="/file/tip/a">file</a></li>
   <li><a href="/file/tip/a">latest</a></li>
-  <li><a href="/diff/20e80271eb7a/a">diff</a></li>
+  <li><a href="/diff/tip/a">diff</a></li>
   <li class="active">comparison</li>
-  <li><a href="/annotate/20e80271eb7a/a">annotate</a></li>
-  <li><a href="/log/20e80271eb7a/a">file log</a></li>
-  <li><a href="/raw-file/20e80271eb7a/a">raw</a></li>
+  <li><a href="/annotate/tip/a">annotate</a></li>
+  <li><a href="/log/tip/a">file log</a></li>
+  <li><a href="/raw-file/tip/a">raw</a></li>
   </ul>
   <ul>
   <li><a href="/help">help</a></li>
@@ -884,7 +902,10 @@ comparison removed file
   
   <div class="main">
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>comparison a @ 3:20e80271eb7a</h3>
+  <h3>
+   comparison a @ 3:<a href="/rev/20e80271eb7a">20e80271eb7a</a>
+   <span class="tag">tip</span> 
+  </h3>
   
   <form class="search" action="/log">
   <p></p>
@@ -971,7 +992,7 @@ comparison not-modified file
   $ hg parents --template "{rev}:{node|short}\n" -r tip e
   4:402bea3b0976
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'comparison/tip/e'
+  $ get-with-headers.py localhost:$HGPORT 'comparison/tip/e'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -993,24 +1014,24 @@ comparison not-modified file
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-  <li><a href="/shortlog/41d9fc4a6ae1">log</a></li>
-  <li><a href="/graph/41d9fc4a6ae1">graph</a></li>
+  <li><a href="/shortlog/tip">log</a></li>
+  <li><a href="/graph/tip">graph</a></li>
   <li><a href="/tags">tags</a></li>
   <li><a href="/bookmarks">bookmarks</a></li>
   <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
-  <li><a href="/rev/41d9fc4a6ae1">changeset</a></li>
-  <li><a href="/file/41d9fc4a6ae1">browse</a></li>
+  <li><a href="/rev/tip">changeset</a></li>
+  <li><a href="/file/tip">browse</a></li>
   </ul>
   <ul>
-  <li><a href="/file/41d9fc4a6ae1/e">file</a></li>
+  <li><a href="/file/tip/e">file</a></li>
   <li><a href="/file/tip/e">latest</a></li>
-  <li><a href="/diff/41d9fc4a6ae1/e">diff</a></li>
+  <li><a href="/diff/tip/e">diff</a></li>
   <li class="active">comparison</li>
-  <li><a href="/annotate/41d9fc4a6ae1/e">annotate</a></li>
-  <li><a href="/log/41d9fc4a6ae1/e">file log</a></li>
-  <li><a href="/raw-file/41d9fc4a6ae1/e">raw</a></li>
+  <li><a href="/annotate/tip/e">annotate</a></li>
+  <li><a href="/log/tip/e">file log</a></li>
+  <li><a href="/raw-file/tip/e">raw</a></li>
   </ul>
   <ul>
   <li><a href="/help">help</a></li>
@@ -1019,7 +1040,10 @@ comparison not-modified file
   
   <div class="main">
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>comparison e @ 5:41d9fc4a6ae1</h3>
+  <h3>
+   comparison e @ 5:<a href="/rev/41d9fc4a6ae1">41d9fc4a6ae1</a>
+   <span class="tag">tip</span> 
+  </h3>
   
   <form class="search" action="/log">
   <p></p>
@@ -1094,7 +1118,7 @@ test import rev as raw-rev
 
 raw revision with diff block numbers
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ cat <<EOF > .hg/hgrc
   > [web]
   > templates = rawdiff
@@ -1114,7 +1138,7 @@ raw revision with diff block numbers
   > EOF
   $ hg serve -n test -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log
   $ cat hg.pid >> $DAEMON_PIDS
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'raw-rev/0'
+  $ get-with-headers.py localhost:$HGPORT 'raw-rev/0'
   200 Script output follows
   
   Block: 1
@@ -1131,7 +1155,7 @@ raw revision with diff block numbers
   @@ -0,0 +1,1 @@
   +b
   
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ rm .hg/hgrc rawdiff/map
   $ rmdir rawdiff
   $ hg serve -n test -p $HGPORT -d --pid-file=hg.pid -A access.log -E errors.log

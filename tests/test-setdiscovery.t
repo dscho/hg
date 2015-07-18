@@ -14,13 +14,13 @@ Function to test discovery between two repos in both directions, using both the 
   >     hg -R a debugdiscovery b --verbose --old
   >     echo
   >     echo "% -- a -> b set"
-  >     hg -R a debugdiscovery b --verbose --debug
+  >     hg -R a debugdiscovery b --verbose --debug --config progress.debug=true
   >     echo
   >     echo "% -- b -> a tree"
-  >     hg -R b debugdiscovery a --verbose --old
+  >     hg -R b debugdiscovery a --verbose --old --config
   >     echo
   >     echo "% -- b -> a set"
-  >     hg -R b debugdiscovery a --verbose --debug
+  >     hg -R b debugdiscovery a --verbose --debug --config progress.debug=true
   >     cd ..
   > }
 
@@ -305,7 +305,7 @@ One with >200 heads, which used to use up all of the sample:
   updating to branch b
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
-  $ hg -R a debugdiscovery b --debug --verbose
+  $ hg -R a debugdiscovery b --debug --verbose --config progress.debug=true
   comparing with b
   query 1; heads
   searching for changes
@@ -346,7 +346,7 @@ Test actual protocol when pulling one new head in addition to common heads
   searching for changes
   e64a39e7da8b
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ cut -d' ' -f6- access.log | grep -v cmd=known # cmd=known uses random sampling
   "GET /?cmd=capabilities HTTP/1.1" 200 -
   "GET /?cmd=batch HTTP/1.1" 200 - x-hgarg-1:cmds=heads+%3Bknown+nodes%3D513314ca8b3ae4dac8eec56966265b00fcf866db

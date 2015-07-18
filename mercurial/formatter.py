@@ -9,6 +9,8 @@ import cPickle
 from node import hex, short
 from i18n import _
 import encoding, util
+import templater
+import os
 
 class baseformatter(object):
     def __init__(self, ui, topic, opts):
@@ -133,6 +135,58 @@ class jsonformatter(baseformatter):
         baseformatter.end(self)
         self._ui.write("\n]\n")
 
+class templateformatter(baseformatter):
+    def __init__(self, ui, topic, opts):
+        baseformatter.__init__(self, ui, topic, opts)
+        self._topic = topic
+        self._t = gettemplater(ui, topic, opts.get('template', ''))
+    def _showitem(self):
+        g = self._t(self._topic, **self._item)
+        self._ui.write(templater.stringify(g))
+
+def lookuptemplate(ui, topic, tmpl):
+    # looks like a literal template?
+    if '{' in tmpl:
+        return tmpl, None
+
+    # perhaps a stock style?
+    if not os.path.split(tmpl)[0]:
+        mapname = (templater.templatepath('map-cmdline.' + tmpl)
+                   or templater.templatepath(tmpl))
+        if mapname and os.path.isfile(mapname):
+            return None, mapname
+
+    # perhaps it's a reference to [templates]
+    t = ui.config('templates', tmpl)
+    if t:
+        try:
+            tmpl = templater.unquotestring(t)
+        except SyntaxError:
+            tmpl = t
+        return tmpl, None
+
+    if tmpl == 'list':
+        ui.write(_("available styles: %s\n") % templater.stylelist())
+        raise util.Abort(_("specify a template"))
+
+    # perhaps it's a path to a map or a template
+    if ('/' in tmpl or '\\' in tmpl) and os.path.isfile(tmpl):
+        # is it a mapfile for a style?
+        if os.path.basename(tmpl).startswith("map-"):
+            return None, os.path.realpath(tmpl)
+        tmpl = open(tmpl).read()
+        return tmpl, None
+
+    # constant string?
+    return tmpl, None
+
+def gettemplater(ui, topic, spec):
+    tmpl, mapfile = lookuptemplate(ui, topic, spec)
+    t = templater.templater(mapfile, {})
+    if tmpl:
+        t.cache[topic] = tmpl
+    return t
+
 def formatter(ui, topic, opts):
     template = opts.get("template", "")
     if template == "json":
@@ -142,9 +196,11 @@ def formatter(ui, topic, opts):
     elif template == "debug":
         return debugformatter(ui, topic, opts)
     elif template != "":
-        raise util.Abort(_("custom templates not yet supported"))
+        return templateformatter(ui, topic, opts)
+    # developer config: ui.formatdebug
     elif ui.configbool('ui', 'formatdebug'):
         return debugformatter(ui, topic, opts)
+    # deprecated config: ui.formatjson
     elif ui.configbool('ui', 'formatjson'):
         return jsonformatter(ui, topic, opts)
     return plainformatter(ui, topic, opts)

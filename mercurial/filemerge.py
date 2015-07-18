@@ -75,6 +75,7 @@ def _picktool(repo, ui, path, binary, symlink):
             return True
         return False
 
+    # internal config: ui.forcemerge
     # forcemerge comes from command line arguments, highest priority
     force = ui.config('ui', 'forcemerge')
     if force:
@@ -354,7 +355,6 @@ def _formatlabels(repo, fcd, fco, fca, labels):
 
     ui = repo.ui
     template = ui.config('ui', 'mergemarkertemplate', _defaultconflictmarker)
-    template = templater.parsestring(template, quoted=False)
     tmpl = templater.templater(None, cache={'conflictmarker': template})
 
     pad = max(len(l) for l in labels)

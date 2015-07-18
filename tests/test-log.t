@@ -148,7 +148,7 @@ log on directory
 
   $ hg log -f -l1 --style something
   abort: style 'something' not found
-  (available styles: bisect, changelog, compact, default, phases, xml)
+  (available styles: bisect, changelog, compact, default, phases, status, xml)
   [255]
 
 -f, phases style
@@ -1626,15 +1626,16 @@ issue3772: hg log -r :null showing revision 0 as well
 working-directory revision requires special treatment
 
   $ hg log -r 'wdir()'
-  changeset:   0:65624cd9070a+
+  changeset:   2147483647:ffffffffffff
+  parent:      0:65624cd9070a
   user:        test
   date:        [A-Za-z0-9:+ ]+ (re)
   
   $ hg log -r 'wdir()' -q
-  0:65624cd9070a+
+  2147483647:ffffffffffff
 
   $ hg log -r 'wdir()' --debug
-  changeset:   0:65624cd9070a035fa7191a54f2b8af39f16b0c08+
+  changeset:   2147483647:ffffffffffffffffffffffffffffffffffffffff
   phase:       draft
   parent:      0:65624cd9070a035fa7191a54f2b8af39f16b0c08
   parent:      -1:0000000000000000000000000000000000000000
@@ -1653,7 +1654,7 @@ working-directory revision requires special treatment
     "date": [*, 0], (glob)
     "desc": "",
     "bookmarks": [],
-    "tags": ["tip"],
+    "tags": [],
     "parents": ["65624cd9070a035fa7191a54f2b8af39f16b0c08"]
    }
   ]
@@ -1677,7 +1678,7 @@ working-directory revision requires special treatment
     "date": [*, 0], (glob)
     "desc": "",
     "bookmarks": [],
-    "tags": ["tip"],
+    "tags": [],
     "parents": ["65624cd9070a035fa7191a54f2b8af39f16b0c08"],
     "manifest": null,
     "extra": {"branch": "default"},

@@ -19,7 +19,7 @@ import error, osutil, encoding, parsers
 import errno, shutil, sys, tempfile, traceback
 import re as remod
 import os, time, datetime, calendar, textwrap, signal, collections
-import imp, socket, urllib, struct
+import imp, socket, urllib
 import gc
 
 if os.name == 'nt':
@@ -54,6 +54,7 @@ openhardlinks = platform.openhardlinks
 oslink = platform.oslink
 parsepatchoutput = platform.parsepatchoutput
 pconvert = platform.pconvert
+poll = platform.poll
 popen = platform.popen
 posixfile = platform.posixfile
 quotecommand = platform.quotecommand
@@ -232,14 +233,101 @@ except NameError:
 import subprocess
 closefds = os.name == 'posix'
 
-def unpacker(fmt):
-    """create a struct unpacker for the specified format"""
-    try:
-        # 2.5+
-        return struct.Struct(fmt).unpack
-    except AttributeError:
-        # 2.4
-        return lambda buf: struct.unpack(fmt, buf)
+_chunksize = 4096
+
+class bufferedinputpipe(object):
+    """a manually buffered input pipe
+
+    Python will not let us use buffered IO and lazy reading with 'polling' at
+    the same time. We cannot probe the buffer state and select will not detect
+    that data are ready to read if they are already buffered.
+
+    This class let us work around that by implementing its own buffering
+    (allowing efficient readline) while offering a way to know if the buffer is
+    empty from the output (allowing collaboration of the buffer with polling).
+
+    This class lives in the 'util' module because it makes use of the 'os'
+    module from the python stdlib.
+    """
+
+    def __init__(self, input):
+        self._input = input
+        self._buffer = []
+        self._eof = False
+        self._lenbuf = 0
+
+    @property
+    def hasbuffer(self):
+        """True is any data is currently buffered
+
+        This will be used externally a pre-step for polling IO. If there is
+        already data then no polling should be set in place."""
+        return bool(self._buffer)
+
+    @property
+    def closed(self):
+        return self._input.closed
+
+    def fileno(self):
+        return self._input.fileno()
+
+    def close(self):
+        return self._input.close()
+
+    def read(self, size):
+        while (not self._eof) and (self._lenbuf < size):
+            self._fillbuffer()
+        return self._frombuffer(size)
+
+    def readline(self, *args, **kwargs):
+        if 1 < len(self._buffer):
+            # this should not happen because both read and readline end with a
+            # _frombuffer call that collapse it.
+            self._buffer = [''.join(self._buffer)]
+            self._lenbuf = len(self._buffer[0])
+        lfi = -1
+        if self._buffer:
+            lfi = self._buffer[-1].find('\n')
+        while (not self._eof) and lfi < 0:
+            self._fillbuffer()
+            if self._buffer:
+                lfi = self._buffer[-1].find('\n')
+        size = lfi + 1
+        if lfi < 0: # end of file
+            size = self._lenbuf
+        elif 1 < len(self._buffer):
+            # we need to take previous chunks into account
+            size += self._lenbuf - len(self._buffer[-1])
+        return self._frombuffer(size)
+
+    def _frombuffer(self, size):
+        """return at most 'size' data from the buffer
+
+        The data are removed from the buffer."""
+        if size == 0 or not self._buffer:
+            return ''
+        buf = self._buffer[0]
+        if 1 < len(self._buffer):
+            buf = ''.join(self._buffer)
+
+        data = buf[:size]
+        buf = buf[len(data):]
+        if buf:
+            self._buffer = [buf]
+            self._lenbuf = len(buf)
+        else:
+            self._buffer = []
+            self._lenbuf = 0
+        return data
+
+    def _fillbuffer(self):
+        """read data to the buffer"""
+        data = os.read(self._input.fileno(), _chunksize)
+        if not data:
+            self._eof = True
+        else:
+            self._lenbuf += len(data)
+            self._buffer.append(data)
 
 def popen2(cmd, env=None, newlines=False):
     # Setting bufsize to -1 lets the system decide the buffer size.
@@ -256,8 +344,8 @@ def popen3(cmd, env=None, newlines=False):
     stdin, stdout, stderr, p = popen4(cmd, env, newlines)
     return stdin, stdout, stderr
 
-def popen4(cmd, env=None, newlines=False):
-    p = subprocess.Popen(cmd, shell=True, bufsize=-1,
+def popen4(cmd, env=None, newlines=False, bufsize=-1):
+    p = subprocess.Popen(cmd, shell=True, bufsize=bufsize,
                          close_fds=closefds,
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE,
@@ -334,18 +422,6 @@ def cachefunc(func):
 
     return f
 
-try:
-    collections.deque.remove
-    deque = collections.deque
-except AttributeError:
-    # python 2.4 lacks deque.remove
-    class deque(collections.deque):
-        def remove(self, val):
-            for i, v in enumerate(self):
-                if v == val:
-                    del self[i]
-                    break
-
 class sortdict(dict):
     '''a simple sorted dictionary'''
     def __init__(self, data=None):
@@ -396,7 +472,7 @@ class lrucachedict(object):
     def __init__(self, maxsize):
         self._cache = {}
         self._maxsize = maxsize
-        self._order = deque()
+        self._order = collections.deque()
 
     def __getitem__(self, key):
         value = self._cache[key]
@@ -418,12 +494,12 @@ class lrucachedict(object):
 
     def clear(self):
         self._cache.clear()
-        self._order = deque()
+        self._order = collections.deque()
 
 def lrucachefunc(func):
     '''cache most recent results of function calls'''
     cache = {}
-    order = deque()
+    order = collections.deque()
     if func.func_code.co_argcount == 1:
         def f(arg):
             if arg not in cache:
@@ -739,7 +815,7 @@ def copyfile(src, dest, hardlink=False):
         try:
             shutil.copyfile(src, dest)
             shutil.copymode(src, dest)
-        except shutil.Error, inst:
+        except shutil.Error as inst:
             raise Abort(str(inst))
 
 def copyfiles(src, dst, hardlink=None, progress=lambda t, pos: None):
@@ -838,7 +914,7 @@ else:
 def makelock(info, pathname):
     try:
         return os.symlink(info, pathname)
-    except OSError, why:
+    except OSError as why:
         if why.errno == errno.EEXIST:
             raise
     except AttributeError: # no symlink in os
@@ -851,7 +927,7 @@ def makelock(info, pathname):
 def readlock(pathname):
     try:
         return os.readlink(pathname)
-    except OSError, why:
+    except OSError as why:
         if why.errno not in (errno.EINVAL, errno.ENOSYS):
             raise
     except AttributeError: # no symlink in os
@@ -1003,15 +1079,13 @@ def checknlink(testfile):
     f2 = testfile + ".hgtmp2"
     fd = None
     try:
-        try:
-            oslink(f1, f2)
-        except OSError:
-            return False
-
+        oslink(f1, f2)
         # nlinks() may behave differently for files on Windows shares if
         # the file is open.
         fd = posixfile(f2)
         return nlinks(f2) > 1
+    except OSError:
+        return False
     finally:
         if fd is not None:
             fd.close()
@@ -1070,7 +1144,7 @@ def mktempcopy(name, emptyok=False, createmode=None):
     try:
         try:
             ifp = posixfile(name, "rb")
-        except IOError, inst:
+        except IOError as inst:
             if inst.errno == errno.ENOENT:
                 return temp
             if not getattr(inst, 'filename', None):
@@ -1129,7 +1203,7 @@ def makedirs(name, mode=None, notindexed=False):
     """recursive directory creation with parent mode inheritance"""
     try:
         makedir(name, notindexed)
-    except OSError, err:
+    except OSError as err:
         if err.errno == errno.EEXIST:
             return
         if err.errno != errno.ENOENT or not name:
@@ -1156,7 +1230,7 @@ def ensuredirs(name, mode=None, notindexed=False):
         ensuredirs(parent, mode, notindexed)
     try:
         makedir(name, notindexed)
-    except OSError, err:
+    except OSError as err:
         if err.errno == errno.EEXIST and os.path.isdir(name):
             # someone else seems to have won a directory creation race
             return
@@ -1203,7 +1277,7 @@ class chunkbuffer(object):
                 else:
                     yield chunk
         self.iter = splitbig(in_iter)
-        self._queue = deque()
+        self._queue = collections.deque()
 
     def read(self, l=None):
         """Read L bytes of data from the iterator of chunks of data.
@@ -1573,13 +1647,6 @@ def MBTextWrapper(**kwargs):
 
         This requires use decision to determine width of such characters.
         """
-        def __init__(self, **kwargs):
-            textwrap.TextWrapper.__init__(self, **kwargs)
-
-            # for compatibility between 2.4 and 2.6
-            if getattr(self, 'drop_whitespace', None) is None:
-                self.drop_whitespace = kwargs.get('drop_whitespace', True)
-
         def _cutdown(self, ucstr, space_left):
             l = 0
             colwidth = encoding.ucolwidth
@@ -1733,21 +1800,6 @@ def rundetached(args, condfn):
     finally:
         if prevhandler is not None:
             signal.signal(signal.SIGCHLD, prevhandler)
-
-try:
-    any, all = any, all
-except NameError:
-    def any(iterable):
-        for i in iterable:
-            if i:
-                return True
-        return False
-
-    def all(iterable):
-        for i in iterable:
-            if not i:
-                return False
-        return True
 
 def interpolate(prefix, mapping, s, fn=None, escape_prefix=False):
     """Return the result of interpolating items in the mapping into string s.

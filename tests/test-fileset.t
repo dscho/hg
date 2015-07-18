@@ -16,15 +16,21 @@
 
 Test operators and basic patterns
 
-  $ fileset a1
+  $ fileset -v a1
+  ('symbol', 'a1')
   a1
-  $ fileset 'a*'
+  $ fileset -v 'a*'
+  ('symbol', 'a*')
   a1
   a2
-  $ fileset '"re:a\d"'
+  $ fileset -v '"re:a\d"'
+  ('string', 're:a\\d')
   a1
   a2
-  $ fileset 'a1 or a2'
+  $ fileset -v 'a1 or a2'
+  (or
+    ('symbol', 'a1')
+    ('symbol', 'a2'))
   a1
   a2
   $ fileset 'a1 | a2'
@@ -174,15 +180,53 @@ Test subrepo predicate
   $ hg -R sub add sub/suba
   $ hg -R sub ci -m sub
   $ echo 'sub = sub' > .hgsub
+  $ hg init sub2
+  $ echo b > sub2/b
+  $ hg -R sub2 ci -Am sub2
+  adding b
+  $ echo 'sub2 = sub2' >> .hgsub
   $ fileset 'subrepo()'
   $ hg add .hgsub
   $ fileset 'subrepo()'
   sub
+  sub2
   $ fileset 'subrepo("sub")'
   sub
   $ fileset 'subrepo("glob:*")'
   sub
+  sub2
   $ hg ci -m subrepo
+
+Test that .hgsubstate is updated as appropriate during a conversion.  The
+saverev property is enough to alter the hashes of the subrepo.
+
+  $ hg init ../converted
+  $ hg --config extensions.convert= convert --config convert.hg.saverev=True  \
+  >      sub ../converted/sub
+  initializing destination ../converted/sub repository
+  scanning source...
+  sorting...
+  converting...
+  0 sub
+  $ hg clone -U sub2 ../converted/sub2
+  $ hg --config extensions.convert= convert --config convert.hg.saverev=True  \
+  >      . ../converted
+  scanning source...
+  sorting...
+  converting...
+  4 addfiles
+  3 manychanges
+  2 diverging
+  1 merge
+  0 subrepo
+  no ".hgsubstate" updates will be made for "sub2"
+  $ hg up -q -R ../converted -r tip
+  $ hg --cwd ../converted cat sub/suba sub2/b -r tip
+  a
+  b
+  $ oldnode=`hg log -r tip -T "{node}\n"`
+  $ newnode=`hg log -R ../converted -r tip -T "{node}\n"`
+  $ [ "$oldnode" != "$newnode" ] || echo "nothing changed"
 
 Test with a revision
 
@@ -235,6 +279,7 @@ Test with a revision
 
   $ fileset -r4 'subrepo("re:su.*")'
   sub
+  sub2
   $ fileset -r4 'subrepo("sub")'
   sub
   $ fileset -r4 'b2 or c1'

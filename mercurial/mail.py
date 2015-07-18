@@ -9,10 +9,6 @@ from i18n import _
 import util, encoding, sslutil
 import os, smtplib, socket, quopri, time, sys
 import email
-# On python2.4 you have to import these by name or they fail to
-# load. This was not a problem on Python 2.7.
-import email.Header
-import email.MIMEText
 
 _oldheaderinit = email.Header.Header.__init__
 def _unifiedheaderinit(self, *args, **kw):
@@ -49,8 +45,8 @@ class STARTTLS(smtplib.SMTP):
             raise smtplib.SMTPException(msg)
         (resp, reply) = self.docmd("STARTTLS")
         if resp == 220:
-            self.sock = sslutil.ssl_wrap_socket(self.sock, keyfile, certfile,
-                                                **self._sslkwargs)
+            self.sock = sslutil.wrapsocket(self.sock, keyfile, certfile,
+                                           **self._sslkwargs)
             if not util.safehasattr(self.sock, "read"):
                 # using httplib.FakeSocket with Python 2.5.x or earlier
                 self.sock.read = self.sock.recv
@@ -78,9 +74,9 @@ if util.safehasattr(smtplib.SMTP, '_get_socket'):
             if self.debuglevel > 0:
                 print >> sys.stderr, 'connect:', (host, port)
             new_socket = socket.create_connection((host, port), timeout)
-            new_socket = sslutil.ssl_wrap_socket(new_socket,
-                                                 self.keyfile, self.certfile,
-                                                 **self._sslkwargs)
+            new_socket = sslutil.wrapsocket(new_socket,
+                                            self.keyfile, self.certfile,
+                                            **self._sslkwargs)
             self.file = smtplib.SSLFakeFile(new_socket)
             return new_socket
 else:
@@ -108,7 +104,8 @@ def _smtp(ui):
     if (starttls or smtps) and verifycert:
         sslkwargs = sslutil.sslkwargs(ui, mailhost)
     else:
-        sslkwargs = {}
+        # 'ui' is required by sslutil.wrapsocket() and set by sslkwargs()
+        sslkwargs = {'ui': ui}
     if smtps:
         ui.note(_('(using smtps)\n'))
         s = SMTPS(sslkwargs, local_hostname=local_hostname)
@@ -141,23 +138,23 @@ def _smtp(ui):
                   (username))
         try:
             s.login(username, password)
-        except smtplib.SMTPException, inst:
+        except smtplib.SMTPException as inst:
             raise util.Abort(inst)
 
     def send(sender, recipients, msg):
         try:
             return s.sendmail(sender, recipients, msg)
-        except smtplib.SMTPRecipientsRefused, inst:
+        except smtplib.SMTPRecipientsRefused as inst:
             recipients = [r[1] for r in inst.recipients.values()]
             raise util.Abort('\n' + '\n'.join(recipients))
-        except smtplib.SMTPException, inst:
+        except smtplib.SMTPException as inst:
             raise util.Abort(inst)
 
     return send
 
 def _sendmail(ui, sender, recipients, msg):
     '''send mail using sendmail.'''
-    program = ui.config('email', 'method')
+    program = ui.config('email', 'method', 'smtp')
     cmdline = '%s -f %s %s' % (program, util.email(sender),
                                ' '.join(map(util.email, recipients)))
     ui.note(_('sending mail: %s\n') % cmdline)

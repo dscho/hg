@@ -15,19 +15,20 @@ import minirst
 # template parsing
 
 elements = {
-    "(": (20, ("group", 1, ")"), ("func", 1, ")")),
-    ",": (2, None, ("list", 2)),
-    "|": (5, None, ("|", 5)),
-    "%": (6, None, ("%", 6)),
-    ")": (0, None, None),
-    "symbol": (0, ("symbol",), None),
-    "string": (0, ("string",), None),
-    "rawstring": (0, ("rawstring",), None),
-    "end": (0, None, None),
+    # token-type: binding-strength, primary, prefix, infix, suffix
+    "(": (20, None, ("group", 1, ")"), ("func", 1, ")"), None),
+    ",": (2, None, None, ("list", 2), None),
+    "|": (5, None, None, ("|", 5), None),
+    "%": (6, None, None, ("%", 6), None),
+    ")": (0, None, None, None, None),
+    "integer": (0, "integer", None, None, None),
+    "symbol": (0, "symbol", None, None, None),
+    "string": (0, "string", None, None, None),
+    "template": (0, "template", None, None, None),
+    "end": (0, None, None, None, None),
 }
 
-def tokenizer(data):
-    program, start, end = data
+def tokenize(program, start, end):
     pos = start
     while pos < end:
         c = program[pos]
@@ -35,30 +36,40 @@ def tokenizer(data):
             pass
         elif c in "(,)%|": # handle simple operators
             yield (c, None, pos)
-        elif (c in '"\'' or c == 'r' and
-              program[pos:pos + 2] in ("r'", 'r"')): # handle quoted strings
-            if c == 'r':
-                pos += 1
-                c = program[pos]
-                decode = False
-            else:
-                decode = True
-            pos += 1
-            s = pos
+        elif c in '"\'': # handle quoted templates
+            s = pos + 1
+            data, pos = _parsetemplate(program, s, end, c)
+            yield ('template', data, s)
+            pos -= 1
+        elif c == 'r' and program[pos:pos + 2] in ("r'", 'r"'):
+            # handle quoted strings
+            c = program[pos + 1]
+            s = pos = pos + 2
             while pos < end: # find closing quote
                 d = program[pos]
                 if d == '\\': # skip over escaped characters
                     pos += 2
                     continue
                 if d == c:
-                    if not decode:
-                        yield ('rawstring', program[s:pos], s)
-                        break
                     yield ('string', program[s:pos], s)
                     break
                 pos += 1
             else:
                 raise error.ParseError(_("unterminated string"), s)
+        elif c.isdigit() or c == '-':
+            s = pos
+            if c == '-': # simply take negate operator as part of integer
+                pos += 1
+            if pos >= end or not program[pos].isdigit():
+                raise error.ParseError(_("integer literal without digits"), s)
+            pos += 1
+            while pos < end:
+                d = program[pos]
+                if not d.isdigit():
+                    break
+                pos += 1
+            yield ('integer', program[s:pos], s)
+            pos -= 1
         elif (c == '\\' and program[pos:pos + 2] in (r"\'", r'\"')
               or c == 'r' and program[pos:pos + 3] in (r"r\'", r'r\"')):
             # handle escaped quoted strings for compatibility with 2.9.2-3.4,
@@ -73,9 +84,9 @@ def tokenizer(data):
             #             escaped quoted string
             if c == 'r':
                 pos += 1
-                token = 'rawstring'
-            else:
                 token = 'string'
+            else:
+                token = 'template'
             quote = program[pos:pos + 2]
             s = pos = pos + 2
             while pos < end: # find closing escaped quote
@@ -88,6 +99,8 @@ def tokenizer(data):
                         data = program[s:pos].decode('string-escape')
                     except ValueError: # unbalanced escapes
                         raise error.ParseError(_("syntax error"), s)
+                    if token == 'template':
+                        data = _parsetemplate(data, 0, len(data))[0]
                     yield (token, data, s)
                     pos += 1
                     break
@@ -106,41 +119,65 @@ def tokenizer(data):
             yield ('symbol', sym, s)
             pos -= 1
         elif c == '}':
-            pos += 1
-            break
+            yield ('end', None, pos + 1)
+            return
         else:
             raise error.ParseError(_("syntax error"), pos)
         pos += 1
-    yield ('end', None, pos)
+    raise error.ParseError(_("unterminated template expansion"), start)
 
-def compiletemplate(tmpl, context, strtoken="string"):
+def _parsetemplate(tmpl, start, stop, quote=''):
+    r"""
+    >>> _parsetemplate('foo{bar}"baz', 0, 12)
+    ([('string', 'foo'), ('symbol', 'bar'), ('string', '"baz')], 12)
+    >>> _parsetemplate('foo{bar}"baz', 0, 12, quote='"')
+    ([('string', 'foo'), ('symbol', 'bar')], 9)
+    >>> _parsetemplate('foo"{bar}', 0, 9, quote='"')
+    ([('string', 'foo')], 4)
+    >>> _parsetemplate(r'foo\"bar"baz', 0, 12, quote='"')
+    ([('string', 'foo"'), ('string', 'bar')], 9)
+    >>> _parsetemplate(r'foo\\"bar', 0, 10, quote='"')
+    ([('string', 'foo\\')], 6)
+    """
     parsed = []
-    pos, stop = 0, len(tmpl)
-    p = parser.parser(tokenizer, elements)
+    sepchars = '{' + quote
+    pos = start
+    p = parser.parser(elements)
     while pos < stop:
-        n = tmpl.find('{', pos)
+        n = min((tmpl.find(c, pos, stop) for c in sepchars),
+                key=lambda n: (n < 0, n))
         if n < 0:
-            parsed.append((strtoken, tmpl[pos:]))
+            parsed.append(('string', tmpl[pos:stop].decode('string-escape')))
+            pos = stop
             break
+        c = tmpl[n]
         bs = (n - pos) - len(tmpl[pos:n].rstrip('\\'))
-        if strtoken == 'string' and bs % 2 == 1:
-            # escaped (e.g. '\{', '\\\{', but not '\\{' nor r'\{')
-            parsed.append((strtoken, (tmpl[pos:n - 1] + "{")))
+        if bs % 2 == 1:
+            # escaped (e.g. '\{', '\\\{', but not '\\{')
+            parsed.append(('string',
+                           tmpl[pos:n - 1].decode('string-escape') + c))
             pos = n + 1
             continue
         if n > pos:
-            parsed.append((strtoken, tmpl[pos:n]))
+            parsed.append(('string', tmpl[pos:n].decode('string-escape')))
+        if c == quote:
+            return parsed, n + 1
 
-        pd = [tmpl, n + 1, stop]
-        parseres, pos = p.parse(pd)
+        parseres, pos = p.parse(tokenize(tmpl, n + 1, stop))
         parsed.append(parseres)
 
-    return [compileexp(e, context) for e in parsed]
+    if quote:
+        raise error.ParseError(_("unterminated string"), start)
+    return parsed, pos
 
-def compileexp(exp, context):
+def compiletemplate(tmpl, context):
+    parsed, pos = _parsetemplate(tmpl, 0, len(tmpl))
+    return [compileexp(e, context, methods) for e in parsed]
+
+def compileexp(exp, context, curmethods):
     t = exp[0]
-    if t in methods:
-        return methods[t](exp, context)
+    if t in curmethods:
+        return curmethods[t](exp, context)
     raise error.ParseError(_("unknown method '%s'") % t)
 
 # template evaluation
@@ -164,16 +201,19 @@ def getfilter(exp, context):
     return context._filters[f]
 
 def gettemplate(exp, context):
-    if exp[0] == 'string' or exp[0] == 'rawstring':
-        return compiletemplate(exp[1], context, strtoken=exp[0])
+    if exp[0] == 'template':
+        return [compileexp(e, context, methods) for e in exp[1]]
     if exp[0] == 'symbol':
+        # unlike runsymbol(), here 'symbol' is always taken as template name
+        # even if it exists in mapping. this allows us to override mapping
+        # by web templates, e.g. 'changelogtag' is redefined in map file.
         return context._load(exp[1])
     raise error.ParseError(_("expected template specifier"))
 
-def runstring(context, mapping, data):
-    return data.decode("string-escape")
+def runinteger(context, mapping, data):
+    return int(data)
 
-def runrawstring(context, mapping, data):
+def runstring(context, mapping, data):
     return data
 
 def runsymbol(context, mapping, key):
@@ -191,8 +231,18 @@ def runsymbol(context, mapping, key):
         v = list(v)
     return v
 
+def buildtemplate(exp, context):
+    ctmpl = [compileexp(e, context, methods) for e in exp[1]]
+    if len(ctmpl) == 1:
+        return ctmpl[0]  # fast path for string with no template fragment
+    return (runtemplate, ctmpl)
+
+def runtemplate(context, mapping, template):
+    for func, data in template:
+        yield func(context, mapping, data)
+
 def buildfilter(exp, context):
-    func, data = compileexp(exp[1], context)
+    func, data = compileexp(exp[1], context, methods)
     filt = getfilter(exp[2], context)
     return (runfilter, (func, data, filt))
 
@@ -214,13 +264,9 @@ def runfilter(context, mapping, data):
                            "keyword '%s'") % (filt.func_name, dt))
 
 def buildmap(exp, context):
-    func, data = compileexp(exp[1], context)
+    func, data = compileexp(exp[1], context, methods)
     ctmpl = gettemplate(exp[2], context)
     return (runmap, (func, data, ctmpl))
-
-def runtemplate(context, mapping, template):
-    for func, data in template:
-        yield func(context, mapping, data)
 
 def runmap(context, mapping, data):
     func, data, ctmpl = data
@@ -243,7 +289,7 @@ def runmap(context, mapping, data):
 
 def buildfunc(exp, context):
     n = getsymbol(exp[1])
-    args = [compileexp(x, context) for x in getlist(exp[2])]
+    args = [compileexp(x, context, exprmethods) for x in getlist(exp[2])]
     if n in funcs:
         f = funcs[n]
         return (f, args)
@@ -311,8 +357,8 @@ def fill(context, mapping, args):
             # i18n: "fill" is a keyword
             raise error.ParseError(_("fill expects an integer width"))
         try:
-            initindent = stringify(_evalifliteral(args[2], context, mapping))
-            hangindent = stringify(_evalifliteral(args[3], context, mapping))
+            initindent = stringify(args[2][0](context, mapping, args[2][1]))
+            hangindent = stringify(args[3][0](context, mapping, args[3][1]))
         except IndexError:
             pass
 
@@ -328,9 +374,6 @@ def pad(context, mapping, args):
     width = int(args[1][1])
 
     text = stringify(args[0][0](context, mapping, args[0][1]))
-    if args[0][0] == runstring:
-        text = stringify(runtemplate(context, mapping,
-            compiletemplate(text, context)))
 
     right = False
     fillchar = ' '
@@ -343,6 +386,26 @@ def pad(context, mapping, args):
         return text.rjust(width, fillchar)
     else:
         return text.ljust(width, fillchar)
+
+def indent(context, mapping, args):
+    """:indent(text, indentchars[, firstline]): Indents all non-empty lines
+    with the characters given in the indentchars string. An optional
+    third parameter will override the indent for the first line only
+    if present."""
+    if not (2 <= len(args) <= 3):
+        # i18n: "indent" is a keyword
+        raise error.ParseError(_("indent() expects two or three arguments"))
+
+    text = stringify(args[0][0](context, mapping, args[0][1]))
+    indent = stringify(args[1][0](context, mapping, args[1][1]))
+
+    if len(args) == 3:
+        firstline = stringify(args[2][0](context, mapping, args[2][1]))
+    else:
+        firstline = indent
+
+    # the indent function doesn't indent the first line, so we do it here
+    return templatefilters.indent(firstline + text, indent)
 
 def get(context, mapping, args):
     """:get(dict, key): Get an attribute/key from an object. Some keywords
@@ -360,15 +423,6 @@ def get(context, mapping, args):
     key = args[1][0](context, mapping, args[1][1])
     yield dictarg.get(key)
 
-def _evalifliteral(arg, context, mapping):
-    # get back to token tag to reinterpret string as template
-    strtoken = {runstring: 'string', runrawstring: 'rawstring'}.get(arg[0])
-    if strtoken:
-        yield runtemplate(context, mapping,
-                          compiletemplate(arg[1], context, strtoken))
-    else:
-        yield stringify(arg[0](context, mapping, arg[1]))
-
 def if_(context, mapping, args):
     """:if(expr, then[, else]): Conditionally execute based on the result of
     an expression."""
@@ -378,9 +432,9 @@ def if_(context, mapping, args):
 
     test = stringify(args[0][0](context, mapping, args[0][1]))
     if test:
-        yield _evalifliteral(args[1], context, mapping)
+        yield args[1][0](context, mapping, args[1][1])
     elif len(args) == 3:
-        yield _evalifliteral(args[2], context, mapping)
+        yield args[2][0](context, mapping, args[2][1])
 
 def ifcontains(context, mapping, args):
     """:ifcontains(search, thing, then[, else]): Conditionally execute based
@@ -393,9 +447,9 @@ def ifcontains(context, mapping, args):
     items = args[1][0](context, mapping, args[1][1])
 
     if item in items:
-        yield _evalifliteral(args[2], context, mapping)
+        yield args[2][0](context, mapping, args[2][1])
     elif len(args) == 4:
-        yield _evalifliteral(args[3], context, mapping)
+        yield args[3][0](context, mapping, args[3][1])
 
 def ifeq(context, mapping, args):
     """:ifeq(expr1, expr2, then[, else]): Conditionally execute based on
@@ -407,9 +461,9 @@ def ifeq(context, mapping, args):
     test = stringify(args[0][0](context, mapping, args[0][1]))
     match = stringify(args[1][0](context, mapping, args[1][1]))
     if test == match:
-        yield _evalifliteral(args[2], context, mapping)
+        yield args[2][0](context, mapping, args[2][1])
     elif len(args) == 4:
-        yield _evalifliteral(args[3], context, mapping)
+        yield args[3][0](context, mapping, args[3][1])
 
 def join(context, mapping, args):
     """:join(list, sep): Join items in a list with a delimiter."""
@@ -443,7 +497,7 @@ def label(context, mapping, args):
         raise error.ParseError(_("label expects two arguments"))
 
     # ignore args[0] (the label string) since this is supposed to be a a no-op
-    yield _evalifliteral(args[1], context, mapping)
+    yield args[1][0](context, mapping, args[1][1])
 
 def revset(context, mapping, args):
     """:revset(query[, formatargs...]): Execute a revision set query. See
@@ -559,7 +613,7 @@ def sub(context, mapping, args):
 
     pat = stringify(args[0][0](context, mapping, args[0][1]))
     rpl = stringify(args[1][0](context, mapping, args[1][1]))
-    src = stringify(_evalifliteral(args[2], context, mapping))
+    src = stringify(args[2][0](context, mapping, args[2][1]))
     yield re.sub(pat, rpl, src)
 
 def startswith(context, mapping, args):
@@ -587,8 +641,7 @@ def word(context, mapping, args):
         num = int(stringify(args[0][0](context, mapping, args[0][1])))
     except ValueError:
         # i18n: "word" is a keyword
-        raise error.ParseError(
-                _("Use strings like '3' for numbers passed to word function"))
+        raise error.ParseError(_("word expects an integer index"))
     text = stringify(args[1][0](context, mapping, args[1][1]))
     if len(args) == 3:
         splitter = stringify(args[2][0](context, mapping, args[2][1]))
@@ -601,16 +654,22 @@ def word(context, mapping, args):
     else:
         return tokens[num]
 
-methods = {
+# methods to interpret function arguments or inner expressions (e.g. {_(x)})
+exprmethods = {
+    "integer": lambda e, c: (runinteger, e[1]),
     "string": lambda e, c: (runstring, e[1]),
-    "rawstring": lambda e, c: (runrawstring, e[1]),
     "symbol": lambda e, c: (runsymbol, e[1]),
-    "group": lambda e, c: compileexp(e[1], c),
+    "template": buildtemplate,
+    "group": lambda e, c: compileexp(e[1], c, exprmethods),
 #    ".": buildmember,
     "|": buildfilter,
     "%": buildmap,
     "func": buildfunc,
     }
+
+# methods to interpret top-level template (e.g. {x}, {x|_}, {x % "y"})
+methods = exprmethods.copy()
+methods["integer"] = exprmethods["symbol"]  # '{1}' as variable
 
 funcs = {
     "date": date,
@@ -620,6 +679,7 @@ funcs = {
     "if": if_,
     "ifcontains": ifcontains,
     "ifeq": ifeq,
+    "indent": indent,
     "join": join,
     "label": label,
     "pad": pad,
@@ -654,14 +714,11 @@ def _flatten(thing):
                 for j in _flatten(i):
                     yield j
 
-def parsestring(s, quoted=True):
-    '''unwrap quotes if quoted is True'''
-    if quoted:
-        if len(s) < 2 or s[0] != s[-1]:
-            raise SyntaxError(_('unmatched quotes'))
-        return s[1:-1]
-
-    return s
+def unquotestring(s):
+    '''unwrap quotes'''
+    if len(s) < 2 or s[0] != s[-1]:
+        raise SyntaxError(_('unmatched quotes'))
+    return s[1:-1]
 
 class engine(object):
     '''template expansion engine.
@@ -745,7 +802,7 @@ class templater(object):
             raise util.Abort(_("style '%s' not found") % mapfile,
                              hint=_("available styles: %s") % stylelist())
 
-        conf = config.config()
+        conf = config.config(includepaths=templatepaths())
         conf.read(mapfile)
 
         for key, val in conf[''].items():
@@ -753,8 +810,8 @@ class templater(object):
                 raise SyntaxError(_('%s: missing value') % conf.source('', key))
             if val[0] in "'\"":
                 try:
-                    self.cache[key] = parsestring(val)
-                except SyntaxError, inst:
+                    self.cache[key] = unquotestring(val)
+                except SyntaxError as inst:
                     raise SyntaxError('%s: %s' %
                                       (conf.source('', key), inst.args[0]))
             else:
@@ -771,10 +828,10 @@ class templater(object):
         if t not in self.cache:
             try:
                 self.cache[t] = util.readfile(self.map[t][1])
-            except KeyError, inst:
+            except KeyError as inst:
                 raise TemplateNotFound(_('"%s" not in template map') %
                                        inst.args[0])
-            except IOError, inst:
+            except IOError as inst:
                 raise IOError(inst.args[0], _('template file %s: %s') %
                               (self.map[t][1], inst.args[1]))
         return self.cache[t]

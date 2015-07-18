@@ -28,7 +28,7 @@ enable obsolescence
   > [hooks]
   > pretxnclose.tip = hg log -r tip -T "pre-close-tip:{node|short} {phase} {bookmarks}\n"
   > txnclose.tip = hg log -r tip -T "postclose-tip:{node|short} {phase} {bookmarks}\n"
-  > txnclose.env = sh -c  "HG_LOCAL= python \"$TESTDIR/printenv.py\" txnclose"
+  > txnclose.env = sh -c  "HG_LOCAL= printenv.py txnclose"
   > pushkey= sh "$TESTTMP/bundle2-pushkey-hook.sh"
   > EOF
 
@@ -173,36 +173,66 @@ pull empty
 add extra data to test their exchange during push
 
   $ hg -R main bookmark --rev eea13746799a book_eea1
+  pre-close-tip:02de42196ebe draft 
+  postclose-tip:02de42196ebe draft 
+  txnclose hook: HG_BOOKMARK_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=bookmark (glob)
   $ hg -R main debugobsolete -d '0 0' 3333333333333333333333333333333333333333 `getmainid eea13746799a`
   pre-close-tip:02de42196ebe draft 
   postclose-tip:02de42196ebe draft 
   txnclose hook: HG_NEW_OBSMARKERS=1 HG_TXNID=TXN:* HG_TXNNAME=debugobsolete (glob)
   $ hg -R main bookmark --rev 02de42196ebe book_02de
+  pre-close-tip:02de42196ebe draft book_02de
+  postclose-tip:02de42196ebe draft book_02de
+  txnclose hook: HG_BOOKMARK_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=bookmark (glob)
   $ hg -R main debugobsolete -d '0 0' 4444444444444444444444444444444444444444 `getmainid 02de42196ebe`
   pre-close-tip:02de42196ebe draft book_02de
   postclose-tip:02de42196ebe draft book_02de
   txnclose hook: HG_NEW_OBSMARKERS=1 HG_TXNID=TXN:* HG_TXNNAME=debugobsolete (glob)
   $ hg -R main bookmark --rev 42ccdea3bb16 book_42cc
+  pre-close-tip:02de42196ebe draft book_02de
+  postclose-tip:02de42196ebe draft book_02de
+  txnclose hook: HG_BOOKMARK_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=bookmark (glob)
   $ hg -R main debugobsolete -d '0 0' 5555555555555555555555555555555555555555 `getmainid 42ccdea3bb16`
   pre-close-tip:02de42196ebe draft book_02de
   postclose-tip:02de42196ebe draft book_02de
   txnclose hook: HG_NEW_OBSMARKERS=1 HG_TXNID=TXN:* HG_TXNNAME=debugobsolete (glob)
   $ hg -R main bookmark --rev 5fddd98957c8 book_5fdd
+  pre-close-tip:02de42196ebe draft book_02de
+  postclose-tip:02de42196ebe draft book_02de
+  txnclose hook: HG_BOOKMARK_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=bookmark (glob)
   $ hg -R main debugobsolete -d '0 0' 6666666666666666666666666666666666666666 `getmainid 5fddd98957c8`
   pre-close-tip:02de42196ebe draft book_02de
   postclose-tip:02de42196ebe draft book_02de
   txnclose hook: HG_NEW_OBSMARKERS=1 HG_TXNID=TXN:* HG_TXNNAME=debugobsolete (glob)
   $ hg -R main bookmark --rev 32af7686d403 book_32af
+  pre-close-tip:02de42196ebe draft book_02de
+  postclose-tip:02de42196ebe draft book_02de
+  txnclose hook: HG_BOOKMARK_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=bookmark (glob)
   $ hg -R main debugobsolete -d '0 0' 7777777777777777777777777777777777777777 `getmainid 32af7686d403`
   pre-close-tip:02de42196ebe draft book_02de
   postclose-tip:02de42196ebe draft book_02de
   txnclose hook: HG_NEW_OBSMARKERS=1 HG_TXNID=TXN:* HG_TXNNAME=debugobsolete (glob)
 
   $ hg -R other bookmark --rev cd010b8cd998 book_eea1
+  pre-close-tip:24b6387c8c8c public 
+  postclose-tip:24b6387c8c8c public 
+  txnclose hook: HG_BOOKMARK_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=bookmark (glob)
   $ hg -R other bookmark --rev cd010b8cd998 book_02de
+  pre-close-tip:24b6387c8c8c public 
+  postclose-tip:24b6387c8c8c public 
+  txnclose hook: HG_BOOKMARK_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=bookmark (glob)
   $ hg -R other bookmark --rev cd010b8cd998 book_42cc
+  pre-close-tip:24b6387c8c8c public 
+  postclose-tip:24b6387c8c8c public 
+  txnclose hook: HG_BOOKMARK_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=bookmark (glob)
   $ hg -R other bookmark --rev cd010b8cd998 book_5fdd
+  pre-close-tip:24b6387c8c8c public 
+  postclose-tip:24b6387c8c8c public 
+  txnclose hook: HG_BOOKMARK_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=bookmark (glob)
   $ hg -R other bookmark --rev cd010b8cd998 book_32af
+  pre-close-tip:24b6387c8c8c public 
+  postclose-tip:24b6387c8c8c public 
+  txnclose hook: HG_BOOKMARK_MOVED=1 HG_TXNID=TXN:* HG_TXNNAME=bookmark (glob)
 
   $ hg -R main phase --public eea13746799a
   pre-close-tip:02de42196ebe draft book_02de
@@ -466,7 +496,7 @@ Setting up
   > failpush=$TESTTMP/failpush.py
   > EOF
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
   $ cat other.pid >> $DAEMON_PIDS
 
@@ -562,7 +592,7 @@ Doing the actual push: hook abort
   > txnabort.failpush = sh -c "echo 'Cleaning up the mess...'"
   > EOF
 
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
   $ cat other.pid >> $DAEMON_PIDS
 
@@ -625,7 +655,7 @@ Check error from hook during the unbundling process itself
   $ cat << EOF >> $HGRCPATH
   > pretxnchangegroup = sh -c "echo 'Fail early!'; false"
   > EOF
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS # reload http config
+  $ killdaemons.py # reload http config
   $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
   $ cat other.pid >> $DAEMON_PIDS
 
@@ -717,3 +747,153 @@ Check output capture control.
   remote: rollback completed
   abort: pretxnchangegroup hook exited with status 1
   [255]
+
+Check abort from mandatory pushkey
+
+  $ cat > mandatorypart.py << EOF
+  > from mercurial import exchange
+  > from mercurial import pushkey
+  > from mercurial import node
+  > from mercurial import error
+  > @exchange.b2partsgenerator('failingpuskey')
+  > def addfailingpushey(pushop, bundler):
+  >     enc = pushkey.encode
+  >     part = bundler.newpart('pushkey')
+  >     part.addparam('namespace', enc('phases'))
+  >     part.addparam('key', enc(pushop.repo['cd010b8cd998'].hex()))
+  >     part.addparam('old', enc(str(0))) # successful update
+  >     part.addparam('new', enc(str(0)))
+  >     def fail(pushop, exc):
+  >         raise error.Abort('Correct phase push failed (because hooks)')
+  >     pushop.pkfailcb[part.id] = fail
+  > EOF
+  $ cat >> $HGRCPATH << EOF
+  > [hooks]
+  > pretxnchangegroup=
+  > pretxnclose.failpush=
+  > prepushkey.failpush = sh -c "echo 'do not push the key !'; false"
+  > [extensions]
+  > mandatorypart=$TESTTMP/mandatorypart.py
+  > EOF
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS # reload http config
+  $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
+  $ cat other.pid >> $DAEMON_PIDS
+
+(Failure from a hook)
+
+  $ hg -R main push other -r e7ec4e813ba6
+  pushing to other
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
+  do not push the key !
+  pushkey-abort: prepushkey.failpush hook exited with status 1
+  transaction abort!
+  Cleaning up the mess...
+  rollback completed
+  abort: Correct phase push failed (because hooks)
+  [255]
+  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
+  pushing to ssh://user@dummy/other
+  searching for changes
+  remote: adding changesets
+  remote: adding manifests
+  remote: adding file changes
+  remote: added 1 changesets with 1 changes to 1 files
+  remote: do not push the key !
+  remote: pushkey-abort: prepushkey.failpush hook exited with status 1
+  remote: transaction abort!
+  remote: Cleaning up the mess...
+  remote: rollback completed
+  abort: Correct phase push failed (because hooks)
+  [255]
+  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
+  pushing to http://localhost:$HGPORT2/
+  searching for changes
+  remote: adding changesets
+  remote: adding manifests
+  remote: adding file changes
+  remote: added 1 changesets with 1 changes to 1 files
+  remote: do not push the key !
+  remote: pushkey-abort: prepushkey.failpush hook exited with status 1
+  remote: transaction abort!
+  remote: Cleaning up the mess...
+  remote: rollback completed
+  abort: Correct phase push failed (because hooks)
+  [255]
+
+(Failure from a the pushkey)
+
+  $ cat > mandatorypart.py << EOF
+  > from mercurial import exchange
+  > from mercurial import pushkey
+  > from mercurial import node
+  > from mercurial import error
+  > @exchange.b2partsgenerator('failingpuskey')
+  > def addfailingpushey(pushop, bundler):
+  >     enc = pushkey.encode
+  >     part = bundler.newpart('pushkey')
+  >     part.addparam('namespace', enc('phases'))
+  >     part.addparam('key', enc(pushop.repo['cd010b8cd998'].hex()))
+  >     part.addparam('old', enc(str(4))) # will fail
+  >     part.addparam('new', enc(str(3)))
+  >     def fail(pushop, exc):
+  >         raise error.Abort('Clown phase push failed')
+  >     pushop.pkfailcb[part.id] = fail
+  > EOF
+  $ cat >> $HGRCPATH << EOF
+  > [hooks]
+  > prepushkey.failpush =
+  > EOF
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS # reload http config
+  $ hg -R other serve -p $HGPORT2 -d --pid-file=other.pid -E other-error.log
+  $ cat other.pid >> $DAEMON_PIDS
+
+  $ hg -R main push other -r e7ec4e813ba6
+  pushing to other
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
+  transaction abort!
+  Cleaning up the mess...
+  rollback completed
+  pushkey: lock state after "phases"
+  lock:  free
+  wlock: free
+  abort: Clown phase push failed
+  [255]
+  $ hg -R main push ssh://user@dummy/other -r e7ec4e813ba6
+  pushing to ssh://user@dummy/other
+  searching for changes
+  remote: adding changesets
+  remote: adding manifests
+  remote: adding file changes
+  remote: added 1 changesets with 1 changes to 1 files
+  remote: transaction abort!
+  remote: Cleaning up the mess...
+  remote: rollback completed
+  remote: pushkey: lock state after "phases"
+  remote: lock:  free
+  remote: wlock: free
+  abort: Clown phase push failed
+  [255]
+  $ hg -R main push http://localhost:$HGPORT2/ -r e7ec4e813ba6
+  pushing to http://localhost:$HGPORT2/
+  searching for changes
+  remote: adding changesets
+  remote: adding manifests
+  remote: adding file changes
+  remote: added 1 changesets with 1 changes to 1 files
+  remote: transaction abort!
+  remote: Cleaning up the mess...
+  remote: rollback completed
+  remote: pushkey: lock state after "phases"
+  remote: lock:  free
+  remote: wlock: free
+  abort: Clown phase push failed
+  [255]
+

@@ -238,24 +238,28 @@ def linktousercache(repo, hash):
     if path:
         link(storepath(repo, hash), path)
 
-def getstandinmatcher(repo, pats=[], opts={}):
-    '''Return a match object that applies pats to the standin directory'''
+def getstandinmatcher(repo, rmatcher=None):
+    '''Return a match object that applies rmatcher to the standin directory'''
     standindir = repo.wjoin(shortname)
-    if pats:
-        pats = [os.path.join(standindir, pat) for pat in pats]
+
+    # no warnings about missing files or directories
+    badfn = lambda f, msg: None
+
+    if rmatcher and not rmatcher.always():
+        pats = [os.path.join(standindir, pat) for pat in rmatcher.files()]
+        match = scmutil.match(repo[None], pats, badfn=badfn)
+        # if pats is empty, it would incorrectly always match, so clear _always
+        match._always = False
     else:
         # no patterns: relative to repo root
-        pats = [standindir]
-    # no warnings about missing files or directories
-    match = scmutil.match(repo[None], pats, opts)
-    match.bad = lambda f, msg: None
+        match = scmutil.match(repo[None], [standindir], badfn=badfn)
     return match
 
 def composestandinmatcher(repo, rmatcher):
     '''Return a matcher that accepts standins corresponding to the
     files accepted by rmatcher. Pass the list of files in the matcher
     as the paths specified by the user.'''
-    smatcher = getstandinmatcher(repo, rmatcher.files())
+    smatcher = getstandinmatcher(repo, rmatcher)
     isstandin = smatcher.matchfn
     def composedmatchfn(f):
         return isstandin(f) and rmatcher.matchfn(splitstandin(f))
@@ -364,10 +368,10 @@ def unixpath(path):
 
 def islfilesrepo(repo):
     if ('largefiles' in repo.requirements and
-            util.any(shortnameslash in f[0] for f in repo.store.datafiles())):
+            any(shortnameslash in f[0] for f in repo.store.datafiles())):
         return True
 
-    return util.any(openlfdirstate(repo.ui, repo, False))
+    return any(openlfdirstate(repo.ui, repo, False))
 
 class storeprotonotcapable(Exception):
     def __init__(self, storetypes):

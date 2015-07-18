@@ -64,7 +64,7 @@ else:
                 os.kill(pid, 0)
             logfn('# Daemon process %d is stuck - really killing it' % pid)
             os.kill(pid, signal.SIGKILL)
-        except OSError, err:
+        except OSError as err:
             if err.errno != errno.ESRCH:
                 raise
 
@@ -87,5 +87,9 @@ def killdaemons(pidfile, tryhard=True, remove=False, logfn=None):
         pass
 
 if __name__ == '__main__':
-    path, = sys.argv[1:]
+    if len(sys.argv) > 1:
+        path, = sys.argv[1:]
+    else:
+        path = os.environ["DAEMON_PIDS"]
+
     killdaemons(path)

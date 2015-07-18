@@ -17,53 +17,6 @@
   > ( 4-1 ) """, "( 1+1 )\" and ")
   > a, '\\\\\\\\', "\\\\\\" x-2", "c-1"
   > EOF
-  $ cat > non-py24.py <<EOF
-  > # Using builtins that does not exist in Python 2.4
-  > if any():
-  >     x = all()
-  >     y = format(x)
-  >     # next(generator) is new in 2.6
-  >     z = next(x)
-  >     # but generator.next() is okay
-  >     x.next()
-  >     # and we can make our own next
-  >     def next(stuff):
-  >         pass
-  > 
-  > # Do not complain about our own definition
-  > def any(x):
-  >     pass
-  > 
-  > # try/except/finally block does not exist in Python 2.4
-  >     try:
-  >         pass
-  >     except StandardError, inst:
-  >         pass
-  >     finally:
-  >         pass
-  > 
-  > # nested try/finally+try/except is allowed
-  >     try:
-  >         try:
-  >             pass
-  >         except StandardError, inst:
-  >             pass
-  >     finally:
-  >         pass
-  > 
-  > # yield inside a try/finally block is not allowed in Python 2.4
-  >     try:
-  >         pass
-  >         yield 1
-  >     finally:
-  >         pass
-  >     try:
-  >         yield
-  >         pass
-  >     finally:
-  >         pass
-  > 
-  > EOF
   $ cat > classstyle.py <<EOF
   > class newstyle_class(object):
   >     pass
@@ -78,7 +31,7 @@
   >     pass
   > EOF
   $ check_code="$TESTDIR"/../contrib/check-code.py
-  $ "$check_code" ./wrong.py ./correct.py ./quote.py ./non-py24.py ./classstyle.py
+  $ "$check_code" ./wrong.py ./correct.py ./quote.py ./classstyle.py
   ./wrong.py:1:
    > def toto( arg1, arg2):
    gratuitous whitespace in () or []
@@ -92,33 +45,12 @@
   ./quote.py:5:
    > '"""', 42+1, """and
    missing whitespace in expression
-  ./non-py24.py:2:
-   > if any():
-   any/all/format not available in Python 2.4
-  ./non-py24.py:3:
-   >     x = all()
-   any/all/format not available in Python 2.4
-  ./non-py24.py:4:
-   >     y = format(x)
-   any/all/format not available in Python 2.4
-  ./non-py24.py:6:
-   >     z = next(x)
-   no next(foo) in Python 2.4 and 2.5, use foo.next() instead
-  ./non-py24.py:18:
-   >     try:
-   no try/except/finally in Python 2.4
-  ./non-py24.py:35:
-   >     try:
-   no yield inside try/finally in Python 2.4
-  ./non-py24.py:40:
-   >     try:
-   no yield inside try/finally in Python 2.4
   ./classstyle.py:4:
    > class oldstyle_class:
    old-style class, use class foo(object)
   ./classstyle.py:7:
    > class empty():
-   class foo() not available in Python 2.4, use class foo(object)
+   class foo() creates old style object, use class foo(object)
   [1]
   $ cat > python3-compat.py << EOF
   > foo <> bar

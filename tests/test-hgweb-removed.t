@@ -17,7 +17,7 @@ set up hgweb
 
 revision
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'rev/tip'
+  $ get-with-headers.py localhost:$HGPORT 'rev/tip'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -38,16 +38,16 @@ revision
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-   <li><a href="/shortlog/c78f6c5cbea9">log</a></li>
-   <li><a href="/graph/c78f6c5cbea9">graph</a></li>
+   <li><a href="/shortlog/tip">log</a></li>
+   <li><a href="/graph/tip">graph</a></li>
    <li><a href="/tags">tags</a></li>
    <li><a href="/bookmarks">bookmarks</a></li>
    <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
    <li class="active">changeset</li>
-   <li><a href="/raw-rev/c78f6c5cbea9">raw</a></li>
-   <li><a href="/file/c78f6c5cbea9">browse</a></li>
+   <li><a href="/raw-rev/tip">raw</a></li>
+   <li><a href="/file/tip">browse</a></li>
   </ul>
   <ul>
    
@@ -60,7 +60,10 @@ revision
   <div class="main">
   
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>changeset 1:c78f6c5cbea9  <span class="tag">tip</span>  </h3>
+  <h3>
+   changeset 1:<a href="/rev/c78f6c5cbea9">c78f6c5cbea9</a>
+   <span class="tag">tip</span> 
+  </h3>
   
   <form class="search" action="/log">
   
@@ -137,7 +140,7 @@ revision
 
 diff removed file
 
-  $ "$TESTDIR/get-with-headers.py" localhost:$HGPORT 'diff/tip/a'
+  $ get-with-headers.py localhost:$HGPORT 'diff/tip/a'
   200 Script output follows
   
   <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -159,24 +162,24 @@ diff removed file
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
-  <li><a href="/shortlog/c78f6c5cbea9">log</a></li>
-  <li><a href="/graph/c78f6c5cbea9">graph</a></li>
+  <li><a href="/shortlog/tip">log</a></li>
+  <li><a href="/graph/tip">graph</a></li>
   <li><a href="/tags">tags</a></li>
   <li><a href="/bookmarks">bookmarks</a></li>
   <li><a href="/branches">branches</a></li>
   </ul>
   <ul>
-  <li><a href="/rev/c78f6c5cbea9">changeset</a></li>
-  <li><a href="/file/c78f6c5cbea9">browse</a></li>
+  <li><a href="/rev/tip">changeset</a></li>
+  <li><a href="/file/tip">browse</a></li>
   </ul>
   <ul>
-  <li><a href="/file/c78f6c5cbea9/a">file</a></li>
+  <li><a href="/file/tip/a">file</a></li>
   <li><a href="/file/tip/a">latest</a></li>
   <li class="active">diff</li>
-  <li><a href="/comparison/c78f6c5cbea9/a">comparison</a></li>
-  <li><a href="/annotate/c78f6c5cbea9/a">annotate</a></li>
-  <li><a href="/log/c78f6c5cbea9/a">file log</a></li>
-  <li><a href="/raw-file/c78f6c5cbea9/a">raw</a></li>
+  <li><a href="/comparison/tip/a">comparison</a></li>
+  <li><a href="/annotate/tip/a">annotate</a></li>
+  <li><a href="/log/tip/a">file log</a></li>
+  <li><a href="/raw-file/tip/a">raw</a></li>
   </ul>
   <ul>
   <li><a href="/help">help</a></li>
@@ -185,7 +188,10 @@ diff removed file
   
   <div class="main">
   <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
-  <h3>diff a @ 1:c78f6c5cbea9</h3>
+  <h3>
+   diff a @ 1:<a href="/rev/c78f6c5cbea9">c78f6c5cbea9</a>
+   <span class="tag">tip</span> 
+  </h3>
   
   <form class="search" action="/log">
   <p></p>

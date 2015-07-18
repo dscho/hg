@@ -20,7 +20,8 @@ locale.setlocale(locale.LC_ALL, '')
 
 # os.name is one of: 'posix', 'nt', 'dos', 'os2', 'mac', or 'ce'
 if os.name == 'posix':
-    import curses, fcntl, termios
+    import curses
+    import fcntl, termios
 else:
     # I have no idea if wcurses works with crecord...
     try:
@@ -424,9 +425,11 @@ class uihunk(patchnode):
     def __repr__(self):
         return '<hunk %r@%d>' % (self.filename(), self.fromline)
 
-def filterpatch(ui, chunks, chunkselector):
+def filterpatch(ui, chunks, chunkselector, operation=None):
     """interactively filter patch chunks into applied-only chunks"""
 
+    if operation is None:
+        operation = _('confirm')
     chunks = list(chunks)
     # convert chunks list into structure suitable for displaying/modifying
     # with curses.  create a list of headers only.
@@ -479,7 +482,12 @@ def chunkselector(ui, headerlist):
     """
     ui.write(_('starting interactive selection\n'))
     chunkselector = curseschunkselector(headerlist, ui)
+    f = signal.getsignal(signal.SIGTSTP)
     curses.wrapper(chunkselector.main)
+    if chunkselector.initerr is not None:
+        raise util.Abort(chunkselector.initerr)
+    # ncurses does not restore signal handler for SIGTSTP
+    signal.signal(signal.SIGTSTP, f)
 
 def testdecorator(testfn, f):
     def u(*args, **kwargs):
@@ -508,6 +516,7 @@ class curseschunkselector(object):
 
         self.ui = ui
 
+        self.errorstr = None
         # list of all chunks
         self.chunklist = []
         for h in headerlist:
@@ -973,6 +982,12 @@ class curseschunkselector(object):
 
         # print out the status lines at the top
         try:
+            if self.errorstr is not None:
+                printstring(self.statuswin, self.errorstr, pairname='legend')
+                printstring(self.statuswin, 'Press any key to continue',
+                            pairname='legend')
+                self.statuswin.refresh()
+                return
             printstring(self.statuswin,
                         "SELECT CHUNKS: (j/k/up/dn/pgup/pgdn) move cursor; "
                         "(space/A) toggle hunk/all; (e)dit hunk;",
@@ -1416,6 +1431,13 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
         """
             edit the currently chelected chunk
         """
+        def updateui(self):
+            self.numpadlines = self.getnumlinesdisplayed(ignorefolding=True) + 1
+            self.chunkpad = curses.newpad(self.numpadlines, self.xscreensize)
+            self.updatescroll()
+            self.stdscr.refresh()
+            self.statuswin.refresh()
+            self.stdscr.keypad(1)
 
         def editpatchwitheditor(self, chunk):
             if chunk is None:
@@ -1451,9 +1473,11 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
                 f.close()
                 # start the editor and wait for it to complete
                 editor = self.ui.geteditor()
-                self.ui.system("%s \"%s\"" % (editor, patchfn),
-                          environ={'hguser': self.ui.username()},
-                          onerr=util.Abort, errprefix=_("edit failed"))
+                ret = self.ui.system("%s \"%s\"" % (editor, patchfn),
+                          environ={'hguser': self.ui.username()})
+                if ret != 0:
+                    self.errorstr = "Editor exited with status %d" % ret
+                    return None
                 # remove comment lines
                 patchfp = open(patchfn)
                 ncpatchfp = cStringIO.StringIO()
@@ -1478,6 +1502,10 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
 
         beforeadded, beforeremoved = item.added, item.removed
         newpatches = editpatchwitheditor(self, item)
+        if newpatches is None:
+            if not test:
+                updateui(self)
+            return
         header = item.header
         editedhunkindex = header.hunks.index(item)
         hunksbefore = header.hunks[:editedhunkindex]
@@ -1498,12 +1526,7 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
         self.currentselecteditem = header
 
         if not test:
-            self.numpadlines = self.getnumlinesdisplayed(ignorefolding=True) + 1
-            self.chunkpad = curses.newpad(self.numpadlines, self.xscreensize)
-            self.updatescroll()
-            self.stdscr.refresh()
-            self.statuswin.refresh()
-            self.stdscr.keypad(1)
+            updateui(self)
 
     def emptypatch(self):
         item = self.headerlist
@@ -1551,6 +1574,8 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
             self.togglefolded(foldparent=True)
         elif keypressed in ["?"]:
             self.helpwindow()
+            self.stdscr.clear()
+            self.stdscr.refresh()
 
     def main(self, stdscr):
         """
@@ -1559,6 +1584,9 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
         """
         signal.signal(signal.SIGWINCH, self.sigwinchhandler)
         self.stdscr = stdscr
+        # error during initialization, cannot be printed in the curses
+        # interface, it should be printed by the calling code
+        self.initerr = None
         self.yscreensize, self.xscreensize = self.stdscr.getmaxyx()
 
         curses.start_color()
@@ -1584,8 +1612,12 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
 
         # add 1 so to account for last line text reaching end of line
         self.numpadlines = self.getnumlinesdisplayed(ignorefolding=True) + 1
-        self.chunkpad = curses.newpad(self.numpadlines, self.xscreensize)
 
+        try:
+            self.chunkpad = curses.newpad(self.numpadlines, self.xscreensize)
+        except curses.error:
+            self.initerr = _('this diff is too large to be displayed')
+            return
         # initialize selecteitemendline (initial start-line is 0)
         self.selecteditemendline = self.getnumlinesdisplayed(
             self.currentselecteditem, recursechildren=False)
@@ -1594,6 +1626,9 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
             self.updatescreen()
             try:
                 keypressed = self.statuswin.getkey()
+                if self.errorstr is not None:
+                    self.errorstr = None
+                    continue
             except curses.error:
                 keypressed = "foobar"
             if self.handlekeypressed(keypressed):

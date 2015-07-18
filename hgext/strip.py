@@ -11,6 +11,10 @@ from mercurial import repair, bookmarks, merge
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 def checksubstate(repo, baserev=None):
@@ -60,8 +64,8 @@ def strip(ui, repo, revs, update=True, backup=True, force=None, bookmark=None):
 
         marks = repo._bookmarks
         if bookmark:
-            if bookmark == repo._bookmarkcurrent:
-                bookmarks.unsetcurrent(repo)
+            if bookmark == repo._activebookmark:
+                bookmarks.deactivate(repo)
             del marks[bookmark]
             marks.write()
             ui.write(_("bookmark '%s' deleted\n") % bookmark)

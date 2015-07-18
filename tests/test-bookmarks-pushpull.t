@@ -7,6 +7,9 @@
   > publish=False
   > [experimental]
   > evolution=createmarkers,exchange
+  > # drop me once bundle2 is the default,
+  > # added to get test change early.
+  > bundle2-exp = True
   > EOF
 
 initialize
@@ -260,7 +263,14 @@ update a bookmark in the middle of a client pulling changes
 
   $ cd ..
   $ hg clone -q a pull-race
-  $ hg clone -q pull-race pull-race2
+
+We want to use http because it is stateless and therefore more susceptible to
+race conditions
+
+  $ hg -R pull-race serve -p $HGPORT -d --pid-file=pull-race.pid -E main-error.log
+  $ cat pull-race.pid >> $DAEMON_PIDS
+
+  $ hg clone -q http://localhost:$HGPORT/ pull-race2
   $ cd pull-race
   $ hg up -q Y
   $ echo c4 > f2
@@ -270,13 +280,23 @@ update a bookmark in the middle of a client pulling changes
   > [hooks]
   > outgoing.makecommit = hg ci -Am5; echo committed in pull-race
   > EOF
-  $ cd ../pull-race2
+
+(new config needs a server restart)
+
+  $ cd ..
+  $ killdaemons.py
+  $ hg -R pull-race serve -p $HGPORT -d --pid-file=pull-race.pid -E main-error.log
+  $ cat pull-race.pid >> $DAEMON_PIDS
+  $ cd pull-race2
+  $ hg -R $TESTTMP/pull-race book
+     @                         1:0d2164f0ce0d
+     X                         1:0d2164f0ce0d
+   * Y                         4:b0a5eff05604
+     Z                         1:0d2164f0ce0d
   $ hg pull
-  pulling from $TESTTMP/pull-race (glob)
+  pulling from http://localhost:$HGPORT/
   searching for changes
   adding changesets
-  adding f3
-  committed in pull-race
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files
@@ -287,6 +307,47 @@ update a bookmark in the middle of a client pulling changes
      X                         1:0d2164f0ce0d
      Y                         4:b0a5eff05604
      Z                         1:0d2164f0ce0d
+
+Update a bookmark right after the initial lookup -B (issue4689)
+
+  $ echo c6 > ../pull-race/f3 # to be committed during the race
+  $ cat <<EOF > ../pull-race/.hg/hgrc
+  > [hooks]
+  > # If anything to commit, commit it right after the first key listing used
+  > # during lookup. This makes the commit appear before the actual getbundle
+  > # call.
+  > listkeys.makecommit= ((hg st | grep -q M) && (hg commit -m race; echo commited in pull-race)) || exit 0
+  > EOF
+
+(new config need server restart)
+
+  $ killdaemons.py
+  $ hg -R ../pull-race serve -p $HGPORT -d --pid-file=../pull-race.pid -E main-error.log
+  $ cat ../pull-race.pid >> $DAEMON_PIDS
+
+  $ hg -R $TESTTMP/pull-race book
+     @                         1:0d2164f0ce0d
+     X                         1:0d2164f0ce0d
+   * Y                         5:35d1ef0a8d1b
+     Z                         1:0d2164f0ce0d
+  $ hg pull -B Y
+  pulling from http://localhost:$HGPORT/
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
+  updating bookmark Y
+  (run 'hg update' to get a working copy)
+  $ hg book
+   * @                         1:0d2164f0ce0d
+     X                         1:0d2164f0ce0d
+     Y                         5:35d1ef0a8d1b
+     Z                         1:0d2164f0ce0d
+
+(done with this section of the test)
+
+  $ killdaemons.py
   $ cd ../b
 
 diverging a remote bookmark fails
@@ -368,6 +429,7 @@ Update to a successor works
   remote: adding manifests
   remote: adding file changes
   remote: added 2 changesets with 2 changes to 1 files (+1 heads)
+  remote: 2 new obsolescence markers
   updating bookmark Y
   $ hg -R ../a book
      @                         1:0d2164f0ce0d
@@ -436,6 +498,7 @@ hgweb
   adding manifests
   adding file changes
   added 5 changesets with 5 changes to 3 files (+2 heads)
+  2 new obsolescence markers
   updating to bookmark @
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg -R cloned-bookmarks bookmarks
@@ -571,6 +634,7 @@ bookmark, not all outgoing changes:
   adding manifests
   adding file changes
   added 5 changesets with 5 changes to 3 files (+2 heads)
+  2 new obsolescence markers
   updating to bookmark @
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd addmarks
@@ -679,7 +743,7 @@ Check hook preventing push (issue4455)
   > push_ssl = false
   > allow_push = *
   > EOF
-  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
+  $ killdaemons.py
   $ hg -R ../issue4455-dest serve -p $HGPORT -d --pid-file=../issue4455.pid -E ../issue4455-error.log
   $ cat ../issue4455.pid >> $DAEMON_PIDS
 
@@ -691,15 +755,25 @@ Local push
   searching for changes
   no changes found
   pushkey-abort: prepushkey hook exited with status 1
-  exporting bookmark @ failed!
-  [1]
+  abort: exporting bookmark @ failed!
+  [255]
   $ hg -R ../issue4455-dest/ bookmarks
   no bookmarks set
 
 Using ssh
 ---------
 
-  $ hg push -B @ ssh
+  $ hg push -B @ ssh --config experimental.bundle2-exp=True
+  pushing to ssh://user@dummy/issue4455-dest
+  searching for changes
+  no changes found
+  remote: pushkey-abort: prepushkey hook exited with status 1
+  abort: exporting bookmark @ failed!
+  [255]
+  $ hg -R ../issue4455-dest/ bookmarks
+  no bookmarks set
+
+  $ hg push -B @ ssh --config experimental.bundle2-exp=False
   pushing to ssh://user@dummy/issue4455-dest
   searching for changes
   no changes found
@@ -712,7 +786,17 @@ Using ssh
 Using http
 ----------
 
-  $ hg push -B @ http
+  $ hg push -B @ http --config experimental.bundle2-exp=True
+  pushing to http://localhost:$HGPORT/
+  searching for changes
+  no changes found
+  remote: pushkey-abort: prepushkey hook exited with status 1
+  abort: exporting bookmark @ failed!
+  [255]
+  $ hg -R ../issue4455-dest/ bookmarks
+  no bookmarks set
+
+  $ hg push -B @ http --config experimental.bundle2-exp=False
   pushing to http://localhost:$HGPORT/
   searching for changes
   no changes found

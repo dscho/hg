@@ -27,8 +27,8 @@ class gnuarch_source(converter_source, commandline):
             self.ren_files = {}
             self.ren_dirs = {}
 
-    def __init__(self, ui, path, rev=None):
-        super(gnuarch_source, self).__init__(ui, path, rev=rev)
+    def __init__(self, ui, path, revs=None):
+        super(gnuarch_source, self).__init__(ui, path, revs=revs)
 
         if not os.path.exists(os.path.join(path, '{arch}')):
             raise NoRepo(_("%s does not look like a GNU Arch repository")
@@ -215,7 +215,7 @@ class gnuarch_source(converter_source, commandline):
                 mode = ''
         else:
             data = open(os.path.join(self.tmppath, name), 'rb').read()
-            mode = (mode & 0111) and 'x' or ''
+            mode = (mode & 0o111) and 'x' or ''
         return data, mode
 
     def _exclude(self, name):

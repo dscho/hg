@@ -15,6 +15,12 @@ Select no files
   $ touch empty-rw
   $ hg add empty-rw
 
+  $ hg record --config ui.interactive=false
+  abort: running non-interactively, use commit instead
+  [255]
+  $ hg commit -i --config ui.interactive=false
+  abort: running non-interactively
+  [255]
   $ hg commit -i empty-rw<<EOF
   > n
   > EOF
@@ -81,6 +87,7 @@ Summary shows we updated to the new cset
   branch: default
   commit: (clean)
   update: (current)
+  phases: 1 draft
 
 Rename empty file
 
@@ -1290,6 +1297,33 @@ Malformed patch - error handling
   abort: error parsing patch: unhandled transition: range -> range
   [255]
 
+Exiting editor with status 1, ignores the edit but does not stop the recording
+session
+
+  $ HGEDITOR=false hg commit -i <<EOF
+  > y
+  > e
+  > n
+  > EOF
+  diff --git a/editedfile b/editedfile
+  1 hunks, 3 lines changed
+  examine changes to 'editedfile'? [Ynesfdaq?] y
+  
+  @@ -1,3 +1,3 @@
+  -This is the first line
+  -This change will be committed
+  -This is the third line
+  +This change will not be committed
+  +This is the second line
+  +This line has been added
+  record this change to 'editedfile'? [Ynesfdaq?] e
+  
+  editor exited with exit code 1
+  record this change to 'editedfile'? [Ynesfdaq?] n
+  
+  no changes to record
+
+
 random text in random positions is still an error
 
   $ cat > editor.sh << '__EOF__'
@@ -1353,6 +1387,8 @@ Ignore win32text deprecation warning for now:
   record this change to 'subdir/f1'? [Ynesfdaq?] y
   
 
+  $ hg status -A subdir/f1
+  C subdir/f1
   $ hg tip -p
   changeset:   28:* (glob)
   tag:         tip
@@ -1389,6 +1425,8 @@ Test --user when ui.username not set
   +e
   record this change to 'subdir/f1'? [Ynesfdaq?] y
   
+  $ hg status -A subdir/f1
+  C subdir/f1
   $ hg log --template '{author}\n' -l 1
   xyz
   $ HGUSER="test"
@@ -1398,7 +1436,7 @@ Test --user when ui.username not set
 Moving files
 
   $ hg update -C .
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg mv plain plain3
   $ echo somechange >> plain3
   $ hg commit -i -d '23 0' -mmoving_files << EOF
@@ -1419,6 +1457,8 @@ Moving files
   record this change to 'plain3'? [Ynesfdaq?] y
   
 The #if execbit block above changes the hash here on some systems
+  $ hg status -A plain3
+  C plain3
   $ hg tip
   changeset:   30:* (glob)
   tag:         tip
@@ -1498,3 +1538,98 @@ The #if execbit block above changes the hashes here on some systems
   +foo
   
   $ cd ..
+
+  $ hg status -A folder/bar
+  C folder/bar
+
+Clear win32text configuration before size/timestamp sensitive test
+
+  $ cat >> .hg/hgrc <<EOF
+  > [extensions]
+  > win32text = !
+  > [decode]
+  > ** = !
+  > [encode]
+  > ** = !
+  > [patch]
+  > eol = strict
+  > EOF
+  $ hg update -q -C null
+  $ hg update -q -C tip
+
+Test that partially committed file is still treated as "modified",
+even if none of mode, size and timestamp is changed on the filesystem
+(see also issue4583).
+
+  $ cat > subdir/f1 <<EOF
+  > A
+  > a
+  > a
+  > b
+  > c
+  > d
+  > E
+  > EOF
+  $ hg diff --git subdir/f1
+  diff --git a/subdir/f1 b/subdir/f1
+  --- a/subdir/f1
+  +++ b/subdir/f1
+  @@ -1,7 +1,7 @@
+  -a
+  +A
+   a
+   a
+   b
+   c
+   d
+  -e
+  +E
+
+  $ touch -t 200001010000 subdir/f1
+
+  $ cat >> .hg/hgrc <<EOF
+  > # emulate invoking patch.internalpatch() at 2000-01-01 00:00
+  > [fakepatchtime]
+  > fakenow = 200001010000
+  > 
+  > [extensions]
+  > fakepatchtime = $TESTDIR/fakepatchtime.py
+  > EOF
+  $ hg commit -i -m 'commit subdir/f1 partially' <<EOF
+  > y
+  > y
+  > n
+  > EOF
+  diff --git a/subdir/f1 b/subdir/f1
+  2 hunks, 2 lines changed
+  examine changes to 'subdir/f1'? [Ynesfdaq?] y
+  
+  @@ -1,6 +1,6 @@
+  -a
+  +A
+   a
+   a
+   b
+   c
+   d
+  record change 1/2 to 'subdir/f1'? [Ynesfdaq?] y
+  
+  @@ -2,6 +2,6 @@
+   a
+   a
+   b
+   c
+   d
+  -e
+  +E
+  record change 2/2 to 'subdir/f1'? [Ynesfdaq?] n
+  
+  $ cat >> .hg/hgrc <<EOF
+  > [extensions]
+  > fakepatchtime = !
+  > EOF
+
+  $ hg debugstate | grep ' subdir/f1$'
+  n   0         -1 unset               subdir/f1
+  $ hg status -A subdir/f1
+  M subdir/f1

@@ -7,13 +7,13 @@
 # GNU General Public License version 2 or any later version.
 
 from mercurial import changegroup, exchange, util, bundle2
-from mercurial.node import short, hex
+from mercurial.node import short
 from mercurial.i18n import _
 import errno
 
 def _bundle(repo, bases, heads, node, suffix, compress=True):
     """create a bundle with the specified revisions as a backup"""
-    usebundle2 = (repo.ui.config('experimental', 'bundle2-exp') and
+    usebundle2 = (repo.ui.configbool('experimental', 'bundle2-exp', True) and
                   repo.ui.config('experimental', 'strip-bundle2-version'))
     if usebundle2:
         cgversion = repo.ui.config('experimental', 'strip-bundle2-version')
@@ -34,9 +34,7 @@ def _bundle(repo, bases, heads, node, suffix, compress=True):
         vfs.mkdir(backupdir)
 
     # Include a hash of all the nodes in the filename for uniqueness
-    hexbases = (hex(n) for n in bases)
-    hexheads = (hex(n) for n in heads)
-    allcommits = repo.set('%ls::%ls', hexbases, hexheads)
+    allcommits = repo.set('%ln::%ln', bases, heads)
     allhashes = sorted(c.hex() for c in allcommits)
     totalhash = util.sha1(''.join(allhashes)).hexdigest()
     name = "%s/%s-%s-%s.hg" % (backupdir, short(node), totalhash[:8], suffix)
@@ -151,6 +149,12 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
 
     mfst = repo.manifest
 
+    curtr = repo.currenttransaction()
+    if curtr is not None:
+        del curtr  # avoid carrying reference to transaction for nothing
+        msg = _('programming error: cannot strip from inside a transaction')
+        raise util.Abort(msg, hint=_('contact your extension maintainer'))
+
     tr = repo.transaction("strip")
     offset = len(tr.entries)
 
@@ -201,7 +205,7 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
         for undovfs, undofile in repo.undofiles():
             try:
                 undovfs.unlink(undofile)
-            except OSError, e:
+            except OSError as e:
                 if e.errno != errno.ENOENT:
                     ui.warn(_('error removing %s: %s\n') %
                             (undovfs.join(undofile), str(e)))
@@ -223,3 +227,72 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
             vfs.unlink(chgrpfile)
 
     repo.destroyed()
+
+def rebuildfncache(ui, repo):
+    """Rebuilds the fncache file from repo history.
+
+    Missing entries will be added. Extra entries will be removed.
+    """
+    repo = repo.unfiltered()
+
+    if 'fncache' not in repo.requirements:
+        ui.warn(_('(not rebuilding fncache because repository does not '
+                  'support fncache\n'))
+        return
+
+    lock = repo.lock()
+    try:
+        fnc = repo.store.fncache
+        # Trigger load of fncache.
+        if 'irrelevant' in fnc:
+            pass
+
+        oldentries = set(fnc.entries)
+        newentries = set()
+        seenfiles = set()
+
+        repolen = len(repo)
+        for rev in repo:
+            ui.progress(_('changeset'), rev, total=repolen)
+
+            ctx = repo[rev]
+            for f in ctx.files():
+                # This is to minimize I/O.
+                if f in seenfiles:
+                    continue
+                seenfiles.add(f)
+
+                i = 'data/%s.i' % f
+                d = 'data/%s.d' % f
+
+                if repo.store._exists(i):
+                    newentries.add(i)
+                if repo.store._exists(d):
+                    newentries.add(d)
+
+        ui.progress(_('changeset'), None)
+
+        addcount = len(newentries - oldentries)
+        removecount = len(oldentries - newentries)
+        for p in sorted(oldentries - newentries):
+            ui.write(_('removing %s\n') % p)
+        for p in sorted(newentries - oldentries):
+            ui.write(_('adding %s\n') % p)
+
+        if addcount or removecount:
+            ui.write(_('%d items added, %d removed from fncache\n') %
+                     (addcount, removecount))
+            fnc.entries = newentries
+            fnc._dirty = True
+
+            tr = repo.transaction('fncache')
+            try:
+                fnc.write(tr)
+                tr.close()
+            finally:
+                tr.release()
+        else:
+            ui.write(_('fncache already up to date\n'))
+    finally:
+        lock.release()
+

@@ -43,12 +43,12 @@ navgraph = '{before%navgraphentry}{after%navgraphentry}'
 filenav = '{before%filenaventry}{after%filenaventry}'
 
 direntry = '
-  <tr class="fileline parity{parity}">
+  <tr class="fileline">
     <td class="name">
-      <a href="{url|urlescape}file/{node|short}{path|urlescape}{sessionvars%urlparameter}">
+      <a href="{url|urlescape}file/{symrev}{path|urlescape}{sessionvars%urlparameter}">
         <img src="{staticurl|urlescape}coal-folder.png" alt="dir."/> {basename|escape}/
       </a>
-      <a href="{url|urlescape}file/{node|short}{path|urlescape}/{emptydirs|urlescape}{sessionvars%urlparameter}">
+      <a href="{url|urlescape}file/{symrev}{path|urlescape}/{emptydirs|urlescape}{sessionvars%urlparameter}">
         {emptydirs|escape}
       </a>
     </td>
@@ -57,9 +57,9 @@ direntry = '
   </tr>'
 
 fileentry = '
-  <tr class="fileline parity{parity}">
+  <tr class="fileline">
     <td class="filename">
-      <a href="{url|urlescape}file/{node|short}/{file|urlescape}{sessionvars%urlparameter}">
+      <a href="{url|urlescape}file/{symrev}/{file|urlescape}{sessionvars%urlparameter}">
         <img src="{staticurl|urlescape}coal-file.png" alt="file"/> {basename|escape}
       </a>
     </td>
@@ -73,11 +73,11 @@ filediff = ../paper/filediff.tmpl
 filecomparison = ../paper/filecomparison.tmpl
 filelog = ../paper/filelog.tmpl
 fileline = '
-  <div class="parity{parity} source"><a href="#{lineid}" id="{lineid}">{linenumber}</a> {line|escape}</div>'
+  <div class="source"><a href="#{lineid}" id="{lineid}">{linenumber}</a> {line|escape}</div>'
 filelogentry = ../paper/filelogentry.tmpl
 
 annotateline = '
-  <tr class="parity{parity}">
+  <tr>
     <td class="annotate">
       <a href="{url|urlescape}annotate/{node|short}/{file|urlescape}{sessionvars%urlparameter}#{targetline}"
          title="{node|short}: {desc|escape|firstline}">{author|user}@{rev}</a>
@@ -85,7 +85,7 @@ annotateline = '
     <td class="source"><a href="#{lineid}" id="{lineid}">{linenumber}</a> {line|escape}</td>
   </tr>'
 
-diffblock = '<div class="source bottomline parity{parity}"><pre>{lines}</pre></div>'
+diffblock = '<div class="source bottomline"><pre>{lines}</pre></div>'
 difflineplus = '<a href="#{lineid}" id="{lineid}">{linenumber}</a> <span class="plusline">{line|escape}</span>'
 difflineminus = '<a href="#{lineid}" id="{lineid}">{linenumber}</a> <span class="minusline">{line|escape}</span>'
 difflineat = '<a href="#{lineid}" id="{lineid}">{linenumber}</a> <span class="atline">{line|escape}</span>'
@@ -156,38 +156,44 @@ fileannotatechild = '
   </tr>'
 tags = ../paper/tags.tmpl
 tagentry = '
-  <tr class="tagEntry parity{parity}">
+  <tr class="tagEntry">
     <td>
-      <a href="{url|urlescape}rev/{node|short}{sessionvars%urlparameter}">
+      <a href="{url|urlescape}rev/{tag|revescape}{sessionvars%urlparameter}">
         {tag|escape}
       </a>
     </td>
     <td class="node">
-      {node|short}
+      <a href="{url|urlescape}rev/{node|short}{sessionvars%urlparameter}">
+        {node|short}
+      </a>
     </td>
   </tr>'
 bookmarks = ../paper/bookmarks.tmpl
 bookmarkentry = '
-  <tr class="tagEntry parity{parity}">
+  <tr class="tagEntry">
     <td>
-      <a href="{url|urlescape}rev/{node|short}{sessionvars%urlparameter}">
+      <a href="{url|urlescape}rev/{bookmark|revescape}{sessionvars%urlparameter}">
         {bookmark|escape}
       </a>
     </td>
     <td class="node">
-      {node|short}
+      <a href="{url|urlescape}rev/{node|short}{sessionvars%urlparameter}">
+        {node|short}
+      </a>
     </td>
   </tr>'
 branches = ../paper/branches.tmpl
 branchentry = '
-  <tr class="tagEntry parity{parity}">
+  <tr class="tagEntry">
     <td>
-      <a href="{url|urlescape}shortlog/{node|short}{sessionvars%urlparameter}" class="{status}">
+      <a href="{url|urlescape}shortlog/{branch|revescape}{sessionvars%urlparameter}" class="{status}">
         {branch|escape}
       </a>
     </td>
     <td class="node">
-      {node|short}
+      <a href="{url|urlescape}shortlog/{node|short}{sessionvars%urlparameter}" class="{status}">
+        {node|short}
+      </a>
     </td>
   </tr>'
 changelogtag = '<span class="tag">{name|escape}</span> '
@@ -219,7 +225,7 @@ filelogchild = '
   </tr>'
 
 indexentry = '
-  <tr class="parity{parity}">
+  <tr>
     <td><a href="{url|urlescape}{sessionvars%urlparameter}">{name|escape}</a></td>
     <td>{description}</td>
     <td>{contact|obfuscate}</td>
@@ -230,7 +236,7 @@ indexarchiveentry = '<a href="{url|urlescape}archive/{node|short}{extension|urle
 index = ../paper/index.tmpl
 archiveentry = '
   <li>
-    <a href="{url|urlescape}archive/{node|short}{extension|urlescape}{ifeq(path,'/','',path|urlescape)}">{type|escape}</a>
+    <a href="{url|urlescape}archive/{symrev}{extension|urlescape}{ifeq(path,'/','',path|urlescape)}">{type|escape}</a>
   </li>'
 notfound = ../paper/notfound.tmpl
 error = ../paper/error.tmpl

@@ -157,6 +157,16 @@ osx:
 	N=`cd dist && echo mercurial-*.mpkg | sed 's,\.mpkg$$,,'` && hdiutil create -srcfolder dist/$$N.mpkg/ -scrub -volname "$$N" -ov packages/osx/$$N.dmg
 	rm -rf dist/mercurial-*.mpkg
 
+debian-jessie:
+	mkdir -p packages/debian-jessie
+	contrib/builddeb
+	mv debbuild/*.deb packages/debian-jessie
+	rm -rf debbuild
+
+docker-debian-jessie:
+	mkdir -p packages/debian/jessie
+	contrib/dockerdeb jessie
+
 fedora20:
 	mkdir -p packages/fedora20
 	contrib/buildrpm

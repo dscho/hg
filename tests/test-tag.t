@@ -416,6 +416,12 @@ check that we can merge tags that differ in rank
   $ hg ci -A -m0
   adding f0
   $ hg tag tbase
+  $ hg up -qr '.^'
+  $ hg log -r 'wdir()' -T "{latesttagdistance}\n"
+  1
+  $ hg up -q
+  $ hg log -r 'wdir()' -T "{latesttagdistance}\n"
+  2
   $ cd ..
   $ hg clone repo-automatic-tag-merge repo-automatic-tag-merge-clone
   updating to branch default
@@ -437,10 +443,28 @@ check that we can merge tags that differ in rank
   $ hg ci -A -m3
   adding f3
   $ hg tag -f t4 t5 t6
+
+  $ hg up -q '.^'
+  $ hg log -r 'wdir()' -T "{changessincelatesttag} changes since {latesttag}\n"
+  1 changes since t4:t5:t6
+  $ hg log -r '.' -T "{changessincelatesttag} changes since {latesttag}\n"
+  0 changes since t4:t5:t6
+  $ echo c5 > f3
+  $ hg log -r 'wdir()' -T "{changessincelatesttag} changes since {latesttag}\n"
+  1 changes since t4:t5:t6
+  $ hg up -qC
+
   $ hg tag --remove t5
   $ echo c4 > f4
+  $ hg log -r '.' -T "{changessincelatesttag} changes since {latesttag}\n"
+  2 changes since t4:t6
+  $ hg log -r '.' -T "{latesttag % '{latesttag}\n'}"
+  t4
+  t6
   $ hg ci -A -m4
   adding f4
+  $ hg log -r 'wdir()' -T "{changessincelatesttag} changes since {latesttag}\n"
+  4 changes since t4:t6
   $ hg tag t2
   $ hg tag -f t6
 

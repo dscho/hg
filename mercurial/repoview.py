@@ -115,16 +115,15 @@ def trywritehiddencache(repo, hideable, hidden):
     """
     wlock = fh = None
     try:
-        try:
-            wlock = repo.wlock(wait=False)
-            # write cache to file
-            newhash = cachehash(repo, hideable)
-            fh = repo.vfs.open(cachefile, 'w+b', atomictemp=True)
-            _writehiddencache(fh, newhash, hidden)
-        except (IOError, OSError):
-            repo.ui.debug('error writing hidden changesets cache')
-        except error.LockHeld:
-            repo.ui.debug('cannot obtain lock to write hidden changesets cache')
+        wlock = repo.wlock(wait=False)
+        # write cache to file
+        newhash = cachehash(repo, hideable)
+        fh = repo.vfs.open(cachefile, 'w+b', atomictemp=True)
+        _writehiddencache(fh, newhash, hidden)
+    except (IOError, OSError):
+        repo.ui.debug('error writing hidden changesets cache')
+    except error.LockHeld:
+        repo.ui.debug('cannot obtain lock to write hidden changesets cache')
     finally:
         if fh:
             fh.close()
@@ -197,7 +196,7 @@ def computemutable(repo):
     Secret and hidden changeset should not pretend to be here."""
     assert not repo.changelog.filteredrevs
     # fast check to avoid revset call on huge repo
-    if util.any(repo._phasecache.phaseroots[1:]):
+    if any(repo._phasecache.phaseroots[1:]):
         getphase = repo._phasecache.phase
         maymutable = filterrevs(repo, 'base')
         return frozenset(r for r in maymutable if getphase(repo, r))

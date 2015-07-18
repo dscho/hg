@@ -36,6 +36,8 @@ Following commit are draft too
 Draft commit are properly created over public one:
 
   $ hg phase --public .
+  $ hg phase
+  1: public
   $ hglog
   1 0 B
   0 0 A
@@ -86,6 +88,9 @@ Even on merge
   $ hg merge 4 # E
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
+  $ hg phase
+  6: draft
+  4: secret
   $ hg ci -m "merge B' and E"
   $ hglog
   7 2 merge B' and E
@@ -241,6 +246,24 @@ Test secret changeset are not cloned
   2 0 C
   1 0 B
   0 0 A
+
+Test summary
+
+  $ hg summary -R clone-dest --verbose
+  parent: -1:000000000000  (no revision checked out)
+  branch: default
+  commit: (clean)
+  update: 5 new changesets (update)
+  $ hg summary -R initialrepo
+  parent: 7:17a481b3bccb tip
+   merge B' and E
+  branch: default
+  commit: (clean) (secret)
+  update: 1 new changesets, 2 branch heads (merge)
+  phases: 3 draft, 3 secret
+  $ hg summary -R initialrepo --quiet
+  parent: 7:17a481b3bccb tip
+  update: 1 new changesets, 2 branch heads (merge)
 
 Test revset
 

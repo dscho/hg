@@ -181,6 +181,10 @@ from mercurial.i18n import _
 cmdtable = {}
 command = cmdutil.command(cmdtable)
 
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 # i18n: command names and abbreviations must remain untranslated
@@ -218,7 +222,7 @@ class histeditstate(object):
         """Load histedit state from disk and set fields appropriately."""
         try:
             fp = self.repo.vfs('histedit-state', 'r')
-        except IOError, err:
+        except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
             raise util.Abort(_('no histedit in progress'))
@@ -381,7 +385,7 @@ def commitfuncfor(repo, src):
 
     - Add a 'histedit_source' entry in extra.
 
-    Note that fold have its own separated logic because its handling is a bit
+    Note that fold has its own separated logic because its handling is a bit
     different and not easily factored out of the fold method.
     """
     phasemin = src.phase()
@@ -429,6 +433,10 @@ def collapse(repo, first, last, commitopts, skipprompt=False):
     ctxs = list(repo.set('%d::%d', first, last))
     if not ctxs:
         return None
+    for c in ctxs:
+        if not c.mutable():
+            raise util.Abort(
+                _("cannot fold into public change %s") % node.short(c.node()))
     base = first.parents()[0]
 
     # commit a new version of the old changeset, including the update
@@ -707,15 +715,15 @@ def _histedit(ui, repo, state, *freeargs, **opts):
     if force and not outg:
         raise util.Abort(_('--force only allowed with --outgoing'))
     if cont:
-        if util.any((outg, abort, revs, freeargs, rules, editplan)):
+        if any((outg, abort, revs, freeargs, rules, editplan)):
             raise util.Abort(_('no arguments allowed with --continue'))
         goal = 'continue'
     elif abort:
-        if util.any((outg, revs, freeargs, rules, editplan)):
+        if any((outg, revs, freeargs, rules, editplan)):
             raise util.Abort(_('no arguments allowed with --abort'))
         goal = 'abort'
     elif editplan:
-        if util.any((outg, revs, freeargs)):
+        if any((outg, revs, freeargs)):
             raise util.Abort(_('only --commands argument allowed with '
                                '--edit-plan'))
         goal = 'edit-plan'
@@ -732,6 +740,7 @@ def _histedit(ui, repo, state, *freeargs, **opts):
         else:
             revs.extend(freeargs)
             if len(revs) == 0:
+                # experimental config: histedit.defaultrev
                 histeditdefault = ui.config('histedit', 'defaultrev')
                 if histeditdefault:
                     revs.append(histeditdefault)
@@ -742,6 +751,7 @@ def _histedit(ui, repo, state, *freeargs, **opts):
 
     replacements = []
     state.keep = opts.get('keep', False)
+    supportsmarkers = obsolete.isenabled(repo, obsolete.createmarkersopt)
 
     # rebuild state
     if goal == 'continue':
@@ -788,8 +798,13 @@ def _histedit(ui, repo, state, *freeargs, **opts):
                 break
         else:
             pass
-        cleanupnode(ui, repo, 'created', tmpnodes)
-        cleanupnode(ui, repo, 'temp', leafs)
+        if supportsmarkers:
+            obsolete.createmarkers(repo,
+                                   ((repo[t],()) for t in sorted(tmpnodes)))
+            obsolete.createmarkers(repo, ((repo[t],()) for t in sorted(leafs)))
+        else:
+            cleanupnode(ui, repo, 'created', tmpnodes)
+            cleanupnode(ui, repo, 'temp', leafs)
         state.clear()
         return
     else:
@@ -873,7 +888,7 @@ def _histedit(ui, repo, state, *freeargs, **opts):
         if mapping:
             movebookmarks(ui, repo, mapping, state.topmost, ntm)
             # TODO update mq state
-        if obsolete.isenabled(repo, obsolete.createmarkersopt):
+        if supportsmarkers:
             markers = []
             # sort by revision number because it sound "right"
             for prec in sorted(mapping, key=repo.changelog.rev):
@@ -884,8 +899,10 @@ def _histedit(ui, repo, state, *freeargs, **opts):
                 obsolete.createmarkers(repo, markers)
         else:
             cleanupnode(ui, repo, 'replaced', mapping)
-
-    cleanupnode(ui, repo, 'temp', tmpnodes)
+    if supportsmarkers:
+        obsolete.createmarkers(repo, ((repo[t],()) for t in sorted(tmpnodes)))
+    else:
+        cleanupnode(ui, repo, 'temp', tmpnodes)
     state.clear()
     if os.path.exists(repo.sjoin('undo')):
         os.unlink(repo.sjoin('undo'))
@@ -924,7 +941,8 @@ def between(repo, old, new, keep):
             raise util.Abort(_('cannot edit history that contains merges'))
         root = ctxs[0] # list is already sorted by repo.set
         if not root.mutable():
-            raise util.Abort(_('cannot edit immutable changeset: %s') % root)
+            raise util.Abort(_('cannot edit public changeset: %s') % root,
+                             hint=_('see "hg help phases" for details'))
     return [c.node() for c in ctxs]
 
 def makedesc(repo, action, rev):

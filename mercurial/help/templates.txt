@@ -47,6 +47,10 @@ Also, for any expression that returns a list, there is a list operator:
 
 - expr % "{template}"
 
+As seen in the above example, "{template}" is interpreted as a template.
+To prevent it from being interpreted, you can use an escape character "\{"
+or a raw string prefix, "r'...'".
+
 Some sample command line templates:
 
 - Format lists, e.g. files::
@@ -67,7 +71,7 @@ Some sample command line templates:
 
 - Output the description set to a fill-width of 30::
 
-   $ hg log -r 0 --template "{fill(desc, '30')}"
+   $ hg log -r 0 --template "{fill(desc, 30)}"
 
 - Use a conditional to test for the default branch::
 
@@ -90,9 +94,9 @@ Some sample command line templates:
 
    $ hg log -r 0 --template "{join(extras, '\n')}\n"
 
-- Mark the current bookmark with '*'::
+- Mark the active bookmark with '*'::
 
-   $ hg log --template "{bookmarks % '{bookmark}{ifeq(bookmark, current, \"*\")} '}\n"
+   $ hg log --template "{bookmarks % '{bookmark}{ifeq(bookmark, active, '*')} '}\n"
 
 - Mark the working copy parent with '@'::
 
@@ -100,8 +104,8 @@ Some sample command line templates:
 
 - Show only commit descriptions that start with "template"::
 
-   $ hg log --template "{startswith(\"template\", firstline(desc))}\n"
+   $ hg log --template "{startswith('template', firstline(desc))}\n"
 
 - Print the first word of each line of a commit message::
 
-   $ hg log --template "{word(\"0\", desc)}\n"
+   $ hg log --template "{word(0, desc)}\n"

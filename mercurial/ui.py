@@ -5,9 +5,10 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+import inspect
 from i18n import _
 import errno, getpass, os, socket, sys, tempfile, traceback
-import config, scmutil, util, error, formatter
+import config, scmutil, util, error, formatter, progress
 from node import hex
 
 samplehgrcs = {
@@ -152,7 +153,7 @@ class ui(object):
         try:
             cfg.read(filename, fp, sections=sections, remap=remap)
             fp.close()
-        except error.ConfigError, inst:
+        except error.ConfigError as inst:
             if trusted:
                 raise
             self.warn(_("ignored: %s\n") % str(inst))
@@ -584,6 +585,7 @@ class ui(object):
         "cmdname.type" is recommended. For example, status issues
         a label of "status.modified" for modified files.
         '''
+        self._progclear()
         if self._buffers:
             self._buffers[-1].extend([str(a) for a in args])
         else:
@@ -591,6 +593,7 @@ class ui(object):
                 self.fout.write(str(a))
 
     def write_err(self, *args, **opts):
+        self._progclear()
         try:
             if self._bufferstates and self._bufferstates[-1][0]:
                 return self.write(*args, **opts)
@@ -602,7 +605,7 @@ class ui(object):
             # including stdout.
             if not getattr(self.ferr, 'closed', False):
                 self.ferr.flush()
-        except IOError, inst:
+        except IOError as inst:
             if inst.errno not in (errno.EPIPE, errno.EIO, errno.EBADF):
                 raise
 
@@ -842,7 +845,7 @@ class ui(object):
         output will be redirected if fout is not stdout.
         '''
         out = self.fout
-        if util.any(s[1] for s in self._bufferstates):
+        if any(s[1] for s in self._bufferstates):
             out = self
         return util.system(cmd, environ=environ, cwd=cwd, onerr=onerr,
                            errprefix=errprefix, out=out)
@@ -867,8 +870,8 @@ class ui(object):
                                ''.join(causetb),
                                ''.join(exconly))
             else:
-                traceback.print_exception(exc[0], exc[1], exc[2],
-                                          file=self.ferr)
+                output = traceback.format_exception(exc[0], exc[1], exc[2])
+                self.write_err(''.join(output))
         return self.tracebackflag or force
 
     def geteditor(self):
@@ -884,6 +887,22 @@ class ui(object):
                 self.config("ui", "editor") or
                 os.environ.get("VISUAL") or
                 os.environ.get("EDITOR", editor))
+
+    @util.propertycache
+    def _progbar(self):
+        """setup the progbar singleton to the ui object"""
+        if (self.quiet or self.debugflag
+                or self.configbool('progress', 'disable', False)
+                or not progress.shouldprint(self)):
+            return None
+        return getprogbar(self)
+
+    def _progclear(self):
+        """clear progress bar output if any. use it before any output"""
+        if '_progbar' not in vars(self): # nothing loadef yet
+            return
+        if self._progbar is not None and self._progbar.printed:
+            self._progbar.clear()
 
     def progress(self, topic, pos, item="", unit="", total=None):
         '''show a progress message
@@ -901,8 +920,10 @@ class ui(object):
         All topics should be marked closed by setting pos to None at
         termination.
         '''
-
-        if pos is None or not self.debugflag:
+        if self._progbar is not None:
+            self._progbar.progress(topic, pos, item=item, unit=unit,
+                                   total=total)
+        if pos is None or not self.configbool('progress', 'debug'):
             return
 
         if unit:
@@ -937,6 +958,16 @@ class ui(object):
         ui.write(ui.label(s, 'label')).
         '''
         return msg
+
+    def develwarn(self, msg):
+        """issue a developer warning message"""
+        msg = 'devel-warn: ' + msg
+        if self.tracebackflag:
+            util.debugstacktrace(msg, 2)
+        else:
+            curframe = inspect.currentframe()
+            calframe = inspect.getouterframes(curframe, 2)
+            self.write_err('%s at: %s:%s (%s)\n' % ((msg,) + calframe[2][1:4]))
 
 class paths(dict):
     """Represents a collection of paths and their configs.
@@ -982,3 +1013,15 @@ class path(object):
         self.name = name
         # We'll do more intelligent things with rawloc in the future.
         self.loc = rawloc
+
+# we instantiate one globally shared progress bar to avoid
+# competing progress bars when multiple UI objects get created
+_progresssingleton = None
+
+def getprogbar(ui):
+    global _progresssingleton
+    if _progresssingleton is None:
+        # passing 'ui' object to the singleton is fishy,
+        # this is how the extension used to work but feel free to rework it.
+        _progresssingleton = progress.progbar(ui)
+    return _progresssingleton

@@ -76,6 +76,10 @@ seriesopts = [('s', 'summary', None, _('print first line of patch header'))]
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 # force load strip extension formerly included in mq and import some utility
@@ -298,7 +302,7 @@ class patchheader(object):
         self.haspatch = diffstart > 1
         self.plainmode = (plainmode or
                           '# HG changeset patch' not in self.comments and
-                          util.any(c.startswith('Date: ') or
+                          any(c.startswith('Date: ') or
                                    c.startswith('From: ')
                                    for c in self.comments))
 
@@ -376,14 +380,17 @@ def newcommit(repo, phase, *args, **kwargs):
         if repo.ui.configbool('mq', 'secret', False):
             phase = phases.secret
     if phase is not None:
-        backup = repo.ui.backupconfig('phases', 'new-commit')
+        phasebackup = repo.ui.backupconfig('phases', 'new-commit')
+    allowemptybackup = repo.ui.backupconfig('ui', 'allowemptycommit')
     try:
         if phase is not None:
             repo.ui.setconfig('phases', 'new-commit', phase, 'mq')
+        repo.ui.setconfig('ui', 'allowemptycommit', True)
         return repo.commit(*args, **kwargs)
     finally:
+        repo.ui.restoreconfig(allowemptybackup)
         if phase is not None:
-            repo.ui.restoreconfig(backup)
+            repo.ui.restoreconfig(phasebackup)
 
 class AbortNoCleanup(error.Abort):
     pass
@@ -423,7 +430,9 @@ class queue(object):
             else:
                 self.gitmode = 'no'
         except error.ConfigError:
-            self.gitmode = ui.config('mq', 'git', 'auto').lower()
+            # let's have check-config ignore the type mismatch
+            self.gitmode = ui.config(r'mq', 'git', 'auto').lower()
+        # deprecated config: mq.plain
         self.plainmode = ui.configbool('mq', 'plain', False)
         self.checkapplied = True
 
@@ -441,7 +450,7 @@ class queue(object):
         try:
             lines = self.opener.read(self.statuspath).splitlines()
             return list(parselines(lines))
-        except IOError, e:
+        except IOError as e:
             if e.errno == errno.ENOENT:
                 return []
             raise
@@ -450,7 +459,7 @@ class queue(object):
     def fullseries(self):
         try:
             return self.opener.read(self.seriespath).splitlines()
-        except IOError, e:
+        except IOError as e:
             if e.errno == errno.ENOENT:
                 return []
             raise
@@ -567,7 +576,7 @@ class queue(object):
             self.activeguards = []
             try:
                 guards = self.opener.read(self.guardspath).split()
-            except IOError, err:
+            except IOError as err:
                 if err.errno != errno.ENOENT:
                     raise
                 guards = []
@@ -668,7 +677,7 @@ class queue(object):
             return
         try:
             os.unlink(undo)
-        except OSError, inst:
+        except OSError as inst:
             self.ui.warn(_('error removing undo: %s\n') % str(inst))
 
     def backup(self, repo, files, copy=False):
@@ -797,7 +806,7 @@ class queue(object):
             fuzz = patchmod.patch(self.ui, repo, patchfile, strip=1,
                                   files=files, eolmode=None)
             return (True, list(files), fuzz)
-        except Exception, inst:
+        except Exception as inst:
             self.ui.note(str(inst) + '\n')
             if not self.ui.verbose:
                 self.ui.warn(_("patch failed, unable to continue (try -v)\n"))
@@ -807,9 +816,10 @@ class queue(object):
     def apply(self, repo, series, list=False, update_status=True,
               strict=False, patchdir=None, merge=None, all_files=None,
               tobackup=None, keepchanges=False):
-        wlock = lock = tr = None
+        wlock = dsguard = lock = tr = None
         try:
             wlock = repo.wlock()
+            dsguard = cmdutil.dirstateguard(repo, 'mq.apply')
             lock = repo.lock()
             tr = repo.transaction("qpush")
             try:
@@ -818,21 +828,22 @@ class queue(object):
                                   tobackup=tobackup, keepchanges=keepchanges)
                 tr.close()
                 self.savedirty()
+                dsguard.close()
                 return ret
             except AbortNoCleanup:
                 tr.close()
                 self.savedirty()
+                dsguard.close()
                 raise
             except: # re-raises
                 try:
                     tr.abort()
                 finally:
                     repo.invalidate()
-                    repo.dirstate.invalidate()
                     self.invalidate()
                 raise
         finally:
-            release(tr, lock, wlock)
+            release(tr, lock, dsguard, wlock)
             self.removeundo(repo)
 
     def _apply(self, repo, series, list=False, update_status=True,
@@ -950,7 +961,7 @@ class queue(object):
             for p in patches:
                 try:
                     os.unlink(self.join(p))
-                except OSError, inst:
+                except OSError as inst:
                     if inst.errno != errno.ENOENT:
                         raise
 
@@ -1093,9 +1104,9 @@ class queue(object):
             if name.startswith(prefix):
                 raise util.Abort(_('patch name cannot begin with "%s"')
                                  % prefix)
-        for c in ('#', ':'):
+        for c in ('#', ':', '\r', '\n'):
             if c in name:
-                raise util.Abort(_('"%s" cannot be used in the name of a patch')
+                raise util.Abort(_('%r cannot be used in the name of a patch')
                                  % c)
 
     def checkpatchname(self, name, force=False):
@@ -1129,12 +1140,11 @@ class queue(object):
         if inclsubs:
             substatestate = repo.dirstate['.hgsubstate']
         if opts.get('include') or opts.get('exclude') or pats:
-            match = scmutil.match(repo[None], pats, opts)
             # detect missing files in pats
             def badfn(f, msg):
                 if f != '.hgsubstate': # .hgsubstate is auto-created
                     raise util.Abort('%s: %s' % (f, msg))
-            match.bad = badfn
+            match = scmutil.match(repo[None], pats, opts, badfn=badfn)
             changes = repo.status(match=match)
         else:
             changes = self.checklocalchanges(repo, force=True)
@@ -1151,7 +1161,7 @@ class queue(object):
             try:
                 # if patch file write fails, abort early
                 p = self.opener(patchfn, "w")
-            except IOError, e:
+            except IOError as e:
                 raise util.Abort(_('cannot write patch "%s": %s')
                                  % (patchfn, e.strerror))
             try:
@@ -1517,7 +1527,7 @@ class queue(object):
                                    "managed by this patch queue"))
             if not repo[self.applied[-1].node].mutable():
                 raise util.Abort(
-                    _("popping would remove an immutable revision"),
+                    _("popping would remove a public revision"),
                     hint=_('see "hg help phases" for details'))
 
             # we know there are no local changes, so we can make a simplified
@@ -1588,7 +1598,7 @@ class queue(object):
             if repo.changelog.heads(top) != [top]:
                 raise util.Abort(_("cannot refresh a revision with children"))
             if not repo[top].mutable():
-                raise util.Abort(_("cannot refresh immutable revision"),
+                raise util.Abort(_("cannot refresh public revision"),
                                  hint=_('see "hg help phases" for details'))
 
             cparents = repo.changelog.parents(top)
@@ -1681,8 +1691,9 @@ class queue(object):
 
             bmlist = repo[top].bookmarks()
 
+            dsguard = None
             try:
-                repo.dirstate.beginparentchange()
+                dsguard = cmdutil.dirstateguard(repo, 'mq.refresh')
                 if diffopts.git or diffopts.upgrade:
                     copies = {}
                     for dst in a:
@@ -1735,13 +1746,12 @@ class queue(object):
 
                 # assumes strip can roll itself back if interrupted
                 repo.setparents(*cparents)
-                repo.dirstate.endparentchange()
                 self.applied.pop()
                 self.applieddirty = True
                 strip(self.ui, repo, [top], update=False, backup=False)
-            except: # re-raises
-                repo.dirstate.invalidate()
-                raise
+                dsguard.close()
+            finally:
+                release(dsguard)
 
             try:
                 # might be nice to attempt to roll back strip after this
@@ -1808,7 +1818,7 @@ class queue(object):
             raise util.Abort(_("patch queue directory already exists"))
         try:
             os.mkdir(self.path)
-        except OSError, inst:
+        except OSError as inst:
             if inst.errno != errno.EEXIST or not create:
                 raise
         if create:

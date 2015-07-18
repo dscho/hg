@@ -120,16 +120,6 @@ class proxyhandler(urllib2.ProxyHandler):
             if e.startswith('.') and host.endswith(e[1:]):
                 return None
 
-        # work around a bug in Python < 2.4.2
-        # (it leaves a "\n" at the end of Proxy-authorization headers)
-        baseclass = req.__class__
-        class _request(baseclass):
-            def add_header(self, key, val):
-                if key.lower() == 'proxy-authorization':
-                    val = val.strip()
-                return baseclass.add_header(self, key, val)
-        req.__class__ = _request
-
         return urllib2.ProxyHandler.proxy_open(self, req, proxy, type_)
 
 def _gen_sendfile(orgsend):
@@ -169,7 +159,7 @@ if has_https:
                     sock.connect(sa)
                     return sock
 
-                except socket.error, msg:
+                except socket.error as msg:
                     if sock is not None:
                         sock.close()
 
@@ -185,8 +175,8 @@ class httpconnection(keepalive.HTTPConnection):
             self.sock.connect((self.host, self.port))
             if _generic_proxytunnel(self):
                 # we do not support client X.509 certificates
-                self.sock = sslutil.ssl_wrap_socket(self.sock, None, None,
-                                                    serverhostname=self.host)
+                self.sock = sslutil.wrapsocket(self.sock, None, None, None,
+                                               serverhostname=self.host)
         else:
             keepalive.HTTPConnection.connect(self)
 
@@ -328,11 +318,18 @@ class httphandler(keepalive.HTTPHandler):
         return keepalive.HTTPHandler._start_transaction(self, h, req)
 
 if has_https:
-    class httpsconnection(httplib.HTTPSConnection):
+    class httpsconnection(httplib.HTTPConnection):
         response_class = keepalive.HTTPResponse
+        default_port = httplib.HTTPS_PORT
         # must be able to send big bundle as stream.
         send = _gen_sendfile(keepalive.safesend)
-        getresponse = keepalive.wrapgetresponse(httplib.HTTPSConnection)
+        getresponse = keepalive.wrapgetresponse(httplib.HTTPConnection)
+
+        def __init__(self, host, port=None, key_file=None, cert_file=None,
+                     *args, **kwargs):
+            httplib.HTTPConnection.__init__(self, host, port, *args, **kwargs)
+            self.key_file = key_file
+            self.cert_file = cert_file
 
         def connect(self):
             self.sock = _create_connection((self.host, self.port))
@@ -341,7 +338,7 @@ if has_https:
             if self.realhostport: # use CONNECT proxy
                 _generic_proxytunnel(self)
                 host = self.realhostport.rsplit(':', 1)[0]
-            self.sock = sslutil.ssl_wrap_socket(
+            self.sock = sslutil.wrapsocket(
                 self.sock, self.key_file, self.cert_file, serverhostname=host,
                 **sslutil.sslkwargs(self.ui, host))
             sslutil.validator(self.ui, host)(self.sock)
@@ -414,7 +411,7 @@ class httpdigestauthhandler(urllib2.HTTPDigestAuthHandler):
         try:
             return urllib2.HTTPDigestAuthHandler.http_error_auth_reqed(
                         self, auth_header, host, req, headers)
-        except ValueError, inst:
+        except ValueError as inst:
             arg = inst.args[0]
             if arg.startswith("AbstractDigestAuthHandler doesn't know "):
                 return
@@ -472,6 +469,7 @@ def opener(ui, authinfo=None):
     construct an opener suitable for urllib2
     authinfo will be added to the password manager
     '''
+    # experimental config: ui.usehttp2
     if ui.configbool('ui', 'usehttp2', False):
         handlers = [httpconnectionmod.http2handler(ui, passwordmgr(ui))]
     else:

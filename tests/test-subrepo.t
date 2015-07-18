@@ -38,6 +38,7 @@ Issue2232: committing a subrepo without .hgsub
   branch: default
   commit: 1 added, 1 subrepos
   update: (current)
+  phases: 1 draft
   $ hg ci -m1
 
 test handling .hgsubstate "added" explicitly.
@@ -83,6 +84,7 @@ Issue2022: update -C
   branch: default
   commit: 1 subrepos
   update: (current)
+  phases: 2 draft
   $ hg co -C 1
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg sum
@@ -91,6 +93,7 @@ Issue2022: update -C
   branch: default
   commit: (clean)
   update: (current)
+  phases: 2 draft
 
 commands that require a clean repo should respect subrepos
 
@@ -113,6 +116,7 @@ add sub sub
   branch: default
   commit: 1 subrepos
   update: (current)
+  phases: 2 draft
   $ hg ci -m2
   committing subrepository s
   committing subrepository s/ss (glob)
@@ -122,6 +126,7 @@ add sub sub
   branch: default
   commit: (clean)
   update: (current)
+  phases: 3 draft
 
 test handling .hgsubstate "modified" explicitly.
 
@@ -255,7 +260,6 @@ merge tests
    branchmerge: True, force: False, partial: False
    ancestor: 1f14a2e2d3ec, local: f0d2028bf86d+, remote: 1831e14459c4
    .hgsubstate: versions differ -> m
-  updating: .hgsubstate 1/1 files (100.00%)
   subrepo merge f0d2028bf86d+ 1831e14459c4 1f14a2e2d3ec
     subrepo t: other changed, get t:6747d179aa9a688023c4b0cad32e4c92bb7f34ad:hg
   getting subrepo t
@@ -264,7 +268,6 @@ merge tests
    ancestor: 60ca1237c194, local: 60ca1237c194+, remote: 6747d179aa9a
    t: remote is newer -> g
   getting t
-  updating: t 1/1 files (100.00%)
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
   $ hg debugsub
@@ -283,7 +286,6 @@ merge tests
    branchmerge: True, force: False, partial: False
    ancestor: 1831e14459c4, local: e45c8b14af55+, remote: f94576341bcf
    .hgsubstate: versions differ -> m
-  updating: .hgsubstate 1/1 files (100.00%)
   subrepo merge e45c8b14af55+ f94576341bcf 1831e14459c4
     subrepo t: both sides changed 
    subrepository t diverged (local revision: 20a0db6fbf6c, remote revision: 7af322bc1198)
@@ -295,7 +297,6 @@ merge tests
    ancestor: 6747d179aa9a, local: 20a0db6fbf6c+, remote: 7af322bc1198
    preserving t for resolve of t
    t: versions differ -> m
-  updating: t 1/1 files (100.00%)
   picked tool 'internal:merge' for t (binary False symlink False)
   merging t
   my t@20a0db6fbf6c+ other t@7af322bc1198 ancestor t@6747d179aa9a
@@ -938,14 +939,32 @@ Issue1977: multirepo push should fail if subrepo push fails
 
 test if untracked file is not overwritten
 
+(this also tests that updated .hgsubstate is treated as "modified",
+when 'merge.update()' is aborted before 'merge.recordupdates()', even
+if none of mode, size and timestamp of it isn't changed on the
+filesystem (see also issue4583))
+
   $ echo issue3276_ok > repo/s/b
   $ hg -R repo2 push -f -q
   $ touch -t 200001010000 repo/.hgsubstate
-  $ hg -R repo status --config debug.dirstate.delaywrite=2 repo/.hgsubstate
+
+  $ cat >> repo/.hg/hgrc <<EOF
+  > [fakedirstatewritetime]
+  > # emulate invoking dirstate.write() via repo.status()
+  > # at 2000-01-01 00:00
+  > fakenow = 200001010000
+  > 
+  > [extensions]
+  > fakedirstatewritetime = $TESTDIR/fakedirstatewritetime.py
+  > EOF
   $ hg -R repo update
   b: untracked file differs
   abort: untracked files in working directory differ from files in requested revision (in subrepo s)
   [255]
+  $ cat >> repo/.hg/hgrc <<EOF
+  > [extensions]
+  > fakedirstatewritetime = !
+  > EOF
 
   $ cat repo/s/b
   issue3276_ok
@@ -1489,7 +1508,17 @@ Courtesy phases synchronisation to publishing server does not block the push
   > [paths]
   > default=../issue3781-dest/
   > EOF
-  $ hg push
+  $ hg push --config experimental.bundle2-exp=False
+  pushing to $TESTTMP/issue3781-dest (glob)
+  pushing subrepo s to $TESTTMP/issue3781-dest/s
+  searching for changes
+  no changes found
+  searching for changes
+  no changes found
+  [1]
+# clean the push cache
+  $ rm s/.hg/cache/storehash/*
+  $ hg push --config experimental.bundle2-exp=True
   pushing to $TESTTMP/issue3781-dest (glob)
   pushing subrepo s to $TESTTMP/issue3781-dest/s
   searching for changes
@@ -1692,4 +1721,37 @@ Test that '[paths]' is configured correctly at subrepo creation
   [paths]
   default = $TESTTMP/t/t
   default-push = /foo/bar/t
+
+  $ cd $TESTTMP/t
+  $ hg up -qC 0
+  $ echo 'bar' > bar.txt
+  $ hg ci -Am 'branch before subrepo add'
+  adding bar.txt
+  created new head
+  $ hg merge -r "first(subrepo('s'))"
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  (branch merge, don't forget to commit)
+  $ hg status -S -X '.hgsub*'
+  A s/a
+  ? s/b
+  ? s/c
+  ? s/f1
+  $ hg status -S --rev 'p2()'
+  A bar.txt
+  ? s/b
+  ? s/c
+  ? s/f1
+  $ hg diff -S -X '.hgsub*' --nodates
+  diff -r 000000000000 s/a
+  --- /dev/null
+  +++ b/s/a
+  @@ -0,0 +1,1 @@
+  +a
+  $ hg diff -S --rev 'p2()' --nodates
+  diff -r 7cf8cfea66e4 bar.txt
+  --- /dev/null
+  +++ b/bar.txt
+  @@ -0,0 +1,1 @@
+  +bar
+
   $ cd ..

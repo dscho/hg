@@ -13,6 +13,10 @@ from mercurial import util
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 
@@ -49,8 +53,17 @@ def record(ui, repo, *pats, **opts):
 
     This command is not available when committing a merge.'''
 
+    if not ui.interactive():
+        raise util.Abort(_('running non-interactively, use %s instead') %
+                         'commit')
+
     opts["interactive"] = True
-    commands.commit(ui, repo, *pats, **opts)
+    backup = ui.backupconfig('experimental', 'crecord')
+    try:
+        ui.setconfig('experimental', 'crecord', False, 'record')
+        commands.commit(ui, repo, *pats, **opts)
+    finally:
+        ui.restoreconfig(backup)
 
 def qrefresh(origfn, ui, repo, *pats, **opts):
     if not opts['interactive']:
@@ -66,7 +79,7 @@ def qrefresh(origfn, ui, repo, *pats, **opts):
         mq.refresh(ui, repo, **opts)
 
     # backup all changed files
-    cmdutil.dorecord(ui, repo, committomq, 'qrefresh', True,
+    cmdutil.dorecord(ui, repo, committomq, None, True,
                     cmdutil.recordfilter, *pats, **opts)
 
 # This command registration is replaced during uisetup().
@@ -80,7 +93,9 @@ def qrecord(ui, repo, patch, *pats, **opts):
     See :hg:`help qnew` & :hg:`help record` for more information and
     usage.
     '''
+    return _qrecord('qnew', ui, repo, patch, *pats, **opts)
 
+def _qrecord(cmdsuggest, ui, repo, patch, *pats, **opts):
     try:
         mq = extensions.find('mq')
     except KeyError:
@@ -92,12 +107,17 @@ def qrecord(ui, repo, patch, *pats, **opts):
         opts['checkname'] = False
         mq.new(ui, repo, patch, *pats, **opts)
 
-    cmdutil.dorecord(ui, repo, committomq, 'qnew', False,
-                    cmdutil.recordfilter, *pats, **opts)
+    backup = ui.backupconfig('experimental', 'crecord')
+    try:
+        ui.setconfig('experimental', 'crecord', False, 'record')
+        cmdutil.dorecord(ui, repo, committomq, cmdsuggest, False,
+                         cmdutil.recordfilter, *pats, **opts)
+    finally:
+        ui.restoreconfig(backup)
 
 def qnew(origfn, ui, repo, patch, *args, **opts):
     if opts['interactive']:
-        return qrecord(ui, repo, patch, *args, **opts)
+        return _qrecord(None, ui, repo, patch, *args, **opts)
     return origfn(ui, repo, patch, *args, **opts)
 
 

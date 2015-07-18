@@ -13,6 +13,10 @@ import os, stat
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 @command('relink', [], _('[ORIGIN]'))
@@ -174,7 +178,7 @@ def do_relink(src, dst, files, ui):
             ui.progress(_('relinking'), pos, f, _('files'), total)
             relinked += 1
             savedbytes += sz
-        except OSError, inst:
+        except OSError as inst:
             ui.warn('%s: %s\n' % (tgt, str(inst)))
 
     ui.progress(_('relinking'), None)

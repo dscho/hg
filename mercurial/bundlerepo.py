@@ -177,11 +177,10 @@ class bundlemanifest(bundlerevlog, manifest.manifest):
         return manifest.manifest.revision(self, nodeorrev)
 
 class bundlefilelog(bundlerevlog, filelog.filelog):
-    def __init__(self, opener, path, bundle, linkmapper, repo):
+    def __init__(self, opener, path, bundle, linkmapper):
         filelog.filelog.__init__(self, opener, path)
         bundlerevlog.__init__(self, opener, self.indexfile, bundle,
                               linkmapper)
-        self._repo = repo
 
     def baserevision(self, nodeorrev):
         return filelog.filelog.revision(self, nodeorrev)
@@ -322,8 +321,7 @@ class bundlerepository(localrepo.localrepository):
 
         if f in self.bundlefilespos:
             self.bundle.seek(self.bundlefilespos[f])
-            return bundlefilelog(self.svfs, f, self.bundle,
-                                 self.changelog.rev, self)
+            return bundlefilelog(self.svfs, f, self.bundle, self.changelog.rev)
         else:
             return filelog.filelog(self.svfs, f)
 
@@ -348,6 +346,7 @@ class bundlerepository(localrepo.localrepository):
 def instance(ui, path, create):
     if create:
         raise util.Abort(_('cannot create new bundle repository'))
+    # internal config: bundle.mainreporoot
     parentpath = ui.config("bundle", "mainreporoot", "")
     if not parentpath:
         # try to find the correct path to the working directory repo

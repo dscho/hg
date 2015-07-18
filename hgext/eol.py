@@ -95,6 +95,10 @@ from mercurial.i18n import _
 from mercurial import util, config, extensions, match, error
 import re, os
 
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 # Matches a lone LF, i.e., one that is not part of CRLF.
@@ -214,7 +218,7 @@ def parseeol(ui, repo, nodes):
                 return eolfile(ui, repo.root, data)
             except (IOError, LookupError):
                 pass
-    except error.ParseError, inst:
+    except error.ParseError as inst:
         ui.warn(_("warning: ignoring .hgeol file due to parse error "
                   "at %s: %s\n") % (inst.args[1], inst.args[0]))
     return None

@@ -26,6 +26,10 @@ class TransplantError(error.Abort):
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 class transplantentry(object):
@@ -268,7 +272,7 @@ class transplanter(object):
                 files = set()
                 patch.patch(self.ui, repo, patchfile, files=files, eolmode=None)
                 files = list(files)
-            except Exception, inst:
+            except Exception as inst:
                 seriespath = os.path.join(self.path, 'series')
                 if os.path.exists(seriespath):
                     os.unlink(seriespath)
@@ -604,8 +608,10 @@ def transplant(ui, repo, *revs, **opts):
     checkopts(opts, revs)
 
     if not opts.get('log'):
+        # deprecated config: transplant.log
         opts['log'] = ui.config('transplant', 'log')
     if not opts.get('filter'):
+        # deprecated config: transplant.filter
         opts['filter'] = ui.config('transplant', 'filter')
 
     tp = transplanter(ui, repo, opts)

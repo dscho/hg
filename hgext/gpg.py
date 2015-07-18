@@ -12,6 +12,10 @@ from mercurial.i18n import _
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 class gpg(object):
@@ -213,6 +217,9 @@ def sign(ui, repo, *revs, **opts):
     If no revision is given, the parent of the working directory is used,
     or tip if no revision is checked out.
 
+    The ``gpg.cmd`` config setting can be used to specify the command
+    to run. A default key can be specified with ``gpg.key``.
+
     See :hg:`help dates` for a list of formats valid for -d/--date.
     """
 
@@ -255,7 +262,7 @@ def sign(ui, repo, *revs, **opts):
 
     if not opts["force"]:
         msigs = match.exact(repo.root, '', ['.hgsigs'])
-        if util.any(repo.status(match=msigs, unknown=True, ignored=True)):
+        if any(repo.status(match=msigs, unknown=True, ignored=True)):
             raise util.Abort(_("working copy of .hgsigs is changed "),
                              hint=_("please commit .hgsigs manually"))
 
@@ -279,7 +286,7 @@ def sign(ui, repo, *revs, **opts):
         editor = cmdutil.getcommiteditor(editform='gpg.sign', **opts)
         repo.commit(message, opts['user'], opts['date'], match=msigs,
                     editor=editor)
-    except ValueError, inst:
+    except ValueError as inst:
         raise util.Abort(str(inst))
 
 def shortkey(ui, key):

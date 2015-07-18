@@ -76,7 +76,7 @@ def rawfile(web, req, tmpl):
 
     try:
         fctx = webutil.filectx(web.repo, req)
-    except error.LookupError, inst:
+    except error.LookupError as inst:
         try:
             content = manifest(web, req, tmpl)
             req.respond(HTTP_OK, web.ctype)
@@ -100,7 +100,7 @@ def rawfile(web, req, tmpl):
     req.respond(HTTP_OK, mt, path, body=text)
     return []
 
-def _filerevision(web, tmpl, fctx):
+def _filerevision(web, req, tmpl, fctx):
     f = fctx.path()
     text = fctx.data()
     parity = paritygen(web.stripecount)
@@ -121,6 +121,7 @@ def _filerevision(web, tmpl, fctx):
                 path=webutil.up(f),
                 text=lines(),
                 rev=fctx.rev(),
+                symrev=webutil.symrevorshortnode(req, fctx),
                 node=fctx.hex(),
                 author=fctx.user(),
                 date=fctx.date(),
@@ -130,6 +131,8 @@ def _filerevision(web, tmpl, fctx):
                 parent=webutil.parents(fctx),
                 child=webutil.children(fctx),
                 rename=webutil.renamelink(fctx),
+                tags=webutil.nodetagsdict(web.repo, fctx.node()),
+                bookmarks=webutil.nodebookmarksdict(web.repo, fctx.node()),
                 permissions=fctx.manifest().flags(f))
 
 @webcommand('file')
@@ -156,8 +159,8 @@ def file(web, req, tmpl):
     if not path:
         return manifest(web, req, tmpl)
     try:
-        return _filerevision(web, tmpl, webutil.filectx(web.repo, req))
-    except error.LookupError, inst:
+        return _filerevision(web, req, tmpl, webutil.filectx(web.repo, req))
+    except error.LookupError as inst:
         try:
             return manifest(web, req, tmpl)
         except ErrorResponse:
@@ -221,7 +224,7 @@ def _search(web, req, tmpl):
 
         revdef = 'reverse(%s)' % query
         try:
-            tree, pos = revset.parse(revdef)
+            tree = revset.parse(revdef)
         except ParseError:
             # can't parse to a revset tree
             return MODE_KEYWORD, query
@@ -230,7 +233,7 @@ def _search(web, req, tmpl):
             # no revset syntax used
             return MODE_KEYWORD, query
 
-        if util.any((token, (value or '')[:3]) == ('string', 're:')
+        if any((token, (value or '')[:3]) == ('string', 're:')
                     for token, value, pos in revset.tokenize(revdef)):
             return MODE_KEYWORD, query
 
@@ -314,7 +317,7 @@ def _search(web, req, tmpl):
     tip = web.repo['tip']
     parity = paritygen(web.stripecount)
 
-    return tmpl('search', query=query, node=tip.hex(),
+    return tmpl('search', query=query, node=tip.hex(), symrev='tip',
                 entries=changelist, archives=web.archivelist("tip"),
                 morevars=morevars, lessvars=lessvars,
                 modedesc=searchfunc[1],
@@ -349,10 +352,12 @@ def changelog(web, req, tmpl, shortlog=False):
     query = ''
     if 'node' in req.form:
         ctx = webutil.changectx(web.repo, req)
+        symrev = webutil.symrevorshortnode(req, ctx)
     elif 'rev' in req.form:
         return _search(web, req, tmpl)
     else:
         ctx = web.repo['tip']
+        symrev = 'tip'
 
     def changelist():
         revs = []
@@ -401,7 +406,7 @@ def changelog(web, req, tmpl, shortlog=False):
         nextentry = []
 
     return tmpl(shortlog and 'shortlog' or 'changelog', changenav=changenav,
-                node=ctx.hex(), rev=pos, changesets=count,
+                node=ctx.hex(), rev=pos, symrev=symrev, changesets=count,
                 entries=entries,
                 latestentry=latestentry, nextentry=nextentry,
                 archives=web.archivelist("tip"), revcount=revcount,
@@ -468,7 +473,12 @@ def manifest(web, req, tmpl):
 
     The ``manifest`` template will be rendered for this handler.
     """
-    ctx = webutil.changectx(web.repo, req)
+    if 'node' in req.form:
+        ctx = webutil.changectx(web.repo, req)
+        symrev = webutil.symrevorshortnode(req, ctx)
+    else:
+        ctx = web.repo['tip']
+        symrev = 'tip'
     path = webutil.cleanpath(web.repo, req.form.get('file', [''])[0])
     mf = ctx.manifest()
     node = ctx.node()
@@ -537,6 +547,7 @@ def manifest(web, req, tmpl):
 
     return tmpl("manifest",
                 rev=ctx.rev(),
+                symrev=symrev,
                 node=hex(node),
                 path=abspath,
                 up=webutil.up(abspath),
@@ -546,6 +557,7 @@ def manifest(web, req, tmpl):
                 archives=web.archivelist(hex(node)),
                 tags=webutil.nodetagsdict(web.repo, node),
                 bookmarks=webutil.nodebookmarksdict(web.repo, node),
+                branch=webutil.nodebranchnodefault(ctx),
                 inbranch=webutil.nodeinbranch(web.repo, ctx),
                 branches=webutil.nodebranchdict(web.repo, ctx))
 
@@ -752,6 +764,7 @@ def summary(web, req, tmpl):
                 branches=branches,
                 shortlog=changelist,
                 node=tip.hex(),
+                symrev='tip',
                 archives=web.archivelist("tip"))
 
 @webcommand('filediff')
@@ -800,6 +813,7 @@ def filediff(web, req, tmpl):
                 file=path,
                 node=hex(n),
                 rev=ctx.rev(),
+                symrev=webutil.symrevorshortnode(req, ctx),
                 date=ctx.date(),
                 desc=ctx.description(),
                 extra=ctx.extra(),
@@ -808,6 +822,8 @@ def filediff(web, req, tmpl):
                 branch=webutil.nodebranchnodefault(ctx),
                 parent=webutil.parents(ctx),
                 child=webutil.children(ctx),
+                tags=webutil.nodetagsdict(web.repo, n),
+                bookmarks=webutil.nodebookmarksdict(web.repo, n),
                 diff=diffs)
 
 diff = webcommand('diff')(filediff)
@@ -872,6 +888,7 @@ def comparison(web, req, tmpl):
                 file=path,
                 node=hex(ctx.node()),
                 rev=ctx.rev(),
+                symrev=webutil.symrevorshortnode(req, ctx),
                 date=ctx.date(),
                 desc=ctx.description(),
                 extra=ctx.extra(),
@@ -880,6 +897,8 @@ def comparison(web, req, tmpl):
                 branch=webutil.nodebranchnodefault(ctx),
                 parent=webutil.parents(fctx),
                 child=webutil.children(fctx),
+                tags=webutil.nodetagsdict(web.repo, ctx.node()),
+                bookmarks=webutil.nodebookmarksdict(web.repo, ctx.node()),
                 leftrev=leftrev,
                 leftnode=hex(leftnode),
                 rightrev=rightrev,
@@ -937,6 +956,7 @@ def annotate(web, req, tmpl):
                 annotate=annotate,
                 path=webutil.up(f),
                 rev=fctx.rev(),
+                symrev=webutil.symrevorshortnode(req, fctx),
                 node=fctx.hex(),
                 author=fctx.user(),
                 date=fctx.date(),
@@ -946,6 +966,8 @@ def annotate(web, req, tmpl):
                 branch=webutil.nodebranchnodefault(fctx),
                 parent=webutil.parents(fctx),
                 child=webutil.children(fctx),
+                tags=webutil.nodetagsdict(web.repo, fctx.node()),
+                bookmarks=webutil.nodebookmarksdict(web.repo, fctx.node()),
                 permissions=fctx.manifest().flags(f))
 
 @webcommand('filelog')
@@ -1034,6 +1056,7 @@ def filelog(web, req, tmpl):
     revnav = webutil.filerevnav(web.repo, fctx.path())
     nav = revnav.gen(end - 1, revcount, count)
     return tmpl("filelog", file=f, node=fctx.hex(), nav=nav,
+                symrev=webutil.symrevorshortnode(req, fctx),
                 entries=entries,
                 latestentry=latestentry,
                 revcount=revcount, morevars=morevars, lessvars=lessvars)
@@ -1140,7 +1163,12 @@ def graph(web, req, tmpl):
     This handler will render the ``graph`` template.
     """
 
-    ctx = webutil.changectx(web.repo, req)
+    if 'node' in req.form:
+        ctx = webutil.changectx(web.repo, req)
+        symrev = webutil.symrevorshortnode(req, ctx)
+    else:
+        ctx = web.repo['tip']
+        symrev = 'tip'
     rev = ctx.rev()
 
     bg_height = 39
@@ -1243,7 +1271,8 @@ def graph(web, req, tmpl):
     rows = len(tree)
     canvasheight = (rows + 1) * bg_height - 27
 
-    return tmpl('graph', rev=rev, revcount=revcount, uprev=uprev,
+    return tmpl('graph', rev=rev, symrev=symrev, revcount=revcount,
+                uprev=uprev,
                 lessvars=lessvars, morevars=morevars, downrev=downrev,
                 cols=cols, rows=rows,
                 canvaswidth=(cols + 1) * bg_height,

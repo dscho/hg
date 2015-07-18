@@ -96,6 +96,7 @@ Show debug commands if there are no other candidates
   debugpushkey
   debugpvec
   debugrebuilddirstate
+  debugrebuildfncache
   debugrename
   debugrevlog
   debugrevspec
@@ -234,7 +235,7 @@ Show all commands + options
   debugcommands: 
   debugcomplete: options
   debugdag: tags, branches, dots, spaces
-  debugdata: changelog, manifest
+  debugdata: changelog, manifest, dir
   debugdate: extended
   debugdirstate: nodates, datesort
   debugdiscovery: old, nonheads, ssh, remotecmd, insecure
@@ -242,7 +243,7 @@ Show all commands + options
   debugfsinfo: 
   debuggetbundle: head, common, type
   debugignore: 
-  debugindex: changelog, manifest, format
+  debugindex: changelog, manifest, dir, format
   debugindexdot: 
   debuginstall: 
   debugknown: 
@@ -254,8 +255,9 @@ Show all commands + options
   debugpushkey: 
   debugpvec: 
   debugrebuilddirstate: rev
+  debugrebuildfncache: 
   debugrename: rev
-  debugrevlog: changelog, manifest, dump
+  debugrevlog: changelog, manifest, dir, dump
   debugrevspec: optimize
   debugsetparents: 
   debugsub: rev

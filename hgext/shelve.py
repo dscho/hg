@@ -21,6 +21,8 @@ shelved change has a distinct name. For details, see the help for "hg
 shelve".
 """
 
+import collections
+import itertools
 from mercurial.i18n import _
 from mercurial.node import nullid, nullrev, bin, hex
 from mercurial import changegroup, cmdutil, scmutil, phases, commands
@@ -32,7 +34,13 @@ import errno
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
+
+backupdir = 'shelve-backup'
 
 class shelvedfile(object):
     """Helper for the file storing a single shelve
@@ -43,6 +51,7 @@ class shelvedfile(object):
         self.repo = repo
         self.name = name
         self.vfs = scmutil.vfs(repo.join('shelved'))
+        self.backupvfs = scmutil.vfs(repo.join(backupdir))
         self.ui = self.repo.ui
         if filetype:
             self.fname = name + '.' + filetype
@@ -55,8 +64,22 @@ class shelvedfile(object):
     def filename(self):
         return self.vfs.join(self.fname)
 
-    def unlink(self):
-        util.unlink(self.filename())
+    def backupfilename(self):
+        def gennames(base):
+            yield base
+            base, ext = base.rsplit('.', 1)
+            for i in itertools.count(1):
+                yield '%s-%d.%s' % (base, i, ext)
+
+        name = self.backupvfs.join(self.fname)
+        for n in gennames(name):
+            if not self.backupvfs.exists(n):
+                return n
+
+    def movetobackup(self):
+        if not self.backupvfs.isdir():
+            self.backupvfs.makedir()
+        util.rename(self.filename(), self.backupfilename())
 
     def stat(self):
         return self.vfs.stat(self.fname)
@@ -64,7 +87,7 @@ class shelvedfile(object):
     def opener(self, mode='rb'):
         try:
             return self.vfs(self.fname, mode)
-        except IOError, err:
+        except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
             raise util.Abort(_("shelved change '%s' not found") % self.name)
@@ -135,6 +158,27 @@ class shelvedstate(object):
     def clear(cls, repo):
         util.unlinkpath(repo.join(cls._filename), ignoremissing=True)
 
+def cleanupoldbackups(repo):
+    vfs = scmutil.vfs(repo.join(backupdir))
+    maxbackups = repo.ui.configint('shelve', 'maxbackups', 10)
+    hgfiles = [f for f in vfs.listdir() if f.endswith('.hg')]
+    hgfiles = sorted([(vfs.stat(f).st_mtime, f) for f in hgfiles])
+    if 0 < maxbackups and maxbackups < len(hgfiles):
+        bordermtime = hgfiles[-maxbackups][0]
+    else:
+        bordermtime = None
+    for mtime, f in hgfiles[:len(hgfiles) - maxbackups]:
+        if mtime == bordermtime:
+            # keep it, because timestamp can't decide exact order of backups
+            continue
+        base = f[:-3]
+        for ext in 'hg patch'.split():
+            try:
+                vfs.unlink(base + '.' + ext)
+            except OSError as err:
+                if err.errno != errno.ENOENT:
+                    raise
+
 def createcmd(ui, repo, pats, opts):
     """subcommand that creates a new shelve"""
 
@@ -143,7 +187,7 @@ def createcmd(ui, repo, pats, opts):
 
         Much faster than the revset ancestors(ctx) & draft()"""
         seen = set([nullrev])
-        visit = util.deque()
+        visit = collections.deque()
         visit.append(ctx)
         while visit:
             ctx = visit.popleft()
@@ -163,7 +207,7 @@ def createcmd(ui, repo, pats, opts):
 
     # we never need the user, so we use a generic user for all shelve operations
     user = 'shelve@localhost'
-    label = repo._bookmarkcurrent or parent.branch() or 'default'
+    label = repo._activebookmark or parent.branch() or 'default'
 
     # slashes aren't allowed in filenames, therefore we rename it
     label = label.replace('/', '_')
@@ -235,7 +279,7 @@ def createcmd(ui, repo, pats, opts):
         if not interactive:
             node = cmdutil.commit(ui, repo, commitfunc, pats, opts)
         else:
-            node = cmdutil.dorecord(ui, repo, interactivecommitfunc, 'commit',
+            node = cmdutil.dorecord(ui, repo, interactivecommitfunc, None,
                                     False, cmdutil.recordfilter, *pats, **opts)
         if not node:
             stat = repo.status(match=scmutil.match(repo[None], pats, opts))
@@ -276,7 +320,8 @@ def cleanupcmd(ui, repo):
         for (name, _type) in repo.vfs.readdir('shelved'):
             suffix = name.rsplit('.', 1)[-1]
             if suffix in ('hg', 'patch'):
-                shelvedfile(repo, name).unlink()
+                shelvedfile(repo, name).movetobackup()
+            cleanupoldbackups(repo)
     finally:
         lockmod.release(wlock)
 
@@ -284,17 +329,16 @@ def deletecmd(ui, repo, pats):
     """subcommand that deletes a specific shelve"""
     if not pats:
         raise util.Abort(_('no shelved changes specified!'))
-    wlock = None
+    wlock = repo.wlock()
     try:
-        wlock = repo.wlock()
-        try:
-            for name in pats:
-                for suffix in 'hg patch'.split():
-                    shelvedfile(repo, name, suffix).unlink()
-        except OSError, err:
-            if err.errno != errno.ENOENT:
-                raise
-            raise util.Abort(_("shelved change '%s' not found") % name)
+        for name in pats:
+            for suffix in 'hg patch'.split():
+                shelvedfile(repo, name, suffix).movetobackup()
+        cleanupoldbackups(repo)
+    except OSError as err:
+        if err.errno != errno.ENOENT:
+            raise
+        raise util.Abort(_("shelved change '%s' not found") % name)
     finally:
         lockmod.release(wlock)
 
@@ -302,7 +346,7 @@ def listshelves(repo):
     """return all shelves in repo as list of (time, filename)"""
     try:
         names = repo.vfs.readdir('shelved')
-    except OSError, err:
+    except OSError as err:
         if err.errno != errno.ENOENT:
             raise
         return []
@@ -362,6 +406,17 @@ def listcmd(ui, repo, pats, opts):
                     ui.write(chunk, label=label)
         finally:
             fp.close()
+
+def singlepatchcmds(ui, repo, pats, opts, subcommand):
+    """subcommand that displays a single shelf"""
+    if len(pats) != 1:
+        raise util.Abort(_("--%s expects a single shelf") % subcommand)
+    shelfname = pats[0]
+
+    if not shelvedfile(repo, shelfname, 'patch').exists():
+        raise util.Abort(_("cannot find shelf %s") % shelfname)
+
+    listcmd(ui, repo, pats, opts)
 
 def checkparents(repo, state):
     """check parent while resuming an unshelve"""
@@ -428,7 +483,8 @@ def unshelvecleanup(ui, repo, name, opts):
     """remove related files after an unshelve"""
     if not opts['keep']:
         for filetype in 'hg patch'.split():
-            shelvedfile(repo, name, filetype).unlink()
+            shelvedfile(repo, name, filetype).movetobackup()
+        cleanupoldbackups(repo)
 
 def unshelvecontinue(ui, repo, state, opts):
     """subcommand to continue an in-progress unshelve"""
@@ -491,18 +547,30 @@ def unshelve(ui, repo, *shelved, **opts):
     restore. If none is given, the most recent shelved change is used.
 
     If a shelved change is applied successfully, the bundle that
-    contains the shelved changes is deleted afterwards.
+    contains the shelved changes is moved to a backup location
+    (.hg/shelve-backup).
 
     Since you can restore a shelved change on top of an arbitrary
     commit, it is possible that unshelving will result in a conflict
     between your changes and the commits you are unshelving onto. If
     this occurs, you must resolve the conflict, then use
     ``--continue`` to complete the unshelve operation. (The bundle
-    will not be deleted until you successfully complete the unshelve.)
+    will not be moved until you successfully complete the unshelve.)
 
     (Alternatively, you can use ``--abort`` to abandon an unshelve
     that causes a conflict. This reverts the unshelved changes, and
-    does not delete the bundle.)
+    leaves the bundle in place.)
+
+    After a successful unshelve, the shelved changes are stored in a
+    backup directory. Only the N most recent backups are kept. N
+    defaults to 10 but can be overridden using the ``shelve.maxbackups``
+    configuration option.
+
+    .. container:: verbose
+
+       Timestamp in seconds is used to decide order of backups. More
+       than ``maxbackups`` backups are kept, if same timestamp
+       prevents from deciding exact order of them, for safety.
     """
     abortf = opts['abort']
     continuef = opts['continue']
@@ -518,7 +586,7 @@ def unshelve(ui, repo, *shelved, **opts):
 
         try:
             state = shelvedstate.load(repo)
-        except IOError, err:
+        except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
             raise util.Abort(_('no unshelve operation underway'))
@@ -658,8 +726,7 @@ def unshelve(ui, repo, *shelved, **opts):
           ('p', 'patch', None,
            _('show patch')),
           ('i', 'interactive', None,
-           _('interactive mode, only works while creating a shelve'
-                   '(EXPERIMENTAL)')),
+           _('interactive mode, only works while creating a shelve')),
           ('', 'stat', None,
            _('output diffstat-style summary of changes'))] + commands.walkopts,
          _('hg shelve [OPTION]... [FILE]...'))
@@ -693,21 +760,21 @@ def shelvecmd(ui, repo, *pats, **opts):
     cmdutil.checkunfinished(repo)
 
     allowables = [
-        ('addremove', 'create'), # 'create' is pseudo action
-        ('cleanup', 'cleanup'),
-#       ('date', 'create'), # ignored for passing '--date "0 0"' in tests
-        ('delete', 'delete'),
-        ('edit', 'create'),
-        ('list', 'list'),
-        ('message', 'create'),
-        ('name', 'create'),
-        ('patch', 'list'),
-        ('stat', 'list'),
+        ('addremove', set(['create'])), # 'create' is pseudo action
+        ('cleanup', set(['cleanup'])),
+#       ('date', set(['create'])), # ignored for passing '--date "0 0"' in tests
+        ('delete', set(['delete'])),
+        ('edit', set(['create'])),
+        ('list', set(['list'])),
+        ('message', set(['create'])),
+        ('name', set(['create'])),
+        ('patch', set(['patch', 'list'])),
+        ('stat', set(['stat', 'list'])),
     ]
     def checkopt(opt):
         if opts[opt]:
             for i, allowable in allowables:
-                if opts[i] and opt != allowable:
+                if opts[i] and opt not in allowable:
                     raise util.Abort(_("options '--%s' and '--%s' may not be "
                                        "used together") % (opt, i))
             return True
@@ -719,11 +786,11 @@ def shelvecmd(ui, repo, *pats, **opts):
         return deletecmd(ui, repo, pats)
     elif checkopt('list'):
         return listcmd(ui, repo, pats, opts)
+    elif checkopt('patch'):
+        return singlepatchcmds(ui, repo, pats, opts, subcommand='patch')
+    elif checkopt('stat'):
+        return singlepatchcmds(ui, repo, pats, opts, subcommand='stat')
     else:
-        for i in ('patch', 'stat'):
-            if opts[i]:
-                raise util.Abort(_("option '--%s' may not be "
-                                   "used when shelving a change") % (i,))
         return createcmd(ui, repo, pats, opts)
 
 def extsetup(ui):

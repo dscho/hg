@@ -195,6 +195,10 @@ from mercurial.i18n import _
 from mercurial import util, match
 import getpass, urllib
 
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 def _getusers(ui, group):
@@ -282,6 +286,7 @@ def hook(ui, repo, hooktype, node=None, source=None, **kwargs):
 
     ui.debug('acl: checking access for user "%s"\n' % user)
 
+    # deprecated config: acl.config
     cfg = ui.config('acl', 'config')
     if cfg:
         ui.readconfig(cfg, sections=['acl.groups', 'acl.allow.branches',

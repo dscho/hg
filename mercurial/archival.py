@@ -37,6 +37,10 @@ def tidyprefix(dest, kind, prefix):
     prefix = util.pconvert(lpfx)
     if not prefix.endswith('/'):
         prefix += '/'
+    # Drop the leading '.' path component if present, so Windows can read the
+    # zip files (issue4634)
+    if prefix.startswith('./'):
+        prefix = prefix[2:]
     if prefix.startswith('../') or os.path.isabs(lpfx) or '/../' in prefix:
         raise util.Abort(_('archive prefix contains illegal components'))
     return prefix
@@ -50,7 +54,7 @@ exts = {
 
 def guesskind(dest):
     for kind, extensions in exts.iteritems():
-        if util.any(dest.endswith(ext) for ext in extensions):
+        if any(dest.endswith(ext) for ext in extensions):
             return kind
     return None
 
@@ -63,20 +67,25 @@ def _rootctx(repo):
 def buildmetadata(ctx):
     '''build content of .hg_archival.txt'''
     repo = ctx.repo()
+    hex = ctx.hex()
+    if ctx.rev() is None:
+        hex = ctx.p1().hex()
+        if ctx.dirty():
+            hex += '+'
+
     base = 'repo: %s\nnode: %s\nbranch: %s\n' % (
-        _rootctx(repo).hex(), ctx.hex(), encoding.fromlocal(ctx.branch()))
+        _rootctx(repo).hex(), hex, encoding.fromlocal(ctx.branch()))
 
     tags = ''.join('tag: %s\n' % t for t in ctx.tags()
                    if repo.tagtype(t) == 'global')
     if not tags:
         repo.ui.pushbuffer()
-        opts = {'template': '{latesttag}\n{latesttagdistance}',
+        opts = {'template': '{latesttag}\n{latesttagdistance}\n'
+                            '{changessincelatesttag}',
                 'style': '', 'patch': None, 'git': None}
         cmdutil.show_changeset(repo.ui, repo, opts).show(ctx)
-        ltags, dist = repo.ui.popbuffer().split('\n')
+        ltags, dist, changessince = repo.ui.popbuffer().split('\n')
         ltags = ltags.split(':')
-        # XXX: ctx.rev() needs to be handled differently with wdir()
-        changessince = len(repo.revs('only(%d,%s)', ctx.rev(), ltags[0]))
         tags = ''.join('latesttag: %s\n' % t for t in ltags)
         tags += 'latesttagdistance: %s\n' % dist
         tags += 'changessincelatesttag: %s\n' % changessince
@@ -148,7 +157,7 @@ class tarit(object):
         i.size = len(data)
         if islink:
             i.type = tarfile.SYMTYPE
-            i.mode = 0777
+            i.mode = 0o777
             i.linkname = data
             data = None
             i.size = 0
@@ -211,7 +220,7 @@ class zipit(object):
         i.create_system = 3
         ftype = _UNX_IFREG
         if islink:
-            mode = 0777
+            mode = 0o777
             ftype = _UNX_IFLNK
         i.external_attr = (mode | ftype) << 16L
         # add "extended-timestamp" extra block, because zip archives
@@ -293,7 +302,7 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
     if repo.ui.configbool("ui", "archivemeta", True):
         name = '.hg_archival.txt'
         if not matchfn or matchfn(name):
-            write(name, 0644, False, lambda: buildmetadata(ctx))
+            write(name, 0o644, False, lambda: buildmetadata(ctx))
 
     if matchfn:
         files = [f for f in ctx.manifest().keys() if matchfn(f)]
@@ -305,14 +314,14 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
         repo.ui.progress(_('archiving'), 0, unit=_('files'), total=total)
         for i, f in enumerate(files):
             ff = ctx.flags(f)
-            write(f, 'x' in ff and 0755 or 0644, 'l' in ff, ctx[f].data)
+            write(f, 'x' in ff and 0o755 or 0o644, 'l' in ff, ctx[f].data)
             repo.ui.progress(_('archiving'), i + 1, item=f,
                              unit=_('files'), total=total)
         repo.ui.progress(_('archiving'), None)
 
     if subrepos:
         for subpath in sorted(ctx.substate):
-            sub = ctx.sub(subpath)
+            sub = ctx.workingsub(subpath)
             submatch = matchmod.narrowmatcher(subpath, matchfn)
             total += sub.archive(archiver, prefix, submatch)
 

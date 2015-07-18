@@ -11,6 +11,7 @@ import difflib
 import util, commands, hg, fancyopts, extensions, hook, error
 import cmdutil, encoding
 import ui as uimod
+import demandimport
 
 class request(object):
     def __init__(self, args, ui=None, repo=None, fin=None, fout=None,
@@ -75,12 +76,12 @@ def dispatch(req):
             req.ui.fout = req.fout
         if req.ferr:
             req.ui.ferr = req.ferr
-    except util.Abort, inst:
+    except util.Abort as inst:
         ferr.write(_("abort: %s\n") % inst)
         if inst.hint:
             ferr.write(_("(%s)\n") % inst.hint)
         return -1
-    except error.ParseError, inst:
+    except error.ParseError as inst:
         _formatparse(ferr.write, inst)
         return -1
 
@@ -128,19 +129,21 @@ def _runcatch(req):
                 for sec, name, val in cfgs:
                     req.repo.ui.setconfig(sec, name, val, source='--config')
 
-            # if we are in HGPLAIN mode, then disable custom debugging
+            # developer config: ui.debugger
             debugger = ui.config("ui", "debugger")
             debugmod = pdb
             if not debugger or ui.plain():
+                # if we are in HGPLAIN mode, then disable custom debugging
                 debugger = 'pdb'
             elif '--debugger' in req.args:
                 # This import can be slow for fancy debuggers, so only
                 # do it when absolutely necessary, i.e. when actual
                 # debugging has been requested
-                try:
-                    debugmod = __import__(debugger)
-                except ImportError:
-                    pass # Leave debugmod = pdb
+                with demandimport.deactivated():
+                    try:
+                        debugmod = __import__(debugger)
+                    except ImportError:
+                        pass # Leave debugmod = pdb
 
             debugtrace[debugger] = debugmod.set_trace
             debugmortem[debugger] = debugmod.post_mortem
@@ -170,36 +173,43 @@ def _runcatch(req):
 
     # Global exception handling, alphabetically
     # Mercurial-specific first, followed by built-in and library exceptions
-    except error.AmbiguousCommand, inst:
+    except error.AmbiguousCommand as inst:
         ui.warn(_("hg: command '%s' is ambiguous:\n    %s\n") %
                 (inst.args[0], " ".join(inst.args[1])))
-    except error.ParseError, inst:
+    except error.ParseError as inst:
         _formatparse(ui.warn, inst)
         return -1
-    except error.LockHeld, inst:
+    except error.LockHeld as inst:
         if inst.errno == errno.ETIMEDOUT:
             reason = _('timed out waiting for lock held by %s') % inst.locker
         else:
             reason = _('lock held by %s') % inst.locker
         ui.warn(_("abort: %s: %s\n") % (inst.desc or inst.filename, reason))
-    except error.LockUnavailable, inst:
+    except error.LockUnavailable as inst:
         ui.warn(_("abort: could not lock %s: %s\n") %
                (inst.desc or inst.filename, inst.strerror))
-    except error.CommandError, inst:
+    except error.CommandError as inst:
         if inst.args[0]:
             ui.warn(_("hg %s: %s\n") % (inst.args[0], inst.args[1]))
             commands.help_(ui, inst.args[0], full=False, command=True)
         else:
             ui.warn(_("hg: %s\n") % inst.args[1])
             commands.help_(ui, 'shortlist')
-    except error.OutOfBandError, inst:
-        ui.warn(_("abort: remote error:\n"))
-        ui.warn(''.join(inst.args))
-    except error.RepoError, inst:
+    except error.OutOfBandError as inst:
+        if inst.args:
+            msg = _("abort: remote error:\n")
+        else:
+            msg = _("abort: remote error\n")
+        ui.warn(msg)
+        if inst.args:
+            ui.warn(''.join(inst.args))
+        if inst.hint:
+            ui.warn('(%s)\n' % inst.hint)
+    except error.RepoError as inst:
         ui.warn(_("abort: %s!\n") % inst)
         if inst.hint:
             ui.warn(_("(%s)\n") % inst.hint)
-    except error.ResponseError, inst:
+    except error.ResponseError as inst:
         ui.warn(_("abort: %s") % inst.args[0])
         if not isinstance(inst.args[1], basestring):
             ui.warn(" %r\n" % (inst.args[1],))
@@ -207,13 +217,13 @@ def _runcatch(req):
             ui.warn(_(" empty string\n"))
         else:
             ui.warn("\n%r\n" % util.ellipsis(inst.args[1]))
-    except error.CensoredNodeError, inst:
+    except error.CensoredNodeError as inst:
         ui.warn(_("abort: file censored %s!\n") % inst)
-    except error.RevlogError, inst:
+    except error.RevlogError as inst:
         ui.warn(_("abort: %s!\n") % inst)
     except error.SignalInterrupt:
         ui.warn(_("killed!\n"))
-    except error.UnknownCommand, inst:
+    except error.UnknownCommand as inst:
         ui.warn(_("hg: unknown command '%s'\n") % inst.args[0])
         try:
             # check if the command is in a disabled extension
@@ -229,21 +239,21 @@ def _runcatch(req):
                     suggested = True
             if not suggested:
                 commands.help_(ui, 'shortlist')
-    except error.InterventionRequired, inst:
+    except error.InterventionRequired as inst:
         ui.warn("%s\n" % inst)
         return 1
-    except util.Abort, inst:
+    except util.Abort as inst:
         ui.warn(_("abort: %s\n") % inst)
         if inst.hint:
             ui.warn(_("(%s)\n") % inst.hint)
-    except ImportError, inst:
+    except ImportError as inst:
         ui.warn(_("abort: %s!\n") % inst)
         m = str(inst).split()[-1]
         if m in "mpatch bdiff".split():
             ui.warn(_("(did you forget to compile extensions?)\n"))
         elif m in "zlib".split():
             ui.warn(_("(is your Python install correct?)\n"))
-    except IOError, inst:
+    except IOError as inst:
         if util.safehasattr(inst, "code"):
             ui.warn(_("abort: %s\n") % inst)
         elif util.safehasattr(inst, "reason"):
@@ -267,7 +277,7 @@ def _runcatch(req):
                 ui.warn(_("abort: %s\n") % inst.strerror)
         else:
             raise
-    except OSError, inst:
+    except OSError as inst:
         if getattr(inst, "filename", None) is not None:
             ui.warn(_("abort: %s: '%s'\n") % (inst.strerror, inst.filename))
         else:
@@ -275,7 +285,7 @@ def _runcatch(req):
     except KeyboardInterrupt:
         try:
             ui.warn(_("interrupted!\n"))
-        except IOError, inst:
+        except IOError as inst:
             if inst.errno == errno.EPIPE:
                 if ui.debugflag:
                     ui.warn(_("\nbroken pipe\n"))
@@ -283,11 +293,11 @@ def _runcatch(req):
                 raise
     except MemoryError:
         ui.warn(_("abort: out of memory\n"))
-    except SystemExit, inst:
+    except SystemExit as inst:
         # Commands shouldn't sys.exit directly, but give a return code.
         # Just in case catch this and and pass exit code to caller.
         return inst.code
-    except socket.error, inst:
+    except socket.error as inst:
         ui.warn(_("abort: %s\n") % inst.args[-1])
     except: # re-raises
         myver = util.version()
@@ -443,7 +453,7 @@ class cmdalias(object):
 
         try:
             args = shlex.split(self.definition)
-        except ValueError, inst:
+        except ValueError as inst:
             self.badalias = (_("error in definition for alias '%s': %s")
                              % (self.name, inst))
             return
@@ -534,7 +544,7 @@ def _parse(ui, args):
 
     try:
         args = fancyopts.fancyopts(args, commands.globalopts, options)
-    except fancyopts.getopt.GetoptError, inst:
+    except fancyopts.getopt.GetoptError as inst:
         raise error.CommandError(None, inst)
 
     if args:
@@ -557,7 +567,7 @@ def _parse(ui, args):
 
     try:
         args = fancyopts.fancyopts(args, c, cmdoptions, True)
-    except fancyopts.getopt.GetoptError, inst:
+    except fancyopts.getopt.GetoptError as inst:
         raise error.CommandError(cmd, inst)
 
     # separate global options back out
@@ -656,7 +666,7 @@ def _getlocal(ui, rpath):
     """
     try:
         wd = os.getcwd()
-    except OSError, e:
+    except OSError as e:
         raise util.Abort(_("error getting current working directory: %s") %
                          e.strerror)
     path = cmdutil.findrepo(wd) or ""
@@ -891,7 +901,7 @@ def lsprofile(ui, func, fp):
     format = ui.config('profiling', 'format', default='text')
     field = ui.config('profiling', 'sort', default='inlinetime')
     limit = ui.configint('profiling', 'limit', default=30)
-    climit = ui.configint('profiling', 'nested', default=5)
+    climit = ui.configint('profiling', 'nested', default=0)
 
     if format not in ['text', 'kcachegrind']:
         ui.warn(_("unrecognized profiling format '%s'"
@@ -920,6 +930,31 @@ def lsprofile(ui, func, fp):
             stats = lsprof.Stats(p.getstats())
             stats.sort(field)
             stats.pprint(limit=limit, file=fp, climit=climit)
+
+def flameprofile(ui, func, fp):
+    try:
+        from flamegraph import flamegraph
+    except ImportError:
+        raise util.Abort(_(
+            'flamegraph not available - install from '
+            'https://github.com/evanhempel/python-flamegraph'))
+    # developer config: profiling.freq
+    freq = ui.configint('profiling', 'freq', default=1000)
+    filter_ = None
+    collapse_recursion = True
+    thread = flamegraph.ProfileThread(fp, 1.0 / freq,
+                                      filter_, collapse_recursion)
+    start_time = time.clock()
+    try:
+        thread.start()
+        func()
+    finally:
+        thread.stop()
+        thread.join()
+        print 'Collected %d stack frames (%d unique) in %2.2f seconds.' % (
+            time.clock() - start_time, thread.num_frames(),
+            thread.num_frames(unique=True))
+
 
 def statprofile(ui, func, fp):
     try:
@@ -952,7 +987,7 @@ def _runcommand(ui, options, cmd, cmdfunc):
         profiler = os.getenv('HGPROF')
         if profiler is None:
             profiler = ui.config('profiling', 'type', default='ls')
-        if profiler not in ('ls', 'stat'):
+        if profiler not in ('ls', 'stat', 'flame'):
             ui.warn(_("unrecognized profiler '%s' - ignored\n") % profiler)
             profiler = 'ls'
 
@@ -967,6 +1002,8 @@ def _runcommand(ui, options, cmd, cmdfunc):
         try:
             if profiler == 'ls':
                 return lsprofile(ui, checkargs, fp)
+            elif profiler == 'flame':
+                return flameprofile(ui, checkargs, fp)
             else:
                 return statprofile(ui, checkargs, fp)
         finally:

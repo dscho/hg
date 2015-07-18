@@ -9,7 +9,8 @@
   <?define contrib.vim.guid = {BB04903A-652D-4C4F-9590-2BD07A2304F2} ?>
 
   <!-- dist.wxs -->
-  <?define dist.guid = {C3B634A4-1B05-4A40-94A9-38EE853CF693} ?>
+  <?define dist.guid = {CE405FE6-CD1E-4873-9C9A-7683AE5A3D90} ?>
+  <?define lib.guid = {91D53B14-E924-432A-ACA2-65F9B3F7C56A} ?>
 
   <!-- doc.wxs -->
   <?define doc.hg.1.html.guid = {AAAA3FDA-EDC5-4220-B59D-D342722358A2} ?>
@@ -28,6 +29,7 @@
   <?define templates.atom.guid = {D30E14A5-8AF0-4268-8B00-00BEE9E09E39} ?>
   <?define templates.coal.guid = {B63CCAAB-4EAF-43b4-901E-4BD13F5B78FC} ?>
   <?define templates.gitweb.guid = {827334AF-1EFD-421B-962C-5660A068F612} ?>
+  <?define templates.json.guid = {F535BE7A-EC34-46E0-B9BE-013F3DBAFB19} ?>
   <?define templates.monoblue.guid = {8060A1E4-BD4C-453E-92CB-9536DC44A9E3} ?>
   <?define templates.paper.guid = {61AB1DE9-645F-46ED-8AF8-0CF02267FFBB} ?>
   <?define templates.raw.guid = {834DF8D7-9784-43A6-851D-A96CE1B3575B} ?>

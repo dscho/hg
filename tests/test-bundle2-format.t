@@ -336,11 +336,12 @@ Test debug output
 
 bundling debug
 
-  $ hg bundle2 --debug --param 'e|! 7/=babar%#==tutu' --param simple ../out.hg2
-  start emission of HG20 stream
-  bundle parameter: e%7C%21%207/=babar%25%23%3D%3Dtutu simple
-  start of parts
-  end of bundle
+  $ hg bundle2 --debug --param 'e|! 7/=babar%#==tutu' --param simple ../out.hg2 --config progress.debug=true --config devel.bundle2.debug=true
+  bundle2-output-bundle: "HG20", (2 params) 0 parts total
+  bundle2-output: start emission of HG20 stream
+  bundle2-output: bundle parameter: e%7C%21%207/=babar%25%23%3D%3Dtutu simple
+  bundle2-output: start of parts
+  bundle2-output: end of bundle
 
 file content is ok
 
@@ -349,18 +350,18 @@ file content is ok
 
 unbundling debug
 
-  $ hg statbundle2 --debug < ../out.hg2
-  start processing of HG20 stream
-  reading bundle2 stream parameters
-  ignoring unknown parameter 'e|! 7/'
-  ignoring unknown parameter 'simple'
+  $ hg statbundle2 --debug --config progress.debug=true --config devel.bundle2.debug=true < ../out.hg2
+  bundle2-input: start processing of HG20 stream
+  bundle2-input: reading bundle2 stream parameters
+  bundle2-input: ignoring unknown parameter 'e|! 7/'
+  bundle2-input: ignoring unknown parameter 'simple'
   options count: 2
   - e|! 7/
       babar%#==tutu
   - simple
-  start extraction of bundle2 parts
-  part header size: 0
-  end of bundle2 stream
+  bundle2-input: start extraction of bundle2 parts
+  bundle2-input: part header size: 0
+  bundle2-input: end of bundle2 stream
   parts count:   0
 
 
@@ -383,18 +384,49 @@ bad parameter name
 Test part
 =================
 
-  $ hg bundle2 --parts ../parts.hg2 --debug
-  start emission of HG20 stream
-  bundle parameter: 
-  start of parts
-  bundle part: "test:empty"
-  bundle part: "test:empty"
-  bundle part: "test:song"
-  bundle part: "test:debugreply"
-  bundle part: "test:math"
-  bundle part: "test:song"
-  bundle part: "test:ping"
-  end of bundle
+  $ hg bundle2 --parts ../parts.hg2 --debug --config progress.debug=true --config devel.bundle2.debug=true
+  bundle2-output-bundle: "HG20", 7 parts total
+  bundle2-output: start emission of HG20 stream
+  bundle2-output: bundle parameter: 
+  bundle2-output: start of parts
+  bundle2-output: bundle part: "test:empty"
+  bundle2-output-part: "test:empty" (advisory) empty payload
+  bundle2-output: part 0: "test:empty"
+  bundle2-output: header chunk size: 17
+  bundle2-output: closing payload chunk
+  bundle2-output: bundle part: "test:empty"
+  bundle2-output-part: "test:empty" (advisory) empty payload
+  bundle2-output: part 1: "test:empty"
+  bundle2-output: header chunk size: 17
+  bundle2-output: closing payload chunk
+  bundle2-output: bundle part: "test:song"
+  bundle2-output-part: "test:song" (advisory) 178 bytes payload
+  bundle2-output: part 2: "test:song"
+  bundle2-output: header chunk size: 16
+  bundle2-output: payload chunk size: 178
+  bundle2-output: closing payload chunk
+  bundle2-output: bundle part: "test:debugreply"
+  bundle2-output-part: "test:debugreply" (advisory) empty payload
+  bundle2-output: part 3: "test:debugreply"
+  bundle2-output: header chunk size: 22
+  bundle2-output: closing payload chunk
+  bundle2-output: bundle part: "test:math"
+  bundle2-output-part: "test:math" (advisory) (params: 2 mandatory 2 advisory) 2 bytes payload
+  bundle2-output: part 4: "test:math"
+  bundle2-output: header chunk size: 43
+  bundle2-output: payload chunk size: 2
+  bundle2-output: closing payload chunk
+  bundle2-output: bundle part: "test:song"
+  bundle2-output-part: "test:song" (advisory) (params: 1 mandatory) empty payload
+  bundle2-output: part 5: "test:song"
+  bundle2-output: header chunk size: 29
+  bundle2-output: closing payload chunk
+  bundle2-output: bundle part: "test:ping"
+  bundle2-output-part: "test:ping" (advisory) empty payload
+  bundle2-output: part 6: "test:ping"
+  bundle2-output: header chunk size: 16
+  bundle2-output: closing payload chunk
+  bundle2-output: end of bundle
 
   $ cat ../parts.hg2
   HG20\x00\x00\x00\x00\x00\x00\x00\x11 (esc)
@@ -436,78 +468,80 @@ Test part
       payload: 0 bytes
   parts count:   7
 
-  $ hg statbundle2 --debug < ../parts.hg2
-  start processing of HG20 stream
-  reading bundle2 stream parameters
+  $ hg statbundle2 --debug --config progress.debug=true --config devel.bundle2.debug=true < ../parts.hg2
+  bundle2-input: start processing of HG20 stream
+  bundle2-input: reading bundle2 stream parameters
   options count: 0
-  start extraction of bundle2 parts
-  part header size: 17
-  part type: "test:empty"
-  part id: "0"
-  part parameters: 0
+  bundle2-input: start extraction of bundle2 parts
+  bundle2-input: part header size: 17
+  bundle2-input: part type: "test:empty"
+  bundle2-input: part id: "0"
+  bundle2-input: part parameters: 0
     :test:empty:
       mandatory: 0
       advisory: 0
-  payload chunk size: 0
+  bundle2-input: payload chunk size: 0
       payload: 0 bytes
-  part header size: 17
-  part type: "test:empty"
-  part id: "1"
-  part parameters: 0
+  bundle2-input: part header size: 17
+  bundle2-input: part type: "test:empty"
+  bundle2-input: part id: "1"
+  bundle2-input: part parameters: 0
     :test:empty:
       mandatory: 0
       advisory: 0
-  payload chunk size: 0
+  bundle2-input: payload chunk size: 0
       payload: 0 bytes
-  part header size: 16
-  part type: "test:song"
-  part id: "2"
-  part parameters: 0
+  bundle2-input: part header size: 16
+  bundle2-input: part type: "test:song"
+  bundle2-input: part id: "2"
+  bundle2-input: part parameters: 0
     :test:song:
       mandatory: 0
       advisory: 0
-  payload chunk size: 178
-  payload chunk size: 0
+  bundle2-input: payload chunk size: 178
+  bundle2-input: payload chunk size: 0
+  bundle2-input-part: total payload size 178
       payload: 178 bytes
-  part header size: 22
-  part type: "test:debugreply"
-  part id: "3"
-  part parameters: 0
+  bundle2-input: part header size: 22
+  bundle2-input: part type: "test:debugreply"
+  bundle2-input: part id: "3"
+  bundle2-input: part parameters: 0
     :test:debugreply:
       mandatory: 0
       advisory: 0
-  payload chunk size: 0
+  bundle2-input: payload chunk size: 0
       payload: 0 bytes
-  part header size: 43
-  part type: "test:math"
-  part id: "4"
-  part parameters: 3
+  bundle2-input: part header size: 43
+  bundle2-input: part type: "test:math"
+  bundle2-input: part id: "4"
+  bundle2-input: part parameters: 3
     :test:math:
       mandatory: 2
       advisory: 1
-  payload chunk size: 2
-  payload chunk size: 0
+  bundle2-input: payload chunk size: 2
+  bundle2-input: payload chunk size: 0
+  bundle2-input-part: total payload size 2
       payload: 2 bytes
-  part header size: 29
-  part type: "test:song"
-  part id: "5"
-  part parameters: 1
+  bundle2-input: part header size: 29
+  bundle2-input: part type: "test:song"
+  bundle2-input: part id: "5"
+  bundle2-input: part parameters: 1
     :test:song:
       mandatory: 1
       advisory: 0
-  payload chunk size: 0
+  bundle2-input: payload chunk size: 0
       payload: 0 bytes
-  part header size: 16
-  part type: "test:ping"
-  part id: "6"
-  part parameters: 0
+  bundle2-input: part header size: 16
+  bundle2-input: part type: "test:ping"
+  bundle2-input: part id: "6"
+  bundle2-input: part parameters: 0
     :test:ping:
       mandatory: 0
       advisory: 0
-  payload chunk size: 0
+  bundle2-input: payload chunk size: 0
       payload: 0 bytes
-  part header size: 0
-  end of bundle2 stream
+  bundle2-input: part header size: 0
+  bundle2-input: end of bundle2 stream
   parts count:   7
 
 Test actual unbundling of test part
@@ -515,63 +549,74 @@ Test actual unbundling of test part
 
 Process the bundle
 
-  $ hg unbundle2 --debug < ../parts.hg2
-  start processing of HG20 stream
-  reading bundle2 stream parameters
-  start extraction of bundle2 parts
-  part header size: 17
-  part type: "test:empty"
-  part id: "0"
-  part parameters: 0
-  ignoring unsupported advisory part test:empty
-  payload chunk size: 0
-  part header size: 17
-  part type: "test:empty"
-  part id: "1"
-  part parameters: 0
-  ignoring unsupported advisory part test:empty
-  payload chunk size: 0
-  part header size: 16
-  part type: "test:song"
-  part id: "2"
-  part parameters: 0
-  found a handler for part 'test:song'
+  $ hg unbundle2 --debug --config progress.debug=true --config devel.bundle2.debug=true < ../parts.hg2
+  bundle2-input: start processing of HG20 stream
+  bundle2-input: reading bundle2 stream parameters
+  bundle2-input-bundle: with-transaction
+  bundle2-input: start extraction of bundle2 parts
+  bundle2-input: part header size: 17
+  bundle2-input: part type: "test:empty"
+  bundle2-input: part id: "0"
+  bundle2-input: part parameters: 0
+  bundle2-input: ignoring unsupported advisory part test:empty
+  bundle2-input-part: "test:empty" (advisory) unsupported-type
+  bundle2-input: payload chunk size: 0
+  bundle2-input: part header size: 17
+  bundle2-input: part type: "test:empty"
+  bundle2-input: part id: "1"
+  bundle2-input: part parameters: 0
+  bundle2-input: ignoring unsupported advisory part test:empty
+  bundle2-input-part: "test:empty" (advisory) unsupported-type
+  bundle2-input: payload chunk size: 0
+  bundle2-input: part header size: 16
+  bundle2-input: part type: "test:song"
+  bundle2-input: part id: "2"
+  bundle2-input: part parameters: 0
+  bundle2-input: found a handler for part 'test:song'
+  bundle2-input-part: "test:song" (advisory) supported
   The choir starts singing:
-  payload chunk size: 178
-  payload chunk size: 0
+  bundle2-input: payload chunk size: 178
+  bundle2-input: payload chunk size: 0
+  bundle2-input-part: total payload size 178
       Patali Dirapata, Cromda Cromda Ripalo, Pata Pata, Ko Ko Ko
       Bokoro Dipoulito, Rondi Rondi Pepino, Pata Pata, Ko Ko Ko
       Emana Karassoli, Loucra Loucra Ponponto, Pata Pata, Ko Ko Ko.
-  part header size: 22
-  part type: "test:debugreply"
-  part id: "3"
-  part parameters: 0
-  found a handler for part 'test:debugreply'
+  bundle2-input: part header size: 22
+  bundle2-input: part type: "test:debugreply"
+  bundle2-input: part id: "3"
+  bundle2-input: part parameters: 0
+  bundle2-input: found a handler for part 'test:debugreply'
+  bundle2-input-part: "test:debugreply" (advisory) supported
   debugreply: no reply
-  payload chunk size: 0
-  part header size: 43
-  part type: "test:math"
-  part id: "4"
-  part parameters: 3
-  ignoring unsupported advisory part test:math
-  payload chunk size: 2
-  payload chunk size: 0
-  part header size: 29
-  part type: "test:song"
-  part id: "5"
-  part parameters: 1
-  found a handler for part 'test:song'
-  ignoring unsupported advisory part test:song - randomparam
-  payload chunk size: 0
-  part header size: 16
-  part type: "test:ping"
-  part id: "6"
-  part parameters: 0
-  found a handler for part 'test:ping'
+  bundle2-input: payload chunk size: 0
+  bundle2-input: part header size: 43
+  bundle2-input: part type: "test:math"
+  bundle2-input: part id: "4"
+  bundle2-input: part parameters: 3
+  bundle2-input: ignoring unsupported advisory part test:math
+  bundle2-input-part: "test:math" (advisory) (params: 2 mandatory 2 advisory) unsupported-type
+  bundle2-input: payload chunk size: 2
+  bundle2-input: payload chunk size: 0
+  bundle2-input-part: total payload size 2
+  bundle2-input: part header size: 29
+  bundle2-input: part type: "test:song"
+  bundle2-input: part id: "5"
+  bundle2-input: part parameters: 1
+  bundle2-input: found a handler for part 'test:song'
+  bundle2-input: ignoring unsupported advisory part test:song - randomparam
+  bundle2-input-part: "test:song" (advisory) (params: 1 mandatory) unsupported-params (['randomparam'])
+  bundle2-input: payload chunk size: 0
+  bundle2-input: part header size: 16
+  bundle2-input: part type: "test:ping"
+  bundle2-input: part id: "6"
+  bundle2-input: part parameters: 0
+  bundle2-input: found a handler for part 'test:ping'
+  bundle2-input-part: "test:ping" (advisory) supported
   received ping request (id 6)
-  payload chunk size: 0
-  part header size: 0
-  end of bundle2 stream
+  bundle2-input: payload chunk size: 0
+  bundle2-input: part header size: 0
+  bundle2-input: end of bundle2 stream
+  bundle2-input-bundle: 6 parts total
   0 unread bytes
   3 total verses sung
 
@@ -704,17 +749,21 @@ Support for changegroup
   @  0:3903775176ed draft test  a
   
 
-  $ hg bundle2 --debug --rev '8+7+5+4' ../rev.hg2
+  $ hg bundle2 --debug --config progress.debug=true --config devel.bundle2.debug=true --rev '8+7+5+4' ../rev.hg2
   4 changesets found
   list of changesets:
   32af7686d403cf45b5d95f2d70cebea587ac806a
   9520eea781bcca16c1e15acc0ba14335a0e8e5ba
   eea13746799a9e0bfd88f29d3c2e9dc9389f524f
   02de42196ebee42ef284b6780a87cdc96e8eaab6
-  start emission of HG20 stream
-  bundle parameter: 
-  start of parts
-  bundle part: "changegroup"
+  bundle2-output-bundle: "HG20", 1 parts total
+  bundle2-output: start emission of HG20 stream
+  bundle2-output: bundle parameter: 
+  bundle2-output: start of parts
+  bundle2-output: bundle part: "changegroup"
+  bundle2-output-part: "changegroup" (advisory) streamed payload
+  bundle2-output: part 0: "changegroup"
+  bundle2-output: header chunk size: 18
   bundling: 1/4 changesets (25.00%)
   bundling: 2/4 changesets (50.00%)
   bundling: 3/4 changesets (75.00%)
@@ -726,7 +775,9 @@ Support for changegroup
   bundling: D 1/3 files (33.33%)
   bundling: E 2/3 files (66.67%)
   bundling: H 3/3 files (100.00%)
-  end of bundle
+  bundle2-output: payload chunk size: 1555
+  bundle2-output: closing payload chunk
+  bundle2-output: end of bundle
 
   $ cat ../rev.hg2
   HG20\x00\x00\x00\x00\x00\x00\x00\x12\x0bchangegroup\x00\x00\x00\x00\x00\x00\x00\x00\x06\x13\x00\x00\x00\xa42\xafv\x86\xd4\x03\xcfE\xb5\xd9_-p\xce\xbe\xa5\x87\xac\x80j_\xdd\xd9\x89W\xc8\xa5JMCm\xfe\x1d\xa9\xd8\x7f!\xa1\xb9{\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x002\xafv\x86\xd4\x03\xcfE\xb5\xd9_-p\xce\xbe\xa5\x87\xac\x80j\x00\x00\x00\x00\x00\x00\x00)\x00\x00\x00)6e1f4c47ecb533ffd0c8e52cdc88afb6cd39e20c (esc)

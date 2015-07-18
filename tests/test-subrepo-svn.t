@@ -72,6 +72,7 @@ make sure we avoid empty commits (issue2445)
   branch: default
   commit: (clean)
   update: (current)
+  phases: 2 draft
   $ hg ci -moops
   nothing changed
   [1]
@@ -96,6 +97,7 @@ change file in svn and hg, commit
   branch: default
   commit: 1 modified, 1 subrepos
   update: (current)
+  phases: 2 draft
   $ hg commit --subrepos -m 'Message!' | grep -v Updating
   committing subrepository s
   Sending*s/alpha (glob)
@@ -136,6 +138,7 @@ bringing any changes.
   branch: default
   commit: (clean)
   update: (current)
+  phases: 3 draft
 
   $ echo a > s/a
 
@@ -548,7 +551,7 @@ First, create that condition in the repository.
 
 Test archive
 
-  $ hg archive -S ../archive-all --debug
+  $ hg archive -S ../archive-all --debug --config progress.debug=true
   archiving: 0/2 files (0.00%)
   archiving: .hgsub 1/2 files (50.00%)
   archiving: .hgsubstate 2/2 files (100.00%)
@@ -560,7 +563,7 @@ Test archive
   archiving (s): 1/2 files (50.00%)
   archiving (s): 2/2 files (100.00%)
 
-  $ hg archive -S ../archive-exclude --debug -X **old
+  $ hg archive -S ../archive-exclude --debug --config progress.debug=true -X **old
   archiving: 0/2 files (0.00%)
   archiving: .hgsub 1/2 files (50.00%)
   archiving: .hgsubstate 2/2 files (100.00%)

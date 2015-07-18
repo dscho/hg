@@ -6,11 +6,11 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-from mercurial.node import nullrev
+from mercurial.node import nullrev, wdirrev
 import util, error, osutil, revset, similar, encoding, phases
 import pathutil
 import match as matchmod
-import os, errno, re, glob, tempfile, shutil, stat, inspect
+import os, errno, re, glob, tempfile, shutil, stat
 
 if os.name == 'nt':
     import scmwindows as scmplatform
@@ -80,8 +80,23 @@ def itersubrepos(ctx1, ctx2):
     # has been modified (in ctx2) but not yet committed (in ctx1).
     subpaths = dict.fromkeys(ctx2.substate, ctx2)
     subpaths.update(dict.fromkeys(ctx1.substate, ctx1))
+
+    missing = set()
+
+    for subpath in ctx2.substate:
+        if subpath not in ctx1.substate:
+            del subpaths[subpath]
+            missing.add(subpath)
+
     for subpath, ctx in sorted(subpaths.iteritems()):
         yield subpath, ctx.sub(subpath)
+
+    # Yield an empty subrepo based on ctx1 for anything only in ctx2.  That way,
+    # status and diff will have an accurate result when it does
+    # 'sub.{status|diff}(rev2)'.  Otherwise, the ctx2 subrepo is compared
+    # against itself.
+    for subpath in missing:
+        yield subpath, ctx2.nullsub(subpath, ctx1)
 
 def nochangesfound(ui, repo, excluded=None):
     '''Report no changes for push/pull, excluded is None or a list of
@@ -172,16 +187,6 @@ class casecollisionauditor(object):
         self._loweredfiles.add(fl)
         self._newfiles.add(f)
 
-def develwarn(tui, msg):
-    """issue a developer warning message"""
-    msg = 'devel-warn: ' + msg
-    if tui.tracebackflag:
-        util.debugstacktrace(msg, 2)
-    else:
-        curframe = inspect.currentframe()
-        calframe = inspect.getouterframes(curframe, 2)
-        tui.write_err('%s at: %s:%s (%s)\n' % ((msg,) + calframe[2][1:4]))
-
 def filteredhash(repo, maxrev):
     """build hash of filtered revisions in the current repoview.
 
@@ -217,7 +222,7 @@ class abstractvfs(object):
         '''gracefully return an empty string for missing files'''
         try:
             return self.read(path)
-        except IOError, inst:
+        except IOError as inst:
             if inst.errno != errno.ENOENT:
                 raise
         return ""
@@ -226,7 +231,7 @@ class abstractvfs(object):
         '''gracefully return an empty array for missing files'''
         try:
             return self.readlines(path, mode=mode)
-        except IOError, inst:
+        except IOError as inst:
             if inst.errno != errno.ENOENT:
                 raise
         return []
@@ -277,8 +282,20 @@ class abstractvfs(object):
         finally:
             fp.close()
 
+    def basename(self, path):
+        """return base element of a path (as os.path.basename would do)
+
+        This exists to allow handling of strange encoding if needed."""
+        return os.path.basename(path)
+
     def chmod(self, path, mode):
         return os.chmod(self.join(path), mode)
+
+    def dirname(self, path):
+        """return dirname element of a path (as os.path.dirname would do)
+
+        This exists to allow handling of strange encoding if needed."""
+        return os.path.dirname(path)
 
     def exists(self, path=None):
         return os.path.exists(self.join(path))
@@ -445,7 +462,7 @@ class vfs(abstractvfs):
     def _fixfilemode(self, name):
         if self.createmode is None or not self._chmod:
             return
-        os.chmod(name, self.createmode & 0666)
+        os.chmod(name, self.createmode & 0o666)
 
     def __call__(self, path, mode="r", text=False, atomictemp=False,
                  notindexed=False):
@@ -486,7 +503,7 @@ class vfs(abstractvfs):
                         if nlink < 1:
                             nlink = 2 # force mktempcopy (issue1922)
                         fd.close()
-                except (OSError, IOError), e:
+                except (OSError, IOError) as e:
                     if e.errno != errno.ENOENT:
                         raise
                     nlink = 0
@@ -514,7 +531,7 @@ class vfs(abstractvfs):
         if self._cansymlink:
             try:
                 os.symlink(src, linkname)
-            except OSError, err:
+            except OSError as err:
                 raise OSError(err.errno, _('could not symlink to %r: %s') %
                               (src, err.strerror), linkname)
         else:
@@ -657,11 +674,11 @@ def rcpath():
             _rcpath = osrcpath()
     return _rcpath
 
-def intrev(repo, rev):
+def intrev(rev):
     """Return integer for a given revision that can be used in comparison or
     arithmetic operation"""
     if rev is None:
-        return len(repo)
+        return wdirrev
     return rev
 
 def revsingle(repo, revspec, default='.'):
@@ -709,14 +726,12 @@ def revrange(repo, revs):
             return defval
         return repo[val].rev()
 
-    seen, l = set(), revset.baseset([])
+    subsets = []
 
     revsetaliases = [alias for (alias, _) in
                      repo.ui.configitems("revsetalias")]
 
     for spec in revs:
-        if l and not seen:
-            seen = set(l)
         # attempt to parse old-style ranges first to deal with
         # things like old-tag which contain query metacharacters
         try:
@@ -727,8 +742,7 @@ def revrange(repo, revs):
                 raise error.RepoLookupError
 
             if isinstance(spec, int):
-                seen.add(spec)
-                l = l + revset.baseset([spec])
+                subsets.append(revset.baseset([spec]))
                 continue
 
             if _revrangesep in spec:
@@ -740,40 +754,24 @@ def revrange(repo, revs):
                 end = revfix(repo, end, len(repo) - 1)
                 if end == nullrev and start < 0:
                     start = nullrev
-                rangeiter = repo.changelog.revs(start, end)
-                if not seen and not l:
-                    # by far the most common case: revs = ["-1:0"]
-                    l = revset.baseset(rangeiter)
-                    # defer syncing seen until next iteration
-                    continue
-                newrevs = set(rangeiter)
-                if seen:
-                    newrevs.difference_update(seen)
-                    seen.update(newrevs)
+                if start < end:
+                    l = revset.spanset(repo, start, end + 1)
                 else:
-                    seen = newrevs
-                l = l + revset.baseset(sorted(newrevs, reverse=start > end))
+                    l = revset.spanset(repo, start, end - 1)
+                subsets.append(l)
                 continue
             elif spec and spec in repo: # single unquoted rev
                 rev = revfix(repo, spec, None)
-                if rev in seen:
-                    continue
-                seen.add(rev)
-                l = l + revset.baseset([rev])
+                subsets.append(revset.baseset([rev]))
                 continue
         except error.RepoLookupError:
             pass
 
         # fall through to new-style queries if old-style fails
         m = revset.match(repo.ui, spec, repo)
-        if seen or l:
-            dl = [r for r in m(repo) if r not in seen]
-            l = l + revset.baseset(dl)
-            seen.update(dl)
-        else:
-            l = m(repo)
+        subsets.append(m(repo))
 
-    return l
+    return revset._combinesets(subsets)
 
 def expandpats(pats):
     '''Expand bare globs when running on windows.
@@ -794,34 +792,40 @@ def expandpats(pats):
         ret.append(kindpat)
     return ret
 
-def matchandpats(ctx, pats=[], opts={}, globbed=False, default='relpath'):
+def matchandpats(ctx, pats=[], opts={}, globbed=False, default='relpath',
+                 badfn=None):
     '''Return a matcher and the patterns that were used.
-    The matcher will warn about bad matches.'''
+    The matcher will warn about bad matches, unless an alternate badfn callback
+    is provided.'''
     if pats == ("",):
         pats = []
     if not globbed and default == 'relpath':
         pats = expandpats(pats or [])
 
-    m = ctx.match(pats, opts.get('include'), opts.get('exclude'),
-                         default)
-    def badfn(f, msg):
+    def bad(f, msg):
         ctx.repo().ui.warn("%s: %s\n" % (m.rel(f), msg))
-    m.bad = badfn
+
+    if badfn is None:
+        badfn = bad
+
+    m = ctx.match(pats, opts.get('include'), opts.get('exclude'),
+                  default, listsubrepos=opts.get('subrepos'), badfn=badfn)
+
     if m.always():
         pats = []
     return m, pats
 
-def match(ctx, pats=[], opts={}, globbed=False, default='relpath'):
+def match(ctx, pats=[], opts={}, globbed=False, default='relpath', badfn=None):
     '''Return a matcher that will warn about bad matches.'''
-    return matchandpats(ctx, pats, opts, globbed, default)[0]
+    return matchandpats(ctx, pats, opts, globbed, default, badfn=badfn)[0]
 
 def matchall(repo):
     '''Return a matcher that will efficiently match everything.'''
     return matchmod.always(repo.root, repo.getcwd())
 
-def matchfiles(repo, files):
+def matchfiles(repo, files, badfn=None):
     '''Return a matcher that will efficiently match exactly these files.'''
-    return matchmod.exact(repo.root, repo.getcwd(), files)
+    return matchmod.exact(repo.root, repo.getcwd(), files, badfn=badfn)
 
 def addremove(repo, matcher, prefix, opts={}, dry_run=None, similarity=None):
     m = matcher
@@ -854,15 +858,14 @@ def addremove(repo, matcher, prefix, opts={}, dry_run=None, similarity=None):
                                  % join(subpath))
 
     rejected = []
-    origbad = m.bad
     def badfn(f, msg):
         if f in m.files():
-            origbad(f, msg)
+            m.bad(f, msg)
         rejected.append(f)
 
-    m.bad = badfn
-    added, unknown, deleted, removed, forgotten = _interestingfiles(repo, m)
-    m.bad = origbad
+    badmatch = matchmod.badmatch(m, badfn)
+    added, unknown, deleted, removed, forgotten = _interestingfiles(repo,
+                                                                    badmatch)
 
     unknownset = set(unknown + forgotten)
     toprint = unknownset.copy()
@@ -889,9 +892,8 @@ def addremove(repo, matcher, prefix, opts={}, dry_run=None, similarity=None):
 def marktouched(repo, files, similarity=0.0):
     '''Assert that files have somehow been operated upon. files are relative to
     the repo root.'''
-    m = matchfiles(repo, files)
+    m = matchfiles(repo, files, badfn=lambda x, y: rejected.append(x))
     rejected = []
-    m.bad = lambda x, y: rejected.append(x)
 
     added, unknown, deleted, removed, forgotten = _interestingfiles(repo, m)
 
@@ -1011,6 +1013,12 @@ def readrequires(opener, supported):
                    " for more information"))
     return requirements
 
+def writerequires(opener, requirements):
+    reqfile = opener("requires", "w")
+    for r in sorted(requirements):
+        reqfile.write("%s\n" % r)
+    reqfile.close()
+
 class filecachesubentry(object):
     def __init__(self, path, stat):
         self.path = path
@@ -1062,7 +1070,7 @@ class filecachesubentry(object):
     def stat(path):
         try:
             return util.cachestat(path)
-        except OSError, e:
+        except OSError as e:
             if e.errno != errno.ENOENT:
                 raise
 

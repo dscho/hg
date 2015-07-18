@@ -1,5 +1,4 @@
 
-
 This test tries to exercise the ssh functionality with a dummy script
 
 creating 'remote' repo
@@ -28,7 +27,7 @@ configure for serving
   > uncompressed = True
   > 
   > [hooks]
-  > changegroup = python "$TESTDIR/printenv.py" changegroup-in-remote 0 ../dummylog
+  > changegroup = printenv.py changegroup-in-remote 0 ../dummylog
   > EOF
   $ cd ..
 
@@ -105,7 +104,7 @@ verify
   checking files
   2 files, 3 changesets, 2 total revisions
   $ echo '[hooks]' >> .hg/hgrc
-  $ echo "changegroup = python \"$TESTDIR/printenv.py\" changegroup-in-local 0 ../dummylog" >> .hg/hgrc
+  $ echo "changegroup = printenv.py changegroup-in-local 0 ../dummylog" >> .hg/hgrc
 
 empty default pull
 
@@ -398,11 +397,8 @@ Test hg-ssh in read-only mode:
   pushing to ssh://user@dummy/*/remote (glob)
   searching for changes
   remote: Permission denied
-  remote: abort: prechangegroup.hg-ssh hook failed
-  remote: Permission denied
-  remote: pushkey-abort: prepushkey.hg-ssh hook failed
-  updating 6c0482d977a3 to public failed!
-  [1]
+  abort: pretxnopen.hg-ssh hook failed
+  [255]
 
   $ cd ..
 
@@ -445,6 +441,32 @@ stderr from remote commands should be printed before stdout from local code (iss
   remote: KABOOM
   local stdout
 
+debug output
+
+  $ hg pull --debug ssh://user@dummy/remote
+  pulling from ssh://user@dummy/remote
+  running python ".*/dummyssh" user@dummy ('|")hg -R remote serve --stdio('|") (re)
+  sending hello command
+  sending between command
+  remote: 345
+  remote: capabilities: lookup changegroupsubset branchmap pushkey known getbundle unbundlehash batch stream bundle2=HG20%0Achangegroup%3D01%2C02%0Adigests%3Dmd5%2Csha1%2Csha512%0Aerror%3Dabort%2Cunsupportedcontent%2Cpushraced%2Cpushkey%0Ahgtagsfnodes%0Alistkeys%0Apushkey%0Aremote-changegroup%3Dhttp%2Chttps unbundle=HG10GZ,HG10BZ,HG10UN httpheader=1024
+  remote: 1
+  query 1; heads
+  sending batch command
+  searching for changes
+  all remote heads known locally
+  no changes found
+  sending getbundle command
+  bundle2-input-bundle: with-transaction
+  bundle2-input-part: "listkeys" (params: 1 mandatory) supported
+  bundle2-input-part: "listkeys" (params: 1 mandatory) supported
+  bundle2-input-part: total payload size 45
+  bundle2-input-bundle: 1 parts total
+  checking for updated bookmarks
+  preparing listkeys for "phases"
+  sending listkeys command
+  received listkey for "phases": 15 bytes
+
   $ cd ..
 
   $ cat dummylog
@@ -459,7 +481,7 @@ stderr from remote commands should be printed before stdout from local code (iss
   Got arguments 1:user@dummy 2:hg -R local serve --stdio
   Got arguments 1:user@dummy 2:hg -R $TESTTMP/local serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
-  changegroup-in-remote hook: HG_NODE=a28a9d1a809cab7d4e2fde4bee738a9ede948b60 HG_SOURCE=serve HG_TXNID=TXN:* HG_URL=remote:ssh:127.0.0.1 (glob)
+  changegroup-in-remote hook: HG_BUNDLE2=1 HG_NODE=a28a9d1a809cab7d4e2fde4bee738a9ede948b60 HG_SOURCE=serve HG_TXNID=TXN:* HG_URL=remote:ssh:127.0.0.1 (glob)
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
@@ -469,7 +491,7 @@ stderr from remote commands should be printed before stdout from local code (iss
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
-  changegroup-in-remote hook: HG_NODE=1383141674ec756a6056f6a9097618482fe0f4a6 HG_SOURCE=serve HG_TXNID=TXN:* HG_URL=remote:ssh:127.0.0.1 (glob)
+  changegroup-in-remote hook: HG_BUNDLE2=1 HG_NODE=1383141674ec756a6056f6a9097618482fe0f4a6 HG_SOURCE=serve HG_TXNID=TXN:* HG_URL=remote:ssh:127.0.0.1 (glob)
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
   Got arguments 1:user@dummy 2:hg init 'a repo'
   Got arguments 1:user@dummy 2:hg -R 'a repo' serve --stdio
@@ -477,4 +499,5 @@ stderr from remote commands should be printed before stdout from local code (iss
   Got arguments 1:user@dummy 2:hg -R 'a repo' serve --stdio
   Got arguments 1:user@dummy 2:hg -R 'a repo' serve --stdio
   Got arguments 1:user@dummy 2:hg -R remote serve --stdio
-  changegroup-in-remote hook: HG_NODE=65c38f4125f9602c8db4af56530cc221d93b8ef8 HG_SOURCE=serve HG_TXNID=TXN:* HG_URL=remote:ssh:127.0.0.1 (glob)
+  changegroup-in-remote hook: HG_BUNDLE2=1 HG_NODE=65c38f4125f9602c8db4af56530cc221d93b8ef8 HG_SOURCE=serve HG_TXNID=TXN:* HG_URL=remote:ssh:127.0.0.1 (glob)
+  Got arguments 1:user@dummy 2:hg -R remote serve --stdio

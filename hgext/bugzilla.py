@@ -279,9 +279,13 @@ All the above add a comment to the Bugzilla bug record of the form::
 
 from mercurial.i18n import _
 from mercurial.node import short
-from mercurial import cmdutil, mail, templater, util
+from mercurial import cmdutil, mail, util
 import re, time, urlparse, xmlrpclib
 
+# Note for extension authors: ONLY specify testedwith = 'internal' for
+# extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
+# be specifying the version(s) of Mercurial they are tested with, or
+# leave the attribute unspecified.
 testedwith = 'internal'
 
 class bzaccess(object):
@@ -353,7 +357,7 @@ class bzmysql(bzaccess):
         try:
             import MySQLdb as mysql
             bzmysql._MySQLdb = mysql
-        except ImportError, err:
+        except ImportError as err:
             raise util.Abort(_('python mysql support not available: %s') % err)
 
         bzaccess.__init__(self, ui)
@@ -876,8 +880,6 @@ class bugzilla(object):
         if not mapfile and not tmpl:
             tmpl = _('changeset {node|short} in repo {root} refers '
                      'to bug {bug}.\ndetails:\n\t{desc|tabindent}')
-        if tmpl:
-            tmpl = templater.parsestring(tmpl, quoted=False)
         t = cmdutil.changeset_templater(self.ui, self.repo,
                                         False, None, tmpl, mapfile, False)
         self.ui.pushbuffer()
@@ -908,5 +910,5 @@ def hook(ui, repo, hooktype, node=None, **kwargs):
             for bug in bugs:
                 bz.update(bug, bugs[bug], ctx)
             bz.notify(bugs, util.email(ctx.user()))
-    except Exception, e:
+    except Exception as e:
         raise util.Abort(_('Bugzilla error: %s') % e)

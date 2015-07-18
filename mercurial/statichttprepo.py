@@ -32,15 +32,11 @@ class httprangereader(object):
         try:
             f = self.opener.open(req)
             data = f.read()
-            # Python 2.6+ defines a getcode() function, and 2.4 and
-            # 2.5 appear to always have an undocumented code attribute
-            # set. If we can't read either of those, fall back to 206
-            # and hope for the best.
-            code = getattr(f, 'getcode', lambda : getattr(f, 'code', 206))()
-        except urllib2.HTTPError, inst:
+            code = f.code
+        except urllib2.HTTPError as inst:
             num = inst.code == 404 and errno.ENOENT or None
             raise IOError(num, inst)
-        except urllib2.URLError, inst:
+        except urllib2.URLError as inst:
             raise IOError(None, inst.reason[1])
 
         if code == 200:
@@ -110,7 +106,7 @@ class statichttprepository(localrepo.localrepository):
 
         try:
             requirements = scmutil.readrequires(self.vfs, self.supported)
-        except IOError, inst:
+        except IOError as inst:
             if inst.errno != errno.ENOENT:
                 raise
             requirements = set()
@@ -120,7 +116,7 @@ class statichttprepository(localrepo.localrepository):
                 fp = self.vfs("00changelog.i")
                 fp.read(1)
                 fp.close()
-            except IOError, inst:
+            except IOError as inst:
                 if inst.errno != errno.ENOENT:
                     raise
                 # we do not care about empty old-style repositories here
@@ -131,7 +127,6 @@ class statichttprepository(localrepo.localrepository):
         self.store = store.store(requirements, self.path, opener)
         self.spath = self.store.path
         self.svfs = self.store.opener
-        self.sopener = self.svfs
         self.sjoin = self.store.join
         self._filecache = {}
         self.requirements = requirements
