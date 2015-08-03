@@ -143,7 +143,7 @@ Check that deep archiving works
   $ hg remove sub1/.hgsubstate
   $ mv sub1/.hgsub sub1/x.hgsub
   $ hg status -S
-  warning: subrepo spec file 'sub1/.hgsub' not found (glob)
+  warning: subrepo spec file 'sub1/.hgsub' not found
   R sub1/.hgsubstate
   R sub1/sub2/folder/test.txt
   ! sub1/.hgsub
@@ -172,7 +172,7 @@ Test relative path printing + subrepos
 Archive wdir() with subrepos
   $ hg rm main
   $ hg archive -S -r 'wdir()' ../wdir
-  $ diff -r . ../wdir | grep -v '\.hg$'
+  $ diff -r . ../wdir | egrep -v '\.hg$|^Common subdirectories:'
   Only in ../wdir: .hg_archival.txt
 
   $ find ../wdir -type f | sort
@@ -524,7 +524,7 @@ largefile and a normal file.  Then a largefile that hasn't been committed yet.
   $ hg add sub1/sub2
 
   $ hg archive -S -r 'wdir()' ../wdir2
-  $ diff -r . ../wdir2 | grep -v '\.hg$'
+  $ diff -r . ../wdir2 | egrep -v '\.hg$|^Common subdirectories:'
   Only in ../wdir2: .hg_archival.txt
   Only in .: .hglf
   Only in .: foo
@@ -563,7 +563,7 @@ Test 'wdir()' modified file archiving with largefiles
   $ echo 'mod' > large.bin
   $ echo 'mod' > sub1/sub2/large.dat
   $ hg archive -S -r 'wdir()' ../wdir3
-  $ diff -r . ../wdir3 | grep -v '\.hg$'
+  $ diff -r . ../wdir3 | egrep -v '\.hg$|^Common subdirectories'
   Only in ../wdir3: .hg_archival.txt
   Only in .: .hglf
   Only in .: foo

@@ -39,6 +39,9 @@ def decodefilename(filename):
 
 class p4_source(converter_source):
     def __init__(self, ui, path, revs=None):
+        # avoid import cycle
+        import convcmd
+
         super(p4_source, self).__init__(ui, path, revs=revs)
 
         if "/" in path and not path.startswith('//'):
@@ -54,7 +57,8 @@ class p4_source(converter_source):
         self.tags = {}
         self.lastbranch = {}
         self.parent = {}
-        self.encoding = "latin_1"
+        self.encoding = self.ui.config('convert', 'p4.encoding',
+                                       default=convcmd.orig_encoding)
         self.depotname = {}           # mapping from local name to depot name
         self.localname = {} # mapping from depot name to local name
         self.re_type = re.compile(
@@ -216,7 +220,7 @@ class p4_source(converter_source):
             stdout = util.popen(cmd, mode='rb')
 
             mode = None
-            contents = ""
+            contents = []
             keywords = None
 
             for d in loaditer(stdout):
@@ -252,7 +256,7 @@ class p4_source(converter_source):
                             keywords = self.re_keywords
 
                 elif code == "text" or code == "binary":
-                    contents += data
+                    contents.append(data)
 
                 lasterror = None
 
@@ -261,6 +265,8 @@ class p4_source(converter_source):
 
         if mode is None:
             return None, None
+
+        contents = ''.join(contents)
 
         if keywords:
             contents = keywords.sub("$\\1$", contents)

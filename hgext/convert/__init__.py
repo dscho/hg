@@ -192,6 +192,9 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
         (forces target IDs to change). It takes a boolean argument and
         defaults to False.
 
+    :convert.hg.startrev: specify the initial Mercurial revision.
+        The default is 0.
+
     :convert.hg.revs: revset specifying the source revisions to convert.
 
     CVS Source
@@ -323,8 +326,11 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     usually should specify a target directory, because otherwise the
     target may be named ``...-hg``.
 
-    It is possible to limit the amount of source history to be
-    converted by specifying an initial Perforce revision:
+    The following options can be set with ``--config``:
+
+    :convert.p4.encoding: specify the encoding to use when decoding standard
+        output of the Perforce command line tool. The default is default system
+        encoding.
 
     :convert.p4.startrev: specify initial Perforce revision (a
         Perforce changelist number).

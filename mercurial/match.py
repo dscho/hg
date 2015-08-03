@@ -5,7 +5,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import copy, re
+import copy, os, re
 import util, pathutil
 from i18n import _
 
@@ -289,7 +289,8 @@ class match(object):
                 continue
             elif kind == 'include':
                 try:
-                    includepats = readpatternfile(pat, self._warn)
+                    fullpath = os.path.join(root, util.localpath(pat))
+                    includepats = readpatternfile(fullpath, self._warn)
                     for k, p, source in self._normalize(includepats, default,
                                                         root, cwd, auditor):
                         kindpats.append((k, p, source or pat))
