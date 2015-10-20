@@ -7,10 +7,24 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import urllib, urllib2, httplib, os, socket, cStringIO, base64
-from i18n import _
-import keepalive, util, sslutil
-import httpconnection as httpconnectionmod
+from __future__ import absolute_import
+
+import base64
+import cStringIO
+import httplib
+import os
+import socket
+import urllib
+import urllib2
+
+from .i18n import _
+from . import (
+    error,
+    httpconnection as httpconnectionmod,
+    keepalive,
+    sslutil,
+    util,
+)
 
 class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
     def __init__(self, ui):
@@ -35,7 +49,7 @@ class passwordmgr(urllib2.HTTPPasswordMgrWithDefaultRealm):
             u = util.url(authuri)
             u.query = None
             if not self.ui.interactive():
-                raise util.Abort(_('http authorization required for %s') %
+                raise error.Abort(_('http authorization required for %s') %
                                  util.hidepassword(str(u)))
 
             self.ui.write(_("http authorization required for %s\n") %
@@ -405,17 +419,8 @@ class httpdigestauthhandler(urllib2.HTTPDigestAuthHandler):
         if req is not self.retried_req:
             self.retried_req = req
             self.retried = 0
-        # In python < 2.5 AbstractDigestAuthHandler raises a ValueError if
-        # it doesn't know about the auth type requested. This can happen if
-        # somebody is using BasicAuth and types a bad password.
-        try:
-            return urllib2.HTTPDigestAuthHandler.http_error_auth_reqed(
-                        self, auth_header, host, req, headers)
-        except ValueError as inst:
-            arg = inst.args[0]
-            if arg.startswith("AbstractDigestAuthHandler doesn't know "):
-                return
-            raise
+        return urllib2.HTTPDigestAuthHandler.http_error_auth_reqed(
+                    self, auth_header, host, req, headers)
 
 class httpbasicauthhandler(urllib2.HTTPBasicAuthHandler):
     def __init__(self, *args, **kwargs):

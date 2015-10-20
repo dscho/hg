@@ -65,10 +65,9 @@ hg merge -r 2
 override $PATH to ensure hgmerge not visible; use $PYTHON in case we're
 running from a devel copy, not a temp installation
 
-  $ PATH="$BINDIR" $PYTHON "$BINDIR"/hg merge -r 2
+  $ PATH="$BINDIR:/usr/sbin" $PYTHON "$BINDIR"/hg merge -r 2
   merging f
-  warning: conflicts during merge.
-  merging f incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging f! (edit, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]
@@ -111,10 +110,9 @@ unexecutable file in $PATH shouldn't be found:
 
   $ echo "echo fail" > false
   $ hg up -qC 1
-  $ PATH="`pwd`:$BINDIR" $PYTHON "$BINDIR"/hg merge -r 2
+  $ PATH="`pwd`:$BINDIR:/usr/sbin" $PYTHON "$BINDIR"/hg merge -r 2
   merging f
-  warning: conflicts during merge.
-  merging f incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging f! (edit, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]
@@ -126,10 +124,9 @@ executable directory in $PATH shouldn't be found:
 
   $ mkdir false
   $ hg up -qC 1
-  $ PATH="`pwd`:$BINDIR" $PYTHON "$BINDIR"/hg merge -r 2
+  $ PATH="`pwd`:$BINDIR:/usr/sbin" $PYTHON "$BINDIR"/hg merge -r 2
   merging f
-  warning: conflicts during merge.
-  merging f incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging f! (edit, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]
@@ -183,6 +180,26 @@ or false set higher on command line:
   true.priority=1
   # hg update -C 1
   $ hg merge -r 2 --config merge-tools.false.priority=117
+  merging f
+  merging f failed!
+  0 files updated, 0 files merged, 0 files removed, 1 files unresolved
+  use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
+  [1]
+  $ aftermerge
+  # cat f
+  revision 1
+  space
+  # hg stat
+  M f
+  ? f.orig
+
+or true set to disabled:
+  $ beforemerge
+  [merge-tools]
+  false.whatever=
+  true.priority=1
+  # hg update -C 1
+  $ hg merge -r 2 --config merge-tools.true.disabled=yes
   merging f
   merging f failed!
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
@@ -351,6 +368,7 @@ merge-patterns specifies executable not found in PATH and gets warning:
   $ hg merge -r 2 --config merge-patterns.f=true --config merge-tools.true.executable=nonexistentmergetool
   couldn't find merge tool true specified for f
   merging f
+  couldn't find merge tool true specified for f
   merging f failed!
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
@@ -374,6 +392,7 @@ merge-patterns specifies executable with bogus path and gets warning:
   $ hg merge -r 2 --config merge-patterns.f=true --config merge-tools.true.executable=/nonexistent/mergetool
   couldn't find merge tool true specified for f
   merging f
+  couldn't find merge tool true specified for f
   merging f failed!
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
@@ -1022,7 +1041,7 @@ internal merge cannot handle symlinks and shouldn't try:
   $ hg merge -r 2 --tool internal:merge
   merging f
   warning: internal :merge cannot merge symlinks for f
-  merging f incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging f! (edit, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]

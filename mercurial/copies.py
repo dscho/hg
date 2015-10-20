@@ -5,8 +5,14 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import util, pathutil
+from __future__ import absolute_import
+
 import heapq
+
+from . import (
+    pathutil,
+    util,
+)
 
 def _findlimit(repo, a, b):
     """
@@ -185,6 +191,9 @@ def _forwardcopies(a, b, match=None):
     return cm
 
 def _backwardrenames(a, b):
+    if a._repo.ui.configbool('experimental', 'disablecopytrace'):
+        return {}
+
     # Even though we're not taking copies into account, 1:n rename situations
     # can still exist (e.g. hg cp a b; hg mv a c). In those cases we
     # arbitrarily pick one of the renames.
@@ -228,6 +237,41 @@ def _computenonoverlap(repo, c1, c2, addedinm1, addedinm2):
                       % "\n   ".join(u2))
     return u1, u2
 
+def _makegetfctx(ctx):
+    """return a 'getfctx' function suitable for checkcopies usage
+
+    We have to re-setup the function building 'filectx' for each
+    'checkcopies' to ensure the linkrev adjustment is properly setup for
+    each. Linkrev adjustment is important to avoid bug in rename
+    detection. Moreover, having a proper '_ancestrycontext' setup ensures
+    the performance impact of this adjustment is kept limited. Without it,
+    each file could do a full dag traversal making the time complexity of
+    the operation explode (see issue4537).
+
+    This function exists here mostly to limit the impact on stable. Feel
+    free to refactor on default.
+    """
+    rev = ctx.rev()
+    repo = ctx._repo
+    ac = getattr(ctx, '_ancestrycontext', None)
+    if ac is None:
+        revs = [rev]
+        if rev is None:
+            revs = [p.rev() for p in ctx.parents()]
+        ac = repo.changelog.ancestors(revs, inclusive=True)
+        ctx._ancestrycontext = ac
+    def makectx(f, n):
+        if len(n) != 20:  # in a working context?
+            if ctx.rev() is None:
+                return ctx.filectx(f)
+            return repo[None][f]
+        fctx = repo.filectx(f, fileid=n)
+        # setup only needed for filectx not create from a changectx
+        fctx._ancestrycontext = ac
+        fctx._descendantrev = rev
+        return fctx
+    return util.lrucachefunc(makectx)
+
 def mergecopies(repo, c1, c2, ca):
     """
     Find moves and copies between context c1 and c2 that are relevant
@@ -258,71 +302,46 @@ def mergecopies(repo, c1, c2, ca):
     if c2.node() is None and c1.node() == repo.dirstate.p1():
         return repo.dirstate.copies(), {}, {}, {}
 
+    # Copy trace disabling is explicitly below the node == p1 logic above
+    # because the logic above is required for a simple copy to be kept across a
+    # rebase.
+    if repo.ui.configbool('experimental', 'disablecopytrace'):
+        return {}, {}, {}, {}
+
     limit = _findlimit(repo, c1.rev(), c2.rev())
     if limit is None:
         # no common ancestor, no copies
         return {}, {}, {}, {}
+    repo.ui.debug("  searching for copies back to rev %d\n" % limit)
+
     m1 = c1.manifest()
     m2 = c2.manifest()
     ma = ca.manifest()
 
-
-    def setupctx(ctx):
-        """return a 'makectx' function suitable for checkcopies usage from ctx
-
-        We have to re-setup the function building 'filectx' for each
-        'checkcopies' to ensure the linkrev adjustement is properly setup for
-        each. Linkrev adjustment is important to avoid bug in rename
-        detection. Moreover, having a proper '_ancestrycontext' setup ensures
-        the performance impact of this adjustment is kept limited. Without it,
-        each file could do a full dag traversal making the time complexity of
-        the operation explode (see issue4537).
-
-        This function exists here mostly to limit the impact on stable. Feel
-        free to refactor on default.
-        """
-        rev = ctx.rev()
-        ac = getattr(ctx, '_ancestrycontext', None)
-        if ac is None:
-            revs = [rev]
-            if rev is None:
-                revs = [p.rev() for p in ctx.parents()]
-            ac = ctx._repo.changelog.ancestors(revs, inclusive=True)
-            ctx._ancestrycontext = ac
-        def makectx(f, n):
-            if len(n) != 20:  # in a working context?
-                if c1.rev() is None:
-                    return c1.filectx(f)
-                return c2.filectx(f)
-            fctx = repo.filectx(f, fileid=n)
-            # setup only needed for filectx not create from a changectx
-            fctx._ancestrycontext = ac
-            fctx._descendantrev = rev
-            return fctx
-        return util.lrucachefunc(makectx)
-
-    copy = {}
-    movewithdir = {}
-    fullcopy = {}
+    copy1, copy2, = {}, {}
+    movewithdir1, movewithdir2 = {}, {}
+    fullcopy1, fullcopy2 = {}, {}
     diverge = {}
 
-    repo.ui.debug("  searching for copies back to rev %d\n" % limit)
-
+    # find interesting file sets from manifests
     addedinm1 = m1.filesnotin(ma)
     addedinm2 = m2.filesnotin(ma)
     u1, u2 = _computenonoverlap(repo, c1, c2, addedinm1, addedinm2)
+    bothnew = sorted(addedinm1 & addedinm2)
 
     for f in u1:
-        ctx = setupctx(c1)
-        checkcopies(ctx, f, m1, m2, ca, limit, diverge, copy, fullcopy)
+        checkcopies(c1, f, m1, m2, ca, limit, diverge, copy1, fullcopy1)
 
     for f in u2:
-        ctx = setupctx(c2)
-        checkcopies(ctx, f, m2, m1, ca, limit, diverge, copy, fullcopy)
+        checkcopies(c2, f, m2, m1, ca, limit, diverge, copy2, fullcopy2)
+
+    copy = dict(copy1.items() + copy2.items())
+    movewithdir = dict(movewithdir1.items() + movewithdir2.items())
+    fullcopy = dict(fullcopy1.items() + fullcopy2.items())
 
     renamedelete = {}
-    renamedelete2 = set()
-    diverge2 = set()
+    renamedeleteset = set()
+    divergeset = set()
     for of, fl in diverge.items():
         if len(fl) == 1 or of in c1 or of in c2:
             del diverge[of] # not actually divergent, or not a rename
@@ -330,20 +349,17 @@ def mergecopies(repo, c1, c2, ca):
                 # renamed on one side, deleted on the other side, but filter
                 # out files that have been renamed and then deleted
                 renamedelete[of] = [f for f in fl if f in c1 or f in c2]
-                renamedelete2.update(fl) # reverse map for below
+                renamedeleteset.update(fl) # reverse map for below
         else:
-            diverge2.update(fl) # reverse map for below
+            divergeset.update(fl) # reverse map for below
 
-    bothnew = sorted(addedinm1 & addedinm2)
     if bothnew:
         repo.ui.debug("  unmatched files new in both:\n   %s\n"
                       % "\n   ".join(bothnew))
     bothdiverge, _copy, _fullcopy = {}, {}, {}
     for f in bothnew:
-        ctx = setupctx(c1)
-        checkcopies(ctx, f, m1, m2, ca, limit, bothdiverge, _copy, _fullcopy)
-        ctx = setupctx(c2)
-        checkcopies(ctx, f, m2, m1, ca, limit, bothdiverge, _copy, _fullcopy)
+        checkcopies(c1, f, m1, m2, ca, limit, bothdiverge, _copy, _fullcopy)
+        checkcopies(c2, f, m2, m1, ca, limit, bothdiverge, _copy, _fullcopy)
     for of, fl in bothdiverge.items():
         if len(fl) == 2 and fl[0] == fl[1]:
             copy[fl[0]] = of # not actually divergent, just matching renames
@@ -355,13 +371,13 @@ def mergecopies(repo, c1, c2, ca):
             note = ""
             if f in copy:
                 note += "*"
-            if f in diverge2:
+            if f in divergeset:
                 note += "!"
-            if f in renamedelete2:
+            if f in renamedeleteset:
                 note += "%"
             repo.ui.debug("   src: '%s' -> dst: '%s' %s\n" % (fullcopy[f], f,
                                                               note))
-    del diverge2
+    del divergeset
 
     if not fullcopy:
         return copy, movewithdir, diverge, renamedelete
@@ -427,7 +443,7 @@ def checkcopies(ctx, f, m1, m2, ca, limit, diverge, copy, fullcopy):
     """
     check possible copies of f from m1 to m2
 
-    ctx = function accepting (filename, node) that returns a filectx.
+    ctx = starting context for f in m1
     f = the filename to check
     m1 = the source manifest
     m2 = the destination manifest
@@ -439,6 +455,7 @@ def checkcopies(ctx, f, m1, m2, ca, limit, diverge, copy, fullcopy):
     """
 
     ma = ca.manifest()
+    getfctx = _makegetfctx(ctx)
 
     def _related(f1, f2, limit):
         # Walk back to common ancestor to see if the two files originate
@@ -473,7 +490,7 @@ def checkcopies(ctx, f, m1, m2, ca, limit, diverge, copy, fullcopy):
 
     of = None
     seen = set([f])
-    for oc in ctx(f, m1[f]).ancestors():
+    for oc in getfctx(f, m1[f]).ancestors():
         ocr = oc.linkrev()
         of = oc.path()
         if of in seen:
@@ -488,7 +505,7 @@ def checkcopies(ctx, f, m1, m2, ca, limit, diverge, copy, fullcopy):
             continue # no match, keep looking
         if m2[of] == ma.get(of):
             break # no merge needed, quit early
-        c2 = ctx(of, m2[of])
+        c2 = getfctx(of, m2[of])
         cr = _related(oc, c2, ca.rev())
         if cr and (of == f or of == c2.path()): # non-divergent
             copy[f] = of
@@ -507,7 +524,12 @@ def duplicatecopies(repo, rev, fromrev, skiprev=None):
     copies between fromrev and rev.
     '''
     exclude = {}
-    if skiprev is not None:
+    if (skiprev is not None and
+        not repo.ui.configbool('experimental', 'disablecopytrace')):
+        # disablecopytrace skips this line, but not the entire function because
+        # the line below is O(size of the repo) during a rebase, while the rest
+        # of the function is much faster (and is required for carrying copy
+        # metadata across the rebase anyway).
         exclude = pathcopies(repo[fromrev], repo[skiprev])
     for dst, src in pathcopies(repo[fromrev], repo[rev]).iteritems():
         # copies.pathcopies returns backward renames, so dst might not

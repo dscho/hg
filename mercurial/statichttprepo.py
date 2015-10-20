@@ -7,10 +7,26 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-import changelog, byterange, url, error, namespaces
-import localrepo, manifest, util, scmutil, store
-import urllib, urllib2, errno, os
+from __future__ import absolute_import
+
+import errno
+import os
+import urllib
+import urllib2
+
+from .i18n import _
+from . import (
+    byterange,
+    changelog,
+    error,
+    localrepo,
+    manifest,
+    namespaces,
+    scmutil,
+    store,
+    url,
+    util,
+)
 
 class httprangereader(object):
     def __init__(self, url, opener):
@@ -155,9 +171,9 @@ class statichttprepository(localrepo.localrepository):
         return statichttppeer(self)
 
     def lock(self, wait=True):
-        raise util.Abort(_('cannot lock static-http repository'))
+        raise error.Abort(_('cannot lock static-http repository'))
 
 def instance(ui, path, create):
     if create:
-        raise util.Abort(_('cannot create new static-http repository'))
+        raise error.Abort(_('cannot create new static-http repository'))
     return statichttprepository(ui, path[7:])

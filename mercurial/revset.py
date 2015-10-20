@@ -5,16 +5,26 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import re
-import parser, util, error, hbisect, phases
-import node
+from __future__ import absolute_import
+
 import heapq
-import match as matchmod
-from i18n import _
-import encoding
-import obsolete as obsmod
-import pathutil
-import repoview
+import re
+
+from .i18n import _
+from . import (
+    destutil,
+    encoding,
+    error,
+    hbisect,
+    match as matchmod,
+    node,
+    obsolete as obsmod,
+    parser,
+    pathutil,
+    phases,
+    repoview,
+    util,
+)
 
 def _revancestors(repo, revs, followfirst):
     """Like revlog.ancestors(), but supports followfirst."""
@@ -78,19 +88,17 @@ def _revdescendants(repo, revs, followfirst):
 
     return generatorset(iterate(), iterasc=True)
 
-def _revsbetween(repo, roots, heads):
-    """Return all paths between roots and heads, inclusive of both endpoint
-    sets."""
+def _reachablerootspure(repo, minroot, roots, heads, includepath):
+    """return (heads(::<roots> and ::<heads>))
+
+    If includepath is True, return (<roots>::<heads>)."""
     if not roots:
-        return baseset()
+        return []
     parentrevs = repo.changelog.parentrevs
+    roots = set(roots)
     visit = list(heads)
     reachable = set()
     seen = {}
-    # XXX this should be 'parentset.min()' assuming 'parentset' is a smartset
-    # (and if it is not, it should.)
-    minroot = min(roots)
-    roots = set(roots)
     # prefetch all the things! (because python is slow)
     reached = reachable.add
     dovisit = visit.append
@@ -101,6 +109,8 @@ def _revsbetween(repo, roots, heads):
         rev = nextvisit()
         if rev in roots:
             reached(rev)
+            if not includepath:
+                continue
         parents = parentrevs(rev)
         seen[rev] = parents
         for parent in parents:
@@ -108,11 +118,30 @@ def _revsbetween(repo, roots, heads):
                 dovisit(parent)
     if not reachable:
         return baseset()
+    if not includepath:
+        return reachable
     for rev in sorted(seen):
         for parent in seen[rev]:
             if parent in reachable:
                 reached(rev)
-    return baseset(sorted(reachable))
+    return reachable
+
+def reachableroots(repo, roots, heads, includepath=False):
+    """return (heads(::<roots> and ::<heads>))
+
+    If includepath is True, return (<roots>::<heads>)."""
+    if not roots:
+        return baseset()
+    minroot = roots.min()
+    roots = list(roots)
+    heads = list(heads)
+    try:
+        revs = repo.changelog.reachableroots(minroot, heads, roots, includepath)
+    except AttributeError:
+        revs = _reachablerootspure(repo, minroot, roots, heads, includepath)
+    revs = baseset(revs)
+    revs.sort()
+    return revs
 
 elements = {
     # token-type: binding-strength, primary, prefix, infix, suffix
@@ -178,6 +207,21 @@ def tokenize(program, lookup=None, syminitletters=None, symletters=None):
     if symletters is None:
         symletters = _symletters
 
+    if program and lookup:
+        # attempt to parse old-style ranges first to deal with
+        # things like old-tag which contain query metacharacters
+        parts = program.split(':', 1)
+        if all(lookup(sym) for sym in parts if sym):
+            if parts[0]:
+                yield ('symbol', parts[0], 0)
+            if len(parts) > 1:
+                s = len(parts[0])
+                yield (':', None, s)
+                if parts[1]:
+                    yield ('symbol', parts[1], s + 1)
+            yield ('end', None, len(program))
+            return
+
     pos, l = 0, len(program)
     while pos < l:
         c = program[pos]
@@ -201,7 +245,7 @@ def tokenize(program, lookup=None, syminitletters=None, symletters=None):
                 c = program[pos]
                 decode = lambda x: x
             else:
-                decode = lambda x: x.decode('string-escape')
+                decode = parser.unescapestr
             pos += 1
             s = pos
             while pos < l: # find closing quote
@@ -382,7 +426,8 @@ def rangeset(repo, subset, x, y):
 
 def dagrange(repo, subset, x, y):
     r = fullreposet(repo)
-    xs = _revsbetween(repo, getset(repo, r, x), getset(repo, r, y))
+    xs = reachableroots(repo, getset(repo, r, x), getset(repo, r, y),
+                         includepath=True)
     # XXX We should combine with subset first: 'subset & baseset(...)'. This is
     # necessary to ensure we preserve the order in subset.
     return xs & subset
@@ -391,8 +436,13 @@ def andset(repo, subset, x, y):
     return getset(repo, getset(repo, subset, x), y)
 
 def orset(repo, subset, *xs):
-    rs = [getset(repo, subset, x) for x in xs]
-    return _combinesets(rs)
+    assert xs
+    if len(xs) == 1:
+        return getset(repo, subset, xs[0])
+    p = len(xs) // 2
+    a = orset(repo, subset, *xs[:p])
+    b = orset(repo, subset, *xs[p:])
+    return a + b
 
 def notset(repo, subset, x):
     return subset - getset(repo, subset, x)
@@ -413,6 +463,16 @@ def func(repo, subset, a, b):
     raise error.UnknownIdentifier(a[1], syms)
 
 # functions
+
+def _destupdate(repo, subset, x):
+    # experimental revset for update destination
+    args = getargsdict(x, 'limit', 'clean check')
+    return subset & baseset([destutil.destupdate(repo, **args)[0]])
+
+def _destmerge(repo, subset, x):
+    # experimental revset for merge destination
+    getargs(x, 0, 0, _("_mergedefaultdest takes no arguments"))
+    return subset & baseset([destutil.destmerge(repo)])
 
 def adds(repo, subset, x):
     """``adds(pattern)``
@@ -531,13 +591,13 @@ def bookmark(repo, subset, x):
         bm = getstring(args[0],
                        # i18n: "bookmark" is a keyword
                        _('the argument to bookmark must be a string'))
-        kind, pattern, matcher = _stringmatcher(bm)
+        kind, pattern, matcher = util.stringmatcher(bm)
         bms = set()
         if kind == 'literal':
             bmrev = repo._bookmarks.get(pattern, None)
             if not bmrev:
                 raise error.RepoLookupError(_("bookmark '%s' does not exist")
-                                            % bm)
+                                            % pattern)
             bms.add(repo[bmrev].rev())
         else:
             matchrevs = set()
@@ -572,12 +632,15 @@ def branch(repo, subset, x):
         # not a string, but another revspec, e.g. tip()
         pass
     else:
-        kind, pattern, matcher = _stringmatcher(b)
+        kind, pattern, matcher = util.stringmatcher(b)
         if kind == 'literal':
             # note: falls through to the revspec case if no branch with
-            # this name exists
+            # this name exists and pattern kind is not specified explicitly
             if pattern in repo.branchmap():
                 return subset.filter(lambda r: matcher(getbi(r)[0]))
+            if b.startswith('literal:'):
+                raise error.RepoLookupError(_("branch '%s' does not exist")
+                                            % pattern)
         else:
             return subset.filter(lambda r: matcher(getbi(r)[0]))
 
@@ -608,7 +671,7 @@ def bundle(repo, subset, x):
     try:
         bundlerevs = repo.changelog.bundlerevs
     except AttributeError:
-        raise util.Abort(_("no bundle provided - specify with -R"))
+        raise error.Abort(_("no bundle provided - specify with -R"))
     return subset & bundlerevs
 
 def checkstatus(repo, subset, pat, field):
@@ -860,7 +923,7 @@ def extra(repo, subset, x):
         # i18n: "extra" is a keyword
         value = getstring(args['value'], _('second argument to extra must be '
                                            'a string'))
-        kind, value, matcher = _stringmatcher(value)
+        kind, value, matcher = util.stringmatcher(value)
 
     def _matchvalue(r):
         extra = repo[r].extra()
@@ -990,34 +1053,37 @@ def first(repo, subset, x):
     return limit(repo, subset, x)
 
 def _follow(repo, subset, x, name, followfirst=False):
-    l = getargs(x, 0, 1, _("%s takes no arguments or a filename") % name)
+    l = getargs(x, 0, 1, _("%s takes no arguments or a pattern") % name)
     c = repo['.']
     if l:
-        x = getstring(l[0], _("%s expected a filename") % name)
-        if x in c:
-            cx = c[x]
-            s = set(ctx.rev() for ctx in cx.ancestors(followfirst=followfirst))
-            # include the revision responsible for the most recent version
-            s.add(cx.introrev())
-        else:
-            return baseset()
+        x = getstring(l[0], _("%s expected a pattern") % name)
+        matcher = matchmod.match(repo.root, repo.getcwd(), [x],
+                                 ctx=repo[None], default='path')
+
+        s = set()
+        for fname in c:
+            if matcher(fname):
+                fctx = c[fname]
+                s = s.union(set(c.rev() for c in fctx.ancestors(followfirst)))
+                # include the revision responsible for the most recent version
+                s.add(fctx.introrev())
     else:
         s = _revancestors(repo, baseset([c.rev()]), followfirst)
 
     return subset & s
 
 def follow(repo, subset, x):
-    """``follow([file])``
+    """``follow([pattern])``
     An alias for ``::.`` (ancestors of the working directory's first parent).
-    If a filename is specified, the history of the given file is followed,
-    including copies.
+    If pattern is specified, the histories of files matching given
+    pattern is followed, including copies.
     """
     return _follow(repo, subset, x, 'follow')
 
 def _followfirst(repo, subset, x):
-    # ``followfirst([file])``
-    # Like ``follow([file])`` but follows only the first parent of
-    # every revision or file revision.
+    # ``followfirst([pattern])``
+    # Like ``follow([pattern])`` but follows only the first parent of
+    # every revisions or files revisions.
     return _follow(repo, subset, x, '_followfirst', followfirst=True)
 
 def getall(repo, subset, x):
@@ -1168,28 +1234,38 @@ def keyword(repo, subset, x):
     return subset.filter(matches)
 
 def limit(repo, subset, x):
-    """``limit(set, [n])``
-    First n members of set, defaulting to 1.
+    """``limit(set[, n[, offset]])``
+    First n members of set, defaulting to 1, starting from offset.
     """
-    # i18n: "limit" is a keyword
-    l = getargs(x, 1, 2, _("limit requires one or two arguments"))
+    args = getargsdict(x, 'limit', 'set n offset')
+    if 'set' not in args:
+        # i18n: "limit" is a keyword
+        raise error.ParseError(_("limit requires one to three arguments"))
     try:
-        lim = 1
-        if len(l) == 2:
+        lim, ofs = 1, 0
+        if 'n' in args:
             # i18n: "limit" is a keyword
-            lim = int(getstring(l[1], _("limit requires a number")))
+            lim = int(getstring(args['n'], _("limit requires a number")))
+        if 'offset' in args:
+            # i18n: "limit" is a keyword
+            ofs = int(getstring(args['offset'], _("limit requires a number")))
+        if ofs < 0:
+            raise error.ParseError(_("negative offset"))
     except (TypeError, ValueError):
         # i18n: "limit" is a keyword
         raise error.ParseError(_("limit expects a number"))
-    ss = subset
-    os = getset(repo, fullreposet(repo), l[0])
+    os = getset(repo, fullreposet(repo), args['set'])
     result = []
     it = iter(os)
+    for x in xrange(ofs):
+        y = next(it, None)
+        if y is None:
+            break
     for x in xrange(lim):
         y = next(it, None)
         if y is None:
             break
-        elif y in ss:
+        elif y in subset:
             result.append(y)
     return baseset(result)
 
@@ -1207,7 +1283,6 @@ def last(repo, subset, x):
     except (TypeError, ValueError):
         # i18n: "last" is a keyword
         raise error.ParseError(_("last expects a number"))
-    ss = subset
     os = getset(repo, fullreposet(repo), l[0])
     os.reverse()
     result = []
@@ -1216,7 +1291,7 @@ def last(repo, subset, x):
         y = next(it, None)
         if y is None:
             break
-        elif y in ss:
+        elif y in subset:
             result.append(y)
     return baseset(result)
 
@@ -1225,10 +1300,14 @@ def maxrev(repo, subset, x):
     Changeset with highest revision number in set.
     """
     os = getset(repo, fullreposet(repo), x)
-    if os:
+    try:
         m = os.max()
         if m in subset:
             return baseset([m])
+    except ValueError:
+        # os.max() throws a ValueError when the collection is empty.
+        # Same as python's max().
+        pass
     return baseset()
 
 def merge(repo, subset, x):
@@ -1264,10 +1343,14 @@ def minrev(repo, subset, x):
     Changeset with lowest revision number in set.
     """
     os = getset(repo, fullreposet(repo), x)
-    if os:
+    try:
         m = os.min()
         if m in subset:
             return baseset([m])
+    except ValueError:
+        # os.min() throws a ValueError when the collection is empty.
+        # Same as python's min().
+        pass
     return baseset()
 
 def modifies(repo, subset, x):
@@ -1296,7 +1379,7 @@ def named(repo, subset, x):
     ns = getstring(args[0],
                    # i18n: "named" is a keyword
                    _('the argument to named must be a string'))
-    kind, pattern, matcher = _stringmatcher(ns)
+    kind, pattern, matcher = util.stringmatcher(ns)
     namespaces = set()
     if kind == 'literal':
         if pattern not in repo.names:
@@ -1415,8 +1498,10 @@ def outgoing(repo, subset, x):
     default push location.
     """
     # Avoid cycles.
-    import discovery
-    import hg
+    from . import (
+        discovery,
+        hg,
+    )
     # i18n: "outgoing" is a keyword
     l = getargs(x, 0, 1, _("outgoing takes one or no arguments"))
     # i18n: "outgoing" is a keyword
@@ -1597,7 +1682,7 @@ def remote(repo, subset, x):
     synonym for the current local branch.
     """
 
-    import hg # avoid start-up nasties
+    from . import hg # avoid start-up nasties
     # i18n: "remote" is a keyword
     l = getargs(x, 0, 2, _("remote takes one, two or no arguments"))
 
@@ -1862,7 +1947,7 @@ def subrepo(repo, subset, x):
     m = matchmod.exact(repo.root, repo.root, ['.hgsubstate'])
 
     def submatches(names):
-        k, p, m = _stringmatcher(pat)
+        k, p, m = util.stringmatcher(pat)
         for name in names:
             if m(name):
                 yield name
@@ -1892,47 +1977,8 @@ def subrepo(repo, subset, x):
 
     return subset.filter(matches)
 
-def _stringmatcher(pattern):
-    """
-    accepts a string, possibly starting with 're:' or 'literal:' prefix.
-    returns the matcher name, pattern, and matcher function.
-    missing or unknown prefixes are treated as literal matches.
-
-    helper for tests:
-    >>> def test(pattern, *tests):
-    ...     kind, pattern, matcher = _stringmatcher(pattern)
-    ...     return (kind, pattern, [bool(matcher(t)) for t in tests])
-
-    exact matching (no prefix):
-    >>> test('abcdefg', 'abc', 'def', 'abcdefg')
-    ('literal', 'abcdefg', [False, False, True])
-
-    regex matching ('re:' prefix)
-    >>> test('re:a.+b', 'nomatch', 'fooadef', 'fooadefbar')
-    ('re', 'a.+b', [False, False, True])
-
-    force exact matches ('literal:' prefix)
-    >>> test('literal:re:foobar', 'foobar', 're:foobar')
-    ('literal', 're:foobar', [False, True])
-
-    unknown prefixes are ignored and treated as literals
-    >>> test('foo:bar', 'foo', 'bar', 'foo:bar')
-    ('literal', 'foo:bar', [False, False, True])
-    """
-    if pattern.startswith('re:'):
-        pattern = pattern[3:]
-        try:
-            regex = re.compile(pattern)
-        except re.error as e:
-            raise error.ParseError(_('invalid regular expression: %s')
-                                   % e)
-        return 're', pattern, regex.search
-    elif pattern.startswith('literal:'):
-        pattern = pattern[8:]
-    return 'literal', pattern, pattern.__eq__
-
 def _substringmatcher(pattern):
-    kind, pattern, matcher = _stringmatcher(pattern)
+    kind, pattern, matcher = util.stringmatcher(pattern)
     if kind == 'literal':
         matcher = lambda s: pattern in s
     return kind, pattern, matcher
@@ -1952,7 +1998,7 @@ def tag(repo, subset, x):
         pattern = getstring(args[0],
                             # i18n: "tag" is a keyword
                             _('the argument to tag must be a string'))
-        kind, pattern, matcher = _stringmatcher(pattern)
+        kind, pattern, matcher = util.stringmatcher(pattern)
         if kind == 'literal':
             # avoid resolving all tags
             tn = repo._tagscache.tags.get(pattern, None)
@@ -2013,14 +2059,17 @@ def _list(repo, subset, x):
             r = int(t)
             if str(r) != t or r not in cl:
                 raise ValueError
+            revs = [r]
         except ValueError:
-            r = repo[t].rev()
-        if r in seen:
-            continue
-        if (r in subset
-            or r == node.nullrev and isinstance(subset, fullreposet)):
-            ls.append(r)
-        seen.add(r)
+            revs = stringset(repo, subset, t)
+
+        for r in revs:
+            if r in seen:
+                continue
+            if (r in subset
+                or r == node.nullrev and isinstance(subset, fullreposet)):
+                ls.append(r)
+            seen.add(r)
     return baseset(ls)
 
 # for internal use
@@ -2043,6 +2092,8 @@ def _hexlist(repo, subset, x):
     return baseset([r for r in ls if r in s])
 
 symbols = {
+    "_destupdate": _destupdate,
+    "_destmerge": _destmerge,
     "adds": adds,
     "all": getall,
     "ancestor": ancestor,
@@ -2578,7 +2629,7 @@ def _expandaliases(aliases, tree, expanding, cache):
     alias = _getalias(aliases, tree)
     if alias is not None:
         if alias.error:
-            raise util.Abort(alias.error)
+            raise error.Abort(alias.error)
         if alias in expanding:
             raise error.ParseError(_('infinite expansion of revset alias "%s" '
                                      'detected') % alias.name)
@@ -2592,7 +2643,7 @@ def _expandaliases(aliases, tree, expanding, cache):
             l = getlist(tree[2])
             if len(l) != len(alias.args):
                 raise error.ParseError(
-                    _('invalid number of arguments: %s') % len(l))
+                    _('invalid number of arguments: %d') % len(l))
             l = [_expandaliases(aliases, a, [], cache) for a in l]
             result = _expandargs(result, dict(zip(alias.args, l)))
     else:
@@ -2654,6 +2705,27 @@ def match(ui, spec, repo=None):
     if repo:
         lookup = repo.__contains__
     tree = parse(spec, lookup)
+    return _makematcher(ui, tree, repo)
+
+def matchany(ui, specs, repo=None):
+    """Create a matcher that will include any revisions matching one of the
+    given specs"""
+    if not specs:
+        def mfunc(repo, subset=None):
+            return baseset()
+        return mfunc
+    if not all(specs):
+        raise error.ParseError(_("empty query"))
+    lookup = None
+    if repo:
+        lookup = repo.__contains__
+    if len(specs) == 1:
+        tree = parse(specs[0], lookup)
+    else:
+        tree = ('or',) + tuple(parse(s, lookup) for s in specs)
+    return _makematcher(ui, tree, repo)
+
+def _makematcher(ui, tree, repo):
     if ui:
         tree = findaliases(ui, tree, showwarning=ui.warn)
     tree = foldconcat(tree)
@@ -2756,7 +2828,7 @@ def formatspec(expr, *args):
                 ret += listexp(list(args[arg]), d)
                 arg += 1
             else:
-                raise util.Abort('unexpected revspec format character %s' % d)
+                raise error.Abort('unexpected revspec format character %s' % d)
         else:
             ret += c
         pos += 1
@@ -2813,6 +2885,7 @@ class abstractsmartset(object):
         """True if the set will iterate in descending order"""
         raise NotImplementedError()
 
+    @util.cachefunc
     def min(self):
         """return the minimum element in the set"""
         if self.fastasc is not None:
@@ -2821,6 +2894,7 @@ class abstractsmartset(object):
             raise ValueError('arg is an empty sequence')
         return min(self)
 
+    @util.cachefunc
     def max(self):
         """return the maximum element in the set"""
         if self.fastdesc is not None:
@@ -2896,6 +2970,8 @@ class baseset(abstractsmartset):
     """
     def __init__(self, data=()):
         if not isinstance(data, list):
+            if isinstance(data, set):
+                self._set = data
             data = list(data)
         self._list = data
         self._ascending = None
@@ -2995,14 +3071,9 @@ class filteredset(abstractsmartset):
         """
         self._subset = subset
         self._condition = condition
-        self._cache = {}
 
     def __contains__(self, x):
-        c = self._cache
-        if x not in c:
-            v = c[x] = x in self._subset and self._condition(x)
-            return v
-        return c[x]
+        return x in self._subset and self._condition(x)
 
     def __iter__(self):
         return self._iterfilter(self._subset)
@@ -3028,7 +3099,15 @@ class filteredset(abstractsmartset):
         return lambda: self._iterfilter(it())
 
     def __nonzero__(self):
-        for r in self:
+        fast = self.fastasc
+        if fast is None:
+            fast = self.fastdesc
+        if fast is not None:
+            it = fast()
+        else:
+            it = self
+
+        for r in it:
             return True
         return False
 
@@ -3072,20 +3151,6 @@ class filteredset(abstractsmartset):
 
     def __repr__(self):
         return '<%s %r>' % (type(self).__name__, self._subset)
-
-# this function will be removed, or merged to addset or orset, when
-# - scmutil.revrange() can be rewritten to not combine calculated smartsets
-# - or addset can handle more than two sets without balanced tree
-def _combinesets(subsets):
-    """Create balanced tree of addsets representing union of given sets"""
-    if not subsets:
-        return baseset()
-    if len(subsets) == 1:
-        return subsets[0]
-    p = len(subsets) // 2
-    xs = _combinesets(subsets[:p])
-    ys = _combinesets(subsets[p:])
-    return addset(xs, ys)
 
 def _iterordered(ascending, iter1, iter2):
     """produce an ordered iteration from two iterators with the same order

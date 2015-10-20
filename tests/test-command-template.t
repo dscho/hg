@@ -343,6 +343,11 @@ Compact style works:
 
 Test xml styles:
 
+  $ hg log --style xml -r 'not all()'
+  <?xml version="1.0"?>
+  <log>
+  </log>
+
   $ hg log --style xml
   <?xml version="1.0"?>
   <log>
@@ -2495,10 +2500,14 @@ Behind the scenes, this will throw AttributeError
   abort: template filter 'escape' is not compatible with keyword 'date'
   [255]
 
+  $ hg log -l 3 --template 'line: {extras|localdate}\n'
+  hg: parse error: localdate expects a date information
+  [255]
+
 Behind the scenes, this will throw ValueError
 
   $ hg tip --template '{author|email|date}\n'
-  abort: template filter 'datefilter' is not compatible with keyword 'author'
+  hg: parse error: date expects a date information
   [255]
 
 Error in nested template:
@@ -2681,6 +2690,32 @@ Merged tag overrides:
   1: t1+0
   0: null+1
 
+  $ hg log --template "{rev}: {latesttag % '{tag}+{distance},{changes} '}\n"
+  10: t5+5,5 
+  9: t5+4,4 
+  8: t5+3,3 
+  7: t5+2,2 
+  6: t5+1,1 
+  5: t5+0,0 
+  4: at3+1,1 t3+1,1 
+  3: at3+0,0 t3+0,0 
+  2: t2+0,0 
+  1: t1+0,0 
+  0: null+1,1 
+
+  $ hg log --template "{rev}: {latesttag('re:^t[13]$') % '{tag}, C: {changes}, D: {distance}'}\n"
+  10: t3, C: 8, D: 7
+  9: t3, C: 7, D: 6
+  8: t3, C: 6, D: 5
+  7: t3, C: 5, D: 4
+  6: t3, C: 4, D: 3
+  5: t3, C: 3, D: 2
+  4: t3, C: 1, D: 1
+  3: t3, C: 0, D: 0
+  2: t1, C: 1, D: 1
+  1: t1, C: 0, D: 0
+  0: null, C: 1, D: 1
+
   $ cd ..
 
 
@@ -2726,6 +2761,13 @@ Test the sub function of templating for expansion:
 
   $ hg log -R latesttag -r 10 --template '{sub("[0-9]", "x", "{rev}")}\n'
   xx
+
+  $ hg log -R latesttag -r 10 -T '{sub("[", "x", rev)}\n'
+  hg: parse error: sub got an invalid pattern: [
+  [255]
+  $ hg log -R latesttag -r 10 -T '{sub("[0-9]", r"\1", rev)}\n'
+  hg: parse error: sub got an invalid replacement: \1
+  [255]
 
 Test the strip function with chars specified:
 
@@ -2925,10 +2967,10 @@ escaped single quotes and errors:
   hg: parse error at 21: unterminated string
   [255]
   $ hg log -r 2 -T '{if(rev, \"\\"")}\n'
-  hg: parse error at 11: syntax error
+  hg: parse error: trailing \ in string
   [255]
   $ hg log -r 2 -T '{if(rev, r\"\\"")}\n'
-  hg: parse error at 12: syntax error
+  hg: parse error: trailing \ in string
   [255]
 
   $ cd ..
@@ -3105,6 +3147,25 @@ Test get function:
   hg: parse error: get() expects a dict as first argument
   [255]
 
+Test localdate(date, tz) function:
+
+  $ TZ=JST-09 hg log -r0 -T '{date|localdate|isodate}\n'
+  1970-01-01 09:00 +0900
+  $ TZ=JST-09 hg log -r0 -T '{localdate(date, "UTC")|isodate}\n'
+  1970-01-01 00:00 +0000
+  $ TZ=JST-09 hg log -r0 -T '{localdate(date, "+0200")|isodate}\n'
+  1970-01-01 02:00 +0200
+  $ TZ=JST-09 hg log -r0 -T '{localdate(date, "0")|isodate}\n'
+  1970-01-01 00:00 +0000
+  $ TZ=JST-09 hg log -r0 -T '{localdate(date, 0)|isodate}\n'
+  1970-01-01 00:00 +0000
+  $ hg log -r0 -T '{localdate(date, "invalid")|isodate}\n'
+  hg: parse error: localdate expects a timezone
+  [255]
+  $ hg log -r0 -T '{localdate(date, date)|isodate}\n'
+  hg: parse error: localdate expects a timezone
+  [255]
+
 Test shortest(node) function:
 
   $ echo b > b
@@ -3117,6 +3178,8 @@ Test shortest(node) function:
   e777603221
   bcc7ff960b
   f7769ec2ab
+  $ hg log --template '{node|shortest}\n' -l1
+  e777
 
 Test pad function
 
@@ -3196,6 +3259,23 @@ Test revset function
   
   $ hg log --template '{revset("TIP"|lower)}\n' -l1
   2
+
+ a list template is evaluated for each item of revset
+
+  $ hg log -T '{rev} p: {revset("p1(%s)", rev) % "{rev}:{node|short}"}\n'
+  2 p: 1:bcc7ff960b8e
+  1 p: 0:f7769ec2ab97
+  0 p: 
+
+ therefore, 'revcache' should be recreated for each rev
+
+  $ hg log -T '{rev} {file_adds}\np {revset("p1(%s)", rev) % "{file_adds}"}\n'
+  2 aa b
+  p 
+  1 
+  p a
+  0 a
+  p 
 
 Test active bookmark templating
 
@@ -3390,3 +3470,12 @@ Test with non-strings like dates
   $ hg log -T "{indent(date, '   ')}\n" -r 2:3 -R a
      1200000.00
      1300000.00
+
+Test broken string escapes:
+
+  $ hg log -T "bogus\\" -R a
+  hg: parse error: trailing \ in string
+  [255]
+  $ hg log -T "\\xy" -R a
+  hg: parse error: invalid \x escape
+  [255]

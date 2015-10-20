@@ -40,6 +40,12 @@ def normalize(form):
     return form
 
 class wsgirequest(object):
+    """Higher-level API for a WSGI request.
+
+    WSGI applications are invoked with 2 arguments. They are used to
+    instantiate instances of this class, which provides higher-level APIs
+    for obtaining request parameters, writing HTTP output, etc.
+    """
     def __init__(self, wsgienv, start_response):
         version = wsgienv['wsgi.version']
         if (version < (1, 0)) or (version >= (2, 0)):
@@ -94,7 +100,7 @@ class wsgirequest(object):
                     self.headers = [(k, v) for (k, v) in self.headers if
                                     k in ('Date', 'ETag', 'Expires',
                                           'Cache-Control', 'Vary')]
-                status = statusmessage(status.code, status.message)
+                status = statusmessage(status.code, str(status))
             elif status == 200:
                 status = '200 Script output follows'
             elif isinstance(status, int):

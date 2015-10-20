@@ -7,6 +7,7 @@ Test exchange of common information using bundle2
 
 enable obsolescence
 
+  $ cp $HGRCPATH $TESTTMP/hgrc.orig
   $ cat > $TESTTMP/bundle2-pushkey-hook.sh << EOF
   > echo pushkey: lock state after \"\$HG_NAMESPACE\"
   > hg debuglock
@@ -452,7 +453,7 @@ Setting up
   > used to test error handling in bundle2
   > """
   > 
-  > from mercurial import util
+  > from mercurial import error
   > from mercurial import bundle2
   > from mercurial import exchange
   > from mercurial import extensions
@@ -470,7 +471,7 @@ Setting up
   > 
   > @bundle2.parthandler("test:abort")
   > def handleabort(op, part):
-  >     raise util.Abort('Abandon ship!', hint="don't panic")
+  >     raise error.Abort('Abandon ship!', hint="don't panic")
   > 
   > def uisetup(ui):
   >     exchange.b2partsgenmapping['failpart'] = _pushbundle2failpart
@@ -897,3 +898,47 @@ Check abort from mandatory pushkey
   abort: Clown phase push failed
   [255]
 
+Test lazily acquiring the lock during unbundle
+  $ cp $TESTTMP/hgrc.orig $HGRCPATH
+  $ cat >> $HGRCPATH <<EOF
+  > [ui]
+  > ssh=python "$TESTDIR/dummyssh"
+  > EOF
+
+  $ cat >> $TESTTMP/locktester.py <<EOF
+  > import os
+  > from mercurial import extensions, bundle2, util
+  > def checklock(orig, repo, *args, **kwargs):
+  >     if repo.svfs.lexists("lock"):
+  >         raise util.Abort("Lock should not be taken")
+  >     return orig(repo, *args, **kwargs)
+  > def extsetup(ui):
+  >    extensions.wrapfunction(bundle2, 'processbundle', checklock)
+  > EOF
+
+  $ hg init lazylock
+  $ cat >> lazylock/.hg/hgrc <<EOF
+  > [extensions]
+  > locktester=$TESTTMP/locktester.py
+  > EOF
+
+  $ hg clone -q ssh://user@dummy/lazylock lazylockclient
+  $ cd lazylockclient
+  $ touch a && hg ci -Aqm a
+  $ hg push
+  pushing to ssh://user@dummy/lazylock
+  searching for changes
+  abort: Lock should not be taken
+  [255]
+
+  $ cat >> ../lazylock/.hg/hgrc <<EOF
+  > [experimental]
+  > bundle2lazylocking=True
+  > EOF
+  $ hg push
+  pushing to ssh://user@dummy/lazylock
+  searching for changes
+  remote: adding changesets
+  remote: adding manifests
+  remote: adding file changes
+  remote: added 1 changesets with 1 changes to 1 files

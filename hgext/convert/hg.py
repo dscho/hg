@@ -23,6 +23,7 @@ from mercurial.i18n import _
 from mercurial.node import bin, hex, nullid
 from mercurial import hg, util, context, bookmarks, error, scmutil, exchange
 from mercurial import phases
+from mercurial import merge as mergemod
 
 from common import NoRepo, commit, converter_source, converter_sink, mapfile
 
@@ -176,14 +177,58 @@ class mercurial_sink(converter_sink):
 
         return fp.getvalue()
 
+    def _calculatemergedfiles(self, source, p1ctx, p2ctx):
+        """Calculates the files from p2 that we need to pull in when merging p1
+        and p2, given that the merge is coming from the given source.
+
+        This prevents us from losing files that only exist in the target p2 and
+        that don't come from the source repo (like if you're merging multiple
+        repositories together).
+        """
+        anc = [p1ctx.ancestor(p2ctx)]
+        # Calculate what files are coming from p2
+        actions, diverge, rename = mergemod.calculateupdates(
+            self.repo, p1ctx, p2ctx, anc,
+            True,  # branchmerge
+            True,  # force
+            False, # partial
+            False, # acceptremote
+            False, # followcopies
+        )
+
+        for file, (action, info, msg) in actions.iteritems():
+            if source.targetfilebelongstosource(file):
+                # If the file belongs to the source repo, ignore the p2
+                # since it will be covered by the existing fileset.
+                continue
+
+            # If the file requires actual merging, abort. We don't have enough
+            # context to resolve merges correctly.
+            if action in ['m', 'dm', 'cd', 'dc']:
+                raise error.Abort(_("unable to convert merge commit "
+                    "since target parents do not merge cleanly (file "
+                    "%s, parents %s and %s)") % (file, p1ctx,
+                                                 p2ctx))
+            elif action == 'k':
+                # 'keep' means nothing changed from p1
+                continue
+            else:
+                # Any other change means we want to take the p2 version
+                yield file
+
     def putcommit(self, files, copies, parents, commit, source, revmap, full,
                   cleanp2):
         files = dict(files)
 
         def getfilectx(repo, memctx, f):
-            if p2ctx and f in cleanp2 and f not in copies:
+            if p2ctx and f in p2files and f not in copies:
                 self.ui.debug('reusing %s from p2\n' % f)
-                return p2ctx[f]
+                try:
+                    return p2ctx[f]
+                except error.ManifestLookupError:
+                    # If the file doesn't exist in p2, then we're syncing a
+                    # delete, so just return None.
+                    return None
             try:
                 v = files[f]
             except KeyError:
@@ -255,6 +300,7 @@ class mercurial_sink(converter_sink):
         while parents:
             p1 = p2
             p2 = parents.pop(0)
+            p1ctx = self.repo[p1]
             p2ctx = None
             if p2 != nullid:
                 p2ctx = self.repo[p2]
@@ -262,6 +308,13 @@ class mercurial_sink(converter_sink):
             if full:
                 fileset.update(self.repo[p1])
                 fileset.update(self.repo[p2])
+
+            if p2ctx:
+                p2files = set(cleanp2)
+                for file in self._calculatemergedfiles(source, p1ctx, p2ctx):
+                    p2files.add(file)
+                    fileset.add(file)
+
             ctx = context.memctx(self.repo, (p1, p2), text, fileset,
                                  getfilectx, commit.author, commit.date, extra)
 
@@ -370,7 +423,7 @@ class mercurial_sink(converter_sink):
 
     def hascommitforsplicemap(self, rev):
         if rev not in self.repo and self.clonebranches:
-            raise util.Abort(_('revision %s not found in destination '
+            raise error.Abort(_('revision %s not found in destination '
                                'repository (lookups with clonebranches=true '
                                'are not implemented)') % rev)
         return rev in self.repo
@@ -378,9 +431,6 @@ class mercurial_sink(converter_sink):
 class mercurial_source(converter_source):
     def __init__(self, ui, path, revs=None):
         converter_source.__init__(self, ui, path, revs)
-        if revs and len(revs) > 1:
-            raise util.Abort(_("mercurial source does not support specifying "
-                               "multiple revisions"))
         self.ignoreerrors = ui.configbool('convert', 'hg.ignoreerrors', False)
         self.ignored = set()
         self.saverev = ui.configbool('convert', 'hg.saverev', False)
@@ -405,7 +455,7 @@ class mercurial_source(converter_source):
                 try:
                     startnode = self.repo.lookup(startnode)
                 except error.RepoError:
-                    raise util.Abort(_('%s is not a valid start revision')
+                    raise error.Abort(_('%s is not a valid start revision')
                                      % startnode)
                 startrev = self.repo.changelog.rev(startnode)
                 children = {startnode: 1}
@@ -415,12 +465,12 @@ class mercurial_source(converter_source):
             else:
                 self.keep = util.always
             if revs:
-                self._heads = [self.repo[revs[0]].node()]
+                self._heads = [self.repo[r].node() for r in revs]
             else:
                 self._heads = self.repo.heads()
         else:
             if revs or startnode is not None:
-                raise util.Abort(_('hg.revs cannot be combined with '
+                raise error.Abort(_('hg.revs cannot be combined with '
                                    'hg.startrev or --rev'))
             nodes = set()
             parents = set()

@@ -13,22 +13,39 @@
 It depends on the Pygments syntax highlighting library:
 http://pygments.org/
 
-There is a single configuration option::
+There are the following configuration options::
 
   [web]
-  pygments_style = <style>
+  pygments_style = <style> (default: colorful)
+  highlightfiles = <fileset> (default: size('<5M'))
+  highlightonlymatchfilename = <bool> (default False)
 
-The default is 'colorful'.
+``highlightonlymatchfilename`` will only highlight files if their type could
+be identified by their filename. When this is not enabled (the default),
+Pygments will try very hard to identify the file type from content and any
+match (even matches with a low confidence score) will be used.
 """
 
 import highlight
 from mercurial.hgweb import webcommands, webutil, common
-from mercurial import extensions, encoding
+from mercurial import extensions, encoding, fileset
 # Note for extension authors: ONLY specify testedwith = 'internal' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
 # be specifying the version(s) of Mercurial they are tested with, or
 # leave the attribute unspecified.
 testedwith = 'internal'
+
+def pygmentize(web, field, fctx, tmpl):
+    style = web.config('web', 'pygments_style', 'colorful')
+    expr = web.config('web', 'highlightfiles', "size('<5M')")
+    filenameonly = web.configbool('web', 'highlightonlymatchfilename', False)
+
+    ctx = fctx.changectx()
+    tree = fileset.parse(expr)
+    mctx = fileset.matchctx(ctx, subset=[fctx.path()], status=None)
+    if fctx.path() in fileset.getset(mctx, tree):
+        highlight.pygmentize(field, fctx, style, tmpl,
+                guessfilenameonly=filenameonly)
 
 def filerevision_highlight(orig, web, req, tmpl, fctx):
     mt = ''.join(tmpl('mimetype', encoding=encoding.encoding))
@@ -40,16 +57,16 @@ def filerevision_highlight(orig, web, req, tmpl, fctx):
     # can't clash with the file's content-type here in case we
     # pygmentize a html file
     if 'html' in mt:
-        style = web.config('web', 'pygments_style', 'colorful')
-        highlight.pygmentize('fileline', fctx, style, tmpl)
+        pygmentize(web, 'fileline', fctx, tmpl)
+
     return orig(web, req, tmpl, fctx)
 
 def annotate_highlight(orig, web, req, tmpl):
     mt = ''.join(tmpl('mimetype', encoding=encoding.encoding))
     if 'html' in mt:
         fctx = webutil.filectx(web.repo, req)
-        style = web.config('web', 'pygments_style', 'colorful')
-        highlight.pygmentize('annotateline', fctx, style, tmpl)
+        pygmentize(web, 'annotateline', fctx, tmpl)
+
     return orig(web, req, tmpl)
 
 def generate_css(web, req, tmpl):

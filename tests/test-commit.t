@@ -117,7 +117,7 @@ Make sure we do not obscure unknown requires file entries (issue2649)
   $ echo fake >> .hg/requires
   $ hg commit -m bla
   abort: repository requires features unknown to this Mercurial: fake!
-  (see http://mercurial.selenic.com/wiki/MissingRequirement for more information)
+  (see https://mercurial-scm.org/wiki/MissingRequirement for more information)
   [255]
 
   $ cd ..
@@ -650,3 +650,30 @@ verify pathauditor blocks evil filepaths
   $ hg co --clean tip
   abort: path contains illegal component: HG8B6C~2/hgrc (glob)
   [255]
+
+# test that an unmodified commit template message aborts
+
+  $ hg init unmodified_commit_template
+  $ cd unmodified_commit_template
+  $ echo foo > foo
+  $ hg add foo
+  $ hg commit -m "foo"
+  $ cat >> .hg/hgrc <<EOF
+  > [committemplate]
+  > changeset.commit = HI THIS IS NOT STRIPPED
+  >     HG: this is customized commit template
+  >     HG: {extramsg}
+  >     {if(activebookmark,
+  >    "HG: bookmark '{activebookmark}' is activated\n",
+  >    "HG: no bookmark is activated\n")}{subrepos %
+  >    "HG: subrepo '{subrepo}' is changed\n"}
+  > EOF
+  $ cat > $TESTTMP/notouching.sh <<EOF
+  > true
+  > EOF
+  $ echo foo2 > foo2
+  $ hg add foo2
+  $ HGEDITOR="sh $TESTTMP/notouching.sh" hg commit
+  abort: commit message unchanged
+  [255]
+  $ cd ..

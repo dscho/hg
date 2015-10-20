@@ -40,8 +40,8 @@
   removing a
    b2: remote created -> g
   getting b2
-   b: remote moved from a -> m
-  picked tool 'internal:merge' for b (binary False symlink False)
+   b: remote moved from a -> m (premerge)
+  picked tool ':merge' for b (binary False symlink False)
   merging a and b to b
   my b@044f8520aeeb+ other b@85c198ef2f6c ancestor a@af1939970a1c
    premerge successful

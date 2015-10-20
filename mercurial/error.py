@@ -11,6 +11,8 @@ This allows us to catch exceptions at higher levels without forcing
 imports.
 """
 
+from __future__ import absolute_import
+
 # Do not import anything here, please
 
 class HintException(Exception):
@@ -32,7 +34,7 @@ class LookupError(RevlogError, KeyError):
         # Python 2.6+ complain about the 'message' property being deprecated
         self.lookupmessage = message
         if isinstance(name, str) and len(name) == 20:
-            from node import short
+            from .node import short
             name = short(name)
         RevlogError.__init__(self, '%s@%s: %s' % (index, name, message))
 
@@ -53,16 +55,22 @@ class InterventionRequired(Exception):
 
 class Abort(HintException):
     """Raised if a command needs to print an error and exit."""
-    pass
+
+class HookLoadError(Abort):
+    """raised when loading a hook fails, aborting an operation
+
+    Exists to allow more specialized catching."""
 
 class HookAbort(Abort):
     """raised when a validation hook fails, aborting an operation
 
     Exists to allow more specialized catching."""
-    pass
 
 class ConfigError(Abort):
     """Exception raised when parsing config files"""
+
+class UpdateAbort(Abort):
+    """Raised when an update is aborted for destination issue"""
 
 class OutOfBandError(Exception):
     """Exception raised when a remote repo reports failure"""
@@ -78,7 +86,7 @@ class UnknownIdentifier(ParseError):
     """Exception raised when a {rev,file}set references an unknown identifier"""
 
     def __init__(self, function, symbols):
-        from i18n import _
+        from .i18n import _
         ParseError.__init__(self, _("unknown identifier: %s") % function)
         self.function = function
         self.symbols = symbols
@@ -97,7 +105,6 @@ class CapabilityError(RepoError):
 
 class RequirementError(RepoError):
     """Exception raised if .hg/requires has an unknown entry."""
-    pass
 
 class LockError(IOError):
     def __init__(self, errno, strerror, filename, desc):
@@ -110,6 +117,10 @@ class LockHeld(LockError):
         self.locker = locker
 
 class LockUnavailable(LockError):
+    pass
+
+# LockError is for errors while acquiring the lock -- this is unrelated
+class LockInheritanceContractViolation(RuntimeError):
     pass
 
 class ResponseError(Exception):
@@ -135,21 +146,31 @@ class PushRaced(RuntimeError):
 class BundleValueError(ValueError):
     """error raised when bundle2 cannot be processed"""
 
-class UnsupportedPartError(BundleValueError):
-    def __init__(self, parttype=None, params=()):
+class BundleUnknownFeatureError(BundleValueError):
+    def __init__(self, parttype=None, params=(), values=()):
         self.parttype = parttype
         self.params = params
+        self.values = values
         if self.parttype is None:
             msg = 'Stream Parameter'
         else:
             msg = parttype
-        if self.params:
-            msg = '%s - %s' % (msg, ', '.join(self.params))
+        entries = self.params
+        if self.params and self.values:
+            assert len(self.params) == len(self.values)
+            entries = []
+            for idx, par in enumerate(self.params):
+                val = self.values[idx]
+                if val is None:
+                    entries.append(val)
+                else:
+                    entries.append("%s=%r" % (par, val))
+        if entries:
+            msg = '%s - %s' % (msg, ', '.join(entries))
         ValueError.__init__(self, msg)
 
 class ReadOnlyPartError(RuntimeError):
     """error raised when code tries to alter a part being generated"""
-    pass
 
 class PushkeyFailed(Abort):
     """error raised when a pushkey part failed to update a value"""
@@ -173,7 +194,7 @@ class CensoredNodeError(RevlogError):
     """
 
     def __init__(self, filename, node, tombstone):
-        from node import short
+        from .node import short
         RevlogError.__init__(self, '%s:%s' % (filename, short(node)))
         self.tombstone = tombstone
 
@@ -184,3 +205,12 @@ class CensoredBaseError(RevlogError):
     operation which replaces the entire base with new content. This ensures
     the delta may be applied by clones which have not censored the base.
     """
+
+class InvalidBundleSpecification(Exception):
+    """error raised when a bundle specification is invalid.
+
+    This is used for syntax errors as opposed to support errors.
+    """
+
+class UnsupportedBundleSpecification(Exception):
+    """error raised when a bundle specification is not supported."""

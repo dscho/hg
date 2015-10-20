@@ -2,6 +2,13 @@ Environment setup for MQ
 
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "mq=" >> $HGRCPATH
+  $ cat >> $HGRCPATH <<EOF
+  > [defaults]
+  > # explicit date to commit with fixed hashid
+  > qnew = -d "0 0"
+  > qrefresh = -d "0 0"
+  > qfold = -d "0 0"
+  > EOF
   $ hg init
   $ hg qinit
 
@@ -108,11 +115,11 @@ Test saving last-message.txt:
   > EOF
 
   $ cat > $TESTTMP/commitfailure.py <<EOF
-  > from mercurial import util
+  > from mercurial import error
   > def reposetup(ui, repo):
   >     class commitfailure(repo.__class__):
   >         def commit(self, *args, **kwargs):
-  >             raise util.Abort('emulating unexpected abort')
+  >             raise error.Abort('emulating unexpected abort')
   >     repo.__class__ = commitfailure
   > EOF
 
@@ -132,7 +139,7 @@ Test saving last-message.txt:
 
   $ rm -f .hg/last-message.txt
   $ HGEDITOR="sh $TESTTMP/editor.sh" hg qrefresh -e
-  refresh interrupted while patch was popped! (revert --all, qpush to recover)
+  qrefresh interrupted while patch was popped! (revert --all, qpush to recover)
   abort: emulating unexpected abort
   [255]
   $ test -f .hg/last-message.txt
@@ -181,7 +188,7 @@ Test saving last-message.txt:
   transaction abort!
   rollback completed
   note: commit message saved in .hg/last-message.txt
-  refresh interrupted while patch was popped! (revert --all, qpush to recover)
+  qrefresh interrupted while patch was popped! (revert --all, qpush to recover)
   abort: pretxncommit.unexpectedabort hook exited with status 1
   [255]
   $ cat .hg/last-message.txt
@@ -191,3 +198,129 @@ Test saving last-message.txt:
   
   
   test saving last-message.txt
+
+Test visibility of in-memory distate changes outside transaction to
+external process
+
+  $ cat > $TESTTMP/checkvisibility.sh <<EOF
+  > echo "===="
+  > hg parents --template "{rev}:{node|short}\n"
+  > hg status -arm
+  > echo "===="
+  > EOF
+
+== test visibility to external editor
+
+  $ hg update -C -q first-patch
+  $ rm -f file2
+  $ hg qpush -q second-patch --config hooks.pretxncommit.unexpectedabort=
+  now at: second-patch
+  $ echo bbbb >> file2
+
+  $ sh "$TESTTMP/checkvisibility.sh"
+  ====
+  1:e30108269082
+  M file2
+  ====
+
+  $ HGEDITOR='sh "$TESTTMP/checkvisibility.sh"' hg qrefresh -e
+  ====
+  0:25e397dabed2
+  A file2
+  ====
+  transaction abort!
+  rollback completed
+  note: commit message saved in .hg/last-message.txt
+  qrefresh interrupted while patch was popped! (revert --all, qpush to recover)
+  abort: pretxncommit.unexpectedabort hook exited with status 1
+  [255]
+
+(rebuilding at failure of qrefresh bases on rev #0, and it causes
+dropping status of "file2")
+
+  $ sh "$TESTTMP/checkvisibility.sh"
+  ====
+  0:25e397dabed2
+  ====
+
+== test visibility to precommit external hook
+
+  $ hg update -C -q
+  $ rm -f file2
+  $ hg qpush -q second-patch --config hooks.pretxncommit.unexpectedabort=
+  now at: second-patch
+  $ echo bbbb >> file2
+
+  $ cat >> .hg/hgrc <<EOF
+  > [hooks]
+  > precommit.checkvisibility = sh "$TESTTMP/checkvisibility.sh"
+  > EOF
+
+  $ sh "$TESTTMP/checkvisibility.sh"
+  ====
+  1:e30108269082
+  M file2
+  ====
+
+  $ hg qrefresh
+  ====
+  0:25e397dabed2
+  A file2
+  ====
+  transaction abort!
+  rollback completed
+  qrefresh interrupted while patch was popped! (revert --all, qpush to recover)
+  abort: pretxncommit.unexpectedabort hook exited with status 1
+  [255]
+
+  $ sh "$TESTTMP/checkvisibility.sh"
+  ====
+  0:25e397dabed2
+  ====
+
+  $ cat >> .hg/hgrc <<EOF
+  > [hooks]
+  > precommit.checkvisibility =
+  > EOF
+
+== test visibility to pretxncommit external hook
+
+  $ hg update -C -q
+  $ rm -f file2
+  $ hg qpush -q second-patch --config hooks.pretxncommit.unexpectedabort=
+  now at: second-patch
+  $ echo bbbb >> file2
+
+  $ cat >> .hg/hgrc <<EOF
+  > [hooks]
+  > pretxncommit.checkvisibility = sh "$TESTTMP/checkvisibility.sh"
+  > # make checkvisibility run before unexpectedabort
+  > priority.pretxncommit.checkvisibility = 10
+  > EOF
+
+  $ sh "$TESTTMP/checkvisibility.sh"
+  ====
+  1:e30108269082
+  M file2
+  ====
+
+  $ hg qrefresh
+  ====
+  0:25e397dabed2
+  A file2
+  ====
+  transaction abort!
+  rollback completed
+  qrefresh interrupted while patch was popped! (revert --all, qpush to recover)
+  abort: pretxncommit.unexpectedabort hook exited with status 1
+  [255]
+
+  $ sh "$TESTTMP/checkvisibility.sh"
+  ====
+  0:25e397dabed2
+  ====
+
+  $ cat >> .hg/hgrc <<EOF
+  > [hooks]
+  > pretxncommit.checkvisibility =
+  > EOF

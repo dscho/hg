@@ -1,6 +1,6 @@
 # Copyright (C) 2006 - Marco Barisione <marco@barisione.org>
 #
-# This is a small extension for Mercurial (http://mercurial.selenic.com/)
+# This is a small extension for Mercurial (https://mercurial-scm.org/)
 # that removes files not known to mercurial
 #
 # This program was inspired by the "cvspurge" script contained in CVS
@@ -24,7 +24,7 @@
 
 '''command to delete untracked files from the working directory'''
 
-from mercurial import util, commands, cmdutil, scmutil
+from mercurial import util, commands, cmdutil, scmutil, error
 from mercurial.i18n import _
 import os
 
@@ -94,7 +94,7 @@ def purge(ui, repo, *dirs, **opts):
             except OSError:
                 m = _('%s cannot be removed') % name
                 if opts['abort_on_err']:
-                    raise util.Abort(m)
+                    raise error.Abort(m)
                 ui.warn(_('warning: %s\n') % m)
         else:
             ui.write('%s%s' % (name, eol))

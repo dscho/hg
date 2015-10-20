@@ -151,13 +151,28 @@ def split(stream):
     # if we are here, we have a very plain patch
     return remainder(cur)
 
+## Some facility for extensible patch parsing:
+# list of pairs ("header to match", "data key")
+patchheadermap = [('Date', 'date'),
+                  ('Branch', 'branch'),
+                  ('Node ID', 'nodeid'),
+                 ]
+
 def extract(ui, fileobj):
     '''extract patch from data read from fileobj.
 
     patch can be a normal patch or contained in an email message.
 
-    return tuple (filename, message, user, date, branch, node, p1, p2).
-    Any item in the returned tuple can be None. If filename is None,
+    return a dictionary. Standard keys are:
+      - filename,
+      - message,
+      - user,
+      - date,
+      - branch,
+      - node,
+      - p1,
+      - p2.
+    Any item can be missing from the dictionary. If filename is missing,
     fileobj did not contain a patch. Caller must unlink filename when done.'''
 
     # attempt to detect the start of a patch
@@ -167,21 +182,19 @@ def extract(ui, fileobj):
                         r'---[ \t].*?^\+\+\+[ \t]|'
                         r'\*\*\*[ \t].*?^---[ \t])', re.MULTILINE|re.DOTALL)
 
+    data = {}
     fd, tmpname = tempfile.mkstemp(prefix='hg-patch-')
     tmpfp = os.fdopen(fd, 'w')
     try:
         msg = email.Parser.Parser().parse(fileobj)
 
         subject = msg['Subject']
-        user = msg['From']
-        if not subject and not user:
+        data['user'] = msg['From']
+        if not subject and not data['user']:
             # Not an email, restore parsed headers if any
             subject = '\n'.join(': '.join(h) for h in msg.items()) + '\n'
 
         # should try to parse msg['Date']
-        date = None
-        nodeid = None
-        branch = None
         parents = []
 
         if subject:
@@ -191,8 +204,8 @@ def extract(ui, fileobj):
                     subject = subject[pend + 1:].lstrip()
             subject = re.sub(r'\n[ \t]+', ' ', subject)
             ui.debug('Subject: %s\n' % subject)
-        if user:
-            ui.debug('From: %s\n' % user)
+        if data['user']:
+            ui.debug('From: %s\n' % data['user'])
         diffs_seen = 0
         ok_types = ('text/plain', 'text/x-diff', 'text/x-patch')
         message = ''
@@ -222,17 +235,16 @@ def extract(ui, fileobj):
                         subject = None
                     elif hgpatchheader:
                         if line.startswith('# User '):
-                            user = line[7:]
-                            ui.debug('From: %s\n' % user)
-                        elif line.startswith("# Date "):
-                            date = line[7:]
-                        elif line.startswith("# Branch "):
-                            branch = line[9:]
-                        elif line.startswith("# Node ID "):
-                            nodeid = line[10:]
+                            data['user'] = line[7:]
+                            ui.debug('From: %s\n' % data['user'])
                         elif line.startswith("# Parent "):
                             parents.append(line[9:].lstrip())
-                        elif not line.startswith("# "):
+                        elif line.startswith("# "):
+                            for header, key in patchheadermap:
+                                prefix = '# %s ' % header
+                                if line.startswith(prefix):
+                                    data[key] = line[len(prefix):]
+                        else:
                             hgpatchheader = False
                     elif line == '---':
                         ignoretext = True
@@ -253,22 +265,18 @@ def extract(ui, fileobj):
 
     if subject and not message.startswith(subject):
         message = '%s\n%s' % (subject, message)
+    data['message'] = message
     tmpfp.close()
-    if not diffs_seen:
+    if parents:
+        data['p1'] = parents.pop(0)
+        if parents:
+            data['p2'] = parents.pop(0)
+
+    if diffs_seen:
+        data['filename'] = tmpname
+    else:
         os.unlink(tmpname)
-        return None, message, user, date, branch, None, None, None
-
-    if parents:
-        p1 = parents.pop(0)
-    else:
-        p1 = None
-
-    if parents:
-        p2 = parents.pop(0)
-    else:
-        p2 = None
-
-    return tmpname, message, user, date, branch, nodeid, p1, p2
+    return data
 
 class patchmeta(object):
     """Patched file metadata
@@ -995,7 +1003,7 @@ def filterpatch(ui, headers, operation=None):
                     ui.write("\n")
                     continue
                 # Patch comment based on the Git one (based on comment at end of
-                # http://mercurial.selenic.com/wiki/RecordExtension)
+                # https://mercurial-scm.org/wiki/RecordExtension)
                 phelp = '---' + _("""
 To remove '-' lines, make them ' ' lines (context).
 To remove '+' lines, delete them.
@@ -1048,7 +1056,7 @@ the hunk is left unchanged.
             elif r == 6: # all
                 ret = skipall = True
             elif r == 7: # quit
-                raise util.Abort(_('user quit'))
+                raise error.Abort(_('user quit'))
             return ret, skipfile, skipall, newpatches
 
     seen = set()
@@ -1956,7 +1964,7 @@ def _applydiff(ui, fp, patcher, backend, store, strip=1, prefix='',
                 else:
                     store.setfile(path, data, mode)
         else:
-            raise util.Abort(_('unsupported parser state: %s') % state)
+            raise error.Abort(_('unsupported parser state: %s') % state)
 
     if current_file:
         rejects += current_file.close()
@@ -2014,7 +2022,7 @@ def patchbackend(ui, backend, patchobj, strip, prefix, files=None,
     if eolmode is None:
         eolmode = ui.config('patch', 'eol', 'strict')
     if eolmode.lower() not in eolmodes:
-        raise util.Abort(_('unsupported line endings type: %s') % eolmode)
+        raise error.Abort(_('unsupported line endings type: %s') % eolmode)
     eolmode = eolmode.lower()
 
     store = filestore()
@@ -2087,7 +2095,7 @@ def changedfiles(ui, repo, patchpath, strip=1):
                 if gp.op == 'RENAME':
                     changed.add(gp.oldpath)
             elif state not in ('hunk', 'git'):
-                raise util.Abort(_('unsupported parser state: %s') % state)
+                raise error.Abort(_('unsupported parser state: %s') % state)
         return changed
     finally:
         fp.close()

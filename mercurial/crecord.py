@@ -8,11 +8,23 @@
 # This code is based on the Mark Edgington's crecord extension.
 # (Itself based on Bryan O'Sullivan's record extension.)
 
-from i18n import _
-import patch as patchmod
-import util, encoding
+from __future__ import absolute_import
 
-import os, re, sys, struct, signal, tempfile, locale, cStringIO
+import cStringIO
+import locale
+import os
+import re
+import signal
+import struct
+import sys
+import tempfile
+
+from .i18n import _
+from . import (
+    encoding,
+    error,
+    patch as patchmod,
+)
 
 # This is required for ncurses to display non-ASCII characters in default user
 # locale encoding correctly.  --immerrr
@@ -21,7 +33,8 @@ locale.setlocale(locale.LC_ALL, '')
 # os.name is one of: 'posix', 'nt', 'dos', 'os2', 'mac', or 'ce'
 if os.name == 'posix':
     import curses
-    import fcntl, termios
+    import fcntl
+    import termios
 else:
     # I have no idea if wcurses works with crecord...
     try:
@@ -34,7 +47,7 @@ try:
     curses
 except NameError:
     if os.name != 'nt':  # Temporary hack to get running on Windows again
-        raise util.Abort(
+        raise error.Abort(
             _('the python curses/wcurses module is not available/installed'))
 
 _origstdout = sys.__stdout__ # used by gethw()
@@ -182,7 +195,7 @@ class patch(patchnode, list): # todo: rename patchroot
 class uiheader(patchnode):
     """patch header
 
-    xxx shoudn't we move this to mercurial/patch.py ?
+    xxx shouldn't we move this to mercurial/patch.py ?
     """
 
     def __init__(self, header):
@@ -485,7 +498,7 @@ def chunkselector(ui, headerlist):
     f = signal.getsignal(signal.SIGTSTP)
     curses.wrapper(chunkselector.main)
     if chunkselector.initerr is not None:
-        raise util.Abort(chunkselector.initerr)
+        raise error.Abort(chunkselector.initerr)
     # ncurses does not restore signal handler for SIGTSTP
     signal.signal(signal.SIGTSTP, f)
 
@@ -1421,7 +1434,7 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
         """
         once we scrolled with pg up pg down we can be pointing outside of the
         display zone. we print the patch with towin=False to compute the
-        location of the selected item eventhough it is outside of the displayed
+        location of the selected item even though it is outside of the displayed
         zone and then update the scroll.
         """
         self.printitem(towin=False)
@@ -1429,7 +1442,7 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
 
     def toggleedit(self, item=None, test=False):
         """
-            edit the currently chelected chunk
+            edit the currently selected chunk
         """
         def updateui(self):
             self.numpadlines = self.getnumlinesdisplayed(ignorefolding=True) + 1
@@ -1449,7 +1462,7 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
                 self.ui.write("\n")
                 return None
             # patch comment based on the git one (based on comment at end of
-            # http://mercurial.selenic.com/wiki/recordextension)
+            # https://mercurial-scm.org/wiki/recordextension)
             phelp = '---' + _("""
     to remove '-' lines, make them ' ' lines (context).
     to remove '+' lines, delete them.
@@ -1553,7 +1566,7 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
         elif keypressed in ["H", "KEY_SLEFT"]:
             self.leftarrowshiftevent()
         elif keypressed in ["q"]:
-            raise util.Abort(_('user quit'))
+            raise error.Abort(_('user quit'))
         elif keypressed in ["c"]:
             if self.confirmcommit():
                 return True

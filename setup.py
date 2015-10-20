@@ -70,7 +70,11 @@ import re
 import shutil
 import tempfile
 from distutils import log
-from distutils.core import setup, Command, Extension
+if 'FORCE_SETUPTOOLS' in os.environ:
+    from setuptools import setup
+else:
+    from distutils.core import setup
+from distutils.core import Command, Extension
 from distutils.dist import Distribution
 from distutils.command.build import build
 from distutils.command.build_ext import build_ext
@@ -602,8 +606,8 @@ setup(name='mercurial',
       version=setupversion,
       author='Matt Mackall and many others',
       author_email='mercurial@selenic.com',
-      url='http://mercurial.selenic.com/',
-      download_url='http://mercurial.selenic.com/release/',
+      url='https://mercurial-scm.org/',
+      download_url='https://mercurial-scm.org/release/',
       description=('Fast scalable distributed SCM (revision control, version '
                    'control) system'),
       long_description=('Mercurial is a distributed SCM tool written in Python.'

@@ -6,7 +6,7 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-from mercurial.node import nullrev, wdirrev
+from mercurial.node import wdirrev
 import util, error, osutil, revset, similar, encoding, phases
 import pathutil
 import match as matchmod
@@ -123,20 +123,20 @@ def checknewlabel(repo, lbl, kind):
     # Do not use the "kind" parameter in ui output.
     # It makes strings difficult to translate.
     if lbl in ['tip', '.', 'null']:
-        raise util.Abort(_("the name '%s' is reserved") % lbl)
+        raise error.Abort(_("the name '%s' is reserved") % lbl)
     for c in (':', '\0', '\n', '\r'):
         if c in lbl:
-            raise util.Abort(_("%r cannot be used in a name") % c)
+            raise error.Abort(_("%r cannot be used in a name") % c)
     try:
         int(lbl)
-        raise util.Abort(_("cannot use an integer as a name"))
+        raise error.Abort(_("cannot use an integer as a name"))
     except ValueError:
         pass
 
 def checkfilename(f):
     '''Check that the filename f is an acceptable filename for a tracked file'''
     if '\r' in f or '\n' in f:
-        raise util.Abort(_("'\\n' and '\\r' disallowed in filenames: %r") % f)
+        raise error.Abort(_("'\\n' and '\\r' disallowed in filenames: %r") % f)
 
 def checkportable(ui, f):
     '''Check if filename f is portable and warn or abort depending on config'''
@@ -147,7 +147,7 @@ def checkportable(ui, f):
         if msg:
             msg = "%s: %r" % (msg, f)
             if abort:
-                raise util.Abort(msg)
+                raise error.Abort(msg)
             ui.warn(_("warning: %s\n") % msg)
 
 def checkportabilityalert(ui):
@@ -182,7 +182,7 @@ class casecollisionauditor(object):
         if fl in self._loweredfiles and f not in self._dirstate:
             msg = _('possible case-folding collision for %s') % f
             if self._abort:
-                raise util.Abort(msg)
+                raise error.Abort(msg)
             self._ui.warn(_("warning: %s\n") % msg)
         self._loweredfiles.add(fl)
         self._newfiles.add(f)
@@ -475,7 +475,7 @@ class vfs(abstractvfs):
         if self._audit:
             r = util.checkosfilename(path)
             if r:
-                raise util.Abort("%s: %r" % (r, path))
+                raise error.Abort("%s: %r" % (r, path))
         self.audit(path)
         f = self.join(path)
 
@@ -583,9 +583,11 @@ class readonlyvfs(abstractvfs, auditvfs):
 
     def __call__(self, path, mode='r', *args, **kw):
         if mode not in ('r', 'rb'):
-            raise util.Abort('this vfs is read only')
+            raise error.Abort('this vfs is read only')
         return self.vfs(path, mode, *args, **kw)
 
+    def join(self, path, *insidef):
+        return self.vfs.join(path, *insidef)
 
 def walkrepos(path, followsym=False, seen_dirs=None, recurse=False):
     '''yield every hg repository under path, always recursively.
@@ -687,8 +689,13 @@ def revsingle(repo, revspec, default='.'):
 
     l = revrange(repo, [revspec])
     if not l:
-        raise util.Abort(_('empty revision set'))
+        raise error.Abort(_('empty revision set'))
     return repo[l.last()]
+
+def _pairspec(revspec):
+    tree = revset.parse(revspec)
+    tree = revset.optimize(tree, True)[1]  # fix up "x^:y" -> "(x^):y"
+    return tree and tree[0] in ('range', 'rangepre', 'rangepost', 'rangeall')
 
 def revpair(repo, revs):
     if not revs:
@@ -709,69 +716,39 @@ def revpair(repo, revs):
         second = l.last()
 
     if first is None:
-        raise util.Abort(_('empty revision range'))
+        raise error.Abort(_('empty revision range'))
 
-    if first == second and len(revs) == 1 and _revrangesep not in revs[0]:
+    # if top-level is range expression, the result must always be a pair
+    if first == second and len(revs) == 1 and not _pairspec(revs[0]):
         return repo.lookup(first), None
 
     return repo.lookup(first), repo.lookup(second)
 
-_revrangesep = ':'
-
 def revrange(repo, revs):
     """Yield revision as strings from a list of revision specifications."""
-
-    def revfix(repo, val, defval):
-        if not val and val != 0 and defval is not None:
-            return defval
-        return repo[val].rev()
-
-    subsets = []
-
-    revsetaliases = [alias for (alias, _) in
-                     repo.ui.configitems("revsetalias")]
-
+    allspecs = []
     for spec in revs:
-        # attempt to parse old-style ranges first to deal with
-        # things like old-tag which contain query metacharacters
-        try:
-            # ... except for revset aliases without arguments. These
-            # should be parsed as soon as possible, because they might
-            # clash with a hash prefix.
-            if spec in revsetaliases:
-                raise error.RepoLookupError
+        if isinstance(spec, int):
+            spec = revset.formatspec('rev(%d)', spec)
+        allspecs.append(spec)
+    m = revset.matchany(repo.ui, allspecs, repo)
+    return m(repo)
 
-            if isinstance(spec, int):
-                subsets.append(revset.baseset([spec]))
-                continue
+def meaningfulparents(repo, ctx):
+    """Return list of meaningful (or all if debug) parentrevs for rev.
 
-            if _revrangesep in spec:
-                start, end = spec.split(_revrangesep, 1)
-                if start in revsetaliases or end in revsetaliases:
-                    raise error.RepoLookupError
-
-                start = revfix(repo, start, 0)
-                end = revfix(repo, end, len(repo) - 1)
-                if end == nullrev and start < 0:
-                    start = nullrev
-                if start < end:
-                    l = revset.spanset(repo, start, end + 1)
-                else:
-                    l = revset.spanset(repo, start, end - 1)
-                subsets.append(l)
-                continue
-            elif spec and spec in repo: # single unquoted rev
-                rev = revfix(repo, spec, None)
-                subsets.append(revset.baseset([rev]))
-                continue
-        except error.RepoLookupError:
-            pass
-
-        # fall through to new-style queries if old-style fails
-        m = revset.match(repo.ui, spec, repo)
-        subsets.append(m(repo))
-
-    return revset._combinesets(subsets)
+    For merges (two non-nullrev revisions) both parents are meaningful.
+    Otherwise the first parent revision is considered meaningful if it
+    is not the preceding revision.
+    """
+    parents = ctx.parents()
+    if len(parents) > 1:
+        return parents
+    if repo.ui.debugflag:
+        return [parents[0], repo['null']]
+    if parents[0].rev() >= intrev(ctx.rev()) - 1:
+        return []
+    return parents
 
 def expandpats(pats):
     '''Expand bare globs when running on windows.
@@ -792,13 +769,15 @@ def expandpats(pats):
         ret.append(kindpat)
     return ret
 
-def matchandpats(ctx, pats=[], opts={}, globbed=False, default='relpath',
+def matchandpats(ctx, pats=(), opts=None, globbed=False, default='relpath',
                  badfn=None):
     '''Return a matcher and the patterns that were used.
     The matcher will warn about bad matches, unless an alternate badfn callback
     is provided.'''
     if pats == ("",):
         pats = []
+    if opts is None:
+        opts = {}
     if not globbed and default == 'relpath':
         pats = expandpats(pats or [])
 
@@ -815,7 +794,8 @@ def matchandpats(ctx, pats=[], opts={}, globbed=False, default='relpath',
         pats = []
     return m, pats
 
-def match(ctx, pats=[], opts={}, globbed=False, default='relpath', badfn=None):
+def match(ctx, pats=(), opts=None, globbed=False, default='relpath',
+          badfn=None):
     '''Return a matcher that will warn about bad matches.'''
     return matchandpats(ctx, pats, opts, globbed, default, badfn=badfn)[0]
 
@@ -827,7 +807,9 @@ def matchfiles(repo, files, badfn=None):
     '''Return a matcher that will efficiently match exactly these files.'''
     return matchmod.exact(repo.root, repo.getcwd(), files, badfn=badfn)
 
-def addremove(repo, matcher, prefix, opts={}, dry_run=None, similarity=None):
+def addremove(repo, matcher, prefix, opts=None, dry_run=None, similarity=None):
+    if opts is None:
+        opts = {}
     m = matcher
     if dry_run is None:
         dry_run = opts.get('dry_run')
@@ -1009,7 +991,7 @@ def readrequires(opener, supported):
         raise error.RequirementError(
             _("repository requires features unknown to this Mercurial: %s")
             % " ".join(missings),
-            hint=_("see http://mercurial.selenic.com/wiki/MissingRequirement"
+            hint=_("see https://mercurial-scm.org/wiki/MissingRequirement"
                    " for more information"))
     return requirements
 
@@ -1103,7 +1085,7 @@ class filecache(object):
     Mercurial either atomic renames or appends for files under .hg,
     so to ensure the cache is reliable we need the filesystem to be able
     to tell us if a file has been replaced. If it can't, we fallback to
-    recreating the object on every call (essentially the same behaviour as
+    recreating the object on every call (essentially the same behavior as
     propertycache).
 
     '''
@@ -1166,3 +1148,22 @@ class filecache(object):
             del obj.__dict__[self.name]
         except KeyError:
             raise AttributeError(self.name)
+
+def _locksub(repo, lock, envvar, cmd, environ=None, *args, **kwargs):
+    if lock is None:
+        raise error.LockInheritanceContractViolation(
+            'lock can only be inherited while held')
+    if environ is None:
+        environ = {}
+    with lock.inherit() as locker:
+        environ[envvar] = locker
+        return repo.ui.system(cmd, environ=environ, *args, **kwargs)
+
+def wlocksub(repo, cmd, *args, **kwargs):
+    """run cmd as a subprocess that allows inheriting repo's wlock
+
+    This can only be called while the wlock is held. This takes all the
+    arguments that ui.system does, and returns the exit code of the
+    subprocess."""
+    return _locksub(repo, repo.currentwlock(), 'HG_WLOCK_LOCKER', cmd, *args,
+                    **kwargs)

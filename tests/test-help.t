@@ -249,6 +249,8 @@ Test extension help:
        bugzilla      hooks for integrating with the Bugzilla bug tracker
        censor        erase file content at a given revision
        churn         command to display statistics about repository history
+       clonebundles  advertise pre-generated bundles to seed clones
+                     (experimental)
        color         colorize output from some commands
        convert       import revisions from foreign VCS repositories into
                      Mercurial
@@ -278,6 +280,11 @@ Test extension help:
        transplant    command to transplant changesets from another branch
        win32mbcs     allow the use of MBCS paths with problematic encodings
        zeroconf      discover and advertise repositories on the local network
+
+Verify that extension keywords appear in help templates
+
+  $ hg help --config extensions.transplant= templating|grep transplant > /dev/null
+
 Test short command list with verbose option
 
   $ hg -v help shortlist
@@ -411,7 +418,7 @@ Test help option with version option
 
   $ hg add -h --version
   Mercurial Distributed SCM (version *) (glob)
-  (see http://mercurial.selenic.com for more information)
+  (see https://mercurial-scm.org for more information)
   
   Copyright (C) 2005-2015 Matt Mackall and others
   This is free software; see the source for copying conditions. There is NO
@@ -457,7 +464,7 @@ Test command without options
       manifest, and tracked files, as well as the integrity of their crosslinks
       and indices.
   
-      Please see http://mercurial.selenic.com/wiki/RepositoryCorruption for more
+      Please see https://mercurial-scm.org/wiki/RepositoryCorruption for more
       information about recovery from corruption of the repository.
   
       Returns 0 on success, 1 if errors are encountered.
@@ -616,6 +623,23 @@ Test command without options
   [255]
 
 
+Make sure that we don't run afoul of the help system thinking that
+this is a section and erroring out weirdly.
+
+  $ hg .log
+  hg: unknown command '.log'
+  (did you mean one of log?)
+  [255]
+
+  $ hg log.
+  hg: unknown command 'log.'
+  (did you mean one of log?)
+  [255]
+  $ hg pu.lh
+  hg: unknown command 'pu.lh'
+  (did you mean one of pull, push?)
+  [255]
+
   $ cat > helpext.py <<EOF
   > import os
   > from mercurial import cmdutil, commands
@@ -629,8 +653,8 @@ Test command without options
   >     ('', 'newline', '', 'line1\nline2')],
   >     'hg nohelp',
   >     norepo=True)
-  > @command('debugoptDEP', [('', 'dopt', None, 'option is DEPRECATED')])
-  > @command('debugoptEXP', [('', 'eopt', None, 'option is EXPERIMENTAL')])
+  > @command('debugoptDEP', [('', 'dopt', None, 'option is (DEPRECATED)')])
+  > @command('debugoptEXP', [('', 'eopt', None, 'option is (EXPERIMENTAL)')])
   > def nohelp(ui, *args, **kwargs):
   >     pass
   > 
@@ -757,6 +781,8 @@ Test list of internal help commands
   
    debugancestor
                  find the ancestor revision of two revisions in a given index
+   debugapplystreamclonebundle
+                 apply a stream clone bundle file
    debugbuilddag
                  builds a repo with a given DAG from scratch in the current
                  empty repo
@@ -767,6 +793,8 @@ Test list of internal help commands
                  list all available commands and options
    debugcomplete
                  returns the completion list associated with the given command
+   debugcreatestreamclonebundle
+                 create a stream clone bundle file
    debugdag      format the changelog or an index DAG as a concise textual
                  description
    debugdata     dump the contents of a data file revision
@@ -775,6 +803,8 @@ Test list of internal help commands
                  show the contents of the current dirstate
    debugdiscovery
                  runs the changeset discovery protocol in isolation
+   debugextensions
+                 show information about active extensions
    debugfileset  parse and apply a fileset specification
    debugfsinfo   show information detected about current filesystem
    debuggetbundle
@@ -786,6 +816,8 @@ Test list of internal help commands
    debuginstall  test Mercurial installation
    debugknown    test whether node ids are known to a repo
    debuglocks    show or modify state of locks
+   debugmergestate
+                 print merge state
    debugnamecomplete
                  complete "names" - tags, open branch names, bookmark names
    debugobsolete
@@ -849,9 +881,9 @@ test deprecated and experimental options are hidden in command help
 
 test deprecated and experimental options is shown with -v
   $ hg help -v debugoptDEP | grep dopt
-    --dopt option is DEPRECATED
+    --dopt option is (DEPRECATED)
   $ hg help -v debugoptEXP | grep eopt
-    --eopt option is EXPERIMENTAL
+    --eopt option is (EXPERIMENTAL)
 
 #if gettext
 test deprecated option is hidden with translation with untranslated description
@@ -912,6 +944,47 @@ Test a help topic
       working directory is checked out, it is equivalent to null. If an
       uncommitted merge is in progress, "." is the revision of the first parent.
 
+Test repeated config section name
+
+  $ hg help config.host
+      "http_proxy.host"
+          Host name and (optional) port of the proxy server, for example
+          "myproxy:8000".
+  
+      "smtp.host"
+          Host name of mail server, e.g. "mail.example.com".
+  
+Unrelated trailing paragraphs shouldn't be included
+
+  $ hg help config.extramsg | grep '^$'
+  
+
+Test capitalized section name
+
+  $ hg help scripting.HGPLAIN > /dev/null
+
+Help subsection:
+
+  $ hg help config.charsets |grep "Email example:" > /dev/null
+  [1]
+
+Show nested definitions
+("profiling.type"[break]"ls"[break]"stat"[break])
+
+  $ hg help config.type | egrep '^$'|wc -l
+  \s*3 (re)
+
+Last item in help config.*:
+
+  $ hg help config.`hg help config|grep '^    "'| \
+  >       tail -1|sed 's![ "]*!!g'`| \
+  >   grep "hg help -c config" > /dev/null
+  [1]
+
+note to use help -c for general hg help config:
+
+  $ hg help config |grep "hg help -c config" > /dev/null
+
 Test templating help
 
   $ hg help templating | egrep '(desc|diffstat|firstline|nonempty)  '
@@ -920,12 +993,18 @@ Test templating help
       firstline     Any text. Returns the first line of text.
       nonempty      Any text. Returns '(none)' if the string is empty.
 
+Test deprecated items
+
+  $ hg help -v templating | grep currentbookmark
+      currentbookmark
+  $ hg help templating | (grep currentbookmark || true)
+
 Test help hooks
 
   $ cat > helphook1.py <<EOF
   > from mercurial import help
   > 
-  > def rewrite(topic, doc):
+  > def rewrite(ui, topic, doc):
   >     return doc + '\nhelphook1\n'
   > 
   > def extsetup(ui):
@@ -934,7 +1013,7 @@ Test help hooks
   $ cat > helphook2.py <<EOF
   > from mercurial import help
   > 
-  > def rewrite(topic, doc):
+  > def rewrite(ui, topic, doc):
   >     return doc + '\nhelphook2\n'
   > 
   > def extsetup(ui):
@@ -946,6 +1025,28 @@ Test help hooks
   $ hg help revsets | grep helphook
       helphook1
       helphook2
+
+Test -e / -c / -k combinations
+
+  $ hg help -c progress
+  abort: no such help topic: progress
+  (try "hg help --keyword progress")
+  [255]
+  $ hg help -e progress |head -1
+  progress extension - show progress bars for some actions (DEPRECATED)
+  $ hg help -c -k dates |egrep '^(Topics|Extensions|Commands):'
+  Commands:
+  $ hg help -e -k a |egrep '^(Topics|Extensions|Commands):'
+  Extensions:
+  $ hg help -e -c -k date |egrep '^(Topics|Extensions|Commands):'
+  Extensions:
+  Commands:
+  $ hg help -c commit > /dev/null
+  $ hg help -e -c commit > /dev/null
+  $ hg help -e commit > /dev/null
+  abort: no such help topic: commit
+  (try "hg help --keyword commit")
+  [255]
 
 Test keyword search help
 
@@ -967,13 +1068,16 @@ Test keyword search help
   
   Commands:
   
-   bookmarks create a new bookmark or list existing bookmarks
-   clone     make a copy of an existing repository
-   paths     show aliases for remote repositories
-   update    update working directory (or switch revisions)
+   bookmarks                    create a new bookmark or list existing bookmarks
+   clone                        make a copy of an existing repository
+   debugapplystreamclonebundle  apply a stream clone bundle file
+   debugcreatestreamclonebundle create a stream clone bundle file
+   paths                        show aliases for remote repositories
+   update                       update working directory (or switch revisions)
   
   Extensions:
   
+   clonebundles advertise pre-generated bundles to seed clones (experimental)
    prefixedname matched against word "clone"
    relink       recreates hardlinks between repository clones
   
@@ -1023,7 +1127,7 @@ Test omit indicating for help
   > def extsetup(ui):
   >     help.helptable.append((["topic-containing-verbose"],
   >                            "This is the topic to test omit indicating.",
-  >                            lambda : testtopic))
+  >                            lambda ui: testtopic))
   > EOF
   $ echo '[extensions]' >> $HGRCPATH
   $ echo "addverboseitems = `pwd`/addverboseitems.py" >> $HGRCPATH
@@ -1095,8 +1199,7 @@ Test section lookup
   
       "default"
           Directory or URL to use when pulling if no source is specified.
-          Default is set to repository from which the current repository was
-          cloned.
+          (default: repository from which the current repository was cloned)
   
       "default-push"
           Optional. Directory or URL to use when pushing if no destination is
@@ -1186,6 +1289,14 @@ Test dynamic list of merge tools only shows up once
         partially merged file. Markers will have two sections, one for each side
         of merge.
   
+      ":merge-local"
+        Like :merge, but resolve all conflicts non-interactively in favor of the
+        local changes.
+  
+      ":merge-other"
+        Like :merge, but resolve all conflicts non-interactively in favor of the
+        other changes.
+  
       ":merge3"
         Uses the internal non-interactive simple merge algorithm for merging
         files. It will fail if there are any conflicts and leave markers in the
@@ -1201,6 +1312,11 @@ Test dynamic list of merge tools only shows up once
   
       ":tagmerge"
         Uses the internal tag merge algorithm (experimental).
+  
+      ":union"
+        Uses the internal non-interactive simple merge algorithm for merging
+        files. It will use both left and right sides for conflict regions. No
+        markers are inserted.
   
       Internal tools are always available and do not require a GUI but will by
       default not handle symlinks or binary files.
@@ -1277,7 +1393,7 @@ Dish up an empty repo; serve it cold.
   <div class="container">
   <div class="menu">
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
@@ -1835,7 +1951,7 @@ Dish up an empty repo; serve it cold.
   <div class="container">
   <div class="menu">
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
@@ -1995,7 +2111,7 @@ Dish up an empty repo; serve it cold.
   <div class="container">
   <div class="menu">
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
@@ -2188,7 +2304,7 @@ Dish up an empty repo; serve it cold.
   <div class="container">
   <div class="menu">
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>

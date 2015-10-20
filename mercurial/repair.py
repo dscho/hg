@@ -6,25 +6,25 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from mercurial import changegroup, exchange, util, bundle2
-from mercurial.node import short
-from mercurial.i18n import _
+from __future__ import absolute_import
+
 import errno
+
+from .i18n import _
+from .node import short
+from . import (
+    bundle2,
+    changegroup,
+    error,
+    exchange,
+    util,
+)
 
 def _bundle(repo, bases, heads, node, suffix, compress=True):
     """create a bundle with the specified revisions as a backup"""
-    usebundle2 = (repo.ui.configbool('experimental', 'bundle2-exp', True) and
-                  repo.ui.config('experimental', 'strip-bundle2-version'))
-    if usebundle2:
-        cgversion = repo.ui.config('experimental', 'strip-bundle2-version')
-        if cgversion not in changegroup.packermap:
-            repo.ui.warn(_('unknown strip-bundle2-version value %r; '
-                            'should be one of %r\n') %
-                         (cgversion, sorted(changegroup.packermap.keys()),))
-            cgversion = '01'
-            usebundle2 = False
-    else:
-        cgversion = '01'
+    cgversion = '01'
+    if 'generaldelta' in repo.requirements:
+        cgversion = '02'
 
     cg = changegroup.changegroupsubset(repo, bases, heads, 'strip',
                                        version=cgversion)
@@ -39,13 +39,17 @@ def _bundle(repo, bases, heads, node, suffix, compress=True):
     totalhash = util.sha1(''.join(allhashes)).hexdigest()
     name = "%s/%s-%s-%s.hg" % (backupdir, short(node), totalhash[:8], suffix)
 
-    if usebundle2:
+    comp = None
+    if cgversion != '01':
         bundletype = "HG20"
+        if compress:
+            comp = 'BZ'
     elif compress:
         bundletype = "HG10BZ"
     else:
         bundletype = "HG10UN"
-    return changegroup.writebundle(repo.ui, cg, name, bundletype, vfs)
+    return changegroup.writebundle(repo.ui, cg, name, bundletype, vfs,
+                                   compression=comp)
 
 def _collectfiles(repo, striprev):
     """find out the filelogs affected by the strip"""
@@ -153,7 +157,7 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
     if curtr is not None:
         del curtr  # avoid carrying reference to transaction for nothing
         msg = _('programming error: cannot strip from inside a transaction')
-        raise util.Abort(msg, hint=_('contact your extension maintainer'))
+        raise error.Abort(msg, hint=_('contact your extension maintainer'))
 
     tr = repo.transaction("strip")
     offset = len(tr.entries)
@@ -188,14 +192,13 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
                 tr.hookargs = {'source': 'strip',
                                'url': 'bundle:' + vfs.join(chgrpfile)}
                 try:
-                    bundle2.processbundle(repo, gen, lambda: tr)
+                    bundle2.applybundle(repo, gen, tr, source='strip',
+                                        url='bundle:' + vfs.join(chgrpfile))
                     tr.close()
                 finally:
                     tr.release()
             else:
-                changegroup.addchangegroup(repo, gen, 'strip',
-                                           'bundle:' + vfs.join(chgrpfile),
-                                           True)
+                gen.apply(repo, 'strip', 'bundle:' + vfs.join(chgrpfile), True)
             if not repo.ui.verbose:
                 repo.ui.popbuffer()
             f.close()
@@ -295,3 +298,14 @@ def rebuildfncache(ui, repo):
     finally:
         lock.release()
 
+def stripbmrevset(repo, mark):
+    """
+    The revset to strip when strip is called with -B mark
+
+    Needs to live here so extensions can use it and wrap it even when strip is
+    not enabled or not present on a box.
+    """
+    return repo.revs("ancestors(bookmark(%s)) - "
+                     "ancestors(head() and not bookmark(%s)) - "
+                     "ancestors(bookmark() and not bookmark(%s))",
+                     mark, mark, mark)

@@ -9,6 +9,7 @@ from i18n import _
 import mdiff, parsers, error, revlog, util
 import array, struct
 import os
+import heapq
 
 propertycache = util.propertycache
 
@@ -441,13 +442,14 @@ def _splittopdir(f):
     else:
         return '', f
 
-_noop = lambda: None
+_noop = lambda s: None
 
 class treemanifest(object):
     def __init__(self, dir='', text=''):
         self._dir = dir
         self._node = revlog.nullid
-        self._load = _noop
+        self._loadfunc = _noop
+        self._copyfunc = _noop
         self._dirty = False
         self._dirs = {}
         # Using _lazymanifest here is a little slower than plain old dicts
@@ -475,11 +477,11 @@ class treemanifest(object):
         return (not self._files and (not self._dirs or
                 all(m._isempty() for m in self._dirs.values())))
 
-    def __str__(self):
-        return ('<treemanifest dir=%s, node=%s, loaded=%s, dirty=%s>' %
+    def __repr__(self):
+        return ('<treemanifest dir=%s, node=%s, loaded=%s, dirty=%s at 0x%x>' %
                 (self._dir, revlog.hex(self._node),
-                 bool(self._load is _noop),
-                 self._dirty))
+                 bool(self._loadfunc is _noop),
+                 self._dirty, id(self)))
 
     def dir(self):
         '''The directory that this tree manifest represents, including a
@@ -597,6 +599,14 @@ class treemanifest(object):
             self._files[f] = n[:21] # to match manifestdict's behavior
         self._dirty = True
 
+    def _load(self):
+        if self._loadfunc is not _noop:
+            lf, self._loadfunc = self._loadfunc, _noop
+            lf(self)
+        elif self._copyfunc is not _noop:
+            cf, self._copyfunc = self._copyfunc, _noop
+            cf(self)
+
     def setflag(self, f, flags):
         """Set the flags (symlink, executable) for path f."""
         assert 'd' not in flags
@@ -614,19 +624,19 @@ class treemanifest(object):
         copy = treemanifest(self._dir)
         copy._node = self._node
         copy._dirty = self._dirty
-        def _load():
-            self._load()
-            for d in self._dirs:
-                copy._dirs[d] = self._dirs[d].copy()
-            copy._files = dict.copy(self._files)
-            copy._flags = dict.copy(self._flags)
-            copy._load = _noop
-        copy._load = _load
-        if self._load == _noop:
-            # Chaining _load if it's _noop is functionally correct, but the
-            # chain may end up excessively long (stack overflow), and
-            # will prevent garbage collection of 'self'.
-            copy._load()
+        if self._copyfunc is _noop:
+            def _copyfunc(s):
+                self._load()
+                for d in self._dirs:
+                    s._dirs[d] = self._dirs[d].copy()
+                s._files = dict.copy(self._files)
+                s._flags = dict.copy(self._flags)
+            if self._loadfunc is _noop:
+                _copyfunc(copy)
+            else:
+                copy._copyfunc = _copyfunc
+        else:
+            copy._copyfunc = self._copyfunc
         return copy
 
     def filesnotin(self, m2):
@@ -833,13 +843,10 @@ class treemanifest(object):
         return _text(sorted(dirs + files), usemanifestv2)
 
     def read(self, gettext, readsubtree):
-        def _load():
-            # Mark as loaded already here, so __setitem__ and setflag() don't
-            # cause infinite loops when they try to load.
-            self._load = _noop
-            self.parse(gettext(), readsubtree)
-            self._dirty = False
-        self._load = _load
+        def _load_for_read(s):
+            s.parse(gettext(), readsubtree)
+            s._dirty = False
+        self._loadfunc = _load_for_read
 
     def writesubtrees(self, m1, m2, writesubtree):
         self._load() # for consistency; should never have any effect here
@@ -970,12 +977,9 @@ class manifest(revlog.revlog):
             # revlog layer.
 
             _checkforbidden(added)
-            # combine the changed lists into one list for sorting
-            work = [(x, False) for x in added]
-            work.extend((x, True) for x in removed)
-            # this could use heapq.merge() (from Python 2.6+) or equivalent
-            # since the lists are already sorted
-            work.sort()
+            # combine the changed lists into one sorted iterator
+            work = heapq.merge([(x, False) for x in added],
+                               [(x, True) for x in removed])
 
             arraytext, deltatext = m.fastdelta(self._mancache[p1][1], work)
             cachedelta = self.rev(p1), deltatext

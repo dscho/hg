@@ -5,10 +5,21 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from node import nullid, short
-from i18n import _
+from __future__ import absolute_import
+
 import os
-import revlog, util, error
+
+from .i18n import _
+from .node import (
+    nullid,
+    short,
+)
+
+from . import (
+    error,
+    revlog,
+    util,
+)
 
 def verify(repo):
     lock = repo.lock()
@@ -39,7 +50,7 @@ def _verify(repo):
     lrugetctx = util.lrucachefunc(repo.changectx)
 
     if not repo.url().startswith('file:'):
-        raise util.Abort(_("cannot verify bundle or remote repos"))
+        raise error.Abort(_("cannot verify bundle or remote repos"))
 
     def err(linkrev, msg, filename=None):
         if linkrev is not None:

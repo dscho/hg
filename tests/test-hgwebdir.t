@@ -201,7 +201,7 @@ should succeed, slashy names
   
   <div class="container">
   <div class="menu">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial" /></a>
   </div>
   <div class="main">
@@ -701,7 +701,7 @@ should succeed, slashy names
   
   <div class="container">
   <div class="menu">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial" /></a>
   </div>
   <div class="main">
@@ -1152,7 +1152,7 @@ test inexistent and inaccessible repo should be ignored silently
   
   <div class="container">
   <div class="menu">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial" /></a>
   </div>
   <div class="main">
@@ -1244,6 +1244,67 @@ rss-log with basedir /foo/
 
   $ get-with-headers.py localhost:$HGPORT2 'a/rss-log' | grep '<guid'
       <guid isPermaLink="true">http://hg.example.com:8080/foo/a/rev/8580ff50825a</guid>
+
+Path refreshing works as expected
+
+  $ killdaemons.py
+  $ mkdir $root/refreshtest
+  $ hg init $root/refreshtest/a
+  $ cat > paths.conf << EOF
+  > [paths]
+  > / = $root/refreshtest/*
+  > EOF
+  $ hg serve -p $HGPORT1 -d --pid-file hg.pid --webdir-conf paths.conf
+  $ cat hg.pid >> $DAEMON_PIDS
+
+  $ get-with-headers.py localhost:$HGPORT1 '?style=raw'
+  200 Script output follows
+  
+  
+  /a/
+  
+
+By default refreshing occurs every 20s and a new repo won't be listed
+immediately.
+
+  $ hg init $root/refreshtest/b
+  $ get-with-headers.py localhost:$HGPORT1 '?style=raw'
+  200 Script output follows
+  
+  
+  /a/
+  
+
+Restart the server with no refresh interval. New repo should appear
+immediately.
+
+  $ killdaemons.py
+  $ cat > paths.conf << EOF
+  > [web]
+  > refreshinterval = -1
+  > [paths]
+  > / = $root/refreshtest/*
+  > EOF
+  $ hg serve -p $HGPORT1 -d --pid-file hg.pid --webdir-conf paths.conf
+  $ cat hg.pid >> $DAEMON_PIDS
+
+  $ get-with-headers.py localhost:$HGPORT1 '?style=raw'
+  200 Script output follows
+  
+  
+  /a/
+  /b/
+  
+
+  $ hg init $root/refreshtest/c
+  $ get-with-headers.py localhost:$HGPORT1 '?style=raw'
+  200 Script output follows
+  
+  
+  /a/
+  /b/
+  /c/
+  
 
 paths errors 1
 

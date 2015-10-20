@@ -243,14 +243,14 @@ qpop
   $ hg -R sub update 0000
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg qpop
-  abort: local changed subrepos found, refresh first
+  abort: local changed subrepos found, qrefresh first
   [255]
   $ hg revert sub
   reverting subrepo sub
   adding sub/a (glob)
   $ hg qpop
-  popping 1.diff
-  now at: 0.diff
+  popping 1
+  now at: 0
   $ hg status -AS
   C .hgsub
   C .hgsubstate
@@ -262,17 +262,17 @@ qpush
   $ hg -R sub update 0000
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg qpush
-  abort: local changed subrepos found, refresh first
+  abort: local changed subrepos found, qrefresh first
   [255]
   $ hg revert sub
   reverting subrepo sub
   adding sub/a (glob)
   $ hg qpush
-  applying 1.diff
+  applying 1
    subrepository sub diverged (local revision: b2fdb12cd82b, remote revision: aa037b301eba)
   (M)erge, keep (l)ocal or keep (r)emote? m
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  now at: 1.diff
+  now at: 1
   $ hg status -AS
   C .hgsub
   C .hgsubstate

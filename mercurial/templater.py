@@ -5,12 +5,23 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-import os, re
-import util, config, templatefilters, templatekw, parser, error
-import revset as revsetmod
+from __future__ import absolute_import
+
+import os
+import re
 import types
-import minirst
+
+from .i18n import _
+from . import (
+    config,
+    error,
+    minirst,
+    parser,
+    revset as revsetmod,
+    templatefilters,
+    templatekw,
+    util,
+)
 
 # template parsing
 
@@ -94,11 +105,8 @@ def tokenize(program, start, end):
                     pos += 4 # skip over double escaped characters
                     continue
                 if program.startswith(quote, pos, end):
-                    try:
-                        # interpret as if it were a part of an outer string
-                        data = program[s:pos].decode('string-escape')
-                    except ValueError: # unbalanced escapes
-                        raise error.ParseError(_("syntax error"), s)
+                    # interpret as if it were a part of an outer string
+                    data = parser.unescapestr(program[s:pos])
                     if token == 'template':
                         data = _parsetemplate(data, 0, len(data))[0]
                     yield (token, data, s)
@@ -147,19 +155,18 @@ def _parsetemplate(tmpl, start, stop, quote=''):
         n = min((tmpl.find(c, pos, stop) for c in sepchars),
                 key=lambda n: (n < 0, n))
         if n < 0:
-            parsed.append(('string', tmpl[pos:stop].decode('string-escape')))
+            parsed.append(('string', parser.unescapestr(tmpl[pos:stop])))
             pos = stop
             break
         c = tmpl[n]
         bs = (n - pos) - len(tmpl[pos:n].rstrip('\\'))
         if bs % 2 == 1:
             # escaped (e.g. '\{', '\\\{', but not '\\{')
-            parsed.append(('string',
-                           tmpl[pos:n - 1].decode('string-escape') + c))
+            parsed.append(('string', parser.unescapestr(tmpl[pos:n - 1]) + c))
             pos = n + 1
             continue
         if n > pos:
-            parsed.append(('string', tmpl[pos:n].decode('string-escape')))
+            parsed.append(('string', parser.unescapestr(tmpl[pos:n])))
         if c == quote:
             return parsed, n + 1
 
@@ -194,12 +201,6 @@ def getlist(x):
         return getlist(x[1]) + [x[2]]
     return [x]
 
-def getfilter(exp, context):
-    f = getsymbol(exp)
-    if f not in context._filters:
-        raise error.ParseError(_("unknown function '%s'") % f)
-    return context._filters[f]
-
 def gettemplate(exp, context):
     if exp[0] == 'template':
         return [compileexp(e, context, methods) for e in exp[1]]
@@ -209,6 +210,15 @@ def gettemplate(exp, context):
         # by web templates, e.g. 'changelogtag' is redefined in map file.
         return context._load(exp[1])
     raise error.ParseError(_("expected template specifier"))
+
+def evalfuncarg(context, mapping, arg):
+    func, data = arg
+    # func() may return string, generator of strings or arbitrary object such
+    # as date tuple, but filter does not want generator.
+    thing = func(context, mapping, data)
+    if isinstance(thing, types.GeneratorType):
+        thing = stringify(thing)
+    return thing
 
 def runinteger(context, mapping, data):
     return int(data)
@@ -240,25 +250,27 @@ def runtemplate(context, mapping, template):
         yield func(context, mapping, data)
 
 def buildfilter(exp, context):
-    func, data = compileexp(exp[1], context, methods)
-    filt = getfilter(exp[2], context)
-    return (runfilter, (func, data, filt))
+    arg = compileexp(exp[1], context, methods)
+    n = getsymbol(exp[2])
+    if n in context._filters:
+        filt = context._filters[n]
+        return (runfilter, (arg, filt))
+    if n in funcs:
+        f = funcs[n]
+        return (f, [arg])
+    raise error.ParseError(_("unknown function '%s'") % n)
 
 def runfilter(context, mapping, data):
-    func, data, filt = data
-    # func() may return string, generator of strings or arbitrary object such
-    # as date tuple, but filter does not want generator.
-    thing = func(context, mapping, data)
-    if isinstance(thing, types.GeneratorType):
-        thing = stringify(thing)
+    arg, filt = data
+    thing = evalfuncarg(context, mapping, arg)
     try:
         return filt(thing)
     except (ValueError, AttributeError, TypeError):
-        if isinstance(data, tuple):
-            dt = data[1]
+        if isinstance(arg[1], tuple):
+            dt = arg[1][1]
         else:
-            dt = data
-        raise util.Abort(_("template filter '%s' is not compatible with "
+            dt = arg[1]
+        raise error.Abort(_("template filter '%s' is not compatible with "
                            "keyword '%s'") % (filt.func_name, dt))
 
 def buildmap(exp, context):
@@ -295,12 +307,13 @@ def buildfunc(exp, context):
         if len(args) != 1:
             raise error.ParseError(_("filter %s expects one argument") % n)
         f = context._filters[n]
-        return (runfilter, (args[0][0], args[0][1], f))
+        return (runfilter, (args[0], f))
     raise error.ParseError(_("unknown function '%s'") % n)
 
 def date(context, mapping, args):
     """:date(date[, fmt]): Format a date. See :hg:`help dates` for formatting
-    strings."""
+    strings. The default is a Unix date format, including the timezone:
+    "Mon Sep 04 15:13:13 2006 0700"."""
     if not (1 <= len(args) <= 2):
         # i18n: "date" is a keyword
         raise error.ParseError(_("date expects one or two arguments"))
@@ -408,7 +421,7 @@ def indent(context, mapping, args):
 def get(context, mapping, args):
     """:get(dict, key): Get an attribute/key from an object. Some keywords
     are complex types. This function allows you to obtain the value of an
-    attribute on these type."""
+    attribute on these types."""
     if len(args) != 2:
         # i18n: "get" is a keyword
         raise error.ParseError(_("get() expects two arguments"))
@@ -497,6 +510,47 @@ def label(context, mapping, args):
     # ignore args[0] (the label string) since this is supposed to be a a no-op
     yield args[1][0](context, mapping, args[1][1])
 
+def latesttag(context, mapping, args):
+    """:latesttag([pattern]): The global tags matching the given pattern on the
+    most recent globally tagged ancestor of this changeset."""
+    if len(args) > 1:
+        # i18n: "latesttag" is a keyword
+        raise error.ParseError(_("latesttag expects at most one argument"))
+
+    pattern = None
+    if len(args) == 1:
+        pattern = stringify(args[0][0](context, mapping, args[0][1]))
+
+    return templatekw.showlatesttags(pattern, **mapping)
+
+def localdate(context, mapping, args):
+    """:localdate(date[, tz]): Converts a date to the specified timezone.
+    The default is local date."""
+    if not (1 <= len(args) <= 2):
+        # i18n: "localdate" is a keyword
+        raise error.ParseError(_("localdate expects one or two arguments"))
+
+    date = evalfuncarg(context, mapping, args[0])
+    try:
+        date = util.parsedate(date)
+    except AttributeError:  # not str nor date tuple
+        # i18n: "localdate" is a keyword
+        raise error.ParseError(_("localdate expects a date information"))
+    if len(args) >= 2:
+        tzoffset = None
+        tz = evalfuncarg(context, mapping, args[1])
+        if isinstance(tz, str):
+            tzoffset = util.parsetimezone(tz)
+        if tzoffset is None:
+            try:
+                tzoffset = int(tz)
+            except (TypeError, ValueError):
+                # i18n: "localdate" is a keyword
+                raise error.ParseError(_("localdate expects a timezone"))
+    else:
+        tzoffset = util.makedate()[1]
+    return (date[0], tzoffset)
+
 def revset(context, mapping, args):
     """:revset(query[, formatargs...]): Execute a revision set query. See
     :hg:`help revset`."""
@@ -525,7 +579,7 @@ def revset(context, mapping, args):
             revs = list([str(r) for r in revs])
             revsetcache[raw] = revs
 
-    return templatekw.showlist("revision", revs, **mapping)
+    return templatekw.showrevslist("revision", revs, **mapping)
 
 def rstdoc(context, mapping, args):
     """:rstdoc(text, style): Format ReStructuredText."""
@@ -591,7 +645,8 @@ def shortest(context, mapping, args):
                 return shortest
 
 def strip(context, mapping, args):
-    """:strip(text[, chars]): Strip characters from a string."""
+    """:strip(text[, chars]): Strip characters from a string. By default,
+    strips all leading and trailing whitespace."""
     if not (1 <= len(args) <= 2):
         # i18n: "strip" is a keyword
         raise error.ParseError(_("strip expects one or two arguments"))
@@ -612,7 +667,16 @@ def sub(context, mapping, args):
     pat = stringify(args[0][0](context, mapping, args[0][1]))
     rpl = stringify(args[1][0](context, mapping, args[1][1]))
     src = stringify(args[2][0](context, mapping, args[2][1]))
-    yield re.sub(pat, rpl, src)
+    try:
+        patre = re.compile(pat)
+    except re.error:
+        # i18n: "sub" is a keyword
+        raise error.ParseError(_("sub got an invalid pattern: %s") % pat)
+    try:
+        yield patre.sub(rpl, src)
+    except re.error:
+        # i18n: "sub" is a keyword
+        raise error.ParseError(_("sub got an invalid replacement: %s") % rpl)
 
 def startswith(context, mapping, args):
     """:startswith(pattern, text): Returns the value from the "text" argument
@@ -680,6 +744,8 @@ funcs = {
     "indent": indent,
     "join": join,
     "label": label,
+    "latesttag": latesttag,
+    "localdate": localdate,
     "pad": pad,
     "revset": revset,
     "rstdoc": rstdoc,
@@ -738,9 +804,13 @@ class engine(object):
     filter uses function to transform value. syntax is
     {key|filter1|filter2|...}.'''
 
-    def __init__(self, loader, filters={}, defaults={}):
+    def __init__(self, loader, filters=None, defaults=None):
         self._loader = loader
+        if filters is None:
+            filters = {}
         self._filters = filters
+        if defaults is None:
+            defaults = {}
         self._defaults = defaults
         self._cache = {}
 
@@ -770,17 +840,23 @@ def stylelist():
             stylelist.append(split[1])
     return ", ".join(sorted(stylelist))
 
-class TemplateNotFound(util.Abort):
+class TemplateNotFound(error.Abort):
     pass
 
 class templater(object):
 
-    def __init__(self, mapfile, filters={}, defaults={}, cache={},
+    def __init__(self, mapfile, filters=None, defaults=None, cache=None,
                  minchunk=1024, maxchunk=65536):
         '''set up template engine.
         mapfile is name of file to read map definitions from.
         filters is dict of functions. each transforms a value into another.
         defaults is dict of default map definitions.'''
+        if filters is None:
+            filters = {}
+        if defaults is None:
+            defaults = {}
+        if cache is None:
+            cache = {}
         self.mapfile = mapfile or 'template'
         self.cache = cache.copy()
         self.map = {}
@@ -797,7 +873,7 @@ class templater(object):
         if not mapfile:
             return
         if not os.path.exists(mapfile):
-            raise util.Abort(_("style '%s' not found") % mapfile,
+            raise error.Abort(_("style '%s' not found") % mapfile,
                              hint=_("available styles: %s") % stylelist())
 
         conf = config.config(includepaths=templatepaths())

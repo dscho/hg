@@ -123,7 +123,9 @@ testpats = [
     (r'sed (-e )?\'(\d+|/[^/]*/)i(?!\\\n)',
      "put a backslash-escaped newline after sed 'i' command"),
     (r'^diff *-\w*u.*$\n(^  \$ |^$)', "prefix diff -u with cmp"),
-    (r'seq ', "don't use 'seq', use $TESTDIR/seq.py")
+    (r'seq ', "don't use 'seq', use $TESTDIR/seq.py"),
+    (r'\butil\.Abort\b', "directly use error.Abort"),
+    (r'\|&', "don't use |&, use 2>&1"),
   ],
   # warnings
   [
@@ -197,7 +199,6 @@ utestfilters = [
 
 pypats = [
   [
-    (r'\([^)]*\*\w[^()]+\w+=', "can't pass varargs with keyword in Py2.5"),
     (r'^\s*def\s*\w+\s*\(.*,\s*\(',
      "tuple parameter unpacking not available in Python 3+"),
     (r'lambda\s*\(.*,.*\)',
@@ -291,6 +292,9 @@ pypats = [
     (r'os\.path\.join\(.*, *(""|\'\')\)',
      "use pathutil.normasprefix(path) instead of os.path.join(path, '')"),
     (r'\s0[0-7]+\b', 'legacy octal syntax; use "0o" prefix instead of "0"'),
+    # XXX only catch mutable arguments on the first line of the definition
+    (r'def.*[( ]\w+=\{\}', "don't use mutable default arguments"),
+    (r'\butil\.Abort\b', "directly use error.Abort"),
   ],
   # warnings
   [

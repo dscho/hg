@@ -44,8 +44,7 @@ now pull and merge from test-a
   (run 'hg heads' to see heads, 'hg merge' to merge)
   $ hg merge
   merging test.txt
-  warning: conflicts during merge.
-  merging test.txt incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging test.txt! (edit, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]
@@ -85,12 +84,14 @@ pull and merge from test-a again
    branchmerge: True, force: False, partial: False
    ancestor: 96b70246a118, local: 50c3a7e29886+, remote: 40d11a4173a8
    preserving test.txt for resolve of test.txt
-   test.txt: versions differ -> m
-  picked tool 'internal:merge' for test.txt (binary False symlink False)
+   test.txt: versions differ -> m (premerge)
+  picked tool ':merge' for test.txt (binary False symlink False)
   merging test.txt
   my test.txt@50c3a7e29886+ other test.txt@40d11a4173a8 ancestor test.txt@96b70246a118
-  warning: conflicts during merge.
-  merging test.txt incomplete! (edit conflicts, then use 'hg resolve --mark')
+   test.txt: versions differ -> m (merge)
+  picked tool ':merge' for test.txt (binary False symlink False)
+  my test.txt@50c3a7e29886+ other test.txt@40d11a4173a8 ancestor test.txt@96b70246a118
+  warning: conflicts while merging test.txt! (edit, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]

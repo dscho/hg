@@ -1,6 +1,9 @@
-import os, stat
+import errno
+import os
 import re
 import socket
+import stat
+import subprocess
 import sys
 import tempfile
 
@@ -17,19 +20,68 @@ def check(name, desc):
         return func
     return decorator
 
+def checkfeatures(features):
+    result = {
+        'error': [],
+        'missing': [],
+        'skipped': [],
+    }
+
+    for feature in features:
+        negate = feature.startswith('no-')
+        if negate:
+            feature = feature[3:]
+
+        if feature not in checks:
+            result['missing'].append(feature)
+            continue
+
+        check, desc = checks[feature]
+        try:
+            available = check()
+        except Exception:
+            result['error'].append('hghave check failed: %s' % feature)
+            continue
+
+        if not negate and not available:
+            result['skipped'].append('missing feature: %s' % desc)
+        elif negate and available:
+            result['skipped'].append('system supports %s' % desc)
+
+    return result
+
+def require(features):
+    """Require that features are available, exiting if not."""
+    result = checkfeatures(features)
+
+    for missing in result['missing']:
+        sys.stderr.write('skipped: unknown feature: %s\n' % missing)
+    for msg in result['skipped']:
+        sys.stderr.write('skipped: %s\n' % msg)
+    for msg in result['error']:
+        sys.stderr.write('%s\n' % msg)
+
+    if result['missing']:
+        sys.exit(2)
+
+    if result['skipped'] or result['error']:
+        sys.exit(1)
+
 def matchoutput(cmd, regexp, ignorestatus=False):
     """Return True if cmd executes successfully and its output
     is matched by the supplied regular expression.
     """
     r = re.compile(regexp)
-    fh = os.popen(cmd)
-    s = fh.read()
     try:
-        ret = fh.close()
-    except IOError:
-        # Happen in Windows test environment
-        ret = 1
-    return (ignorestatus or ret is None) and r.search(s)
+        p = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    except OSError as e:
+        if e.errno != errno.ENOENT:
+            raise
+        ret = -1
+    ret = p.wait()
+    s = p.stdout.read()
+    return (ignorestatus or not ret) and r.search(s)
 
 @check("baz", "GNU Arch baz client")
 def has_baz():
@@ -367,6 +419,33 @@ def has_aix():
 def has_osx():
     return sys.platform == 'darwin'
 
+@check("docker", "docker support")
+def has_docker():
+    pat = r'A self-sufficient runtime for linux containers\.'
+    if matchoutput('docker --help', pat):
+        if 'linux' not in sys.platform:
+            # TODO: in theory we should be able to test docker-based
+            # package creation on non-linux using boot2docker, but in
+            # practice that requires extra coordination to make sure
+            # $TESTTEMP is going to be visible at the same path to the
+            # boot2docker VM. If we figure out how to verify that, we
+            # can use the following instead of just saying False:
+            # return 'DOCKER_HOST' in os.environ
+            return False
+
+        return True
+    return False
+
+@check("debhelper", "debian packaging tools")
+def has_debhelper():
+    dpkg = matchoutput('dpkg --version',
+                       "Debian `dpkg' package management program")
+    dh = matchoutput('dh --help',
+                     'dh is a part of debhelper.', ignorestatus=True)
+    dh_py2 = matchoutput('dh_python2 --help',
+                         'other supported Python versions')
+    return dpkg and dh and dh_py2
+
 @check("absimport", "absolute_import in __future__")
 def has_absimport():
     import __future__
@@ -380,3 +459,7 @@ def has_py3k():
 @check("pure", "running with pure Python code")
 def has_pure():
     return os.environ.get("HGTEST_RUN_TESTS_PURE") == "--pure"
+
+@check("slow", "allow slow tests")
+def has_slow():
+    return os.environ.get('HGTEST_SLOW') == 'slow'

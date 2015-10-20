@@ -69,17 +69,20 @@ Do not show debug commands if there are other candidates
 Show debug commands if there are no other candidates
   $ hg debugcomplete debug
   debugancestor
+  debugapplystreamclonebundle
   debugbuilddag
   debugbundle
   debugcheckstate
   debugcommands
   debugcomplete
   debugconfig
+  debugcreatestreamclonebundle
   debugdag
   debugdata
   debugdate
   debugdirstate
   debugdiscovery
+  debugextensions
   debugfileset
   debugfsinfo
   debuggetbundle
@@ -90,6 +93,7 @@ Show debug commands if there are no other candidates
   debugknown
   debuglabelcomplete
   debuglocks
+  debugmergestate
   debugnamecomplete
   debugobsolete
   debugpathcomplete
@@ -229,16 +233,19 @@ Show all commands + options
   config: untrusted, edit, local, global
   copy: after, force, include, exclude, dry-run
   debugancestor: 
+  debugapplystreamclonebundle: 
   debugbuilddag: mergeable-file, overwritten-file, new-file
   debugbundle: all
   debugcheckstate: 
   debugcommands: 
   debugcomplete: options
+  debugcreatestreamclonebundle: 
   debugdag: tags, branches, dots, spaces
   debugdata: changelog, manifest, dir
   debugdate: extended
   debugdirstate: nodates, datesort
   debugdiscovery: old, nonheads, ssh, remotecmd, insecure
+  debugextensions: template
   debugfileset: rev
   debugfsinfo: 
   debuggetbundle: head, common, type
@@ -249,12 +256,13 @@ Show all commands + options
   debugknown: 
   debuglabelcomplete: 
   debuglocks: force-lock, force-wlock
+  debugmergestate: 
   debugnamecomplete: 
   debugobsolete: flags, record-parents, rev, date, user
   debugpathcomplete: full, normal, added, removed
   debugpushkey: 
   debugpvec: 
-  debugrebuilddirstate: rev
+  debugrebuilddirstate: rev, minimal
   debugrebuildfncache: 
   debugrename: rev
   debugrevlog: changelog, manifest, dir, dump

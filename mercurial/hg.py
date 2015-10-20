@@ -6,17 +6,41 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-from lock import release
-from node import nullid
+from __future__ import absolute_import
 
-import localrepo, bundlerepo, unionrepo, httppeer, sshpeer, statichttprepo
-import bookmarks, lock, util, extensions, error, node, scmutil, phases, url
-import cmdutil, discovery, repoview, exchange
-import ui as uimod
-import merge as mergemod
-import verify as verifymod
-import errno, os, shutil
+import errno
+import os
+import shutil
+
+from .i18n import _
+from .node import nullid
+
+from . import (
+    bookmarks,
+    bundlerepo,
+    cmdutil,
+    discovery,
+    error,
+    exchange,
+    extensions,
+    httppeer,
+    localrepo,
+    lock,
+    merge as mergemod,
+    node,
+    phases,
+    repoview,
+    scmutil,
+    sshpeer,
+    statichttprepo,
+    ui as uimod,
+    unionrepo,
+    url,
+    util,
+    verify as verifymod,
+)
+
+release = lock.release
 
 def _local(path):
     path = util.expandpath(util.urllocalpath(path))
@@ -41,7 +65,7 @@ def addbranchrevs(lrepo, other, branches, revs):
 
     if not peer.capable('branchmap'):
         if branches:
-            raise util.Abort(_("remote branch lookup not supported"))
+            raise error.Abort(_("remote branch lookup not supported"))
         revs.append(hashbranch)
         return revs, revs[0]
     branchmap = peer.branchmap()
@@ -49,7 +73,7 @@ def addbranchrevs(lrepo, other, branches, revs):
     def primary(branch):
         if branch == '.':
             if not lrepo:
-                raise util.Abort(_("dirstate branch not accessible"))
+                raise error.Abort(_("dirstate branch not accessible"))
             branch = lrepo.dirstate.branch()
         if branch in branchmap:
             revs.extend(node.hex(r) for r in reversed(branchmap[branch]))
@@ -136,7 +160,7 @@ def repository(ui, path='', create=False):
     peer = _peerorrepo(ui, path, create)
     repo = peer.local()
     if not repo:
-        raise util.Abort(_("repository '%s' is not local") %
+        raise error.Abort(_("repository '%s' is not local") %
                          (path or peer.url()))
     return repo.filtered('visible')
 
@@ -170,7 +194,7 @@ def share(ui, source, dest=None, update=True, bookmarks=True):
     '''create a shared repository'''
 
     if not islocal(source):
-        raise util.Abort(_('can only share local repositories'))
+        raise error.Abort(_('can only share local repositories'))
 
     if not dest:
         dest = defaultdest(source)
@@ -193,7 +217,7 @@ def share(ui, source, dest=None, update=True, bookmarks=True):
     destvfs = scmutil.vfs(os.path.join(destwvfs.base, '.hg'), realpath=True)
 
     if destvfs.lexists():
-        raise util.Abort(_('destination already exists'))
+        raise error.Abort(_('destination already exists'))
 
     if not destwvfs.isdir():
         destwvfs.mkdir()
@@ -296,7 +320,7 @@ def clonewithshare(ui, peeropts, sharepath, source, srcpeer, dest, pull=False,
     revs = None
     if rev:
         if not srcpeer.capable('lookup'):
-            raise util.Abort(_("src repository does not support "
+            raise error.Abort(_("src repository does not support "
                                "revision lookup and so doesn't "
                                "support clone by revision"))
         revs = [srcpeer.lookup(r) for r in rev]
@@ -392,14 +416,14 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
     source = util.urllocalpath(source)
 
     if not dest:
-        raise util.Abort(_("empty destination path is not valid"))
+        raise error.Abort(_("empty destination path is not valid"))
 
     destvfs = scmutil.vfs(dest, expandpath=True)
     if destvfs.lexists():
         if not destvfs.isdir():
-            raise util.Abort(_("destination '%s' already exists") % dest)
+            raise error.Abort(_("destination '%s' already exists") % dest)
         elif destvfs.listdir():
-            raise util.Abort(_("destination '%s' is not empty") % dest)
+            raise error.Abort(_("destination '%s' is not empty") % dest)
 
     shareopts = shareopts or {}
     sharepool = shareopts.get('pool')
@@ -424,7 +448,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
         elif sharenamemode == 'remote':
             sharepath = os.path.join(sharepool, util.sha1(source).hexdigest())
         else:
-            raise util.Abort('unknown share naming mode: %s' % sharenamemode)
+            raise error.Abort('unknown share naming mode: %s' % sharenamemode)
 
         if sharepath:
             return clonewithshare(ui, peeropts, sharepath, source, srcpeer,
@@ -470,7 +494,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
             except OSError as inst:
                 if inst.errno == errno.EEXIST:
                     cleandir = None
-                    raise util.Abort(_("destination '%s' already exists")
+                    raise error.Abort(_("destination '%s' already exists")
                                      % dest)
                 raise
 
@@ -510,14 +534,14 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
             except OSError as inst:
                 if inst.errno == errno.EEXIST:
                     cleandir = None
-                    raise util.Abort(_("destination '%s' already exists")
+                    raise error.Abort(_("destination '%s' already exists")
                                      % dest)
                 raise
 
             revs = None
             if rev:
                 if not srcpeer.capable('lookup'):
-                    raise util.Abort(_("src repository does not support "
+                    raise error.Abort(_("src repository does not support "
                                        "revision lookup and so doesn't "
                                        "support clone by revision"))
                 revs = [srcpeer.lookup(r) for r in rev]
@@ -533,7 +557,8 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
                 exchange.push(srcrepo, destpeer, revs=revs,
                               bookmarks=srcrepo._bookmarks.keys())
             else:
-                raise util.Abort(_("clone from remote to remote not supported"))
+                raise error.Abort(_("clone from remote to remote not supported")
+                                 )
 
         cleandir = None
 
@@ -558,7 +583,11 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
                     try:
                         uprev = destrepo.lookup(checkout)
                     except error.RepoLookupError:
-                        pass
+                        if update is not True:
+                            try:
+                                uprev = destrepo.lookup(update)
+                            except error.RepoLookupError:
+                                pass
                 if uprev is None:
                     try:
                         uprev = destrepo._bookmarks['@']
@@ -568,7 +597,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
                             status = _("updating to bookmark @\n")
                         else:
                             status = (_("updating to bookmark @ on branch %s\n")
-                                       % bn)
+                                      % bn)
                     except KeyError:
                         try:
                             uprev = destrepo.branchtip('default')
@@ -737,10 +766,6 @@ def outgoing(ui, repo, dest, opts):
     recurse()
     return 0 # exit code is zero since we found outgoing changes
 
-def revert(repo, node, choose):
-    """revert changes to revision in node without updating dirstate"""
-    return mergemod.update(repo, node, False, True, choose)[3] > 0
-
 def verify(repo):
     """verify the consistency of a repository"""
     ret = verifymod.verify(repo)
@@ -796,3 +821,77 @@ def remoteui(src, opts):
         dst.setconfig('web', 'cacerts', util.expandpath(v), 'copied')
 
     return dst
+
+# Files of interest
+# Used to check if the repository has changed looking at mtime and size of
+# these files.
+foi = [('spath', '00changelog.i'),
+       ('spath', 'phaseroots'), # ! phase can change content at the same size
+       ('spath', 'obsstore'),
+       ('path', 'bookmarks'), # ! bookmark can change content at the same size
+      ]
+
+class cachedlocalrepo(object):
+    """Holds a localrepository that can be cached and reused."""
+
+    def __init__(self, repo):
+        """Create a new cached repo from an existing repo.
+
+        We assume the passed in repo was recently created. If the
+        repo has changed between when it was created and when it was
+        turned into a cache, it may not refresh properly.
+        """
+        assert isinstance(repo, localrepo.localrepository)
+        self._repo = repo
+        self._state, self.mtime = self._repostate()
+
+    def fetch(self):
+        """Refresh (if necessary) and return a repository.
+
+        If the cached instance is out of date, it will be recreated
+        automatically and returned.
+
+        Returns a tuple of the repo and a boolean indicating whether a new
+        repo instance was created.
+        """
+        # We compare the mtimes and sizes of some well-known files to
+        # determine if the repo changed. This is not precise, as mtimes
+        # are susceptible to clock skew and imprecise filesystems and
+        # file content can change while maintaining the same size.
+
+        state, mtime = self._repostate()
+        if state == self._state:
+            return self._repo, False
+
+        self._repo = repository(self._repo.baseui, self._repo.url())
+        self._state = state
+        self.mtime = mtime
+
+        return self._repo, True
+
+    def _repostate(self):
+        state = []
+        maxmtime = -1
+        for attr, fname in foi:
+            prefix = getattr(self._repo, attr)
+            p = os.path.join(prefix, fname)
+            try:
+                st = os.stat(p)
+            except OSError:
+                st = os.stat(prefix)
+            state.append((st.st_mtime, st.st_size))
+            maxmtime = max(maxmtime, st.st_mtime)
+
+        return tuple(state), maxmtime
+
+    def copy(self):
+        """Obtain a copy of this class instance.
+
+        A new localrepository instance is obtained. The new instance should be
+        completely independent of the original.
+        """
+        repo = repository(self._repo.baseui, self._repo.origroot)
+        c = cachedlocalrepo(repo)
+        c._state = self._state
+        c.mtime = self.mtime
+        return c

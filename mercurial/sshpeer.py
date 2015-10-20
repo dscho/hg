@@ -5,9 +5,16 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+from __future__ import absolute_import
+
 import re
-from i18n import _
-import util, error, wireproto
+
+from .i18n import _
+from . import (
+    error,
+    util,
+    wireproto,
+)
 
 class remotelock(object):
     def __init__(self, repo):
@@ -51,7 +58,7 @@ class doublepipe(object):
 
     The main pipe is expected to be a 'bufferedinputpipe' from the util module
     that handle all the os specific bites. This class lives in this module
-    because it focus on behavior specifig to the ssh protocol."""
+    because it focus on behavior specific to the ssh protocol."""
 
     def __init__(self, ui, main, side):
         self._ui = ui
@@ -270,7 +277,7 @@ class sshpeer(wireproto.wirepeer):
         r = self._call(cmd, **args)
         if r:
             # XXX needs to be made better
-            raise util.Abort('unexpected remote reply: %s' % r)
+            raise error.Abort('unexpected remote reply: %s' % r)
         while True:
             d = fp.read(4096)
             if not d:

@@ -301,8 +301,7 @@ force a conflicted merge to occur
   rebasing shelved changes
   rebasing 5:4702e8911fe0 "changes to '[mq]: second.patch'" (tip)
   merging a/a
-  warning: conflicts during merge.
-  merging a/a incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging a/a! (edit, then use 'hg resolve --mark')
   unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
   [1]
 
@@ -382,8 +381,7 @@ try to continue with no unshelve underway
 redo the unshelve to get a conflict
 
   $ hg unshelve -q
-  warning: conflicts during merge.
-  merging a/a incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging a/a! (edit, then use 'hg resolve --mark')
   unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
   [1]
 
@@ -534,8 +532,12 @@ shelve should still work even if mq is disabled
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg --config extensions.mq=! shelve --list
   test            (*)    changes to 'create conflict' (glob)
+  $ hg bookmark
+   * test                      4:33f7f61e6c5e
   $ hg --config extensions.mq=! unshelve
   unshelving change 'test'
+  $ hg bookmark
+   * test                      4:33f7f61e6c5e
 
 shelve should leave dirstate clean (issue4055)
 
@@ -703,8 +705,7 @@ unshelve and conflicts with tracked and untracked files
   rebasing shelved changes
   rebasing 5:23b29cada8ba "changes to 'commit stuff'" (tip)
   merging f
-  warning: conflicts during merge.
-  merging f incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging f! (edit, then use 'hg resolve --mark')
   unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
   [1]
   $ hg log -G --template '{rev}  {desc|firstline}  {author}  {date|isodate}'
@@ -759,8 +760,7 @@ unshelve and conflicts with tracked and untracked files
   rebasing shelved changes
   rebasing 5:23b29cada8ba "changes to 'commit stuff'" (tip)
   merging f
-  warning: conflicts during merge.
-  merging f incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging f! (edit, then use 'hg resolve --mark')
   unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
   [1]
   $ hg st
@@ -796,15 +796,18 @@ Recreate some conflict again
   $ hg up test
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (activating bookmark test)
+  $ hg bookmark
+   * test                      4:33f7f61e6c5e
   $ hg unshelve
   unshelving change 'default'
   rebasing shelved changes
   rebasing 5:4b555fdb4e96 "changes to 'second'" (tip)
   merging a/a
-  warning: conflicts during merge.
-  merging a/a incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging a/a! (edit, then use 'hg resolve --mark')
   unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
   [1]
+  $ hg bookmark
+     test                      4:33f7f61e6c5e
 
 Test that resolving all conflicts in one direction (so that the rebase
 is a no-op), works (issue4398)
@@ -817,6 +820,8 @@ is a no-op), works (issue4398)
   rebasing 5:4b555fdb4e96 "changes to 'second'" (tip)
   note: rebase of 5:4b555fdb4e96 created no changes to commit
   unshelve of 'default' complete
+  $ hg bookmark
+   * test                      4:33f7f61e6c5e
   $ hg diff
   $ hg status
   ? a/a.orig
@@ -900,12 +905,16 @@ Test interactive shelve
   $ hg st
   M a/a
   ? foo/foo
+  $ hg bookmark
+   * test                      4:33f7f61e6c5e
   $ hg unshelve
   unshelving change 'test'
   temporarily committing pending changes (restore with 'hg unshelve --abort')
   rebasing shelved changes
   rebasing 6:65b5d1c34c34 "changes to 'create conflict'" (tip)
   merging a/a
+  $ hg bookmark
+   * test                      4:33f7f61e6c5e
   $ cat a/a
   a
   a
@@ -917,6 +926,7 @@ shelve --patch and shelve --stat should work with a single valid shelfname
 
   $ hg up --clean .
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  (leaving bookmark test)
   $ hg shelve --list
   $ echo 'patch a' > shelf-patch-a
   $ hg add shelf-patch-a
@@ -954,3 +964,213 @@ shelve --patch and shelve --stat should work with a single valid shelfname
   abort: cannot find shelf nonexistentshelf
   [255]
 
+  $ cd ..
+
+Shelve from general delta repo uses bundle2 on disk
+--------------------------------------------------
+
+no general delta
+
+  $ hg clone --pull repo bundle1 --config format.generaldelta=0
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 5 changesets with 8 changes to 6 files
+  updating to branch default
+  6 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ cd bundle1
+  $ echo babar > jungle
+  $ hg add jungle
+  $ hg shelve
+  shelved as default
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg debugbundle .hg/shelved/*.hg
+  7e30d8ac6f23cfc84330fd7e698730374615d21a
+  $ cd ..
+
+with general delta
+
+  $ hg clone --pull repo bundle2 --config format.generaldelta=1
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 5 changesets with 8 changes to 6 files
+  updating to branch default
+  6 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ cd bundle2
+  $ echo babar > jungle
+  $ hg add jungle
+  $ hg shelve
+  shelved as default
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg debugbundle .hg/shelved/*.hg
+  Stream params: {'Compression': 'BZ'}
+  changegroup -- "{'version': '02'}"
+      7e30d8ac6f23cfc84330fd7e698730374615d21a
+  $ cd ..
+
+Test visibility of in-memory changes inside transaction to external hook
+------------------------------------------------------------------------
+
+  $ cd repo
+
+  $ echo xxxx >> x
+  $ hg commit -m "#5: changes to invoke rebase"
+
+  $ cat > $TESTTMP/checkvisibility.sh <<EOF
+  > echo "==== \$1:"
+  > hg parents --template "VISIBLE {rev}:{node|short}\n"
+  > # test that pending changes are hidden
+  > unset HG_PENDING
+  > hg parents --template "ACTUAL  {rev}:{node|short}\n"
+  > echo "===="
+  > EOF
+
+  $ cat >> .hg/hgrc <<EOF
+  > [defaults]
+  > # to fix hash id of temporary revisions
+  > unshelve = --date '0 0'
+  > EOF
+
+"hg unshelve" at REV5 implies steps below:
+
+(1) commit changes in the working directory (REV6)
+(2) unbundle shelved revision (REV7)
+(3) rebase: merge REV7 into REV6 (REV6 => REV6, REV7)
+(4) rebase: commit merged revision (REV8)
+(5) rebase: update to REV6 (REV8 => REV6)
+(6) update to REV5 (REV6 => REV5)
+(7) abort transaction
+
+== test visibility to external preupdate hook
+
+  $ cat >> .hg/hgrc <<EOF
+  > [hooks]
+  > preupdate.visibility = sh $TESTTMP/checkvisibility.sh preupdate
+  > EOF
+
+  $ echo nnnn >> n
+
+  $ sh $TESTTMP/checkvisibility.sh before-unshelving
+  ==== before-unshelving:
+  VISIBLE 5:703117a2acfb
+  ACTUAL  5:703117a2acfb
+  ====
+
+  $ hg unshelve --keep default
+  temporarily committing pending changes (restore with 'hg unshelve --abort')
+  rebasing shelved changes
+  rebasing 7:fcbb97608399 "changes to 'create conflict'" (tip)
+  ==== preupdate:
+  VISIBLE 6:66b86db80ee4
+  ACTUAL  5:703117a2acfb
+  ====
+  ==== preupdate:
+  VISIBLE 8:cb2a4e59c2d5
+  ACTUAL  5:703117a2acfb
+  ====
+  ==== preupdate:
+  VISIBLE 6:66b86db80ee4
+  ACTUAL  5:703117a2acfb
+  ====
+
+  $ cat >> .hg/hgrc <<EOF
+  > [hooks]
+  > preupdate.visibility =
+  > EOF
+
+  $ sh $TESTTMP/checkvisibility.sh after-unshelving
+  ==== after-unshelving:
+  VISIBLE 5:703117a2acfb
+  ACTUAL  5:703117a2acfb
+  ====
+
+== test visibility to external update hook
+
+  $ hg update -q -C 5
+
+  $ cat >> .hg/hgrc <<EOF
+  > [hooks]
+  > update.visibility = sh $TESTTMP/checkvisibility.sh update
+  > EOF
+
+  $ echo nnnn >> n
+
+  $ sh $TESTTMP/checkvisibility.sh before-unshelving
+  ==== before-unshelving:
+  VISIBLE 5:703117a2acfb
+  ACTUAL  5:703117a2acfb
+  ====
+
+  $ hg unshelve --keep default
+  temporarily committing pending changes (restore with 'hg unshelve --abort')
+  rebasing shelved changes
+  rebasing 7:fcbb97608399 "changes to 'create conflict'" (tip)
+  ==== update:
+  VISIBLE 6:66b86db80ee4
+  VISIBLE 7:fcbb97608399
+  ACTUAL  5:703117a2acfb
+  ====
+  ==== update:
+  VISIBLE 6:66b86db80ee4
+  ACTUAL  5:703117a2acfb
+  ====
+  ==== update:
+  VISIBLE 5:703117a2acfb
+  ACTUAL  5:703117a2acfb
+  ====
+
+  $ cat >> .hg/hgrc <<EOF
+  > [hooks]
+  > update.visibility =
+  > EOF
+
+  $ sh $TESTTMP/checkvisibility.sh after-unshelving
+  ==== after-unshelving:
+  VISIBLE 5:703117a2acfb
+  ACTUAL  5:703117a2acfb
+  ====
+
+  $ cd ..
+
+test Abort unshelve always gets user out of the unshelved state
+---------------------------------------------------------------
+  $ hg init salvage
+  $ cd salvage
+  $ echo 'content' > root
+  $ hg commit -A -m 'root' -q
+  $ echo '' > root
+  $ hg shelve -q
+  $ echo 'contADDent' > root
+  $ hg unshelve -q
+  warning: conflicts while merging root! (edit, then use 'hg resolve --mark')
+  unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
+  [1]
+Wreak havoc on the unshelve process
+  $ rm .hg/unshelverebasestate
+  $ hg unshelve --abort
+  unshelve of 'default' aborted
+  abort: No such file or directory
+  [255]
+Can the user leave the current state?
+  $ hg up -C .
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
+Try again but with a corrupted shelve state file
+  $ hg strip -r 2 -r 1 -q
+  $ hg up -r 0 -q
+  $ echo '' > root
+  $ hg shelve -q
+  $ echo 'contADDent' > root
+  $ hg unshelve -q
+  warning: conflicts while merging root! (edit, then use 'hg resolve --mark')
+  unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
+  [1]
+  $ sed 's/ae8c668541e8/123456789012/' .hg/shelvedstate > ../corrupt-shelvedstate
+  $ mv ../corrupt-shelvedstate .hg/histedit-state
+  $ hg unshelve --abort 2>&1 | grep 'rebase aborted'
+  rebase aborted
+  $ hg up -C .
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved

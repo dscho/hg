@@ -11,11 +11,26 @@
 allowing operations like diff and log with revsets.
 """
 
-from node import nullid
-from i18n import _
+from __future__ import absolute_import
+
 import os
-import util, mdiff, cmdutil, scmutil
-import localrepo, changelog, manifest, filelog, revlog, pathutil
+
+from .i18n import _
+from .node import nullid
+
+from . import (
+    changelog,
+    cmdutil,
+    error,
+    filelog,
+    localrepo,
+    manifest,
+    mdiff,
+    pathutil,
+    revlog,
+    scmutil,
+    util,
+)
 
 class unionrevlog(revlog.revlog):
     def __init__(self, opener, indexfile, revlog2, linkmapper):
@@ -35,13 +50,16 @@ class unionrevlog(revlog.revlog):
         for rev2 in self.revlog2:
             rev = self.revlog2.index[rev2]
             # rev numbers - in revlog2, very different from self.rev
-            _start, _csize, _rsize, _base, linkrev, p1rev, p2rev, node = rev
+            _start, _csize, _rsize, base, linkrev, p1rev, p2rev, node = rev
 
             if linkmapper is None: # link is to same revlog
                 assert linkrev == rev2 # we never link back
                 link = n
             else: # rev must be mapped from repo2 cl to unified cl by linkmapper
                 link = linkmapper(linkrev)
+
+            if linkmapper is not None: # link is to same revlog
+                base = linkmapper(base)
 
             if node in self.nodemap:
                 # this happens for the common revlog revisions
@@ -51,7 +69,7 @@ class unionrevlog(revlog.revlog):
             p1node = self.revlog2.node(p1rev)
             p2node = self.revlog2.node(p2rev)
 
-            e = (None, None, None, None,
+            e = (None, None, None, base,
                  link, self.rev(p1node), self.rev(p2node), node)
             self.index.insert(-1, e)
             self.nodemap[node] = n
@@ -214,7 +232,7 @@ class unionrepository(localrepo.localrepository):
 
 def instance(ui, path, create):
     if create:
-        raise util.Abort(_('cannot create new union repository'))
+        raise error.Abort(_('cannot create new union repository'))
     parentpath = ui.config("bundle", "mainreporoot", "")
     if not parentpath:
         # try to find the correct path to the working directory repo

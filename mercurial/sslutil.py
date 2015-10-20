@@ -6,10 +6,17 @@
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
-import os, sys, ssl
 
-from mercurial import util
-from mercurial.i18n import _
+from __future__ import absolute_import
+
+import os
+import ssl
+import sys
+
+from .i18n import _
+from . import error, util
+
+hassni = getattr(ssl, 'HAS_SNI', False)
 
 _canloaddefaultcerts = False
 try:
@@ -45,7 +52,7 @@ try:
         # closed
         # - see http://bugs.python.org/issue13721
         if not sslsocket.cipher():
-            raise util.Abort(_('ssl connection failed'))
+            raise error.Abort(_('ssl connection failed'))
         return sslsocket
 except AttributeError:
     def wrapsocket(sock, keyfile, certfile, ui, cert_reqs=ssl.CERT_NONE,
@@ -57,7 +64,7 @@ except AttributeError:
         # closed
         # - see http://bugs.python.org/issue13721
         if not sslsocket.cipher():
-            raise util.Abort(_('ssl connection failed'))
+            raise error.Abort(_('ssl connection failed'))
         return sslsocket
 
 def _verifycert(cert, hostname):
@@ -135,7 +142,7 @@ def sslkwargs(ui, host):
     elif cacerts:
         cacerts = util.expandpath(cacerts)
         if not os.path.exists(cacerts):
-            raise util.Abort(_('could not find web.cacerts: %s') % cacerts)
+            raise error.Abort(_('could not find web.cacerts: %s') % cacerts)
     else:
         cacerts = _defaultcacerts()
         if cacerts and cacerts != '!':
@@ -158,15 +165,15 @@ class validator(object):
         hostfingerprint = self.ui.config('hostfingerprints', host)
 
         if not sock.cipher(): # work around http://bugs.python.org/issue13721
-            raise util.Abort(_('%s ssl connection error') % host)
+            raise error.Abort(_('%s ssl connection error') % host)
         try:
             peercert = sock.getpeercert(True)
             peercert2 = sock.getpeercert()
         except AttributeError:
-            raise util.Abort(_('%s ssl connection error') % host)
+            raise error.Abort(_('%s ssl connection error') % host)
 
         if not peercert:
-            raise util.Abort(_('%s certificate error: '
+            raise error.Abort(_('%s certificate error: '
                                'no certificate received') % host)
         peerfingerprint = util.sha1(peercert).hexdigest()
         nicefingerprint = ":".join([peerfingerprint[x:x + 2]
@@ -174,7 +181,7 @@ class validator(object):
         if hostfingerprint:
             if peerfingerprint.lower() != \
                     hostfingerprint.replace(':', '').lower():
-                raise util.Abort(_('certificate for %s has unexpected '
+                raise error.Abort(_('certificate for %s has unexpected '
                                    'fingerprint %s') % (host, nicefingerprint),
                                  hint=_('check hostfingerprint configuration'))
             self.ui.debug('%s certificate matched fingerprint %s\n' %
@@ -182,13 +189,13 @@ class validator(object):
         elif cacerts != '!':
             msg = _verifycert(peercert2, host)
             if msg:
-                raise util.Abort(_('%s certificate error: %s') % (host, msg),
+                raise error.Abort(_('%s certificate error: %s') % (host, msg),
                                  hint=_('configure hostfingerprint %s or use '
                                         '--insecure to connect insecurely') %
                                       nicefingerprint)
             self.ui.debug('%s certificate successfully verified\n' % host)
         elif strict:
-            raise util.Abort(_('%s certificate with fingerprint %s not '
+            raise error.Abort(_('%s certificate with fingerprint %s not '
                                'verified') % (host, nicefingerprint),
                              hint=_('check hostfingerprints or web.cacerts '
                                      'config setting'))

@@ -322,7 +322,6 @@ check that local configs for the cached repo aren't inherited when -R is used:
   ...     runcommand(server, ['phase', '-r', '.'])
   *** runcommand phase -r . -p
   no phases changed
-   [1]
   *** runcommand commit -Am.
   *** runcommand rollback
   repository tip rolled back to revision 3 (undo commit)
@@ -379,7 +378,10 @@ cache of non-public revisions should be invalidated on repository change
   ...     runcommand(server, ['log', '-qr', 'draft()'])
   ...     # create draft commits by another process
   ...     for i in xrange(5, 7):
-  ...         os.system('echo a >> a')
+  ...         f = open('a', 'ab')
+  ...         f.seek(0, os.SEEK_END)
+  ...         f.write('a\n')
+  ...         f.close()
   ...         os.system('hg commit -Aqm%d' % i)
   ...     # new commits should be listed as draft revisions
   ...     runcommand(server, ['log', '-qr', 'draft()'])
@@ -457,6 +459,30 @@ cache of phase roots should be invalidated on strip (issue3827):
   5: public
   *** runcommand branches
   default                        1:731265503d86
+
+in-memory cache must be reloaded if transaction is aborted. otherwise
+changelog and manifest would have invalid node:
+
+  $ echo a >> a
+  >>> from hgclient import readchannel, runcommand, check
+  >>> @check
+  ... def txabort(server):
+  ...     readchannel(server)
+  ...     runcommand(server, ['commit', '--config', 'hooks.pretxncommit=false',
+  ...                         '-mfoo'])
+  ...     runcommand(server, ['verify'])
+  *** runcommand commit --config hooks.pretxncommit=false -mfoo
+  transaction abort!
+  rollback completed
+  abort: pretxncommit hook exited with status 1
+   [255]
+  *** runcommand verify
+  checking changesets
+  checking manifests
+  crosschecking files in changesets and manifests
+  checking files
+  1 files, 2 changesets, 2 total revisions
+  $ hg revert --no-backup -aq
 
   $ cat >> .hg/hgrc << EOF
   > [experimental]
@@ -630,6 +656,15 @@ start without repository:
   *** runcommand init repo2
   *** runcommand id -R repo2
   000000000000 tip
+
+
+don't fall back to cwd if invalid -R path is specified (issue4805):
+
+  $ cd repo
+  $ hg serve --cmdserver pipe -R ../nonexistent
+  abort: repository ../nonexistent not found!
+  [255]
+  $ cd ..
 
 
 unix domain socket:

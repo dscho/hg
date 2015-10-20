@@ -112,22 +112,5 @@ hidden by deduplication algorithm in the cycle detector, so fixing
 these may expose other cycles.
 
   $ hg locate 'mercurial/**.py' 'hgext/**.py' | sed 's-\\-/-g' | python "$import_checker" -
-  mercurial/dispatch.py mixed imports
-     stdlib:    commands
-     relative:  error, extensions, fancyopts, hg, hook, util
-  mercurial/fileset.py mixed imports
-     stdlib:    parser
-     relative:  error, merge, util
-  mercurial/revset.py mixed imports
-     stdlib:    parser
-     relative:  error, hbisect, phases, util
-  mercurial/templater.py mixed imports
-     stdlib:    parser
-     relative:  config, error, templatefilters, templatekw, util
-  mercurial/ui.py mixed imports
-     stdlib:    formatter
-     relative:  config, error, progress, scmutil, util
-  Import cycle: mercurial.cmdutil -> mercurial.context -> mercurial.subrepo -> mercurial.cmdutil
   Import cycle: hgext.largefiles.basestore -> hgext.largefiles.localstore -> hgext.largefiles.basestore
-  Import cycle: mercurial.commands -> mercurial.commandserver -> mercurial.dispatch -> mercurial.commands
   [1]

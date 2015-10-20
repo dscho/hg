@@ -15,7 +15,7 @@
 # audience not running a version control system.
 #
 # For in-depth discussion refer to
-# <http://mercurial.selenic.com/wiki/KeywordPlan>.
+# <https://mercurial-scm.org/wiki/KeywordPlan>.
 #
 # Keyword expansion is based on Mercurial's changeset template mappings.
 #
@@ -83,7 +83,7 @@ like CVS' $Log$, are not supported. A keyword template map "Log =
 '''
 
 from mercurial import commands, context, cmdutil, dispatch, filelog, extensions
-from mercurial import localrepo, match, patch, templatefilters, util
+from mercurial import localrepo, match, patch, templatefilters, util, error
 from mercurial import scmutil, pathutil
 from mercurial.hgweb import webcommands
 from mercurial.i18n import _
@@ -348,20 +348,20 @@ def _status(ui, repo, wctx, kwt, *pats, **opts):
         return repo.status(match=scmutil.match(wctx, pats, opts), clean=True,
                            unknown=opts.get('unknown') or opts.get('all'))
     if ui.configitems('keyword'):
-        raise util.Abort(_('[keyword] patterns cannot match'))
-    raise util.Abort(_('no [keyword] patterns configured'))
+        raise error.Abort(_('[keyword] patterns cannot match'))
+    raise error.Abort(_('no [keyword] patterns configured'))
 
 def _kwfwrite(ui, repo, expand, *pats, **opts):
     '''Selects files and passes them to kwtemplater.overwrite.'''
     wctx = repo[None]
     if len(wctx.parents()) > 1:
-        raise util.Abort(_('outstanding uncommitted merge'))
+        raise error.Abort(_('outstanding uncommitted merge'))
     kwt = kwtools['templater']
     wlock = repo.wlock()
     try:
         status = _status(ui, repo, wctx, kwt, *pats, **opts)
         if status.modified or status.added or status.removed or status.deleted:
-            raise util.Abort(_('outstanding uncommitted changes'))
+            raise error.Abort(_('outstanding uncommitted changes'))
         kwt.overwrite(wctx, status.clean, True, expand)
     finally:
         wlock.release()
@@ -623,6 +623,7 @@ def reposetup(ui, repo):
 
         def rollback(self, dryrun=False, force=False):
             wlock = self.wlock()
+            origrestrict = kwt.restrict
             try:
                 if not dryrun:
                     changed = self['.'].files()
@@ -630,10 +631,12 @@ def reposetup(ui, repo):
                 if not dryrun:
                     ctx = self['.']
                     modified, added = _preselect(ctx.status(), changed)
+                    kwt.restrict = False
                     kwt.overwrite(ctx, modified, True, True)
                     kwt.overwrite(ctx, added, True, False)
                 return ret
             finally:
+                kwt.restrict = origrestrict
                 wlock.release()
 
     # monkeypatches

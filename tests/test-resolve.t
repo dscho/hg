@@ -53,6 +53,58 @@ resolving an unknown path should emit a warning, but not for -l
   arguments do not match paths that need resolving
   $ hg resolve -l does-not-exist
 
+don't allow marking or unmarking driver-resolved files
+
+  $ cat > $TESTTMP/markdriver.py << EOF
+  > '''mark and unmark files as driver-resolved'''
+  > from mercurial import cmdutil, merge, scmutil
+  > cmdtable = {}
+  > command = cmdutil.command(cmdtable)
+  > @command('markdriver',
+  >   [('u', 'unmark', None, '')],
+  >   'FILE...')
+  > def markdriver(ui, repo, *pats, **opts):
+  >     wlock = repo.wlock()
+  >     try:
+  >         ms = merge.mergestate(repo)
+  >         m = scmutil.match(repo[None], pats, opts)
+  >         for f in ms:
+  >             if not m(f):
+  >                 continue
+  >             if not opts['unmark']:
+  >                 ms.mark(f, 'd')
+  >             else:
+  >                 ms.mark(f, 'u')
+  >         ms.commit()
+  >     finally:
+  >         wlock.release()
+  > EOF
+  $ hg --config extensions.markdriver=$TESTTMP/markdriver.py markdriver file1
+  $ hg resolve --list
+  D file1
+  U file2
+  $ hg resolve --mark file1
+  not marking file1 as it is driver-resolved
+this should not print out file1
+  $ hg resolve --mark --all
+  (no more unresolved files -- run "hg resolve --all" to conclude)
+  $ hg resolve --mark 'glob:file*'
+  (no more unresolved files -- run "hg resolve --all" to conclude)
+  $ hg resolve --list
+  D file1
+  R file2
+  $ hg resolve --unmark file1
+  not unmarking file1 as it is driver-resolved
+  (no more unresolved files -- run "hg resolve --all" to conclude)
+  $ hg resolve --unmark --all
+  $ hg resolve --list
+  D file1
+  U file2
+  $ hg --config extensions.markdriver=$TESTTMP/markdriver.py markdriver --unmark file1
+  $ hg resolve --list
+  U file1
+  U file2
+
 resolve the failure
 
   $ echo resolved > file1
@@ -129,24 +181,29 @@ get back to conflicting state
 resolve without arguments should suggest --all
   $ hg resolve
   abort: no files or directories specified
-  (use --all to remerge all files)
+  (use --all to re-merge all unresolved files)
   [255]
 
 resolve --all should re-merge all unresolved files
-  $ hg resolve -q --all
-  warning: conflicts during merge.
-  merging file1 incomplete! (edit conflicts, then use 'hg resolve --mark')
-  warning: conflicts during merge.
-  merging file2 incomplete! (edit conflicts, then use 'hg resolve --mark')
+  $ hg resolve --all
+  merging file1
+  merging file2
+  warning: conflicts while merging file1! (edit, then use 'hg resolve --mark')
+  warning: conflicts while merging file2! (edit, then use 'hg resolve --mark')
   [1]
+  $ cat file1.orig
+  foo
+  baz
+  $ cat file2.orig
+  foo
+  baz
   $ grep '<<<' file1 > /dev/null
   $ grep '<<<' file2 > /dev/null
 
 resolve <file> should re-merge file
   $ echo resolved > file1
   $ hg resolve -q file1
-  warning: conflicts during merge.
-  merging file1 incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging file1! (edit, then use 'hg resolve --mark')
   [1]
   $ grep '<<<' file1 > /dev/null
 

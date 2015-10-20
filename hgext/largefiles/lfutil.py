@@ -16,7 +16,7 @@ import copy
 
 from mercurial import dirstate, httpconnection, match as match_, util, scmutil
 from mercurial.i18n import _
-from mercurial import node
+from mercurial import node, error
 
 shortname = '.hglf'
 shortnameslash = shortname + '/'
@@ -33,10 +33,10 @@ def getminsize(ui, assumelfiles, opt, default=10):
         try:
             lfsize = float(lfsize)
         except ValueError:
-            raise util.Abort(_('largefiles: size must be number (not %s)\n')
+            raise error.Abort(_('largefiles: size must be number (not %s)\n')
                              % lfsize)
     if lfsize is None:
-        raise util.Abort(_('minimum size for largefiles must be specified'))
+        raise error.Abort(_('minimum size for largefiles must be specified'))
     return lfsize
 
 def link(src, dest):
@@ -74,7 +74,7 @@ def usercachepath(ui, hash):
                 if home:
                     path = os.path.join(home, '.cache', longname, hash)
         else:
-            raise util.Abort(_('unknown operating system: %s\n') % os.name)
+            raise error.Abort(_('unknown operating system: %s\n') % os.name)
     return path
 
 def inusercache(ui, hash):
@@ -110,6 +110,11 @@ class largefilesdirstate(dirstate.dirstate):
         return super(largefilesdirstate, self).normallookup(unixpath(f))
     def _ignore(self, f):
         return False
+    def write(self, tr=False):
+        # (1) disable PENDING mode always
+        #     (lfdirstate isn't yet managed as a part of the transaction)
+        # (2) avoid develwarn 'use dirstate.write with ....'
+        super(largefilesdirstate, self).write(None)
 
 def openlfdirstate(ui, repo, create=True):
     '''
@@ -399,7 +404,8 @@ def synclfdirstate(repo, lfdirstate, lfile, normallookup):
     else:
         state, mtime = '?', -1
     if state == 'n':
-        if normallookup or mtime < 0:
+        if (normallookup or mtime < 0 or
+            not os.path.exists(repo.wjoin(lfile))):
             # state 'n' doesn't ensure 'clean' in this case
             lfdirstate.normallookup(lfile)
         else:

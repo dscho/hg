@@ -30,10 +30,8 @@ parser.add_option("--test-features", action="store_true",
                   help="test available features")
 parser.add_option("--list-features", action="store_true",
                   help="list available features")
-parser.add_option("-q", "--quiet", action="store_true",
-                  help="check features silently")
 
-def _loadaddon(quiet):
+def _loadaddon():
     if 'TESTDIR' in os.environ:
         # loading from '.' isn't needed, because `hghave` should be
         # running at TESTTMP in this case
@@ -48,15 +46,14 @@ def _loadaddon(quiet):
     try:
         import hghaveaddon
     except BaseException, inst:
-        if not quiet:
-            sys.stderr.write('failed to import hghaveaddon.py from %r: %s\n'
-                             % (path, inst))
+        sys.stderr.write('failed to import hghaveaddon.py from %r: %s\n'
+                         % (path, inst))
         sys.exit(2)
     sys.path.pop(0)
 
 if __name__ == '__main__':
     options, args = parser.parse_args()
-    _loadaddon(options.quiet)
+    _loadaddon()
     if options.list_features:
         list_features()
         sys.exit(0)
@@ -64,36 +61,4 @@ if __name__ == '__main__':
     if options.test_features:
         sys.exit(test_features())
 
-    quiet = options.quiet
-
-    failures = 0
-
-    def error(msg):
-        global failures
-        if not quiet:
-            sys.stderr.write(msg + '\n')
-        failures += 1
-
-    for feature in args:
-        negate = feature.startswith('no-')
-        if negate:
-            feature = feature[3:]
-
-        if feature not in checks:
-            error('skipped: unknown feature: ' + feature)
-            sys.exit(2)
-
-        check, desc = checks[feature]
-        try:
-            available = check()
-        except Exception, e:
-            error('hghave check failed: ' + feature)
-            continue
-
-        if not negate and not available:
-            error('skipped: missing feature: ' + desc)
-        elif negate and available:
-            error('skipped: system supports %s' % desc)
-
-    if failures != 0:
-        sys.exit(1)
+    hghave.require(args)

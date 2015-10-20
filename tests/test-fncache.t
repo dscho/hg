@@ -202,13 +202,13 @@ Aborting lock does not prevent fncache writes
 
   $ cat > exceptionext.py <<EOF
   > import os
-  > from mercurial import commands, util
+  > from mercurial import commands, error
   > from mercurial.extensions import wrapfunction
   > 
-  > def lockexception(orig, vfs, lockname, wait, releasefn, acquirefn, desc):
+  > def lockexception(orig, vfs, lockname, wait, releasefn, *args, **kwargs):
   >     def releasewrap():
-  >         raise util.Abort("forced lock failure")
-  >     return orig(vfs, lockname, wait, releasewrap, acquirefn, desc)
+  >         raise error.Abort("forced lock failure")
+  >     return orig(vfs, lockname, wait, releasewrap, *args, **kwargs)
   > 
   > def reposetup(ui, repo):
   >     wrapfunction(repo, '_lock', lockexception)
@@ -231,13 +231,13 @@ Aborting transaction prevents fncache change
 
   $ cat > ../exceptionext.py <<EOF
   > import os
-  > from mercurial import commands, util, localrepo
+  > from mercurial import commands, error, localrepo
   > from mercurial.extensions import wrapfunction
   > 
   > def wrapper(orig, self, *args, **kwargs):
   >     tr = orig(self, *args, **kwargs)
   >     def fail(tr):
-  >         raise util.Abort("forced transaction failure")
+  >         raise error.Abort("forced transaction failure")
   >     # zzz prefix to ensure it sorted after store.write
   >     tr.addfinalize('zzz-forcefails', fail)
   >     return tr
@@ -262,19 +262,19 @@ Aborted transactions can be recovered later
 
   $ cat > ../exceptionext.py <<EOF
   > import os
-  > from mercurial import commands, util, transaction, localrepo
+  > from mercurial import commands, error, transaction, localrepo
   > from mercurial.extensions import wrapfunction
   > 
   > def trwrapper(orig, self, *args, **kwargs):
   >     tr = orig(self, *args, **kwargs)
   >     def fail(tr):
-  >         raise util.Abort("forced transaction failure")
+  >         raise error.Abort("forced transaction failure")
   >     # zzz prefix to ensure it sorted after store.write
   >     tr.addfinalize('zzz-forcefails', fail)
   >     return tr
   > 
   > def abortwrapper(orig, self, *args, **kwargs):
-  >     raise util.Abort("forced transaction failure")
+  >     raise error.Abort("forced transaction failure")
   > 
   > def uisetup(ui):
   >     wrapfunction(localrepo.localrepository, 'transaction', trwrapper)

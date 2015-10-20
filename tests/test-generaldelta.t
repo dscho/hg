@@ -69,3 +69,46 @@ commit.
      rev    offset  length   base linkrev nodeid       p1           p2
        0         0       3      0       1 1406e7411862 000000000000 000000000000
 
+  $ cd ..
+
+Test format.aggressivemergedeltas
+
+  $ hg init --config format.generaldelta=1 aggressive
+  $ cd aggressive
+  $ touch a b c d e
+  $ hg commit -Aqm side1
+  $ hg up -q null
+  $ touch x y
+  $ hg commit -Aqm side2
+
+- Verify non-aggressive merge uses p1 (commit 1) as delta parent
+  $ hg merge -q 0
+  $ hg commit -q -m merge
+  $ hg debugindex -m
+     rev    offset  length  delta linkrev nodeid       p1           p2
+       0         0      59     -1       0 8dde941edb6e 000000000000 000000000000
+       1        59      59     -1       1 315c023f341d 000000000000 000000000000
+       2       118      65      1       2 2ab389a983eb 315c023f341d 8dde941edb6e
+
+  $ hg strip -q -r . --config extensions.strip=
+
+- Verify aggressive merge uses p2 (commit 0) as delta parent
+  $ hg up -q -C 1
+  $ hg merge -q 0
+  $ hg commit -q -m merge --config format.aggressivemergedeltas=True
+  $ hg debugindex -m
+     rev    offset  length  delta linkrev nodeid       p1           p2
+       0         0      59     -1       0 8dde941edb6e 000000000000 000000000000
+       1        59      59     -1       1 315c023f341d 000000000000 000000000000
+       2       118      62      0       2 2ab389a983eb 315c023f341d 8dde941edb6e
+
+Test that strip bundle use bundle2
+  $ hg --config extensions.strip= strip .
+  0 files updated, 0 files merged, 5 files removed, 0 files unresolved
+  saved backup bundle to $TESTTMP/aggressive/.hg/strip-backup/1c5d4dc9a8b8-6c68e60c-backup.hg (glob)
+  $ hg debugbundle .hg/strip-backup/*
+  Stream params: {'Compression': 'BZ'}
+  changegroup -- "{'version': '02'}"
+      1c5d4dc9a8b8d6e1750966d343e94db665e7a1e9
+
+  $ cd ..

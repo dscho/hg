@@ -62,7 +62,7 @@ def checknewline(s, newline, ui=None, repo=None, filename=None):
     # warn if already has 'newline' in repository.
     # it might cause unexpected eol conversion.
     # see issue 302:
-    #   http://mercurial.selenic.com/bts/issue302
+    #   https://bz.mercurial-scm.org/302
     if newline in s and ui and filename and repo:
         ui.warn(_('WARNING: %s already has %s line endings\n'
                   'and does not need EOL conversion by the win32text plugin.\n'
@@ -174,4 +174,4 @@ def extsetup(ui):
     # deprecated config: win32text.warn
     if ui.configbool('win32text', 'warn', True):
         ui.warn(_("win32text is deprecated: "
-                  "http://mercurial.selenic.com/wiki/Win32TextExtension\n"))
+                  "https://mercurial-scm.org/wiki/Win32TextExtension\n"))

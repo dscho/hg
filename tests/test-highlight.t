@@ -5,6 +5,7 @@
   > highlight =
   > [web]
   > pygments_style = friendly
+  > highlightfiles = **.py and size('<100KB')
   > EOF
   $ hg init test
   $ cd test
@@ -76,7 +77,7 @@ hgweb filerevision, html
   <div class="container">
   <div class="menu">
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
@@ -142,7 +143,7 @@ hgweb filerevision, html
   <div class="overflow">
   <div class="sourcefirst linewraptoggle">line wrap: <a class="linewraplink" href="javascript:toggleLinewrap()">on</a></div>
   <div class="sourcefirst"> line source</div>
-  <pre class="sourcelines stripes4 wrap">
+  <pre class="sourcelines stripes4 wrap bottomline">
   <span id="l1"><span class="c">#!/usr/bin/env python</span></span><a href="#l1"></a>
   <span id="l2"></span><a href="#l2"></a>
   <span id="l3"><span class="sd">&quot;&quot;&quot;Fun with generators. Corresponding Haskell implementation:</span></span><a href="#l3"></a>
@@ -176,7 +177,6 @@ hgweb filerevision, html
   <span id="l31">    <span class="n">p</span> <span class="o">=</span> <span class="n">primes</span><span class="p">()</span></span><a href="#l31"></a>
   <span id="l32">    <span class="kn">print</span> <span class="s">&quot;The first </span><span class="si">%d</span><span class="s"> primes: </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="nb">list</span><span class="p">(</span><span class="n">islice</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">n</span><span class="p">)))</span></span><a href="#l32"></a>
   <span id="l33"></span><a href="#l33"></a></pre>
-  <div class="sourcelast"></div>
   </div>
   </div>
   </div>
@@ -210,7 +210,7 @@ hgweb fileannotate, html
   <div class="container">
   <div class="menu">
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
@@ -591,6 +591,28 @@ hgweb highlightcss fruity
 errors encountered
 
   $ cat errors.log
+  $ killdaemons.py
+
+only highlight C source files
+
+  $ cat > .hg/hgrc <<EOF
+  > [web]
+  > highlightfiles = **.c
+  > EOF
+
+hg serve again
+
+  $ hg serve -p $HGPORT -d -n test --pid-file=hg.pid -A access.log -E errors.log
+  $ cat hg.pid >> $DAEMON_PIDS
+
+test that fileset in highlightfiles works and primes.py is not highlighted
+
+  $ get-with-headers.py localhost:$HGPORT 'file/tip/primes.py' | grep 'id="l11"'
+  <span id="l11">def primes():</span><a href="#l11"></a>
+
+errors encountered
+
+  $ cat errors.log
   $ cd ..
   $ hg init eucjp
   $ cd eucjp
@@ -621,5 +643,44 @@ errors encountered
   % HGENCODING=us-ascii hg serve
   % hgweb filerevision, html
   % errors encountered
+
+We attempt to highlight unknown files by default
+
+  $ killdaemons.py
+
+  $ cat > .hg/hgrc << EOF
+  > [web]
+  > highlightfiles = **
+  > EOF
+
+  $ cat > unknownfile << EOF
+  > #!/usr/bin/python
+  > def foo():
+  >    pass
+  > EOF
+
+  $ hg add unknownfile
+  $ hg commit -m unknown unknownfile
+
+  $ hg serve -p $HGPORT -d -n test --pid-file=hg.pid
+  $ cat hg.pid >> $DAEMON_PIDS
+
+  $ get-with-headers.py localhost:$HGPORT 'file/tip/unknownfile' | grep l2
+  <span id="l2"><span class="k">def</span> <span class="nf">foo</span><span class="p">():</span></span><a href="#l2"></a>
+
+We can prevent Pygments from falling back to a non filename-based
+detection mode
+
+  $ cat > .hg/hgrc << EOF
+  > [web]
+  > highlightfiles = **
+  > highlightonlymatchfilename = true
+  > EOF
+
+  $ killdaemons.py
+  $ hg serve -p $HGPORT -d -n test --pid-file=hg.pid
+  $ cat hg.pid >> $DAEMON_PIDS
+  $ get-with-headers.py localhost:$HGPORT 'file/tip/unknownfile' | grep l2
+  <span id="l2">def foo():</span><a href="#l2"></a>
 
   $ cd ..

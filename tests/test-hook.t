@@ -223,8 +223,8 @@ update hook
   $ echo "update = printenv.py update" >> .hg/hgrc
   $ hg update
   preupdate hook: HG_PARENT1=539e4b31b6dc
-  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   update hook: HG_ERROR=0 HG_PARENT1=539e4b31b6dc
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
 pushkey hook
 
@@ -394,7 +394,7 @@ preoutgoing hook can prevent outgoing changes for local clones
   $ cd "$TESTTMP/b"
 
   $ cat > hooktests.py <<EOF
-  > from mercurial import util
+  > from mercurial import error
   > 
   > uncallable = 0
   > 
@@ -421,7 +421,7 @@ preoutgoing hook can prevent outgoing changes for local clones
   >     raise LocalException('exception from hook')
   > 
   > def aborthook(**args):
-  >     raise util.Abort('raise abort from hook')
+  >     raise error.Abort('raise abort from hook')
   > 
   > def brokenhook(**args):
   >     return 1 + {}
@@ -628,7 +628,7 @@ make sure --traceback works on hook import failure
   Traceback (most recent call last):
   ImportError: No module named hgext_importfail
   Traceback (most recent call last):
-  Abort: precommit.importfail hook is invalid (import of "importfail" failed)
+  HookLoadError: precommit.importfail hook is invalid (import of "importfail" failed)
   abort: precommit.importfail hook is invalid (import of "importfail" failed)
 
 Issue1827: Hooks Update & Commit not completely post operation
@@ -644,8 +644,8 @@ final release (and dirstate flush).
   $ hg ci -ma
   223eafe2750c tip
   $ hg up 0 --config extensions.largefiles=
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   cb9a9f314b8b
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
 make sure --verbose (and --quiet/--debug etc.) are propagated to the local ui
 that is passed to pre/post hooks

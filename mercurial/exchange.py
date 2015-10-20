@@ -5,14 +5,140 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import time
 from i18n import _
 from node import hex, nullid
-import errno, urllib
-import util, scmutil, changegroup, base85, error, store
+import errno, urllib, urllib2
+import util, scmutil, changegroup, base85, error
 import discovery, phases, obsolete, bookmarks as bookmod, bundle2, pushkey
 import lock as lockmod
+import streamclone
+import sslutil
 import tags
+import url as urlmod
+
+# Maps bundle compression human names to internal representation.
+_bundlespeccompressions = {'none': None,
+                           'bzip2': 'BZ',
+                           'gzip': 'GZ',
+                          }
+
+# Maps bundle version human names to changegroup versions.
+_bundlespeccgversions = {'v1': '01',
+                         'v2': '02',
+                         'packed1': 's1',
+                         'bundle2': '02', #legacy
+                        }
+
+def parsebundlespec(repo, spec, strict=True, externalnames=False):
+    """Parse a bundle string specification into parts.
+
+    Bundle specifications denote a well-defined bundle/exchange format.
+    The content of a given specification should not change over time in
+    order to ensure that bundles produced by a newer version of Mercurial are
+    readable from an older version.
+
+    The string currently has the form:
+
+       <compression>-<type>[;<parameter0>[;<parameter1>]]
+
+    Where <compression> is one of the supported compression formats
+    and <type> is (currently) a version string. A ";" can follow the type and
+    all text afterwards is interpretted as URI encoded, ";" delimited key=value
+    pairs.
+
+    If ``strict`` is True (the default) <compression> is required. Otherwise,
+    it is optional.
+
+    If ``externalnames`` is False (the default), the human-centric names will
+    be converted to their internal representation.
+
+    Returns a 3-tuple of (compression, version, parameters). Compression will
+    be ``None`` if not in strict mode and a compression isn't defined.
+
+    An ``InvalidBundleSpecification`` is raised when the specification is
+    not syntactically well formed.
+
+    An ``UnsupportedBundleSpecification`` is raised when the compression or
+    bundle type/version is not recognized.
+
+    Note: this function will likely eventually return a more complex data
+    structure, including bundle2 part information.
+    """
+    def parseparams(s):
+        if ';' not in s:
+            return s, {}
+
+        params = {}
+        version, paramstr = s.split(';', 1)
+
+        for p in paramstr.split(';'):
+            if '=' not in p:
+                raise error.InvalidBundleSpecification(
+                    _('invalid bundle specification: '
+                      'missing "=" in parameter: %s') % p)
+
+            key, value = p.split('=', 1)
+            key = urllib.unquote(key)
+            value = urllib.unquote(value)
+            params[key] = value
+
+        return version, params
+
+
+    if strict and '-' not in spec:
+        raise error.InvalidBundleSpecification(
+                _('invalid bundle specification; '
+                  'must be prefixed with compression: %s') % spec)
+
+    if '-' in spec:
+        compression, version = spec.split('-', 1)
+
+        if compression not in _bundlespeccompressions:
+            raise error.UnsupportedBundleSpecification(
+                    _('%s compression is not supported') % compression)
+
+        version, params = parseparams(version)
+
+        if version not in _bundlespeccgversions:
+            raise error.UnsupportedBundleSpecification(
+                    _('%s is not a recognized bundle version') % version)
+    else:
+        # Value could be just the compression or just the version, in which
+        # case some defaults are assumed (but only when not in strict mode).
+        assert not strict
+
+        spec, params = parseparams(spec)
+
+        if spec in _bundlespeccompressions:
+            compression = spec
+            version = 'v1'
+            if 'generaldelta' in repo.requirements:
+                version = 'v2'
+        elif spec in _bundlespeccgversions:
+            if spec == 'packed1':
+                compression = 'none'
+            else:
+                compression = 'bzip2'
+            version = spec
+        else:
+            raise error.UnsupportedBundleSpecification(
+                    _('%s is not a recognized bundle specification') % spec)
+
+    # The specification for packed1 can optionally declare the data formats
+    # required to apply it. If we see this metadata, compare against what the
+    # repo supports and error if the bundle isn't compatible.
+    if version == 'packed1' and 'requirements' in params:
+        requirements = set(params['requirements'].split(','))
+        missingreqs = requirements - repo.supportedformats
+        if missingreqs:
+            raise error.UnsupportedBundleSpecification(
+                    _('missing support for repository features: %s') %
+                      ', '.join(sorted(missingreqs)))
+
+    if not externalnames:
+        compression = _bundlespeccompressions[compression]
+        version = _bundlespeccgversions[version]
+    return compression, version, params
 
 def readbundle(ui, fh, fname, vfs=None):
     header = changegroup.readexactly(fh, 4)
@@ -30,15 +156,17 @@ def readbundle(ui, fh, fname, vfs=None):
     magic, version = header[0:2], header[2:4]
 
     if magic != 'HG':
-        raise util.Abort(_('%s: not a Mercurial bundle') % fname)
+        raise error.Abort(_('%s: not a Mercurial bundle') % fname)
     if version == '10':
         if alg is None:
             alg = changegroup.readexactly(fh, 2)
         return changegroup.cg1unpacker(fh, alg)
     elif version.startswith('2'):
         return bundle2.getunbundler(ui, fh, magicstring=magic + version)
+    elif version == 'S1':
+        return streamclone.streamcloneapplier(fh)
     else:
-        raise util.Abort(_('%s: unknown bundle version %s') % (fname, version))
+        raise error.Abort(_('%s: unknown bundle version %s') % (fname, version))
 
 def buildobsmarkerspart(bundler, markers):
     """add an obsmarker part to the bundler with <markers>
@@ -50,7 +178,7 @@ def buildobsmarkerspart(bundler, markers):
         remoteversions = bundle2.obsmarkersversion(bundler.capabilities)
         version = obsolete.commonversion(remoteversions)
         if version is None:
-            raise ValueError('bundler do not support common obsmarker format')
+            raise ValueError('bundler does not support common obsmarker format')
         stream = obsolete.encodemarkers(markers, True, version=version)
         return bundler.newpart('obsmarkers', data=stream)
     return None
@@ -147,7 +275,7 @@ class pushoperation(object):
         #
         # We can pick:
         # * missingheads part of common (::commonheads)
-        common = set(self.outgoing.common)
+        common = self.outgoing.common
         nm = self.repo.changelog.nodemap
         cheads = [node for node in self.revs if nm[node] in common]
         # and
@@ -176,7 +304,8 @@ bookmsgmap = {'update': (_("updating bookmark %s\n"),
               }
 
 
-def push(repo, remote, force=False, revs=None, newbranch=False, bookmarks=()):
+def push(repo, remote, force=False, revs=None, newbranch=False, bookmarks=(),
+         opargs=None):
     '''Push outgoing changesets (limited by revs) from a local
     repository to remote. Return an integer:
       - None means nothing to push
@@ -185,7 +314,10 @@ def push(repo, remote, force=False, revs=None, newbranch=False, bookmarks=()):
         we have outgoing changesets but refused to push
       - other values as described by addchangegroup()
     '''
-    pushop = pushoperation(repo, remote, force, revs, newbranch, bookmarks)
+    if opargs is None:
+        opargs = {}
+    pushop = pushoperation(repo, remote, force, revs, newbranch, bookmarks,
+                           **opargs)
     if pushop.remote.local():
         missing = (set(pushop.repo.requirements)
                    - pushop.remote.local().supported)
@@ -193,7 +325,7 @@ def push(repo, remote, force=False, revs=None, newbranch=False, bookmarks=()):
             msg = _("required features are not"
                     " supported in the destination:"
                     " %s") % (', '.join(sorted(missing)))
-            raise util.Abort(msg)
+            raise error.Abort(msg)
 
     # there are two ways to push to remote repo:
     #
@@ -204,7 +336,7 @@ def push(repo, remote, force=False, revs=None, newbranch=False, bookmarks=()):
     # servers, http servers).
 
     if not pushop.remote.canpush():
-        raise util.Abort(_("destination does not support push"))
+        raise error.Abort(_("destination does not support push"))
     # get local lock as we might write phase data
     localwlock = locallock = None
     try:
@@ -226,7 +358,7 @@ def push(repo, remote, force=False, revs=None, newbranch=False, bookmarks=()):
         pushop.ui.debug(msg)
     try:
         if pushop.locallocked:
-            pushop.trmanager = transactionmanager(repo,
+            pushop.trmanager = transactionmanager(pushop.repo,
                                                   'push-response',
                                                   pushop.remote.url())
         pushop.repo.checkpush(pushop)
@@ -435,9 +567,9 @@ def _pushcheckoutgoing(pushop):
             for node in outgoing.missingheads:
                 ctx = unfi[node]
                 if ctx.obsolete():
-                    raise util.Abort(mso % ctx)
+                    raise error.Abort(mso % ctx)
                 elif ctx.troubled():
-                    raise util.Abort(mst[ctx.troubles()[0]] % ctx)
+                    raise error.Abort(mst[ctx.troubles()[0]] % ctx)
 
         # internal config: bookmarks.pushing
         newbm = pushop.ui.configlist('bookmarks', 'pushing')
@@ -475,6 +607,14 @@ def b2partsgenerator(stepname, idx=None):
         return func
     return dec
 
+def _pushb2ctxcheckheads(pushop, bundler):
+    """Generate race condition checking parts
+
+    Exists as an independent function to aid extensions
+    """
+    if not pushop.force:
+        bundler.newpart('check:heads', data=iter(pushop.remoteheads))
+
 @b2partsgenerator('changeset')
 def _pushb2ctx(pushop, bundler):
     """handle changegroup push through bundle2
@@ -490,8 +630,9 @@ def _pushb2ctx(pushop, bundler):
     pushop.repo.prepushoutgoinghooks(pushop.repo,
                                      pushop.remote,
                                      pushop.outgoing)
-    if not pushop.force:
-        bundler.newpart('check:heads', data=iter(pushop.remoteheads))
+
+    _pushb2ctxcheckheads(pushop, bundler)
+
     b2caps = bundle2.bundle2caps(pushop.remote)
     version = None
     cgversions = b2caps.get('changegroup')
@@ -571,7 +712,7 @@ def _pushb2obsmarkers(pushop, bundler):
 
 @b2partsgenerator('bookmarks')
 def _pushb2bookmarks(pushop, bundler):
-    """handle phase push through bundle2"""
+    """handle bookmark push through bundle2"""
     if 'bookmarks' in pushop.stepsdone:
         return
     b2caps = bundle2.bundle2caps(pushop.remote)
@@ -649,14 +790,14 @@ def _pushbundle2(pushop):
         try:
             reply = pushop.remote.unbundle(stream, ['force'], 'push')
         except error.BundleValueError as exc:
-            raise util.Abort('missing support for %s' % exc)
+            raise error.Abort('missing support for %s' % exc)
         try:
             trgetter = None
             if pushback:
                 trgetter = pushop.trmanager.transaction
             op = bundle2.processbundle(pushop.repo, reply, trgetter)
         except error.BundleValueError as exc:
-            raise util.Abort('missing support for %s' % exc)
+            raise error.Abort('missing support for %s' % exc)
     except error.PushkeyFailed as exc:
         partid = int(exc.partid)
         if partid not in pushop.pkfailcb:
@@ -838,7 +979,7 @@ class pulloperation(object):
     """
 
     def __init__(self, repo, remote, heads=None, force=False, bookmarks=(),
-                 remotebookmarks=None):
+                 remotebookmarks=None, streamclonerequested=None):
         # repo we pull into
         self.repo = repo
         # repo we pull from
@@ -849,6 +990,8 @@ class pulloperation(object):
         self.explicitbookmarks = bookmarks
         # do we force pull?
         self.force = force
+        # whether a streaming clone was requested
+        self.streamclonerequested = streamclonerequested
         # transaction manager
         self.trmanager = None
         # set of common changeset between local and remote before pull
@@ -863,6 +1006,8 @@ class pulloperation(object):
         self.cgresult = None
         # list of step already done
         self.stepsdone = set()
+        # Whether we attempted a clone from pre-generated bundles.
+        self.clonebundleattempted = False
 
     @util.propertycache
     def pulledsubset(self):
@@ -881,6 +1026,14 @@ class pulloperation(object):
             # We pulled a specific subset
             # sync on this subset
             return self.heads
+
+    @util.propertycache
+    def canusebundle2(self):
+        return _canusebundle2(self)
+
+    @util.propertycache
+    def remotebundle2caps(self):
+        return bundle2.bundle2caps(self.remote)
 
     def gettransaction(self):
         # deprecated; talk to trmanager directly
@@ -916,24 +1069,49 @@ class transactionmanager(object):
         if self._tr is not None:
             self._tr.release()
 
-def pull(repo, remote, heads=None, force=False, bookmarks=(), opargs=None):
+def pull(repo, remote, heads=None, force=False, bookmarks=(), opargs=None,
+         streamclonerequested=None):
+    """Fetch repository data from a remote.
+
+    This is the main function used to retrieve data from a remote repository.
+
+    ``repo`` is the local repository to clone into.
+    ``remote`` is a peer instance.
+    ``heads`` is an iterable of revisions we want to pull. ``None`` (the
+    default) means to pull everything from the remote.
+    ``bookmarks`` is an iterable of bookmarks requesting to be pulled. By
+    default, all remote bookmarks are pulled.
+    ``opargs`` are additional keyword arguments to pass to ``pulloperation``
+    initialization.
+    ``streamclonerequested`` is a boolean indicating whether a "streaming
+    clone" is requested. A "streaming clone" is essentially a raw file copy
+    of revlogs from the server. This only works when the local repository is
+    empty. The default value of ``None`` means to respect the server
+    configuration for preferring stream clones.
+
+    Returns the ``pulloperation`` created for this pull.
+    """
     if opargs is None:
         opargs = {}
     pullop = pulloperation(repo, remote, heads, force, bookmarks=bookmarks,
-                           **opargs)
+                           streamclonerequested=streamclonerequested, **opargs)
     if pullop.remote.local():
         missing = set(pullop.remote.requirements) - pullop.repo.supported
         if missing:
             msg = _("required features are not"
                     " supported in the destination:"
                     " %s") % (', '.join(sorted(missing)))
-            raise util.Abort(msg)
+            raise error.Abort(msg)
 
     lock = pullop.repo.lock()
     try:
         pullop.trmanager = transactionmanager(repo, 'pull', remote.url())
+        streamclone.maybeperformlegacystreamclone(pullop)
+        # This should ideally be in _pullbundle2(). However, it needs to run
+        # before discovery to avoid extra work.
+        _maybeapplyclonebundle(pullop)
         _pulldiscovery(pullop)
-        if _canusebundle2(pullop):
+        if pullop.canusebundle2:
             _pullbundle2(pullop)
         _pullchangeset(pullop)
         _pullphase(pullop)
@@ -984,8 +1162,7 @@ def _pullbookmarkbundle1(pullop):
     discovery to reduce the chance and impact of race conditions."""
     if pullop.remotebookmarks is not None:
         return
-    if (_canusebundle2(pullop)
-            and 'listkeys' in bundle2.bundle2caps(pullop.remote)):
+    if pullop.canusebundle2 and 'listkeys' in pullop.remotebundle2caps:
         # all known bundle2 servers now support listkeys, but lets be nice with
         # new implementation.
         return
@@ -1034,28 +1211,42 @@ def _pullbundle2(pullop):
     """pull data using bundle2
 
     For now, the only supported data are changegroup."""
-    remotecaps = bundle2.bundle2caps(pullop.remote)
     kwargs = {'bundlecaps': caps20to10(pullop.repo)}
+
+    streaming, streamreqs = streamclone.canperformstreamclone(pullop)
+
     # pulling changegroup
     pullop.stepsdone.add('changegroup')
 
     kwargs['common'] = pullop.common
     kwargs['heads'] = pullop.heads or pullop.rheads
     kwargs['cg'] = pullop.fetch
-    if 'listkeys' in remotecaps:
+    if 'listkeys' in pullop.remotebundle2caps:
         kwargs['listkeys'] = ['phase']
         if pullop.remotebookmarks is None:
             # make sure to always includes bookmark data when migrating
             # `hg incoming --bundle` to using this function.
             kwargs['listkeys'].append('bookmarks')
-    if not pullop.fetch:
+
+    # If this is a full pull / clone and the server supports the clone bundles
+    # feature, tell the server whether we attempted a clone bundle. The
+    # presence of this flag indicates the client supports clone bundles. This
+    # will enable the server to treat clients that support clone bundles
+    # differently from those that don't.
+    if (pullop.remote.capable('clonebundles')
+        and pullop.heads is None and list(pullop.common) == [nullid]):
+        kwargs['cbattempted'] = pullop.clonebundleattempted
+
+    if streaming:
+        pullop.repo.ui.status(_('streaming all changes\n'))
+    elif not pullop.fetch:
         pullop.repo.ui.status(_("no changes found\n"))
         pullop.cgresult = 0
     else:
         if pullop.heads is None and list(pullop.common) == [nullid]:
             pullop.repo.ui.status(_("requesting all changes\n"))
     if obsolete.isenabled(pullop.repo, obsolete.exchangeopt):
-        remoteversions = bundle2.obsmarkersversion(remotecaps)
+        remoteversions = bundle2.obsmarkersversion(pullop.remotebundle2caps)
         if obsolete.commonversion(remoteversions) is not None:
             kwargs['obsmarkers'] = True
             pullop.stepsdone.add('obsmarkers')
@@ -1064,7 +1255,7 @@ def _pullbundle2(pullop):
     try:
         op = bundle2.processbundle(pullop.repo, bundle, pullop.gettransaction)
     except error.BundleValueError as exc:
-        raise util.Abort('missing support for %s' % exc)
+        raise error.Abort('missing support for %s' % exc)
 
     if pullop.fetch:
         results = [cg['return'] for cg in op.records['changegroup']]
@@ -1114,13 +1305,12 @@ def _pullchangeset(pullop):
     elif pullop.heads is None:
         cg = pullop.remote.changegroup(pullop.fetch, 'pull')
     elif not pullop.remote.capable('changegroupsubset'):
-        raise util.Abort(_("partial pull cannot be done because "
+        raise error.Abort(_("partial pull cannot be done because "
                            "other repository doesn't support "
                            "changegroupsubset."))
     else:
         cg = pullop.remote.changegroupsubset(pullop.fetch, pullop.heads, 'pull')
-    pullop.cgresult = changegroup.addchangegroup(pullop.repo, cg, 'pull',
-                                                 pullop.remote.url())
+    pullop.cgresult = cg.apply(pullop.repo, 'pull', pullop.remote.url())
 
 def _pullphase(pullop):
     # Get remote phases data from remote
@@ -1397,7 +1587,8 @@ def unbundle(repo, cg, heads, source, url):
     If the push was raced as PushRaced exception is raised."""
     r = 0
     # need a transaction when processing a bundle2 stream
-    wlock = lock = tr = None
+    # [wlock, lock, tr] - needs to be an array so nested functions can modify it
+    lockandtr = [None, None, None]
     recordout = None
     # quick fix for output mismatch with bundle2 in 3.4
     captureoutput = repo.ui.configbool('experimental', 'bundle2-output-capture',
@@ -1410,23 +1601,33 @@ def unbundle(repo, cg, heads, source, url):
         if util.safehasattr(cg, 'params'):
             r = None
             try:
-                wlock = repo.wlock()
-                lock = repo.lock()
-                tr = repo.transaction(source)
-                tr.hookargs['source'] = source
-                tr.hookargs['url'] = url
-                tr.hookargs['bundle2'] = '1'
-                op = bundle2.bundleoperation(repo, lambda: tr,
+                def gettransaction():
+                    if not lockandtr[2]:
+                        lockandtr[0] = repo.wlock()
+                        lockandtr[1] = repo.lock()
+                        lockandtr[2] = repo.transaction(source)
+                        lockandtr[2].hookargs['source'] = source
+                        lockandtr[2].hookargs['url'] = url
+                        lockandtr[2].hookargs['bundle2'] = '1'
+                    return lockandtr[2]
+
+                # Do greedy locking by default until we're satisfied with lazy
+                # locking.
+                if not repo.ui.configbool('experimental', 'bundle2lazylocking'):
+                    gettransaction()
+
+                op = bundle2.bundleoperation(repo, gettransaction,
                                              captureoutput=captureoutput)
                 try:
-                    r = bundle2.processbundle(repo, cg, op=op)
+                    op = bundle2.processbundle(repo, cg, op=op)
                 finally:
                     r = op.reply
                     if captureoutput and r is not None:
                         repo.ui.pushbuffer(error=True, subproc=True)
                         def recordout(output):
                             r.newpart('output', data=output, mandatory=False)
-                tr.close()
+                if lockandtr[2] is not None:
+                    lockandtr[2].close()
             except BaseException as exc:
                 exc.duringunbundle2 = True
                 if captureoutput and r is not None:
@@ -1437,138 +1638,213 @@ def unbundle(repo, cg, heads, source, url):
                         parts.append(part)
                 raise
         else:
-            lock = repo.lock()
-            r = changegroup.addchangegroup(repo, cg, source, url)
+            lockandtr[1] = repo.lock()
+            r = cg.apply(repo, source, url)
     finally:
-        lockmod.release(tr, lock, wlock)
+        lockmod.release(lockandtr[2], lockandtr[1], lockandtr[0])
         if recordout is not None:
             recordout(repo.ui.popbuffer())
     return r
 
-# This is it's own function so extensions can override it.
-def _walkstreamfiles(repo):
-    return repo.store.walk()
+def _maybeapplyclonebundle(pullop):
+    """Apply a clone bundle from a remote, if possible."""
 
-def generatestreamclone(repo):
-    """Emit content for a streaming clone.
+    repo = pullop.repo
+    remote = pullop.remote
 
-    This is a generator of raw chunks that constitute a streaming clone.
+    if not repo.ui.configbool('experimental', 'clonebundles', False):
+        return
 
-    The stream begins with a line of 2 space-delimited integers containing the
-    number of entries and total bytes size.
+    if pullop.heads:
+        return
 
-    Next, are N entries for each file being transferred. Each file entry starts
-    as a line with the file name and integer size delimited by a null byte.
-    The raw file data follows. Following the raw file data is the next file
-    entry, or EOF.
+    if not remote.capable('clonebundles'):
+        return
 
-    When used on the wire protocol, an additional line indicating protocol
-    success will be prepended to the stream. This function is not responsible
-    for adding it.
+    res = remote._call('clonebundles')
 
-    This function will obtain a repository lock to ensure a consistent view of
-    the store is captured. It therefore may raise LockError.
+    # If we call the wire protocol command, that's good enough to record the
+    # attempt.
+    pullop.clonebundleattempted = True
+
+    entries = parseclonebundlesmanifest(repo, res)
+    if not entries:
+        repo.ui.note(_('no clone bundles available on remote; '
+                       'falling back to regular clone\n'))
+        return
+
+    entries = filterclonebundleentries(repo, entries)
+    if not entries:
+        # There is a thundering herd concern here. However, if a server
+        # operator doesn't advertise bundles appropriate for its clients,
+        # they deserve what's coming. Furthermore, from a client's
+        # perspective, no automatic fallback would mean not being able to
+        # clone!
+        repo.ui.warn(_('no compatible clone bundles available on server; '
+                       'falling back to regular clone\n'))
+        repo.ui.warn(_('(you may want to report this to the server '
+                       'operator)\n'))
+        return
+
+    entries = sortclonebundleentries(repo.ui, entries)
+
+    url = entries[0]['URL']
+    repo.ui.status(_('applying clone bundle from %s\n') % url)
+    if trypullbundlefromurl(repo.ui, repo, url):
+        repo.ui.status(_('finished applying clone bundle\n'))
+    # Bundle failed.
+    #
+    # We abort by default to avoid the thundering herd of
+    # clients flooding a server that was expecting expensive
+    # clone load to be offloaded.
+    elif repo.ui.configbool('ui', 'clonebundlefallback', False):
+        repo.ui.warn(_('falling back to normal clone\n'))
+    else:
+        raise error.Abort(_('error applying bundle'),
+                          hint=_('if this error persists, consider contacting '
+                                 'the server operator or disable clone '
+                                 'bundles via '
+                                 '"--config experimental.clonebundles=false"'))
+
+def parseclonebundlesmanifest(repo, s):
+    """Parses the raw text of a clone bundles manifest.
+
+    Returns a list of dicts. The dicts have a ``URL`` key corresponding
+    to the URL and other keys are the attributes for the entry.
     """
-    entries = []
-    total_bytes = 0
-    # Get consistent snapshot of repo, lock during scan.
+    m = []
+    for line in s.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        attrs = {'URL': fields[0]}
+        for rawattr in fields[1:]:
+            key, value = rawattr.split('=', 1)
+            key = urllib.unquote(key)
+            value = urllib.unquote(value)
+            attrs[key] = value
+
+            # Parse BUNDLESPEC into components. This makes client-side
+            # preferences easier to specify since you can prefer a single
+            # component of the BUNDLESPEC.
+            if key == 'BUNDLESPEC':
+                try:
+                    comp, version, params = parsebundlespec(repo, value,
+                                                            externalnames=True)
+                    attrs['COMPRESSION'] = comp
+                    attrs['VERSION'] = version
+                except error.InvalidBundleSpecification:
+                    pass
+                except error.UnsupportedBundleSpecification:
+                    pass
+
+        m.append(attrs)
+
+    return m
+
+def filterclonebundleentries(repo, entries):
+    """Remove incompatible clone bundle manifest entries.
+
+    Accepts a list of entries parsed with ``parseclonebundlesmanifest``
+    and returns a new list consisting of only the entries that this client
+    should be able to apply.
+
+    There is no guarantee we'll be able to apply all returned entries because
+    the metadata we use to filter on may be missing or wrong.
+    """
+    newentries = []
+    for entry in entries:
+        spec = entry.get('BUNDLESPEC')
+        if spec:
+            try:
+                parsebundlespec(repo, spec, strict=True)
+            except error.InvalidBundleSpecification as e:
+                repo.ui.debug(str(e) + '\n')
+                continue
+            except error.UnsupportedBundleSpecification as e:
+                repo.ui.debug('filtering %s because unsupported bundle '
+                              'spec: %s\n' % (entry['URL'], str(e)))
+                continue
+
+        if 'REQUIRESNI' in entry and not sslutil.hassni:
+            repo.ui.debug('filtering %s because SNI not supported\n' %
+                          entry['URL'])
+            continue
+
+        newentries.append(entry)
+
+    return newentries
+
+def sortclonebundleentries(ui, entries):
+    # experimental config: experimental.clonebundleprefers
+    prefers = ui.configlist('experimental', 'clonebundleprefers', default=[])
+    if not prefers:
+        return list(entries)
+
+    prefers = [p.split('=', 1) for p in prefers]
+
+    # Our sort function.
+    def compareentry(a, b):
+        for prefkey, prefvalue in prefers:
+            avalue = a.get(prefkey)
+            bvalue = b.get(prefkey)
+
+            # Special case for b missing attribute and a matches exactly.
+            if avalue is not None and bvalue is None and avalue == prefvalue:
+                return -1
+
+            # Special case for a missing attribute and b matches exactly.
+            if bvalue is not None and avalue is None and bvalue == prefvalue:
+                return 1
+
+            # We can't compare unless attribute present on both.
+            if avalue is None or bvalue is None:
+                continue
+
+            # Same values should fall back to next attribute.
+            if avalue == bvalue:
+                continue
+
+            # Exact matches come first.
+            if avalue == prefvalue:
+                return -1
+            if bvalue == prefvalue:
+                return 1
+
+            # Fall back to next attribute.
+            continue
+
+        # If we got here we couldn't sort by attributes and prefers. Fall
+        # back to index order.
+        return 0
+
+    return sorted(entries, cmp=compareentry)
+
+def trypullbundlefromurl(ui, repo, url):
+    """Attempt to apply a bundle from a URL."""
     lock = repo.lock()
     try:
-        repo.ui.debug('scanning\n')
-        for name, ename, size in _walkstreamfiles(repo):
-            if size:
-                entries.append((name, size))
-                total_bytes += size
-    finally:
-            lock.release()
-
-    repo.ui.debug('%d files, %d bytes to transfer\n' %
-                  (len(entries), total_bytes))
-    yield '%d %d\n' % (len(entries), total_bytes)
-
-    svfs = repo.svfs
-    oldaudit = svfs.mustaudit
-    debugflag = repo.ui.debugflag
-    svfs.mustaudit = False
-
-    try:
-        for name, size in entries:
-            if debugflag:
-                repo.ui.debug('sending %s (%d bytes)\n' % (name, size))
-            # partially encode name over the wire for backwards compat
-            yield '%s\0%d\n' % (store.encodedir(name), size)
-            if size <= 65536:
-                fp = svfs(name)
-                try:
-                    data = fp.read(size)
-                finally:
-                    fp.close()
-                yield data
-            else:
-                for chunk in util.filechunkiter(svfs(name), limit=size):
-                    yield chunk
-    finally:
-        svfs.mustaudit = oldaudit
-
-def consumestreamclone(repo, fp):
-    """Apply the contents from a streaming clone file.
-
-    This takes the output from "streamout" and applies it to the specified
-    repository.
-
-    Like "streamout," the status line added by the wire protocol is not handled
-    by this function.
-    """
-    lock = repo.lock()
-    try:
-        repo.ui.status(_('streaming all changes\n'))
-        l = fp.readline()
+        tr = repo.transaction('bundleurl')
         try:
-            total_files, total_bytes = map(int, l.split(' ', 1))
-        except (ValueError, TypeError):
-            raise error.ResponseError(
-                _('unexpected response from remote server:'), l)
-        repo.ui.status(_('%d files to transfer, %s of data\n') %
-                       (total_files, util.bytecount(total_bytes)))
-        handled_bytes = 0
-        repo.ui.progress(_('clone'), 0, total=total_bytes)
-        start = time.time()
+            try:
+                fh = urlmod.open(ui, url)
+                cg = readbundle(ui, fh, 'stream')
 
-        tr = repo.transaction(_('clone'))
-        try:
-            for i in xrange(total_files):
-                # XXX doesn't support '\n' or '\r' in filenames
-                l = fp.readline()
-                try:
-                    name, size = l.split('\0', 1)
-                    size = int(size)
-                except (ValueError, TypeError):
-                    raise error.ResponseError(
-                        _('unexpected response from remote server:'), l)
-                if repo.ui.debugflag:
-                    repo.ui.debug('adding %s (%s)\n' %
-                                  (name, util.bytecount(size)))
-                # for backwards compat, name was partially encoded
-                ofp = repo.svfs(store.decodedir(name), 'w')
-                for chunk in util.filechunkiter(fp, limit=size):
-                    handled_bytes += len(chunk)
-                    repo.ui.progress(_('clone'), handled_bytes,
-                                     total=total_bytes)
-                    ofp.write(chunk)
-                ofp.close()
-            tr.close()
+                if isinstance(cg, bundle2.unbundle20):
+                    bundle2.processbundle(repo, cg, lambda: tr)
+                elif isinstance(cg, streamclone.streamcloneapplier):
+                    cg.apply(repo)
+                else:
+                    cg.apply(repo, 'clonebundles', url)
+                tr.close()
+                return True
+            except urllib2.HTTPError as e:
+                ui.warn(_('HTTP error fetching bundle: %s\n') % str(e))
+            except urllib2.URLError as e:
+                ui.warn(_('error fetching bundle: %s\n') % e.reason[1])
+
+            return False
         finally:
             tr.release()
-
-        # Writing straight to files circumvented the inmemory caches
-        repo.invalidate()
-
-        elapsed = time.time() - start
-        if elapsed <= 0:
-            elapsed = 0.001
-        repo.ui.progress(_('clone'), None)
-        repo.ui.status(_('transferred %s in %.1f seconds (%s/sec)\n') %
-                       (util.bytecount(total_bytes), elapsed,
-                        util.bytecount(total_bytes / elapsed)))
     finally:
         lock.release()

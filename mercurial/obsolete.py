@@ -67,8 +67,8 @@ The header is followed by the markers. Marker format depend of the version. See
 comment associated with each format for details.
 
 """
-import struct
-import util, base85, node, parsers
+import errno, struct
+import util, base85, node, parsers, error
 import phases
 from i18n import _
 
@@ -164,7 +164,7 @@ def _fm0readmarkers(data, off):
         # (metadata will be decoded on demand)
         metadata = data[off:off + mdsize]
         if len(metadata) != mdsize:
-            raise util.Abort(_('parsing obsolete marker: metadata is too '
+            raise error.Abort(_('parsing obsolete marker: metadata is too '
                                'short, %d bytes expected, got %d')
                              % (mdsize, len(metadata)))
         off += mdsize
@@ -200,7 +200,7 @@ def _fm0readmarkers(data, off):
 def _fm0encodeonemarker(marker):
     pre, sucs, flags, metadata, date, parents = marker
     if flags & usingsha256:
-        raise util.Abort(_('cannot handle sha256 with old obsstore format'))
+        raise error.Abort(_('cannot handle sha256 with old obsstore format'))
     metadata = dict(metadata)
     time, tz = date
     metadata['date'] = '%r %i' % (time, tz)
@@ -414,7 +414,7 @@ def _readmarkers(data):
     diskversion = _unpack('>B', data[off:off + 1])[0]
     off += 1
     if diskversion not in formats:
-        raise util.Abort(_('parsing obsolete marker: unknown version %r')
+        raise error.Abort(_('parsing obsolete marker: unknown version %r')
                          % diskversion)
     return diskversion, formats[diskversion][0](data, off)
 
@@ -496,7 +496,7 @@ def _checkinvalidmarkers(markers):
     """
     for mark in markers:
         if node.nullid in mark[1]:
-            raise util.Abort(_('bad obsolescence marker detected: '
+            raise error.Abort(_('bad obsolescence marker detected: '
                                'invalid successors nullid'))
 
 class obsstore(object):
@@ -520,14 +520,9 @@ class obsstore(object):
     def __init__(self, svfs, defaultformat=_fm1version, readonly=False):
         # caches for various obsolescence related cache
         self.caches = {}
-        self._all = []
         self.svfs = svfs
-        data = svfs.tryread('obsstore')
         self._version = defaultformat
         self._readonly = readonly
-        if data:
-            self._version, markers = _readmarkers(data)
-            self._addmarkers(markers)
 
     def __iter__(self):
         return iter(self._all)
@@ -536,7 +531,23 @@ class obsstore(object):
         return len(self._all)
 
     def __nonzero__(self):
+        if not self._cached('_all'):
+            try:
+                return self.svfs.stat('obsstore').st_size > 1
+            except OSError as inst:
+                if inst.errno != errno.ENOENT:
+                    raise
+                # just build an empty _all list if no obsstore exists, which
+                # avoids further stat() syscalls
+                pass
         return bool(self._all)
+
+    @property
+    def readonly(self):
+        """True if marker creation is disabled
+
+        Remove me in the future when obsolete marker is always on."""
+        return self._readonly
 
     def create(self, transaction, prec, succs=(), flag=0, parents=None,
                date=None, metadata=None):
@@ -579,8 +590,8 @@ class obsstore(object):
         Take care of filtering duplicate.
         Return the number of new marker."""
         if self._readonly:
-            raise util.Abort('creating obsolete markers is not enabled on this '
-                             'repo')
+            raise error.Abort('creating obsolete markers is not enabled on '
+                              'this repo')
         known = set(self._all)
         new = []
         for m in markers:
@@ -613,6 +624,16 @@ class obsstore(object):
         Returns the number of new markers added."""
         version, markers = _readmarkers(data)
         return self.add(transaction, markers)
+
+    @propertycache
+    def _all(self):
+        data = self.svfs.tryread('obsstore')
+        if not data:
+            return []
+        self._version, markers = _readmarkers(data)
+        markers = list(markers)
+        _checkinvalidmarkers(markers)
+        return markers
 
     @propertycache
     def successors(self):
@@ -841,15 +862,15 @@ def foreground(repo, nodes):
 
 
 def successorssets(repo, initialnode, cache=None):
-    """Return all set of successors of initial nodes
+    """Return set of all latest successors of initial nodes
 
-    The successors set of a changeset A are a group of revisions that succeed
+    The successors set of a changeset A are the group of revisions that succeed
     A. It succeeds A as a consistent whole, each revision being only a partial
     replacement. The successors set contains non-obsolete changesets only.
 
     This function returns the full list of successor sets which is why it
     returns a list of tuples and not just a single tuple. Each tuple is a valid
-    successors set. Not that (A,) may be a valid successors set for changeset A
+    successors set. Note that (A,) may be a valid successors set for changeset A
     (see below).
 
     In most cases, a changeset A will have a single element (e.g. the changeset
@@ -865,7 +886,7 @@ def successorssets(repo, initialnode, cache=None):
 
     If a changeset A is not obsolete, then it will conceptually have no
     successors set. To distinguish this from a pruned changeset, the successor
-    set will only contain itself, i.e. [(A,)].
+    set will contain itself only, i.e. [(A,)].
 
     Finally, successors unknown locally are considered to be pruned (obsoleted
     without any successors).
@@ -873,10 +894,9 @@ def successorssets(repo, initialnode, cache=None):
     The optional `cache` parameter is a dictionary that may contain precomputed
     successors sets. It is meant to reuse the computation of a previous call to
     `successorssets` when multiple calls are made at the same time. The cache
-    dictionary is updated in place. The caller is responsible for its live
-    spawn. Code that makes multiple calls to `successorssets` *must* use this
-    cache mechanism or suffer terrible performances.
-
+    dictionary is updated in place. The caller is responsible for its life
+    span. Code that makes multiple calls to `successorssets` *must* use this
+    cache mechanism or suffer terrible performance.
     """
 
     succmarkers = repo.obsstore.successors
@@ -1046,16 +1066,6 @@ def successorssets(repo, initialnode, cache=None):
                 cache[current] = final
     return cache[initialnode]
 
-def _knownrevs(repo, nodes):
-    """yield revision numbers of known nodes passed in parameters
-
-    Unknown revisions are silently ignored."""
-    torev = repo.changelog.nodemap.get
-    for n in nodes:
-        rev = torev(n)
-        if rev is not None:
-            yield rev
-
 # mapping of 'set-name' -> <function to compute this set>
 cachefuncs = {}
 def cachefor(name):
@@ -1214,7 +1224,7 @@ def createmarkers(repo, relations, flag=0, date=None, metadata=None):
                 localmetadata.update(rel[2])
 
             if not prec.mutable():
-                raise util.Abort("cannot obsolete public changeset: %s"
+                raise error.Abort("cannot obsolete public changeset: %s"
                                  % prec,
                                  hint='see "hg help phases" for details')
             nprec = prec.node()
@@ -1223,7 +1233,7 @@ def createmarkers(repo, relations, flag=0, date=None, metadata=None):
             if not nsucs:
                 npare = tuple(p.node() for p in prec.parents())
             if nprec in nsucs:
-                raise util.Abort("changeset %s cannot obsolete itself" % prec)
+                raise error.Abort("changeset %s cannot obsolete itself" % prec)
             repo.obsstore.create(tr, nprec, nsucs, flag, parents=npare,
                                  date=date, metadata=localmetadata)
             repo.filteredrevcache.clear()
@@ -1247,7 +1257,7 @@ def isenabled(repo, option):
     # createmarkers must be enabled if other options are enabled
     if ((allowunstableopt in result or exchangeopt in result) and
         not createmarkersopt in result):
-        raise util.Abort(_("'createmarkers' obsolete option must be enabled "
+        raise error.Abort(_("'createmarkers' obsolete option must be enabled "
                            "if other obsolete options are enabled"))
 
     return option in result

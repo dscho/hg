@@ -5,9 +5,16 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-import errno, os, signal, sys, threading
-import util
+from __future__ import absolute_import
+
+import errno
+import os
+import signal
+import sys
+import threading
+
+from .i18n import _
+from . import error
 
 def countcpus():
     '''try to count the number of CPUs on the system'''
@@ -38,7 +45,7 @@ def _numworkers(ui):
             if n >= 1:
                 return n
         except ValueError:
-            raise util.Abort(_('number of cpus must be an integer'))
+            raise error.Abort(_('number of cpus must be an integer'))
     return min(max(countcpus(), 4), 32)
 
 if os.name == 'posix':

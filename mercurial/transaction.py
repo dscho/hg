@@ -11,9 +11,15 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
+from __future__ import absolute_import
+
 import errno
-import error, util
+
+from .i18n import _
+from . import (
+    error,
+    util,
+)
 
 version = 2
 
@@ -65,25 +71,25 @@ def _playback(journal, report, opener, vfsmap, entries, backupentries,
                 except (IOError, OSError) as inst:
                     if inst.errno != errno.ENOENT:
                         raise
-        except (IOError, OSError, util.Abort) as inst:
+        except (IOError, OSError, error.Abort) as inst:
             if not c:
                 raise
 
-    opener.unlink(journal)
     backuppath = "%s.backupfiles" % journal
     if opener.exists(backuppath):
         opener.unlink(backuppath)
+    opener.unlink(journal)
     try:
         for f in backupfiles:
             if opener.exists(f):
                 opener.unlink(f)
-    except (IOError, OSError, util.Abort) as inst:
+    except (IOError, OSError, error.Abort) as inst:
         # only pure backup file remains, it is sage to ignore any error
         pass
 
 class transaction(object):
     def __init__(self, report, opener, vfsmap, journalname, undoname=None,
-                 after=None, createmode=None, validator=None):
+                 after=None, createmode=None, validator=None, releasefn=None):
         """Begin a new transaction
 
         Begins a new transaction that allows rolling back writes in the event of
@@ -91,6 +97,7 @@ class transaction(object):
 
         * `after`: called after the transaction has been committed
         * `createmode`: the mode of the journal file that will be created
+        * `releasefn`: called after releasing (with transaction and result)
         """
         self.count = 1
         self.usages = 1
@@ -113,6 +120,11 @@ class transaction(object):
         if validator is None:
             validator = lambda tr: None
         self.validator = validator
+        # A callback to do something just after releasing transaction.
+        if releasefn is None:
+            releasefn = lambda tr, success: None
+        self.releasefn = releasefn
+
         # a dict of arguments to be passed to hooks
         self.hookargs = {}
         self.file = opener.open(self.journal, "w")
@@ -398,44 +410,48 @@ class transaction(object):
         # cleanup temporary files
         for l, f, b, c in self._backupentries:
             if l not in self._vfsmap and c:
-                self.report("couldn't remote %s: unknown cache location %s\n"
+                self.report("couldn't remove %s: unknown cache location %s\n"
                             % (b, l))
                 continue
             vfs = self._vfsmap[l]
             if not f and b and vfs.exists(b):
                 try:
                     vfs.unlink(b)
-                except (IOError, OSError, util.Abort) as inst:
+                except (IOError, OSError, error.Abort) as inst:
                     if not c:
                         raise
                     # Abort may be raise by read only opener
-                    self.report("couldn't remote %s: %s\n"
+                    self.report("couldn't remove %s: %s\n"
                                 % (vfs.join(b), inst))
         self.entries = []
         self._writeundo()
         if self.after:
             self.after()
-        if self.opener.isfile(self.journal):
-            self.opener.unlink(self.journal)
         if self.opener.isfile(self._backupjournal):
             self.opener.unlink(self._backupjournal)
+        if self.opener.isfile(self.journal):
+            self.opener.unlink(self.journal)
+        if True:
             for l, _f, b, c in self._backupentries:
                 if l not in self._vfsmap and c:
-                    self.report("couldn't remote %s: unknown cache location"
+                    self.report("couldn't remove %s: unknown cache location"
                                 "%s\n" % (b, l))
                     continue
                 vfs = self._vfsmap[l]
                 if b and vfs.exists(b):
                     try:
                         vfs.unlink(b)
-                    except (IOError, OSError, util.Abort) as inst:
+                    except (IOError, OSError, error.Abort) as inst:
                         if not c:
                             raise
                         # Abort may be raise by read only opener
-                        self.report("couldn't remote %s: %s\n"
+                        self.report("couldn't remove %s: %s\n"
                                     % (vfs.join(b), inst))
         self._backupentries = []
         self.journal = None
+
+        self.releasefn(self, True) # notify success of closing transaction
+
         # run post close action
         categories = sorted(self._postclosecallback)
         for cat in categories:
@@ -461,7 +477,7 @@ class transaction(object):
                 u = ''
             else:
                 if l not in self._vfsmap and c:
-                    self.report("couldn't remote %s: unknown cache location"
+                    self.report("couldn't remove %s: unknown cache location"
                                 "%s\n" % (b, l))
                     continue
                 vfs = self._vfsmap[l]
@@ -482,10 +498,10 @@ class transaction(object):
 
         try:
             if not self.entries and not self._backupentries:
-                if self.journal:
-                    self.opener.unlink(self.journal)
                 if self._backupjournal:
                     self.opener.unlink(self._backupjournal)
+                if self.journal:
+                    self.opener.unlink(self.journal)
                 return
 
             self.report(_("transaction abort!\n"))
@@ -500,7 +516,7 @@ class transaction(object):
                 self.report(_("rollback failed - please run hg recover\n"))
         finally:
             self.journal = None
-
+            self.releasefn(self, False) # notify failure of transaction
 
 def rollback(opener, vfsmap, file, report):
     """Rolls back the transaction contained in the given file

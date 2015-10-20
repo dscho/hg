@@ -639,35 +639,10 @@ def branches(web, req, tmpl):
 
     The ``branches`` template is rendered.
     """
-    tips = []
-    heads = web.repo.heads()
-    parity = paritygen(web.stripecount)
-    sortkey = lambda item: (not item[1], item[0].rev())
-
-    def entries(limit, **map):
-        count = 0
-        if not tips:
-            for tag, hs, tip, closed in web.repo.branchmap().iterbranches():
-                tips.append((web.repo[tip], closed))
-        for ctx, closed in sorted(tips, key=sortkey, reverse=True):
-            if limit > 0 and count >= limit:
-                return
-            count += 1
-            if closed:
-                status = 'closed'
-            elif ctx.node() not in heads:
-                status = 'inactive'
-            else:
-                status = 'open'
-            yield {'parity': parity.next(),
-                   'branch': ctx.branch(),
-                   'status': status,
-                   'node': ctx.hex(),
-                   'date': ctx.date()}
-
+    entries = webutil.branchentries(web.repo, web.stripecount)
+    latestentry = webutil.branchentries(web.repo, web.stripecount, 1)
     return tmpl('branches', node=hex(web.repo.changelog.tip()),
-                entries=lambda **x: entries(0, **x),
-                latestentry=lambda **x: entries(1, **x))
+                entries=entries, latestentry=latestentry)
 
 @webcommand('summary')
 def summary(web, req, tmpl):
@@ -710,18 +685,6 @@ def summary(web, req, tmpl):
                    'date': web.repo[n].date(),
                    'node': hex(n)}
 
-    def branches(**map):
-        parity = paritygen(web.stripecount)
-
-        b = web.repo.branchmap()
-        l = [(-web.repo.changelog.rev(tip), tip, tag)
-             for tag, heads, tip, closed in b.iterbranches()]
-        for r, n, t in sorted(l):
-            yield {'parity': parity.next(),
-                   'branch': t,
-                   'node': hex(n),
-                   'date': web.repo[n].date()}
-
     def changelist(**map):
         parity = paritygen(web.stripecount, offset=start - end)
         l = [] # build a list in forward order for efficiency
@@ -761,7 +724,7 @@ def summary(web, req, tmpl):
                 lastchange=tip.date(),
                 tags=tagentries,
                 bookmarks=bookmarks,
-                branches=branches,
+                branches=webutil.branchentries(web.repo, web.stripecount, 10),
                 shortlog=changelist,
                 node=tip.hex(),
                 symrev='tip',
@@ -777,7 +740,7 @@ def filediff(web, req, tmpl):
 
     The ``filediff`` template is rendered.
 
-    This hander is registered under both the ``/diff`` and ``/filediff``
+    This handler is registered under both the ``/diff`` and ``/filediff``
     paths. ``/diff`` is used in modern code.
     """
     fctx, ctx = None, None
@@ -1115,7 +1078,7 @@ def archive(web, req, tmpl):
                 raise ErrorResponse(HTTP_NOT_FOUND,
                     'file(s) not found: %s' % file[0])
 
-    mimetype, artype, extension, encoding = web.archive_specs[type_]
+    mimetype, artype, extension, encoding = web.archivespecs[type_]
     headers = [
         ('Content-Disposition', 'attachment; filename=%s%s' % (name, extension))
         ]

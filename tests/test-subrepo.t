@@ -259,7 +259,7 @@ merge tests
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: 1f14a2e2d3ec, local: f0d2028bf86d+, remote: 1831e14459c4
-   .hgsubstate: versions differ -> m
+   .hgsubstate: versions differ -> m (premerge)
   subrepo merge f0d2028bf86d+ 1831e14459c4 1f14a2e2d3ec
     subrepo t: other changed, get t:6747d179aa9a688023c4b0cad32e4c92bb7f34ad:hg
   getting subrepo t
@@ -285,7 +285,7 @@ merge tests
   resolving manifests
    branchmerge: True, force: False, partial: False
    ancestor: 1831e14459c4, local: e45c8b14af55+, remote: f94576341bcf
-   .hgsubstate: versions differ -> m
+   .hgsubstate: versions differ -> m (premerge)
   subrepo merge e45c8b14af55+ f94576341bcf 1831e14459c4
     subrepo t: both sides changed 
    subrepository t diverged (local revision: 20a0db6fbf6c, remote revision: 7af322bc1198)
@@ -296,12 +296,14 @@ merge tests
    branchmerge: True, force: False, partial: False
    ancestor: 6747d179aa9a, local: 20a0db6fbf6c+, remote: 7af322bc1198
    preserving t for resolve of t
-   t: versions differ -> m
-  picked tool 'internal:merge' for t (binary False symlink False)
+   t: versions differ -> m (premerge)
+  picked tool ':merge' for t (binary False symlink False)
   merging t
   my t@20a0db6fbf6c+ other t@7af322bc1198 ancestor t@6747d179aa9a
-  warning: conflicts during merge.
-  merging t incomplete! (edit conflicts, then use 'hg resolve --mark')
+   t: versions differ -> m (merge)
+  picked tool ':merge' for t (binary False symlink False)
+  my t@20a0db6fbf6c+ other t@7af322bc1198 ancestor t@6747d179aa9a
+  warning: conflicts while merging t! (edit, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
     subrepo t: merge with t:7af322bc1198a32402fe903e0b7ebcfc5c9bf8f4:hg
@@ -1028,8 +1030,8 @@ Create repo without default path, pull top repo, and see what happens on update
 
 Ensure a full traceback, not just the SubrepoAbort part
 
-  $ hg -R issue1852b update --traceback 2>&1 | grep 'raise util\.Abort'
-      raise util.Abort(_("default path for subrepository not found"))
+  $ hg -R issue1852b update --traceback 2>&1 | grep 'raise error\.Abort'
+      raise error.Abort(_("default path for subrepository not found"))
 
 Pull -u now doesn't help
 

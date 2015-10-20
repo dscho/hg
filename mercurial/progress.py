@@ -5,13 +5,14 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+from __future__ import absolute_import
+
 import sys
-import time
 import threading
-from mercurial import encoding
+import time
 
-from mercurial.i18n import _
-
+from .i18n import _
+from . import encoding
 
 def spacejoin(*args):
     return ' '.join(s for s in args if s)
@@ -21,7 +22,7 @@ def shouldprint(ui):
         ui._isatty(sys.stderr) or ui.configbool('progress', 'assume-tty'))
 
 def fmtremaining(seconds):
-    """format a number of remaining seconds in humain readable way
+    """format a number of remaining seconds in human readable way
 
     This will properly display seconds, minutes, hours, days if needed"""
     if seconds < 60:
@@ -165,6 +166,9 @@ class progbar(object):
         if not shouldprint(self.ui):
             return
         sys.stderr.write('\r%s\r' % (' ' * self.width()))
+        if self.printed:
+            # force immediate re-paint of progress bar
+            self.lastprint = 0
 
     def complete(self):
         if not shouldprint(self.ui):

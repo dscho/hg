@@ -5,13 +5,30 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+from __future__ import absolute_import
+
+import errno
+import os
+import shutil
 import struct
 
-from node import nullid, nullrev, hex, bin
-from i18n import _
-from mercurial import obsolete
-import error as errormod, util, filemerge, copies, subrepo, worker
-import errno, os, shutil
+from .i18n import _
+from .node import (
+    bin,
+    hex,
+    nullid,
+    nullrev,
+)
+from . import (
+    copies,
+    destutil,
+    error,
+    filemerge,
+    obsolete,
+    subrepo,
+    util,
+    worker,
+)
 
 _pack = struct.pack
 _unpack = struct.unpack
@@ -27,7 +44,7 @@ class mergestate(object):
 
     it is stored on disk when needed. Two file are used, one with an old
     format, one with a new format. Both contains similar data, but the new
-    format can store new kind of field.
+    format can store new kinds of field.
 
     Current new format is a list of arbitrary record of the form:
 
@@ -44,6 +61,16 @@ class mergestate(object):
     L: the node of the "local" part of the merge (hexified version)
     O: the node of the "other" part of the merge (hexified version)
     F: a file to be merged entry
+    D: a file that the external merge driver will merge internally
+       (experimental)
+    m: the external merge driver defined for this merge plus its run state
+       (experimental)
+
+    Merge driver run states (experimental):
+    u: driver-resolved files unmarked -- needs to be run next time we're about
+       to resolve or commit
+    m: driver-resolved files marked -- only needs to be run before commit
+    s: success/skipped -- does not need to be run any more
     '''
     statepathv1 = 'merge/state'
     statepathv2 = 'merge/state2'
@@ -57,9 +84,16 @@ class mergestate(object):
         self._state = {}
         self._local = None
         self._other = None
+        if 'otherctx' in vars(self):
+            del self.otherctx
         if node:
             self._local = node
             self._other = other
+        self._readmergedriver = None
+        if self.mergedriver:
+            self._mdstate = 's'
+        else:
+            self._mdstate = 'u'
         shutil.rmtree(self._repo.join('merge'), True)
         self._dirty = False
 
@@ -72,17 +106,30 @@ class mergestate(object):
         self._state = {}
         self._local = None
         self._other = None
+        if 'otherctx' in vars(self):
+            del self.otherctx
+        self._readmergedriver = None
+        self._mdstate = 's'
         records = self._readrecords()
         for rtype, record in records:
             if rtype == 'L':
                 self._local = bin(record)
             elif rtype == 'O':
                 self._other = bin(record)
-            elif rtype == 'F':
+            elif rtype == 'm':
+                bits = record.split('\0', 1)
+                mdstate = bits[1]
+                if len(mdstate) != 1 or mdstate not in 'ums':
+                    # the merge driver should be idempotent, so just rerun it
+                    mdstate = 'u'
+
+                self._readmergedriver = bits[0]
+                self._mdstate = mdstate
+            elif rtype in 'FD':
                 bits = record.split('\0')
                 self._state[bits[0]] = bits[1:]
             elif not rtype.islower():
-                raise util.Abort(_('unsupported merge state record: %s')
+                raise error.Abort(_('unsupported merge state record: %s')
                                    % rtype)
         self._dirty = False
 
@@ -102,6 +149,25 @@ class mergestate(object):
         returns list of record [(TYPE, data), ...]"""
         v1records = self._readrecordsv1()
         v2records = self._readrecordsv2()
+        if self._v1v2match(v1records, v2records):
+            return v2records
+        else:
+            # v1 file is newer than v2 file, use it
+            # we have to infer the "other" changeset of the merge
+            # we cannot do better than that with v1 of the format
+            mctx = self._repo[None].parents()[-1]
+            v1records.append(('O', mctx.hex()))
+            # add place holder "other" file node information
+            # nobody is using it yet so we do no need to fetch the data
+            # if mctx was wrong `mctx[bits[-2]]` may fails.
+            for idx, r in enumerate(v1records):
+                if r[0] == 'F':
+                    bits = r[1].split('\0')
+                    bits.insert(-2, '')
+                    v1records[idx] = (r[0], '\0'.join(bits))
+            return v1records
+
+    def _v1v2match(self, v1records, v2records):
         oldv2 = set() # old format version of v2 record
         for rec in v2records:
             if rec[0] == 'L':
@@ -111,22 +177,9 @@ class mergestate(object):
                 oldv2.add(('F', _droponode(rec[1])))
         for rec in v1records:
             if rec not in oldv2:
-                # v1 file is newer than v2 file, use it
-                # we have to infer the "other" changeset of the merge
-                # we cannot do better than that with v1 of the format
-                mctx = self._repo[None].parents()[-1]
-                v1records.append(('O', mctx.hex()))
-                # add place holder "other" file node information
-                # nobody is using it yet so we do no need to fetch the data
-                # if mctx was wrong `mctx[bits[-2]]` may fails.
-                for idx, r in enumerate(v1records):
-                    if r[0] == 'F':
-                        bits = r[1].split('\0')
-                        bits.insert(-2, '')
-                        v1records[idx] = (r[0], '\0'.join(bits))
-                return v1records
+                return False
         else:
-            return v2records
+            return True
 
     def _readrecordsv1(self):
         """read on disk merge state for version 1 file
@@ -175,6 +228,29 @@ class mergestate(object):
                 raise
         return records
 
+    @util.propertycache
+    def mergedriver(self):
+        # protect against the following:
+        # - A configures a malicious merge driver in their hgrc, then
+        #   pauses the merge
+        # - A edits their hgrc to remove references to the merge driver
+        # - A gives a copy of their entire repo, including .hg, to B
+        # - B inspects .hgrc and finds it to be clean
+        # - B then continues the merge and the malicious merge driver
+        #  gets invoked
+        configmergedriver = self._repo.ui.config('experimental', 'mergedriver')
+        if (self._readmergedriver is not None
+            and self._readmergedriver != configmergedriver):
+            raise error.ConfigError(
+                _("merge driver changed since merge started"),
+                hint=_("revert merge driver change or abort merge"))
+
+        return configmergedriver
+
+    @util.propertycache
+    def otherctx(self):
+        return self._repo[self._other]
+
     def active(self):
         """Whether mergestate is active.
 
@@ -193,8 +269,14 @@ class mergestate(object):
             records = []
             records.append(('L', hex(self._local)))
             records.append(('O', hex(self._other)))
+            if self.mergedriver:
+                records.append(('m', '\0'.join([
+                    self.mergedriver, self._mdstate])))
             for d, v in self._state.iteritems():
-                records.append(('F', '\0'.join([d] + v)))
+                if v[0] == 'd':
+                    records.append(('D', '\0'.join([d] + v)))
+                else:
+                    records.append(('F', '\0'.join([d] + v)))
             self._writerecords(records)
             self._dirty = False
 
@@ -257,6 +339,9 @@ class mergestate(object):
         self._state[dfile][0] = state
         self._dirty = True
 
+    def mdstate(self):
+        return self._mdstate
+
     def unresolved(self):
         """Obtain the paths of unresolved files."""
 
@@ -264,10 +349,17 @@ class mergestate(object):
             if entry[0] == 'u':
                 yield f
 
-    def resolve(self, dfile, wctx, labels=None):
+    def driverresolved(self):
+        """Obtain the paths of driver-resolved files."""
+
+        for f, entry in self._state.items():
+            if entry[0] == 'd':
+                yield f
+
+    def _resolve(self, preresolve, dfile, wctx, labels=None):
         """rerun merge process for file path `dfile`"""
-        if self[dfile] == 'r':
-            return 0
+        if self[dfile] in 'rd':
+            return True, 0
         stateentry = self._state[dfile]
         state, hash, lfile, afile, anode, ofile, onode, flags = stateentry
         octx = self._repo[self._other]
@@ -279,23 +371,35 @@ class mergestate(object):
         fla = fca.flags()
         if 'x' in flags + flo + fla and 'l' not in flags + flo + fla:
             if fca.node() == nullid:
-                self._repo.ui.warn(_('warning: cannot merge flags for %s\n') %
-                                   afile)
+                if preresolve:
+                    self._repo.ui.warn(
+                        _('warning: cannot merge flags for %s\n') % afile)
             elif flags == fla:
                 flags = flo
-        # restore local
-        f = self._repo.vfs('merge/' + hash)
-        self._repo.wwrite(dfile, f.read(), flags)
-        f.close()
-        r = filemerge.filemerge(self._repo, self._local, lfile, fcd, fco, fca,
-                                labels=labels)
+        if preresolve:
+            # restore local
+            f = self._repo.vfs('merge/' + hash)
+            self._repo.wwrite(dfile, f.read(), flags)
+            f.close()
+            complete, r = filemerge.premerge(self._repo, self._local, lfile,
+                                             fcd, fco, fca, labels=labels)
+        else:
+            complete, r = filemerge.filemerge(self._repo, self._local, lfile,
+                                              fcd, fco, fca, labels=labels)
         if r is None:
             # no real conflict
             del self._state[dfile]
             self._dirty = True
         elif not r:
             self.mark(dfile, 'r')
-        return r
+        return complete, r
+
+    def preresolve(self, dfile, wctx, labels=None):
+        return self._resolve(True, dfile, wctx, labels=labels)
+
+    def resolve(self, dfile, wctx, labels=None):
+        """rerun merge process for file path `dfile`"""
+        return self._resolve(False, dfile, wctx, labels=labels)[1]
 
 def _checkunknownfile(repo, wctx, mctx, f, f2=None):
     if f2 is None:
@@ -324,7 +428,7 @@ def _checkunknownfiles(repo, wctx, mctx, force, actions):
     for f in sorted(aborts):
         repo.ui.warn(_("%s: untracked file differs\n") % f)
     if aborts:
-        raise util.Abort(_("untracked files in working directory differ "
+        raise error.Abort(_("untracked files in working directory differ "
                            "from files in requested revision"))
 
     for f, (m, args, msg) in actions.iteritems():
@@ -397,9 +501,32 @@ def _checkcollision(repo, wmf, actions):
     for f in sorted(pmmf):
         fold = util.normcase(f)
         if fold in foldmap:
-            raise util.Abort(_("case-folding collision between %s and %s")
+            raise error.Abort(_("case-folding collision between %s and %s")
                              % (f, foldmap[fold]))
         foldmap[fold] = f
+
+    # check case-folding of directories
+    foldprefix = unfoldprefix = lastfull = ''
+    for fold, f in sorted(foldmap.items()):
+        if fold.startswith(foldprefix) and not f.startswith(unfoldprefix):
+            # the folded prefix matches but actual casing is different
+            raise error.Abort(_("case-folding collision between "
+                                "%s and directory of %s") % (lastfull, f))
+        foldprefix = fold + '/'
+        unfoldprefix = f + '/'
+        lastfull = f
+
+def driverpreprocess(repo, ms, wctx, labels=None):
+    """run the preprocess step of the merge driver, if any
+
+    This is currently not implemented -- it's an extension point."""
+    return True
+
+def driverconclude(repo, ms, wctx, labels=None):
+    """run the conclude step of the merge driver, if any
+
+    This is currently not implemented -- it's an extension point."""
+    return True
 
 def manifestmerge(repo, wctx, p2, pa, branchmerge, force, partial,
                   acceptremote, followcopies):
@@ -581,10 +708,14 @@ def calculateupdates(repo, wctx, mctx, ancestors, branchmerge, force, partial,
                 repo, wctx, mctx, ancestor, branchmerge, force, partial,
                 acceptremote, followcopies)
             _checkunknownfiles(repo, wctx, mctx, force, actions)
-            if diverge is None: # and renamedelete is None.
-                # Arbitrarily pick warnings from first iteration
+
+            # Track the shortest set of warning on the theory that bid
+            # merge will correctly incorporate more information
+            if diverge is None or len(diverge1) < len(diverge):
                 diverge = diverge1
+            if renamedelete is None or len(renamedelete) < len(renamedelete1):
                 renamedelete = renamedelete1
+
             for f, a in sorted(actions.iteritems()):
                 m, args, msg = a
                 repo.ui.debug(' %s: %s -> %s\n' % (f, msg, m))
@@ -779,25 +910,6 @@ def applyupdates(repo, actions, wctx, mctx, overwrite, labels=None):
         repo.ui.debug(" %s: %s -> k\n" % (f, msg))
         # no progress
 
-    # merge
-    for f, args, msg in actions['m']:
-        repo.ui.debug(" %s: %s -> m\n" % (f, msg))
-        z += 1
-        progress(_updating, z, item=f, total=numupdates, unit=_files)
-        if f == '.hgsubstate': # subrepo states need updating
-            subrepo.submerge(repo, wctx, mctx, wctx.ancestor(mctx),
-                             overwrite)
-            continue
-        audit(f)
-        r = ms.resolve(f, wctx, labels=labels)
-        if r is not None and r > 0:
-            unresolved += 1
-        else:
-            if r is None:
-                updated += 1
-            else:
-                merged += 1
-
     # directory rename, move local
     for f, args, msg in actions['dm']:
         repo.ui.debug(" %s: %s -> dm\n" % (f, msg))
@@ -830,7 +942,75 @@ def applyupdates(repo, actions, wctx, mctx, overwrite, labels=None):
         util.setflags(repo.wjoin(f), 'l' in flags, 'x' in flags)
         updated += 1
 
+    mergeactions = actions['m']
+    # the ordering is important here -- ms.mergedriver will raise if the merge
+    # driver has changed, and we want to be able to bypass it when overwrite is
+    # True
+    usemergedriver = not overwrite and mergeactions and ms.mergedriver
+
+    if usemergedriver:
+        ms.commit()
+        proceed = driverpreprocess(repo, ms, wctx, labels=labels)
+        # the driver might leave some files unresolved
+        unresolvedf = set(ms.unresolved())
+        if not proceed:
+            # XXX setting unresolved to at least 1 is a hack to make sure we
+            # error out
+            return updated, merged, removed, max(len(unresolvedf), 1)
+        newactions = []
+        for f, args, msg in mergeactions:
+            if f in unresolvedf:
+                newactions.append((f, args, msg))
+        mergeactions = newactions
+
+    # premerge
+    tocomplete = []
+    for f, args, msg in actions['m']:
+        repo.ui.debug(" %s: %s -> m (premerge)\n" % (f, msg))
+        z += 1
+        progress(_updating, z, item=f, total=numupdates, unit=_files)
+        if f == '.hgsubstate': # subrepo states need updating
+            subrepo.submerge(repo, wctx, mctx, wctx.ancestor(mctx),
+                             overwrite)
+            continue
+        audit(f)
+        complete, r = ms.preresolve(f, wctx, labels=labels)
+        if complete:
+            if r is not None and r > 0:
+                unresolved += 1
+            else:
+                if r is None:
+                    updated += 1
+                else:
+                    merged += 1
+        else:
+            numupdates += 1
+            tocomplete.append((f, args, msg))
+
+    # merge
+    for f, args, msg in tocomplete:
+        repo.ui.debug(" %s: %s -> m (merge)\n" % (f, msg))
+        z += 1
+        progress(_updating, z, item=f, total=numupdates, unit=_files)
+        r = ms.resolve(f, wctx, labels=labels)
+        if r is not None and r > 0:
+            unresolved += 1
+        else:
+            if r is None:
+                updated += 1
+            else:
+                merged += 1
+
     ms.commit()
+
+    if usemergedriver and not unresolved and ms.mdstate() != 's':
+        if not driverconclude(repo, ms, wctx, labels=labels):
+            # XXX setting unresolved to at least 1 is a hack to make sure we
+            # error out
+            return updated, merged, removed, max(unresolved, 1)
+
+        ms.commit()
+
     progress(_updating, None, total=numupdates, unit=_files)
 
     return updated, merged, removed, unresolved
@@ -969,43 +1149,11 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
             pas = [repo[ancestor]]
 
         if node is None:
-            # Here is where we should consider bookmarks, divergent bookmarks,
-            # foreground changesets (successors), and tip of current branch;
-            # but currently we are only checking the branch tips.
-            try:
-                node = repo.branchtip(wc.branch())
-            except errormod.RepoLookupError:
-                if wc.branch() == 'default': # no default branch!
-                    node = repo.lookup('tip') # update to tip
-                else:
-                    raise util.Abort(_("branch %s not found") % wc.branch())
-
-            if p1.obsolete() and not p1.children():
-                # allow updating to successors
-                successors = obsolete.successorssets(repo, p1.node())
-
-                # behavior of certain cases is as follows,
-                #
-                # divergent changesets: update to highest rev, similar to what
-                #     is currently done when there are more than one head
-                #     (i.e. 'tip')
-                #
-                # replaced changesets: same as divergent except we know there
-                # is no conflict
-                #
-                # pruned changeset: no update is done; though, we could
-                #     consider updating to the first non-obsolete parent,
-                #     similar to what is current done for 'hg prune'
-
-                if successors:
-                    # flatten the list here handles both divergent (len > 1)
-                    # and the usual case (len = 1)
-                    successors = [n for sub in successors for n in sub]
-
-                    # get the max revision for the given successors set,
-                    # i.e. the 'tip' of a set
-                    node = repo.revs('max(%ln)', successors).first()
-                    pas = [p1]
+            if (repo.ui.configbool('devel', 'all-warnings')
+                    or repo.ui.configbool('devel', 'oldapi')):
+                repo.ui.develwarn('update with no target')
+            rev, _mark, _act = destutil.destupdate(repo)
+            node = repo[rev].node()
 
         overwrite = force and not branchmerge
 
@@ -1021,18 +1169,18 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
 
         ### check phase
         if not overwrite and len(pl) > 1:
-            raise util.Abort(_("outstanding uncommitted merge"))
+            raise error.Abort(_("outstanding uncommitted merge"))
         if branchmerge:
             if pas == [p2]:
-                raise util.Abort(_("merging with a working directory ancestor"
+                raise error.Abort(_("merging with a working directory ancestor"
                                    " has no effect"))
             elif pas == [p1]:
                 if not mergeancestor and p1.branch() == p2.branch():
-                    raise util.Abort(_("nothing to merge"),
+                    raise error.Abort(_("nothing to merge"),
                                      hint=_("use 'hg update' "
                                             "or check 'hg heads'"))
             if not force and (wc.files() or wc.deleted()):
-                raise util.Abort(_("uncommitted changes"),
+                raise error.Abort(_("uncommitted changes"),
                                  hint=_("use 'hg status' to list changes"))
             for s in sorted(wc.substate):
                 wc.sub(s).bailifchanged()
@@ -1061,11 +1209,11 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
                         else:
                             hint = _("commit or update --clean to discard"
                                      " changes")
-                        raise util.Abort(msg, hint=hint)
+                        raise error.Abort(msg, hint=hint)
                     else:  # node is none
                         msg = _("not a linear update")
                         hint = _("merge or update --check to force update")
-                        raise util.Abort(msg, hint=hint)
+                        raise error.Abort(msg, hint=hint)
                 else:
                     # Allow jumping branches if clean and specific rev given
                     pas = [p1]
@@ -1158,9 +1306,7 @@ def update(repo, node, branchmerge, force, partial, ancestor=None,
         wlock.release()
 
     if not partial:
-        def updatehook(parent1=xp1, parent2=xp2, error=stats[3]):
-            repo.hook('update', parent1=parent1, parent2=parent2, error=error)
-        repo._afterlock(updatehook)
+        repo.hook('update', parent1=xp1, parent2=xp2, error=stats[3])
     return stats
 
 def graft(repo, ctx, pctx, labels):
@@ -1191,7 +1337,7 @@ def graft(repo, ctx, pctx, labels):
     # drop the second merge parent
     repo.dirstate.beginparentchange()
     repo.setparents(repo['.'].node(), nullid)
-    repo.dirstate.write()
+    repo.dirstate.write(repo.currenttransaction())
     # fix up dirstate for copies and renames
     copies.duplicatecopies(repo, ctx.rev(), pctx.rev())
     repo.dirstate.endparentchange()

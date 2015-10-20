@@ -393,6 +393,14 @@ No Diff
   python hash seed: * (glob)
   [1]
 
+test --tmpdir support
+  $ run-tests.py --with-hg=`which hg` --tmpdir=$TESTTMP/keep test-success.t
+  
+  Keeping testtmp dir: $TESTTMP/keep/child1/test-success.t (glob)
+  Keeping threadtmp dir: $TESTTMP/keep/child1  (glob)
+  .
+  # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
+
 test for --time
 ==================
 
@@ -580,7 +588,7 @@ Mercurial source tree.
   >   $ echo foo
   >   foo
   > EOF
-  $ run-tests.py test-hghave.t
+  $ run-tests.py $HGTEST_RUN_TESTS_PURE test-hghave.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -599,7 +607,7 @@ running is placed.
   >   #
   >   # check-code - a style and portability checker for Mercurial
   > EOF
-  $ run-tests.py test-runtestdir.t
+  $ run-tests.py $HGTEST_RUN_TESTS_PURE test-runtestdir.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -616,8 +624,22 @@ test that TESTDIR is referred in PATH
   >   $ custom-command.sh
   >   hello world
   > EOF
-  $ run-tests.py test-testdir-path.t
+  $ run-tests.py $HGTEST_RUN_TESTS_PURE test-testdir-path.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
 #endif
+
+test support for --allow-slow-tests
+  $ cat > test-very-slow-test.t <<EOF
+  > #require slow
+  >   $ echo pass
+  >   pass
+  > EOF
+  $ run-tests.py $HGTEST_RUN_TESTS_PURE test-very-slow-test.t
+  s
+  Skipped test-very-slow-test.t: skipped
+  # Ran 0 tests, 1 skipped, 0 warned, 0 failed.
+  $ run-tests.py $HGTEST_RUN_TESTS_PURE --allow-slow-tests test-very-slow-test.t
+  .
+  # Ran 1 tests, 0 skipped, 0 warned, 0 failed.

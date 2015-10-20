@@ -18,7 +18,6 @@
 Push should provide a hint when both 'default' and 'default-push' not set:
   $ cd c
   $ hg push --config paths.default=
-  pushing to default-push
   abort: default repository not configured!
   (see the "path" section in "hg help config")
   [255]
@@ -46,3 +45,9 @@ Push should push to 'default-push' when set:
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files
+
+Pushing to a path that isn't defined should not fall back to default
+
+  $ hg --cwd b push doesnotexist
+  abort: repository doesnotexist does not exist!
+  [255]

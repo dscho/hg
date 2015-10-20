@@ -5,9 +5,21 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import imp, os
-import util, cmdutil, error
-from i18n import _, gettext
+from __future__ import absolute_import
+
+import imp
+import os
+
+from .i18n import (
+    _,
+    gettext,
+)
+
+from . import (
+    cmdutil,
+    error,
+    util,
+)
 
 _extensions = {}
 _aftercallbacks = {}
@@ -193,7 +205,7 @@ def wrapcommand(table, command, wrapper, synopsis=None, docstring=None):
 
       The ``remotenames`` extension adds the ``--remote`` and ``--all`` (``-a``)
       flags to the bookmarks command. Either flag will show the remote bookmarks
-      known to the repository; ``--remote`` will also supress the output of the
+      known to the repository; ``--remote`` will also suppress the output of the
       local bookmarks.
       """
 

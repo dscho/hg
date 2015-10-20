@@ -38,7 +38,7 @@ file open in your editor::
  #  f, fold = use commit, but combine it with the one above
  #  r, roll = like fold, but discard this commit's description
  #  d, drop = remove commit from history
- #  m, mess = edit message without changing commit content
+ #  m, mess = edit commit message without changing commit content
  #
 
 In this file, lines beginning with ``#`` are ignored. You must specify a rule
@@ -60,7 +60,7 @@ would reorganize the file to look like this::
  #  f, fold = use commit, but combine it with the one above
  #  r, roll = like fold, but discard this commit's description
  #  d, drop = remove commit from history
- #  m, mess = edit message without changing commit content
+ #  m, mess = edit commit message without changing commit content
  #
 
 At which point you close the editor and ``histedit`` starts working. When you
@@ -144,7 +144,7 @@ repository that Mercurial does not detect to be related to the source
 repo, you can add a ``--force`` option.
 
 Histedit rule lines are truncated to 80 characters by default. You
-can customise this behaviour by setting a different length in your
+can customize this behavior by setting a different length in your
 configuration file::
 
   [histedit]
@@ -160,10 +160,10 @@ import errno
 import os
 import sys
 
+from mercurial import bundle2
 from mercurial import cmdutil
 from mercurial import discovery
 from mercurial import error
-from mercurial import changegroup
 from mercurial import copies
 from mercurial import context
 from mercurial import exchange
@@ -198,7 +198,7 @@ editcomment = _("""# Edit history between %s and %s
 #  f, fold = use commit, but combine it with the one above
 #  r, roll = like fold, but discard this commit's description
 #  d, drop = remove commit from history
-#  m, mess = edit message without changing commit content
+#  m, mess = edit commit message without changing commit content
 #
 """)
 
@@ -225,7 +225,7 @@ class histeditstate(object):
         except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
-            raise util.Abort(_('no histedit in progress'))
+            raise error.Abort(_('no histedit in progress'))
 
         try:
             data = pickle.load(fp)
@@ -310,7 +310,11 @@ class histeditstate(object):
         return parentctxnode, rules, keep, topmost, replacements, backupfile
 
     def clear(self):
-        self.repo.vfs.unlink('histedit-state')
+        if self.inprogress():
+            self.repo.vfs.unlink('histedit-state')
+
+    def inprogress(self):
+        return self.repo.vfs.exists('histedit-state')
 
 class histeditaction(object):
     def __init__(self, state, node):
@@ -327,7 +331,7 @@ class histeditaction(object):
         try:
             node = repo[rulehash].node()
         except error.RepoError:
-            raise util.Abort(_('unknown changeset %s listed') % rulehash[:12])
+            raise error.Abort(_('unknown changeset %s listed') % rulehash[:12])
         return cls(state, node)
 
     def run(self):
@@ -406,7 +410,7 @@ def applychanges(ui, repo, ctx, opts):
     """Merge changeset from ctx (only) in the current working directory"""
     wcpar = repo.dirstate.parents()[0]
     if ctx.p1().node() == wcpar:
-        # edition ar "in place" we do not need to make any merge,
+        # edits are "in place" we do not need to make any merge,
         # just applies changes on parent for edition
         cmdutil.revert(ui, repo, ctx, (wcpar, node.nullid), all=True)
         stats = None
@@ -435,7 +439,7 @@ def collapse(repo, first, last, commitopts, skipprompt=False):
         return None
     for c in ctxs:
         if not c.mutable():
-            raise util.Abort(
+            raise error.Abort(
                 _("cannot fold into public change %s") % node.short(c.node()))
     base = first.parents()[0]
 
@@ -557,7 +561,20 @@ class fold(histeditaction):
                                middlecommits)
 
     def skipprompt(self):
+        """Returns true if the rule should skip the message editor.
+
+        For example, 'fold' wants to show an editor, but 'rollup'
+        doesn't want to.
+        """
         return False
+
+    def mergedescs(self):
+        """Returns true if the rule should merge messages of multiple changes.
+
+        This exists mainly so that 'rollup' rules can be a subclass of
+        'fold'.
+        """
+        return True
 
     def finishfold(self, ui, repo, ctx, oldctx, newnode, internalchanges):
         parent = ctx.parents()[0].node()
@@ -566,7 +583,7 @@ class fold(histeditaction):
         commitopts = {}
         commitopts['user'] = ctx.user()
         # commit message
-        if self.skipprompt():
+        if not self.mergedescs():
             newmessage = ctx.description()
         else:
             newmessage = '\n***\n'.join(
@@ -601,7 +618,22 @@ class fold(histeditaction):
             replacements.append((ich, (n,)))
         return repo[n], replacements
 
+class _multifold(fold):
+    """fold subclass used for when multiple folds happen in a row
+
+    We only want to fire the editor for the folded message once when
+    (say) four changes are folded down into a single change. This is
+    similar to rollup, but we should preserve both messages so that
+    when the last fold operation runs we can show the user all the
+    commit messages in their editor.
+    """
+    def skipprompt(self):
+        return True
+
 class rollup(fold):
+    def mergedescs(self):
+        return False
+
     def skipprompt(self):
         return True
 
@@ -614,10 +646,12 @@ class message(histeditaction):
     def commiteditor(self):
         return cmdutil.getcommiteditor(edit=True, editform='histedit.mess')
 
-def findoutgoing(ui, repo, remote=None, force=False, opts={}):
+def findoutgoing(ui, repo, remote=None, force=False, opts=None):
     """utility function to find the first outgoing changeset
 
-    Used by initialisation code"""
+    Used by initialization code"""
+    if opts is None:
+        opts = {}
     dest = ui.expandpath(remote or 'default-push', remote or 'default')
     dest, revs = hg.parseurl(dest, None)[:2]
     ui.status(_('comparing with %s\n') % util.hidepassword(dest))
@@ -630,12 +664,12 @@ def findoutgoing(ui, repo, remote=None, force=False, opts={}):
 
     outgoing = discovery.findcommonoutgoing(repo, other, revs, force=force)
     if not outgoing.missing:
-        raise util.Abort(_('no outgoing ancestors'))
+        raise error.Abort(_('no outgoing ancestors'))
     roots = list(repo.revs("roots(%ln)", outgoing.missing))
     if 1 < len(roots):
         msg = _('there are ambiguous outgoing revisions')
         hint = _('see "hg help histedit" for more detail')
-        raise util.Abort(msg, hint=hint)
+        raise error.Abort(msg, hint=hint)
     return repo.lookup(roots[0])
 
 actiontable = {'p': pick,
@@ -644,6 +678,7 @@ actiontable = {'p': pick,
                'edit': edit,
                'f': fold,
                'fold': fold,
+               '_multifold': _multifold,
                'r': rollup,
                'roll': rollup,
                'd': drop,
@@ -675,9 +710,9 @@ def histedit(ui, repo, *freeargs, **opts):
     destination repository. If URL of the destination is omitted, the
     'default-push' (or 'default') path will be used.
 
-    For safety, this command is aborted, also if there are ambiguous
-    outgoing revisions which may confuse users: for example, there are
-    multiple branches containing outgoing revisions.
+    For safety, this command is also aborted if there are ambiguous
+    outgoing revisions which may confuse users: for example, if there
+    are multiple branches containing outgoing revisions.
 
     Use "min(outgoing() and ::.)" or similar revset specification
     instead of --outgoing to specify edit target revision exactly in
@@ -701,7 +736,7 @@ def _histedit(ui, repo, state, *freeargs, **opts):
     # blanket if mq patches are applied somewhere
     mq = getattr(repo, 'mq', None)
     if mq and mq.applied:
-        raise util.Abort(_('source has mq patches applied'))
+        raise error.Abort(_('source has mq patches applied'))
 
     # basic argument incompatibility processing
     outg = opts.get('outgoing')
@@ -713,29 +748,29 @@ def _histedit(ui, repo, state, *freeargs, **opts):
     revs = opts.get('rev', [])
     goal = 'new' # This invocation goal, in new, continue, abort
     if force and not outg:
-        raise util.Abort(_('--force only allowed with --outgoing'))
+        raise error.Abort(_('--force only allowed with --outgoing'))
     if cont:
         if any((outg, abort, revs, freeargs, rules, editplan)):
-            raise util.Abort(_('no arguments allowed with --continue'))
+            raise error.Abort(_('no arguments allowed with --continue'))
         goal = 'continue'
     elif abort:
         if any((outg, revs, freeargs, rules, editplan)):
-            raise util.Abort(_('no arguments allowed with --abort'))
+            raise error.Abort(_('no arguments allowed with --abort'))
         goal = 'abort'
     elif editplan:
         if any((outg, revs, freeargs)):
-            raise util.Abort(_('only --commands argument allowed with '
+            raise error.Abort(_('only --commands argument allowed with '
                                '--edit-plan'))
         goal = 'edit-plan'
     else:
         if os.path.exists(os.path.join(repo.path, 'histedit-state')):
-            raise util.Abort(_('history edit already in progress, try '
+            raise error.Abort(_('history edit already in progress, try '
                                '--continue or --abort'))
         if outg:
             if revs:
-                raise util.Abort(_('no revisions allowed with --outgoing'))
+                raise error.Abort(_('no revisions allowed with --outgoing'))
             if len(freeargs) > 1:
-                raise util.Abort(
+                raise error.Abort(
                     _('only one repo argument allowed with --outgoing'))
         else:
             revs.extend(freeargs)
@@ -745,7 +780,7 @@ def _histedit(ui, repo, state, *freeargs, **opts):
                 if histeditdefault:
                     revs.append(histeditdefault)
             if len(revs) != 1:
-                raise util.Abort(
+                raise error.Abort(
                     _('histedit requires exactly one ancestor revision'))
 
 
@@ -777,30 +812,45 @@ def _histedit(ui, repo, state, *freeargs, **opts):
         state.write()
         return
     elif goal == 'abort':
-        state.read()
-        mapping, tmpnodes, leafs, _ntm = processreplacement(state)
-        ui.debug('restore wc to old parent %s\n' % node.short(state.topmost))
+        try:
+            state.read()
+            tmpnodes, leafs = newnodestoabort(state)
+            ui.debug('restore wc to old parent %s\n'
+                    % node.short(state.topmost))
 
-        # Recover our old commits if necessary
-        if not state.topmost in repo and state.backupfile:
-            backupfile = repo.join(state.backupfile)
-            f = hg.openpath(ui, backupfile)
-            gen = exchange.readbundle(ui, f, backupfile)
-            changegroup.addchangegroup(repo, gen, 'histedit',
-                                       'bundle:' + backupfile)
-            os.remove(backupfile)
+            # Recover our old commits if necessary
+            if not state.topmost in repo and state.backupfile:
+                backupfile = repo.join(state.backupfile)
+                f = hg.openpath(ui, backupfile)
+                gen = exchange.readbundle(ui, f, backupfile)
+                tr = repo.transaction('histedit.abort')
+                try:
+                    if not isinstance(gen, bundle2.unbundle20):
+                        gen.apply(repo, 'histedit', 'bundle:' + backupfile)
+                    if isinstance(gen, bundle2.unbundle20):
+                        bundle2.applybundle(repo, gen, tr,
+                                            source='histedit',
+                                            url='bundle:' + backupfile)
+                    tr.close()
+                finally:
+                    tr.release()
 
-        # check whether we should update away
-        parentnodes = [c.node() for c in repo[None].parents()]
-        for n in leafs | set([state.parentctxnode]):
-            if n in parentnodes:
+                os.remove(backupfile)
+
+            # check whether we should update away
+            if repo.unfiltered().revs('parents() and (%n  or %ln::)',
+                                    state.parentctxnode, leafs | tmpnodes):
                 hg.clean(repo, state.topmost)
-                break
-        else:
-            pass
-        cleanupnode(ui, repo, 'created', tmpnodes)
-        cleanupnode(ui, repo, 'temp', leafs)
-        state.clear()
+            cleanupnode(ui, repo, 'created', tmpnodes)
+            cleanupnode(ui, repo, 'temp', leafs)
+        except Exception:
+            if state.inprogress():
+                ui.warn(_('warning: encountered an exception during histedit '
+                    '--abort; the repository may not have been completely '
+                    'cleaned up\n'))
+            raise
+        finally:
+                state.clear()
         return
     else:
         cmdutil.checkunfinished(repo)
@@ -816,13 +866,13 @@ def _histedit(ui, repo, state, *freeargs, **opts):
         else:
             rr = list(repo.set('roots(%ld)', scmutil.revrange(repo, revs)))
             if len(rr) != 1:
-                raise util.Abort(_('The specified revisions must have '
+                raise error.Abort(_('The specified revisions must have '
                     'exactly one common root'))
             root = rr[0].node()
 
         revs = between(repo, root, topmost, state.keep)
         if not revs:
-            raise util.Abort(_('%s is not an ancestor of working directory') %
+            raise error.Abort(_('%s is not an ancestor of working directory') %
                              node.short(root))
 
         ctxs = [repo[r] for r in revs]
@@ -854,6 +904,14 @@ def _histedit(ui, repo, state, *freeargs, **opts):
                                         'histedit')
         state.backupfile = backupfile
 
+    # preprocess rules so that we can hide inner folds from the user
+    # and only show one editor
+    rules = state.rules[:]
+    for idx, ((action, ha), (nextact, unused)) in enumerate(
+            zip(rules, rules[1:] + [(None, None)])):
+        if action == 'fold' and nextact == 'fold':
+            state.rules[idx] = '_multifold', ha
+
     while state.rules:
         state.write()
         action, ha = state.rules.pop(0)
@@ -879,6 +937,13 @@ def _histedit(ui, repo, state, *freeargs, **opts):
                     for n in succs[1:]:
                         ui.debug(m % node.short(n))
 
+    if supportsmarkers:
+        # Only create markers if the temp nodes weren't already removed.
+        obsolete.createmarkers(repo, ((repo[t],()) for t in sorted(tmpnodes)
+                                       if t in repo))
+    else:
+        cleanupnode(ui, repo, 'temp', tmpnodes)
+
     if not state.keep:
         if mapping:
             movebookmarks(ui, repo, mapping, state.topmost, ntm)
@@ -895,7 +960,6 @@ def _histedit(ui, repo, state, *freeargs, **opts):
         else:
             cleanupnode(ui, repo, 'replaced', mapping)
 
-    cleanupnode(ui, repo, 'temp', tmpnodes)
     state.clear()
     if os.path.exists(repo.sjoin('undo')):
         os.unlink(repo.sjoin('undo'))
@@ -912,7 +976,7 @@ def bootstrapcontinue(ui, state, opts):
             actobj.continuedirty()
             s = repo.status()
             if s.modified or s.added or s.removed or s.deleted:
-                raise util.Abort(_("working copy still dirty"))
+                raise error.Abort(_("working copy still dirty"))
 
         parentctx, replacements = actobj.continueclean()
 
@@ -929,12 +993,12 @@ def between(repo, old, new, keep):
     if ctxs and not keep:
         if (not obsolete.isenabled(repo, obsolete.allowunstableopt) and
             repo.revs('(%ld::) - (%ld)', ctxs, ctxs)):
-            raise util.Abort(_('cannot edit history that would orphan nodes'))
+            raise error.Abort(_('cannot edit history that would orphan nodes'))
         if repo.revs('(%ld) and merge()', ctxs):
-            raise util.Abort(_('cannot edit history that contains merges'))
+            raise error.Abort(_('cannot edit history that contains merges'))
         root = ctxs[0] # list is already sorted by repo.set
         if not root.mutable():
-            raise util.Abort(_('cannot edit public changeset: %s') % root,
+            raise error.Abort(_('cannot edit public changeset: %s') % root,
                              hint=_('see "hg help phases" for details'))
     return [c.node() for c in ctxs]
 
@@ -985,29 +1049,48 @@ def verifyrules(rules, repo, ctxs):
     seen = set()
     for r in rules:
         if ' ' not in r:
-            raise util.Abort(_('malformed line "%s"') % r)
+            raise error.Abort(_('malformed line "%s"') % r)
         action, rest = r.split(' ', 1)
         ha = rest.strip().split(' ', 1)[0]
         try:
             ha = repo[ha].hex()
         except error.RepoError:
-            raise util.Abort(_('unknown changeset %s listed') % ha[:12])
+            raise error.Abort(_('unknown changeset %s listed') % ha[:12])
         if ha not in expected:
-            raise util.Abort(
+            raise error.Abort(
                 _('may not use changesets other than the ones listed'))
         if ha in seen:
-            raise util.Abort(_('duplicated command for changeset %s') %
+            raise error.Abort(_('duplicated command for changeset %s') %
                     ha[:12])
         seen.add(ha)
-        if action not in actiontable:
-            raise util.Abort(_('unknown action "%s"') % action)
+        if action not in actiontable or action.startswith('_'):
+            raise error.Abort(_('unknown action "%s"') % action)
         parsed.append([action, ha])
     missing = sorted(expected - seen)  # sort to stabilize output
     if missing:
-        raise util.Abort(_('missing rules for changeset %s') %
+        raise error.Abort(_('missing rules for changeset %s') %
                 missing[0][:12],
                 hint=_('do you want to use the drop action?'))
     return parsed
+
+def newnodestoabort(state):
+    """process the list of replacements to return
+
+    1) the list of final node
+    2) the list of temporary node
+
+    This meant to be used on abort as less data are required in this case.
+    """
+    replacements = state.replacements
+    allsuccs = set()
+    replaced = set()
+    for rep in replacements:
+        allsuccs.update(rep[1])
+        replaced.add(rep[0])
+    newnodes = allsuccs - replaced
+    tmpnodes = allsuccs & replaced
+    return newnodes, tmpnodes
+
 
 def processreplacement(state):
     """process the list of replacements to return
@@ -1019,15 +1102,15 @@ def processreplacement(state):
     allsuccs = set()
     replaced = set()
     fullmapping = {}
-    # initialise basic set
-    # fullmapping record all operation recorded in replacement
+    # initialize basic set
+    # fullmapping records all operations recorded in replacement
     for rep in replacements:
         allsuccs.update(rep[1])
         replaced.add(rep[0])
         fullmapping.setdefault(rep[0], set()).update(rep[1])
     new = allsuccs - replaced
     tmpnodes = allsuccs & replaced
-    # Reduce content fullmapping  into direct relation between original nodes
+    # Reduce content fullmapping into direct relation between original nodes
     # and final node created during history edition
     # Dropped changeset are replaced by an empty list
     toproceed = set(fullmapping)
@@ -1113,8 +1196,12 @@ def cleanupnode(ui, repo, name, nodes):
     lock = None
     try:
         lock = repo.lock()
-        # Find all node that need to be stripped
-        # (we hg %lr instead of %ln to silently ignore unknown item
+        # do not let filtering get in the way of the cleanse
+        # we should probably get rid of obsolescence marker created during the
+        # histedit, but we currently do not have such information.
+        repo = repo.unfiltered()
+        # Find all nodes that need to be stripped
+        # (we use %lr instead of %ln to silently ignore unknown items)
         nm = repo.changelog.nodemap
         nodes = sorted(n for n in nodes if n in nm)
         roots = [c.node() for c in repo.set("roots(%ln)", nodes)]
@@ -1137,7 +1224,7 @@ def stripwrapper(orig, ui, repo, nodelist, *args, **kwargs):
         strip_nodes = set([repo[n].node() for n in nodelist])
         common_nodes = histedit_nodes & strip_nodes
         if common_nodes:
-            raise util.Abort(_("histedit in progress, can't strip %s")
+            raise error.Abort(_("histedit in progress, can't strip %s")
                              % ', '.join(node.short(x) for x in common_nodes))
     return orig(ui, repo, nodelist, *args, **kwargs)
 

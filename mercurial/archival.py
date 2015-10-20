@@ -5,14 +5,27 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-import match as matchmod
-import cmdutil
-import scmutil, util, encoding
-import cStringIO, os, tarfile, time, zipfile
-import zlib, gzip
+from __future__ import absolute_import
+
+import cStringIO
+import gzip
+import os
 import struct
-import error
+import tarfile
+import time
+import zipfile
+import zlib
+
+from .i18n import _
+
+from . import (
+    cmdutil,
+    encoding,
+    error,
+    match as matchmod,
+    scmutil,
+    util,
+)
 
 # from unzip source code:
 _UNX_IFREG = 0x8000
@@ -42,7 +55,7 @@ def tidyprefix(dest, kind, prefix):
     if prefix.startswith('./'):
         prefix = prefix[2:]
     if prefix.startswith('../') or os.path.isabs(lpfx) or '/../' in prefix:
-        raise util.Abort(_('archive prefix contains illegal components'))
+        raise error.Abort(_('archive prefix contains illegal components'))
     return prefix
 
 exts = {
@@ -111,11 +124,7 @@ class tarit(object):
         def _write_gzip_header(self):
             self.fileobj.write('\037\213')             # magic header
             self.fileobj.write('\010')                 # compression method
-            # Python 2.6 introduced self.name and deprecated self.filename
-            try:
-                fname = self.name
-            except AttributeError:
-                fname = self.filename
+            fname = self.name
             if fname and fname.endswith('.gz'):
                 fname = fname[:-3]
             flags = 0
@@ -283,7 +292,7 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
 
     if kind == 'files':
         if prefix:
-            raise util.Abort(_('cannot give prefix when archiving to files'))
+            raise error.Abort(_('cannot give prefix when archiving to files'))
     else:
         prefix = tidyprefix(dest, kind, prefix)
 
@@ -294,7 +303,7 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
         archiver.addfile(prefix + name, mode, islink, data)
 
     if kind not in archivers:
-        raise util.Abort(_("unknown archive type '%s'") % kind)
+        raise error.Abort(_("unknown archive type '%s'") % kind)
 
     ctx = repo[node]
     archiver = archivers[kind](dest, mtime or ctx.date()[0])

@@ -5,7 +5,7 @@
 #   - 'workingctx._checklookup()' (= 'repo.status()')
 #   - 'committablectx.markcommitted()'
 
-from mercurial import context, extensions, parsers, util
+from mercurial import context, dirstate, extensions, parsers, util
 
 def pack_dirstate(fakenow, orig, dmap, copymap, pl, now):
     # execute what original parsers.pack_dirstate should do actually
@@ -31,17 +31,19 @@ def fakewrite(ui, func):
 
     # parsing 'fakenow' in YYYYmmddHHMM format makes comparison between
     # 'fakenow' value and 'touch -t YYYYmmddHHMM' argument easy
-    timestamp = util.parsedate(fakenow, ['%Y%m%d%H%M'])[0]
-    fakenow = float(timestamp)
+    fakenow = util.parsedate(fakenow, ['%Y%m%d%H%M'])[0]
 
     orig_pack_dirstate = parsers.pack_dirstate
+    orig_dirstate_getfsnow = dirstate._getfsnow
     wrapper = lambda *args: pack_dirstate(fakenow, orig_pack_dirstate, *args)
 
     parsers.pack_dirstate = wrapper
+    dirstate._getfsnow = lambda *args: fakenow
     try:
         return func()
     finally:
         parsers.pack_dirstate = orig_pack_dirstate
+        dirstate._getfsnow = orig_dirstate_getfsnow
 
 def _checklookup(orig, workingctx, files):
     ui = workingctx.repo().ui

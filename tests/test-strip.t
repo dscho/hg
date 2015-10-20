@@ -197,55 +197,18 @@
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     c
   
-  $ hg --config experimental.bundle2-exp=True --config experimental.strip-bundle2-version=INVALID strip 4
+
+  $ hg --traceback strip 4
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  unknown strip-bundle2-version value 'INVALID'; should be one of ['01', '02']
   saved backup bundle to $TESTTMP/test/.hg/strip-backup/264128213d29-0b39d6bf-backup.hg (glob)
+  $ hg parents
+  changeset:   1:ef3a871183d7
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     b
+  
   $ hg debugbundle .hg/strip-backup/*
   264128213d290d868c54642d13aeaa3675551a78
-  $ restore
-
-  $ hg up -C 4
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  $ hg --config experimental.bundle2-exp=True --config experimental.strip-bundle2-version=02 --traceback strip 4
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  saved backup bundle to $TESTTMP/test/.hg/strip-backup/264128213d29-0b39d6bf-backup.hg (glob)
-  $ hg parents
-  changeset:   1:ef3a871183d7
-  user:        test
-  date:        Thu Jan 01 00:00:00 1970 +0000
-  summary:     b
-  
-  $ hg debugbundle .hg/strip-backup/*
-  Stream params: {}
-  changegroup -- "{'version': '02'}"
-      264128213d290d868c54642d13aeaa3675551a78
-  $ hg incoming .hg/strip-backup/*
-  comparing with .hg/strip-backup/264128213d29-0b39d6bf-backup.hg
-  searching for changes
-  changeset:   4:264128213d29
-  tag:         tip
-  parent:      1:ef3a871183d7
-  user:        test
-  date:        Thu Jan 01 00:00:00 1970 +0000
-  summary:     c
-  
-  $ restore
-  $ hg up -C 4
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  $ hg --config experimental.bundle2-exp=True --config experimental.strip-bundle2-version=02 --traceback strip 4
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  saved backup bundle to $TESTTMP/test/.hg/strip-backup/264128213d29-0b39d6bf-backup.hg (glob)
-  $ hg parents
-  changeset:   1:ef3a871183d7
-  user:        test
-  date:        Thu Jan 01 00:00:00 1970 +0000
-  summary:     b
-  
-  $ hg debugbundle .hg/strip-backup/*
-  Stream params: {}
-  changegroup -- "{'version': '02'}"
-      264128213d290d868c54642d13aeaa3675551a78
   $ hg pull .hg/strip-backup/*
   pulling from .hg/strip-backup/264128213d29-0b39d6bf-backup.hg
   searching for changes
@@ -468,9 +431,9 @@ strip of applied mq should cleanup status file
 applied patches before strip
 
   $ hg qapplied
-  2.diff
-  3.diff
-  4.diff
+  d
+  e
+  f
 
 stripping revision in queue
 
@@ -481,7 +444,7 @@ stripping revision in queue
 applied patches after stripping rev in queue
 
   $ hg qapplied
-  2.diff
+  d
 
 stripping ancestor of queue
 
@@ -697,7 +660,7 @@ Verify bundles don't get overwritten:
 Test that we only bundle the stripped changesets (issue4736)
 ------------------------------------------------------------
 
-initialisation (previous repo is empty anyway)
+initialization (previous repo is empty anyway)
 
   $ hg init issue4736
   $ cd issue4736
@@ -844,7 +807,7 @@ Error during post-close callback of the strip transaction
   > EOF
   $ hg strip tip --config extensions.crash=$TESTTMP/crashstrip.py
   saved backup bundle to $TESTTMP/issue4736/.hg/strip-backup/5c51d8d6557d-70daef06-backup.hg (glob)
-  strip failed, full bundle stored in '$TESTTMP/issue4736/.hg/strip-backup/5c51d8d6557d-70daef06-backup.hg'
+  strip failed, full bundle stored in '$TESTTMP/issue4736/.hg/strip-backup/5c51d8d6557d-70daef06-backup.hg' (glob)
   abort: boom
   [255]
 

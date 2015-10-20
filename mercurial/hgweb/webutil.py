@@ -7,6 +7,7 @@
 # GNU General Public License version 2 or any later version.
 
 import os, copy
+import re
 from mercurial import match, patch, error, ui, util, pathutil, context
 from mercurial.i18n import _
 from mercurial.node import hex, nullid, short
@@ -199,11 +200,42 @@ def showbookmark(repo, tmpl, t1, node=nullid, **args):
     for t in repo.nodebookmarks(node):
         yield tmpl(t1, bookmark=t, **args)
 
+def branchentries(repo, stripecount, limit=0):
+    tips = []
+    heads = repo.heads()
+    parity = paritygen(stripecount)
+    sortkey = lambda item: (not item[1], item[0].rev())
+
+    def entries(**map):
+        count = 0
+        if not tips:
+            for tag, hs, tip, closed in repo.branchmap().iterbranches():
+                tips.append((repo[tip], closed))
+        for ctx, closed in sorted(tips, key=sortkey, reverse=True):
+            if limit > 0 and count >= limit:
+                return
+            count += 1
+            if closed:
+                status = 'closed'
+            elif ctx.node() not in heads:
+                status = 'inactive'
+            else:
+                status = 'open'
+            yield {
+                'parity': parity.next(),
+                'branch': ctx.branch(),
+                'status': status,
+                'node': ctx.hex(),
+                'date': ctx.date()
+            }
+
+    return entries
+
 def cleanpath(repo, path):
     path = path.lstrip('/')
     return pathutil.canonpath(repo.root, '', path)
 
-def changeidctx (repo, changeid):
+def changeidctx(repo, changeid):
     try:
         ctx = repo[changeid]
     except error.RepoError:
@@ -212,11 +244,11 @@ def changeidctx (repo, changeid):
 
     return ctx
 
-def changectx (repo, req):
+def changectx(repo, req):
     changeid = "tip"
     if 'node' in req.form:
         changeid = req.form['node'][0]
-        ipos=changeid.find(':')
+        ipos = changeid.find(':')
         if ipos != -1:
             changeid = changeid[(ipos + 1):]
     elif 'manifest' in req.form:
@@ -227,7 +259,7 @@ def changectx (repo, req):
 def basechangectx(repo, req):
     if 'node' in req.form:
         changeid = req.form['node'][0]
-        ipos=changeid.find(':')
+        ipos = changeid.find(':')
         if ipos != -1:
             changeid = changeid[:ipos]
             return changeidctx(repo, changeid)
@@ -509,3 +541,44 @@ class wsgiui(ui.ui):
     # default termwidth breaks under mod_wsgi
     def termwidth(self):
         return 80
+
+def getwebsubs(repo):
+    websubtable = []
+    websubdefs = repo.ui.configitems('websub')
+    # we must maintain interhg backwards compatibility
+    websubdefs += repo.ui.configitems('interhg')
+    for key, pattern in websubdefs:
+        # grab the delimiter from the character after the "s"
+        unesc = pattern[1]
+        delim = re.escape(unesc)
+
+        # identify portions of the pattern, taking care to avoid escaped
+        # delimiters. the replace format and flags are optional, but
+        # delimiters are required.
+        match = re.match(
+            r'^s%s(.+)(?:(?<=\\\\)|(?<!\\))%s(.*)%s([ilmsux])*$'
+            % (delim, delim, delim), pattern)
+        if not match:
+            repo.ui.warn(_("websub: invalid pattern for %s: %s\n")
+                              % (key, pattern))
+            continue
+
+        # we need to unescape the delimiter for regexp and format
+        delim_re = re.compile(r'(?<!\\)\\%s' % delim)
+        regexp = delim_re.sub(unesc, match.group(1))
+        format = delim_re.sub(unesc, match.group(2))
+
+        # the pattern allows for 6 regexp flags, so set them if necessary
+        flagin = match.group(3)
+        flags = 0
+        if flagin:
+            for flag in flagin.upper():
+                flags |= re.__dict__[flag]
+
+        try:
+            regexp = re.compile(regexp, flags)
+            websubtable.append((regexp, format))
+        except re.error:
+            repo.ui.warn(_("websub: invalid regexp for %s: %s\n")
+                         % (key, regexp))
+    return websubtable

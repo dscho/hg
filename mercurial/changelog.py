@@ -5,9 +5,21 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from node import bin, hex, nullid
-from i18n import _
-import util, error, revlog, encoding
+from __future__ import absolute_import
+
+from .i18n import _
+from .node import (
+    bin,
+    hex,
+    nullid,
+)
+
+from . import (
+    encoding,
+    error,
+    revlog,
+    util,
+)
 
 _defaultextra = {'branch': 'default'}
 
@@ -171,6 +183,9 @@ class changelog(revlog.revlog):
         # XXX need filtering too
         self.rev(self.node(0))
         return self._nodecache
+
+    def reachableroots(self, minroot, heads, roots, includepath=False):
+        return self.index.reachableroots2(minroot, heads, roots, includepath)
 
     def headrevs(self):
         if self.filteredrevs:

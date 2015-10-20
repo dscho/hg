@@ -27,7 +27,7 @@ from mercurial.i18n import _
 from mercurial.node import nullid, nullrev, bin, hex
 from mercurial import changegroup, cmdutil, scmutil, phases, commands
 from mercurial import error, hg, mdiff, merge, patch, repair, util
-from mercurial import templatefilters, exchange, bundlerepo
+from mercurial import templatefilters, exchange, bundlerepo, bundle2
 from mercurial import lock as lockmod
 from hgext import rebase
 import errno
@@ -90,23 +90,40 @@ class shelvedfile(object):
         except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
-            raise util.Abort(_("shelved change '%s' not found") % self.name)
+            raise error.Abort(_("shelved change '%s' not found") % self.name)
 
     def applybundle(self):
         fp = self.opener()
         try:
             gen = exchange.readbundle(self.repo.ui, fp, self.fname, self.vfs)
-            changegroup.addchangegroup(self.repo, gen, 'unshelve',
-                                       'bundle:' + self.vfs.join(self.fname),
-                                       targetphase=phases.secret)
+            if not isinstance(gen, bundle2.unbundle20):
+                gen.apply(self.repo, 'unshelve',
+                          'bundle:' + self.vfs.join(self.fname),
+                          targetphase=phases.secret)
+            if isinstance(gen, bundle2.unbundle20):
+                bundle2.applybundle(self.repo, gen,
+                                    self.repo.currenttransaction(),
+                                    source='unshelve',
+                                    url='bundle:' + self.vfs.join(self.fname))
         finally:
             fp.close()
 
     def bundlerepo(self):
         return bundlerepo.bundlerepository(self.repo.baseui, self.repo.root,
                                            self.vfs.join(self.fname))
-    def writebundle(self, cg):
-        changegroup.writebundle(self.ui, cg, self.fname, 'HG10UN', self.vfs)
+    def writebundle(self, bases, node):
+        btype = 'HG10BZ'
+        cgversion = '01'
+        compression = None
+        if 'generaldelta' in self.repo.requirements:
+            btype = 'HG20'
+            cgversion = '02'
+            compression = 'BZ'
+
+        cg = changegroup.changegroupsubset(self.repo, bases, [node], 'shelve',
+                                           version=cgversion)
+        changegroup.writebundle(self.ui, cg, self.fname, btype, self.vfs,
+                                compression=compression)
 
 class shelvedstate(object):
     """Handle persistence during unshelving operations.
@@ -124,7 +141,7 @@ class shelvedstate(object):
             version = int(fp.readline().strip())
 
             if version != cls._version:
-                raise util.Abort(_('this version of shelve is incompatible '
+                raise error.Abort(_('this version of shelve is incompatible '
                                    'with the version used in this repo'))
             name = fp.readline().strip()
             wctx = fp.readline().strip()
@@ -179,11 +196,37 @@ def cleanupoldbackups(repo):
                 if err.errno != errno.ENOENT:
                     raise
 
+def _aborttransaction(repo):
+    '''Abort current transaction for shelve/unshelve, but keep dirstate
+    '''
+    backupname = 'dirstate.shelve'
+    dirstatebackup = None
+    try:
+        # create backup of (un)shelved dirstate, because aborting transaction
+        # should restore dirstate to one at the beginning of the
+        # transaction, which doesn't include the result of (un)shelving
+        fp = repo.vfs.open(backupname, "w")
+        dirstatebackup = backupname
+        # clearing _dirty/_dirtypl of dirstate by _writedirstate below
+        # is unintentional. but it doesn't cause problem in this case,
+        # because no code path refers them until transaction is aborted.
+        repo.dirstate._writedirstate(fp) # write in-memory changes forcibly
+
+        tr = repo.currenttransaction()
+        tr.abort()
+
+        # restore to backuped dirstate
+        repo.vfs.rename(dirstatebackup, 'dirstate')
+        dirstatebackup = None
+    finally:
+        if dirstatebackup:
+            repo.vfs.unlink(dirstatebackup)
+
 def createcmd(ui, repo, pats, opts):
     """subcommand that creates a new shelve"""
 
-    def publicancestors(ctx):
-        """Compute the public ancestors of a commit.
+    def mutableancestors(ctx):
+        """return all mutable ancestors for ctx (included)
 
         Much faster than the revset ancestors(ctx) & draft()"""
         seen = set([nullrev])
@@ -202,7 +245,7 @@ def createcmd(ui, repo, pats, opts):
     wctx = repo[None]
     parents = wctx.parents()
     if len(parents) > 1:
-        raise util.Abort(_('cannot shelve while merging'))
+        raise error.Abort(_('cannot shelve while merging'))
     parent = parents[0]
 
     # we never need the user, so we use a generic user for all shelve operations
@@ -242,34 +285,33 @@ def createcmd(ui, repo, pats, opts):
 
     name = opts['name']
 
-    wlock = lock = tr = bms = None
+    wlock = lock = tr = None
     try:
         wlock = repo.wlock()
         lock = repo.lock()
 
-        bms = repo._bookmarks.copy()
         # use an uncommitted transaction to generate the bundle to avoid
         # pull races. ensure we don't print the abort message to stderr.
         tr = repo.transaction('commit', report=lambda x: None)
 
         if name:
             if shelvedfile(repo, name, 'hg').exists():
-                raise util.Abort(_("a shelved change named '%s' already exists")
-                                 % name)
+                raise error.Abort(_("a shelved change named '%s' already exists"
+                                   ) % name)
         else:
             for n in gennames():
                 if not shelvedfile(repo, n, 'hg').exists():
                     name = n
                     break
             else:
-                raise util.Abort(_("too many shelved changes named '%s'") %
+                raise error.Abort(_("too many shelved changes named '%s'") %
                                  label)
 
         # ensure we are not creating a subdirectory or a hidden file
         if '/' in name or '\\' in name:
-            raise util.Abort(_('shelved change names may not contain slashes'))
+            raise error.Abort(_('shelved change names may not contain slashes'))
         if name.startswith('.'):
-            raise util.Abort(_("shelved change names may not start with '.'"))
+            raise error.Abort(_("shelved change names may not start with '.'"))
         interactive = opts.get('interactive', False)
 
         def interactivecommitfunc(ui, repo, *pats, **opts):
@@ -290,9 +332,8 @@ def createcmd(ui, repo, pats, opts):
                 ui.status(_("nothing changed\n"))
             return 1
 
-        bases = list(publicancestors(repo[node]))
-        cg = changegroup.changegroupsubset(repo, bases, [node], 'shelve')
-        shelvedfile(repo, name, 'hg').writebundle(cg)
+        bases = list(mutableancestors(repo[node]))
+        shelvedfile(repo, name, 'hg').writebundle(bases, node)
         cmdutil.export(repo, [node],
                        fp=shelvedfile(repo, name, 'patch').opener('wb'),
                        opts=mdiff.diffopts(git=True))
@@ -302,14 +343,10 @@ def createcmd(ui, repo, pats, opts):
             desc = util.ellipsis(desc, ui.termwidth())
         ui.status(_('shelved as %s\n') % name)
         hg.update(repo, parent.node())
+
+        _aborttransaction(repo)
     finally:
-        if bms:
-            # restore old bookmarks
-            repo._bookmarks.update(bms)
-            repo._bookmarks.write()
-        if tr:
-            tr.abort()
-        lockmod.release(lock, wlock)
+        lockmod.release(tr, lock, wlock)
 
 def cleanupcmd(ui, repo):
     """subcommand that deletes all shelves"""
@@ -328,7 +365,7 @@ def cleanupcmd(ui, repo):
 def deletecmd(ui, repo, pats):
     """subcommand that deletes a specific shelve"""
     if not pats:
-        raise util.Abort(_('no shelved changes specified!'))
+        raise error.Abort(_('no shelved changes specified!'))
     wlock = repo.wlock()
     try:
         for name in pats:
@@ -338,7 +375,7 @@ def deletecmd(ui, repo, pats):
     except OSError as err:
         if err.errno != errno.ENOENT:
             raise
-        raise util.Abort(_("shelved change '%s' not found") % name)
+        raise error.Abort(_("shelved change '%s' not found") % name)
     finally:
         lockmod.release(wlock)
 
@@ -410,18 +447,18 @@ def listcmd(ui, repo, pats, opts):
 def singlepatchcmds(ui, repo, pats, opts, subcommand):
     """subcommand that displays a single shelf"""
     if len(pats) != 1:
-        raise util.Abort(_("--%s expects a single shelf") % subcommand)
+        raise error.Abort(_("--%s expects a single shelf") % subcommand)
     shelfname = pats[0]
 
     if not shelvedfile(repo, shelfname, 'patch').exists():
-        raise util.Abort(_("cannot find shelf %s") % shelfname)
+        raise error.Abort(_("cannot find shelf %s") % shelfname)
 
     listcmd(ui, repo, pats, opts)
 
 def checkparents(repo, state):
     """check parent while resuming an unshelve"""
     if state.parents != repo.dirstate.parents():
-        raise util.Abort(_('working directory parents do not match unshelve '
+        raise error.Abort(_('working directory parents do not match unshelve '
                            'state'))
 
 def pathtofiles(repo, files):
@@ -451,9 +488,9 @@ def unshelveabort(ui, repo, state, opts):
         mergefiles(ui, repo, state.wctx, state.pendingctx)
 
         repair.strip(ui, repo, state.stripnodes, backup=False, topic='shelve')
+    finally:
         shelvedstate.clear(repo)
         ui.warn(_("unshelve of '%s' aborted\n") % state.name)
-    finally:
         lockmod.release(lock, wlock)
 
 def mergefiles(ui, repo, wctx, shelvectx):
@@ -496,7 +533,7 @@ def unshelvecontinue(ui, repo, state, opts):
         checkparents(repo, state)
         ms = merge.mergestate(repo)
         if [f for f in ms if ms[f] == 'u']:
-            raise util.Abort(
+            raise error.Abort(
                 _("unresolved conflicts, can't continue"),
                 hint=_("see 'hg resolve', then 'hg unshelve --continue'"))
 
@@ -579,9 +616,9 @@ def unshelve(ui, repo, *shelved, **opts):
 
     if abortf or continuef:
         if abortf and continuef:
-            raise util.Abort(_('cannot use both abort and continue'))
+            raise error.Abort(_('cannot use both abort and continue'))
         if shelved:
-            raise util.Abort(_('cannot combine abort/continue with '
+            raise error.Abort(_('cannot combine abort/continue with '
                                'naming a shelved change'))
 
         try:
@@ -589,25 +626,25 @@ def unshelve(ui, repo, *shelved, **opts):
         except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
-            raise util.Abort(_('no unshelve operation underway'))
+            raise error.Abort(_('no unshelve operation underway'))
 
         if abortf:
             return unshelveabort(ui, repo, state, opts)
         elif continuef:
             return unshelvecontinue(ui, repo, state, opts)
     elif len(shelved) > 1:
-        raise util.Abort(_('can only unshelve one change at a time'))
+        raise error.Abort(_('can only unshelve one change at a time'))
     elif not shelved:
         shelved = listshelves(repo)
         if not shelved:
-            raise util.Abort(_('no shelved changes to apply!'))
+            raise error.Abort(_('no shelved changes to apply!'))
         basename = util.split(shelved[0][1])[1]
         ui.status(_("unshelving change '%s'\n") % basename)
     else:
         basename = shelved[0]
 
     if not shelvedfile(repo, basename, 'patch').exists():
-        raise util.Abort(_("shelved change '%s' not found") % basename)
+        raise error.Abort(_("shelved change '%s' not found") % basename)
 
     oldquiet = ui.quiet
     wlock = lock = tr = None
@@ -700,6 +737,8 @@ def unshelve(ui, repo, *shelved, **opts):
         repo.unfiltered().changelog.strip(oldtiprev, tr)
 
         unshelvecleanup(ui, repo, basename, opts)
+
+        _aborttransaction(repo)
     finally:
         ui.quiet = oldquiet
         if tr:
@@ -775,12 +814,12 @@ def shelvecmd(ui, repo, *pats, **opts):
         if opts[opt]:
             for i, allowable in allowables:
                 if opts[i] and opt not in allowable:
-                    raise util.Abort(_("options '--%s' and '--%s' may not be "
+                    raise error.Abort(_("options '--%s' and '--%s' may not be "
                                        "used together") % (opt, i))
             return True
     if checkopt('cleanup'):
         if pats:
-            raise util.Abort(_("cannot specify names when using '--cleanup'"))
+            raise error.Abort(_("cannot specify names when using '--cleanup'"))
         return cleanupcmd(ui, repo)
     elif checkopt('delete'):
         return deletecmd(ui, repo, pats)

@@ -25,7 +25,7 @@ testedwith = 'internal'
 
 @command('convert',
     [('', 'authors', '',
-      _('username mapping filename (DEPRECATED, use --authormap instead)'),
+      _('username mapping filename (DEPRECATED) (use --authormap instead)'),
       _('FILE')),
     ('s', 'source-type', '', _('source repository type'), _('TYPE')),
     ('d', 'dest-type', '', _('destination repository type'), _('TYPE')),
@@ -315,6 +315,9 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     :convert.git.remoteprefix: remote refs are converted as bookmarks with
         ``convert.git.remoteprefix`` as a prefix followed by a /. The default
         is 'remote'.
+
+    :convert.git.skipsubmodules: does not convert root level .gitmodules files
+        or files with 160000 mode indicating a submodule. Default is False.
 
     Perforce Source
     ###############

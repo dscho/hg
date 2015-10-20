@@ -145,19 +145,25 @@ future, dropping the stream may become an option for channel we do not care to
 preserve.
 """
 
-import errno
-import sys
-import util
-import struct
-import urllib
-import string
-import obsolete
-import pushkey
-import url
-import re
+from __future__ import absolute_import
 
-import changegroup, error, tags
-from i18n import _
+import errno
+import re
+import string
+import struct
+import sys
+import urllib
+
+from .i18n import _
+from . import (
+    changegroup,
+    error,
+    obsolete,
+    pushkey,
+    tags,
+    url,
+    util,
+)
 
 _pack = struct.pack
 _unpack = struct.unpack
@@ -296,6 +302,15 @@ def _notransaction():
     to be created"""
     raise TransactionUnavailable()
 
+def applybundle(repo, unbundler, tr, source=None, url=None, op=None):
+    # transform me into unbundler.apply() as soon as the freeze is lifted
+    tr.hookargs['bundle2'] = '1'
+    if source is not None and 'source' not in tr.hookargs:
+        tr.hookargs['source'] = source
+    if url is not None and 'url' not in tr.hookargs:
+        tr.hookargs['url'] = url
+    return processbundle(repo, unbundler, lambda: tr, op=op)
+
 def processbundle(repo, unbundler, transactiongetter=None, op=None):
     """This function process a bundle, apply effect to/from a repo
 
@@ -370,17 +385,17 @@ def _processpart(op, part):
             handler = parthandlermapping.get(part.type)
             if handler is None:
                 status = 'unsupported-type'
-                raise error.UnsupportedPartError(parttype=part.type)
+                raise error.BundleUnknownFeatureError(parttype=part.type)
             indebug(op.ui, 'found a handler for part %r' % part.type)
             unknownparams = part.mandatorykeys - handler.params
             if unknownparams:
                 unknownparams = list(unknownparams)
                 unknownparams.sort()
                 status = 'unsupported-params (%s)' % unknownparams
-                raise error.UnsupportedPartError(parttype=part.type,
-                                               params=unknownparams)
+                raise error.BundleUnknownFeatureError(parttype=part.type,
+                                                      params=unknownparams)
             status = 'supported'
-        except error.UnsupportedPartError as exc:
+        except error.BundleUnknownFeatureError as exc:
             if part.mandatory: # mandatory parts
                 raise
             indebug(op.ui, 'ignoring unsupported advisory part %s' % exc)
@@ -473,6 +488,15 @@ class bundle20(object):
         self._params = []
         self._parts = []
         self.capabilities = dict(capabilities)
+        self._compressor = util.compressors[None]()
+
+    def setcompression(self, alg):
+        """setup core part compression to <alg>"""
+        if alg is None:
+            return
+        assert not any(n.lower() == 'Compression' for n, v in self._params)
+        self.addparam('Compression', alg)
+        self._compressor = util.compressors[alg]()
 
     @property
     def nbparts(self):
@@ -524,14 +548,10 @@ class bundle20(object):
         yield _pack(_fstreamparamsize, len(param))
         if param:
             yield param
-
-        outdebug(self.ui, 'start of parts')
-        for part in self._parts:
-            outdebug(self.ui, 'bundle part: "%s"' % part.type)
-            for chunk in part.getchunks(ui=self.ui):
-                yield chunk
-        outdebug(self.ui, 'end of bundle')
-        yield _pack(_fpartheadersize, 0)
+        # starting compression
+        for chunk in self._getcorechunk():
+            yield self._compressor.compress(chunk)
+        yield self._compressor.flush()
 
     def _paramchunk(self):
         """return a encoded version of all stream parameters"""
@@ -543,6 +563,19 @@ class bundle20(object):
                 par = '%s=%s' % (par, value)
             blocks.append(par)
         return ' '.join(blocks)
+
+    def _getcorechunk(self):
+        """yield chunk for the core part of the bundle
+
+        (all but headers and parameters)"""
+        outdebug(self.ui, 'start of parts')
+        for part in self._parts:
+            outdebug(self.ui, 'bundle part: "%s"' % part.type)
+            for chunk in part.getchunks(ui=self.ui):
+                yield chunk
+        outdebug(self.ui, 'end of bundle')
+        yield _pack(_fpartheadersize, 0)
+
 
     def salvageoutput(self):
         """return a list with a copy of all output parts in the bundle
@@ -603,10 +636,10 @@ def getunbundler(ui, fp, magicstring=None):
         magicstring = changegroup.readexactly(fp, 4)
     magic, version = magicstring[0:2], magicstring[2:4]
     if magic != 'HG':
-        raise util.Abort(_('not a Mercurial bundle'))
+        raise error.Abort(_('not a Mercurial bundle'))
     unbundlerclass = formatmap.get(version)
     if unbundlerclass is None:
-        raise util.Abort(_('unknown bundle version %s') % version)
+        raise error.Abort(_('unknown bundle version %s') % version)
     unbundler = unbundlerclass(ui, fp)
     indebug(ui, 'start processing of %s stream' % magicstring)
     return unbundler
@@ -617,9 +650,13 @@ class unbundle20(unpackermixin):
     This class is fed with a binary stream and yields parts through its
     `iterparts` methods."""
 
+    _magicstring = 'HG20'
+
     def __init__(self, ui, fp):
         """If header is specified, we do not read it out of the stream."""
         self.ui = ui
+        self._decompressor = util.decompressors[None]
+        self._compressed = None
         super(unbundle20, self).__init__(fp)
 
     @util.propertycache
@@ -632,14 +669,22 @@ class unbundle20(unpackermixin):
             raise error.BundleValueError('negative bundle param size: %i'
                                          % paramssize)
         if paramssize:
-            for p in self._readexact(paramssize).split(' '):
-                p = p.split('=', 1)
-                p = [urllib.unquote(i) for i in p]
-                if len(p) < 2:
-                    p.append(None)
-                self._processparam(*p)
-                params[p[0]] = p[1]
+            params = self._readexact(paramssize)
+            params = self._processallparams(params)
         return params
+
+    def _processallparams(self, paramsblock):
+        """"""
+        params = {}
+        for p in paramsblock.split(' '):
+            p = p.split('=', 1)
+            p = [urllib.unquote(i) for i in p]
+            if len(p) < 2:
+                p.append(None)
+            self._processparam(*p)
+            params[p[0]] = p[1]
+        return params
+
 
     def _processparam(self, name, value):
         """process a parameter, applying its effect if needed
@@ -655,18 +700,62 @@ class unbundle20(unpackermixin):
             raise ValueError('empty parameter name')
         if name[0] not in string.letters:
             raise ValueError('non letter first character: %r' % name)
-        # Some logic will be later added here to try to process the option for
-        # a dict of known parameter.
-        if name[0].islower():
-            indebug(self.ui, "ignoring unknown parameter %r" % name)
+        try:
+            handler = b2streamparamsmap[name.lower()]
+        except KeyError:
+            if name[0].islower():
+                indebug(self.ui, "ignoring unknown parameter %r" % name)
+            else:
+                raise error.BundleUnknownFeatureError(params=(name,))
         else:
-            raise error.UnsupportedPartError(params=(name,))
+            handler(self, name, value)
+
+    def _forwardchunks(self):
+        """utility to transfer a bundle2 as binary
+
+        This is made necessary by the fact the 'getbundle' command over 'ssh'
+        have no way to know then the reply end, relying on the bundle to be
+        interpreted to know its end. This is terrible and we are sorry, but we
+        needed to move forward to get general delta enabled.
+        """
+        yield self._magicstring
+        assert 'params' not in vars(self)
+        paramssize = self._unpack(_fstreamparamsize)[0]
+        if paramssize < 0:
+            raise error.BundleValueError('negative bundle param size: %i'
+                                         % paramssize)
+        yield _pack(_fstreamparamsize, paramssize)
+        if paramssize:
+            params = self._readexact(paramssize)
+            self._processallparams(params)
+            yield params
+            assert self._decompressor is util.decompressors[None]
+        # From there, payload might need to be decompressed
+        self._fp = self._decompressor(self._fp)
+        emptycount = 0
+        while emptycount < 2:
+            # so we can brainlessly loop
+            assert _fpartheadersize == _fpayloadsize
+            size = self._unpack(_fpartheadersize)[0]
+            yield _pack(_fpartheadersize, size)
+            if size:
+                emptycount = 0
+            else:
+                emptycount += 1
+                continue
+            if size == flaginterrupt:
+                continue
+            elif size < 0:
+                raise error.BundleValueError('negative chunk size: %i')
+            yield self._readexact(size)
 
 
     def iterparts(self):
         """yield all parts contained in the stream"""
         # make sure param have been loaded
         self.params
+        # From there, payload need to be decompressed
+        self._fp = self._decompressor(self._fp)
         indebug(self.ui, 'start extraction of bundle2 parts')
         headerblock = self._readpartheader()
         while headerblock is not None:
@@ -690,9 +779,30 @@ class unbundle20(unpackermixin):
         return None
 
     def compressed(self):
-        return False
+        self.params # load params
+        return self._compressed
 
 formatmap = {'20': unbundle20}
+
+b2streamparamsmap = {}
+
+def b2streamparamhandler(name):
+    """register a handler for a stream level parameter"""
+    def decorator(func):
+        assert name not in formatmap
+        b2streamparamsmap[name] = func
+        return func
+    return decorator
+
+@b2streamparamhandler('compression')
+def processcompression(unbundler, param, value):
+    """read compression parameter and install payload decompression"""
+    if value not in util.decompressors:
+        raise error.BundleUnknownFeatureError(params=(param,),
+                                              values=(value,))
+    unbundler._decompressor = util.decompressors[value]
+    if value is not None:
+        unbundler._compressed = True
 
 class bundlepart(object):
     """A bundle2 part contains application level payload
@@ -841,6 +951,12 @@ class bundlepart(object):
                 outdebug(ui, 'payload chunk size: %i' % len(chunk))
                 yield _pack(_fpayloadsize, len(chunk))
                 yield chunk
+        except GeneratorExit:
+            # GeneratorExit means that nobody is listening for our
+            # results anyway, so just bail quickly rather than trying
+            # to produce an error part.
+            ui.debug('bundle2-generatorexit\n')
+            raise
         except BaseException as exc:
             # backup exception data for later
             ui.debug('bundle2-input-stream-interrupt: encoding exception %s'
@@ -1103,7 +1219,7 @@ class unbundlepart(unpackermixin):
             self._payloadstream = util.chunkbuffer(self._payloadchunks(chunk))
             adjust = self.read(internaloffset)
             if len(adjust) != internaloffset:
-                raise util.Abort(_('Seek failed\n'))
+                raise error.Abort(_('Seek failed\n'))
             self._pos = newpos
 
 # These are only the static capabilities.
@@ -1162,14 +1278,13 @@ def handlechangegroup(op, inpart):
     unpackerversion = inpart.params.get('version', '01')
     # We should raise an appropriate exception here
     unpacker = changegroup.packermap[unpackerversion][1]
-    cg = unpacker(inpart, 'UN')
+    cg = unpacker(inpart, None)
     # the source and url passed here are overwritten by the one contained in
     # the transaction.hookargs argument. So 'bundle2' is a placeholder
     nbchangesets = None
     if 'nbchanges' in inpart.params:
         nbchangesets = int(inpart.params.get('nbchanges'))
-    ret = changegroup.addchangegroup(op.repo, cg, 'bundle2', 'bundle2',
-                                     expectedtotal=nbchangesets)
+    ret = cg.apply(op.repo, 'bundle2', 'bundle2', expectedtotal=nbchangesets)
     op.records.add('changegroup', {'return': ret})
     if op.reply is not None:
         # This is definitely not the final form of this
@@ -1201,19 +1316,19 @@ def handleremotechangegroup(op, inpart):
     try:
         raw_url = inpart.params['url']
     except KeyError:
-        raise util.Abort(_('remote-changegroup: missing "%s" param') % 'url')
+        raise error.Abort(_('remote-changegroup: missing "%s" param') % 'url')
     parsed_url = util.url(raw_url)
     if parsed_url.scheme not in capabilities['remote-changegroup']:
-        raise util.Abort(_('remote-changegroup does not support %s urls') %
+        raise error.Abort(_('remote-changegroup does not support %s urls') %
             parsed_url.scheme)
 
     try:
         size = int(inpart.params['size'])
     except ValueError:
-        raise util.Abort(_('remote-changegroup: invalid value for param "%s"')
+        raise error.Abort(_('remote-changegroup: invalid value for param "%s"')
             % 'size')
     except KeyError:
-        raise util.Abort(_('remote-changegroup: missing "%s" param') % 'size')
+        raise error.Abort(_('remote-changegroup: missing "%s" param') % 'size')
 
     digests = {}
     for typ in inpart.params.get('digests', '').split():
@@ -1221,7 +1336,7 @@ def handleremotechangegroup(op, inpart):
         try:
             value = inpart.params[param]
         except KeyError:
-            raise util.Abort(_('remote-changegroup: missing "%s" param') %
+            raise error.Abort(_('remote-changegroup: missing "%s" param') %
                 param)
         digests[typ] = value
 
@@ -1233,12 +1348,12 @@ def handleremotechangegroup(op, inpart):
     # we need to make sure we trigger the creation of a transaction object used
     # for the whole processing scope.
     op.gettransaction()
-    import exchange
+    from . import exchange
     cg = exchange.readbundle(op.repo.ui, real_part, raw_url)
     if not isinstance(cg, changegroup.cg1unpacker):
-        raise util.Abort(_('%s: not a bundle version 1.0') %
+        raise error.Abort(_('%s: not a bundle version 1.0') %
             util.hidepassword(raw_url))
-    ret = changegroup.addchangegroup(op.repo, cg, 'bundle2', 'bundle2')
+    ret = cg.apply(op.repo, 'bundle2', 'bundle2')
     op.records.add('changegroup', {'return': ret})
     if op.reply is not None:
         # This is definitely not the final form of this
@@ -1248,8 +1363,8 @@ def handleremotechangegroup(op, inpart):
         part.addparam('return', '%i' % ret, mandatory=False)
     try:
         real_part.validate()
-    except util.Abort as e:
-        raise util.Abort(_('bundle at %s is corrupted:\n%s') %
+    except error.Abort as e:
+        raise error.Abort(_('bundle at %s is corrupted:\n%s') %
             (util.hidepassword(raw_url), str(e)))
     assert not inpart.read()
 
@@ -1271,6 +1386,9 @@ def handlecheckheads(op, inpart):
         heads.append(h)
         h = inpart.read(20)
     assert not h
+    # Trigger a transaction so that we are guaranteed to have the lock now.
+    if op.ui.configbool('experimental', 'bundle2lazylocking'):
+        op.gettransaction()
     if heads != op.repo.heads():
         raise error.PushRaced('repository changed while pushing - '
                               'please try again')
@@ -1293,7 +1411,7 @@ def handlereplycaps(op, inpart):
 @parthandler('error:abort', ('message', 'hint'))
 def handleerrorabort(op, inpart):
     """Used to transmit abort error over the wire"""
-    raise util.Abort(inpart.params['message'], hint=inpart.params.get('hint'))
+    raise error.Abort(inpart.params['message'], hint=inpart.params.get('hint'))
 
 @parthandler('error:pushkey', ('namespace', 'key', 'new', 'old', 'ret',
                                'in-reply-to'))
@@ -1317,7 +1435,7 @@ def handleerrorunsupportedcontent(op, inpart):
     if params is not None:
         kwargs['params'] = params.split('\0')
 
-    raise error.UnsupportedPartError(**kwargs)
+    raise error.BundleUnknownFeatureError(**kwargs)
 
 @parthandler('error:pushraced', ('message',))
 def handleerrorpushraced(op, inpart):
@@ -1339,6 +1457,10 @@ def handlepushkey(op, inpart):
     key = dec(inpart.params['key'])
     old = dec(inpart.params['old'])
     new = dec(inpart.params['new'])
+    # Grab the transaction to ensure that we have the lock before performing the
+    # pushkey.
+    if op.ui.configbool('experimental', 'bundle2lazylocking'):
+        op.gettransaction()
     ret = op.repo.pushkey(namespace, key, old, new)
     record = {'namespace': namespace,
               'key': key,
@@ -1371,6 +1493,11 @@ def handleobsmarker(op, inpart):
     if op.ui.config('experimental', 'obsmarkers-exchange-debug', False):
         op.ui.write(('obsmarker-exchange: %i bytes received\n')
                     % len(markerdata))
+    # The mergemarkers call will crash if marker creation is not enabled.
+    # we want to avoid this if the part is advisory.
+    if not inpart.mandatory and op.repo.obsstore.readonly:
+        op.repo.ui.debug('ignoring obsolescence markers, feature not enabled')
+        return
     new = op.repo.obsstore.mergemarkers(tr, markerdata)
     if new:
         op.repo.ui.status(_('%i new obsolescence markers\n') % new)
@@ -1394,6 +1521,9 @@ def handlehgtagsfnodes(op, inpart):
 
     Payload is pairs of 20 byte changeset nodes and filenodes.
     """
+    # Grab the transaction so we ensure that we have the lock at this point.
+    if op.ui.configbool('experimental', 'bundle2lazylocking'):
+        op.gettransaction()
     cache = tags.hgtagsfnodescache(op.repo.unfiltered())
 
     count = 0

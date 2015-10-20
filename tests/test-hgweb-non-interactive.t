@@ -58,13 +58,15 @@ by the WSGI standard and strictly implemented by mod_wsgi.
   > }
   > 
   > i = hgweb('.')
-  > i(env, startrsp)
+  > for c in i(env, startrsp):
+  >     pass
   > print '---- ERRORS'
   > print errors.getvalue()
   > print '---- OS.ENVIRON wsgi variables'
   > print sorted([x for x in os.environ if x.startswith('wsgi')])
   > print '---- request.ENVIRON wsgi variables'
-  > print sorted([x for x in i.repo.ui.environ if x.startswith('wsgi')])
+  > with i._obtainrepo() as repo:
+  >     print sorted([x for x in repo.ui.environ if x.startswith('wsgi')])
   > EOF
   $ python request.py
   ---- STATUS

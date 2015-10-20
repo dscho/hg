@@ -203,10 +203,9 @@ More complex case were part of the rebase set were already rebased
   |/
   o  0:cd010b8cd998 A
   
-  $ hg rebase --source 'desc(B)' --dest 'tip'
+  $ hg rebase --source 'desc(B)' --dest 'tip' --config experimental.rebaseskipobsolete=True
   rebasing 8:8877864f1edb "B"
-  rebasing 9:08483444fef9 "D"
-  note: rebase of 9:08483444fef9 created no changes to commit
+  note: not rebasing 9:08483444fef9 "D", already in destination as 11:4596109a6a43 "D"
   rebasing 10:5ae4c968c6ac "C"
   $ hg debugobsolete
   42ccdea3bb16d28e1848c95fe2e44c000f3f21b1 0 {cd010b8cd998f3981a5a8115f94f8da4ab506089} (*) {'user': 'test'} (glob)
@@ -214,7 +213,6 @@ More complex case were part of the rebase set were already rebased
   32af7686d403cf45b5d95f2d70cebea587ac806a 0 {5fddd98957c8a54a4d436dfe1da9d87f21a1b97b} (*) {'user': 'test'} (glob)
   08483444fef91d6224f6655ee586a65d263ad34c 4596109a6a4328c398bde3a4a3b6737cfade3003 0 (*) {'user': 'test'} (glob)
   8877864f1edb05d0e07dc4ba77b67a80a7b86672 462a34d07e599b87ea08676a449373fe4e2e1347 0 (*) {'user': 'test'} (glob)
-  08483444fef91d6224f6655ee586a65d263ad34c 0 {8877864f1edb05d0e07dc4ba77b67a80a7b86672} (*) {'user': 'test'} (glob)
   5ae4c968c6aca831df823664e706c9d4aa34473d 98f6af4ee9539e14da4465128f894c274900b6e5 0 (*) {'user': 'test'} (glob)
   $ hg log --rev 'divergent()'
   $ hg log -G
@@ -261,11 +259,8 @@ collapse rebase
   $ cd collapse
   $ hg rebase  -s 42ccdea3bb16 -d eea13746799a --collapse
   rebasing 1:42ccdea3bb16 "B"
-  note: rebase of 1:42ccdea3bb16 created no changes to commit
   rebasing 2:5fddd98957c8 "C"
-  note: rebase of 2:5fddd98957c8 created no changes to commit
   rebasing 3:32af7686d403 "D"
-  note: rebase of 3:32af7686d403 created no changes to commit
   $ hg log -G
   o  8:4dc2197e807b Collapsed revision
   |
@@ -540,3 +535,103 @@ Test hidden changesets in the rebase set (issue4504)
   |/
   o  0:cd010b8cd998 A
   
+  $ hg up 14 -C
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo "K" > K
+  $ hg add K
+  $ hg commit --amend -m "K"
+  $ echo "L" > L
+  $ hg add L
+  $ hg commit -m "L"
+  $ hg up '.^'
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo "M" > M
+  $ hg add M
+  $ hg commit --amend -m "M"
+  $ hg log -G
+  @  20:bfaedf8eb73b M
+  |
+  | o  18:97219452e4bd L
+  | |
+  | x  17:fc37a630c901 K
+  |/
+  | o  15:5ae8a643467b J
+  | |
+  | x  14:9ad579b4a5de I
+  |/
+  | o  12:acd174b7ab39 I
+  | |
+  | o  11:6c11a6218c97 H
+  | |
+  o |  10:b5313c85b22e D
+  |/
+  | o    8:53a6a128b2b7 M
+  | |\
+  | | x  7:02de42196ebe H
+  | | |
+  o---+  6:eea13746799a G
+  | | |
+  | | o  5:24b6387c8c8c F
+  | | |
+  o---+  4:9520eea781bc E
+   / /
+  x |  3:32af7686d403 D
+  | |
+  o |  2:5fddd98957c8 C
+  | |
+  o |  1:42ccdea3bb16 B
+  |/
+  o  0:cd010b8cd998 A
+  
+  $ hg rebase -s 14 -d 18 --config experimental.rebaseskipobsolete=True
+  note: not rebasing 14:9ad579b4a5de "I", already in destination as 17:fc37a630c901 "K"
+  rebasing 15:5ae8a643467b "J"
+
+  $ cd ..
+
+Skip obsolete changeset even with multiple hops
+-----------------------------------------------
+
+setup
+
+  $ hg init obsskip
+  $ cd obsskip
+  $ cat << EOF >> .hg/hgrc
+  > [experimental]
+  > rebaseskipobsolete = True
+  > [extensions]
+  > strip =
+  > EOF
+  $ echo A > A
+  $ hg add A
+  $ hg commit -m A
+  $ echo B > B
+  $ hg add B
+  $ hg commit -m B0
+  $ hg commit --amend -m B1
+  $ hg commit --amend -m B2
+  $ hg up --hidden 'desc(B0)'
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ echo C > C
+  $ hg add C
+  $ hg commit -m C
+
+Rebase finds its way in a chain of marker
+
+  $ hg rebase -d 'desc(B2)'
+  note: not rebasing 1:a8b11f55fb19 "B0", already in destination as 3:261e70097290 "B2"
+  rebasing 4:212cb178bcbb "C" (tip)
+
+Even when the chain include missing node
+
+  $ hg up --hidden 'desc(B0)'
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo D > D
+  $ hg add D
+  $ hg commit -m D
+  $ hg --hidden strip -r 'desc(B1)'
+  saved backup bundle to $TESTTMP/obsskip/.hg/strip-backup/86f6414ccda7-b1c452ee-backup.hg (glob)
+
+  $ hg rebase -d 'desc(B2)'
+  note: not rebasing 1:a8b11f55fb19 "B0", already in destination as 2:261e70097290 "B2"
+  rebasing 5:1a79b7535141 "D" (tip)

@@ -5,12 +5,22 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+from __future__ import absolute_import
+
 import cPickle
-from node import hex, short
-from i18n import _
-import encoding, util
-import templater
 import os
+
+from .i18n import _
+from .node import (
+    hex,
+    short,
+)
+
+from . import (
+    encoding,
+    error,
+    templater,
+)
 
 class baseformatter(object):
     def __init__(self, ui, topic, opts):
@@ -38,12 +48,14 @@ class baseformatter(object):
         self._item.update(data)
     def write(self, fields, deftext, *fielddata, **opts):
         '''do default text output while assigning data to item'''
-        for k, v in zip(fields.split(), fielddata):
-            self._item[k] = v
+        fieldkeys = fields.split()
+        assert len(fieldkeys) == len(fielddata)
+        self._item.update(zip(fieldkeys, fielddata))
     def condwrite(self, cond, fields, deftext, *fielddata, **opts):
         '''do conditional write (primarily for plain formatter)'''
-        for k, v in zip(fields.split(), fielddata):
-            self._item[k] = v
+        fieldkeys = fields.split()
+        assert len(fieldkeys) == len(fielddata)
+        self._item.update(zip(fieldkeys, fielddata))
     def plain(self, text, **opts):
         '''show raw text for non-templated mode'''
         pass
@@ -167,7 +179,7 @@ def lookuptemplate(ui, topic, tmpl):
 
     if tmpl == 'list':
         ui.write(_("available styles: %s\n") % templater.stylelist())
-        raise util.Abort(_("specify a template"))
+        raise error.Abort(_("specify a template"))
 
     # perhaps it's a path to a map or a template
     if ('/' in tmpl or '\\' in tmpl) and os.path.isfile(tmpl):

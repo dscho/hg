@@ -156,8 +156,7 @@ plain headers
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   created new head
   merging a
-  warning: conflicts during merge.
-  merging a incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging a! (edit, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   (no more unresolved files)
@@ -234,8 +233,7 @@ hg headers
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   created new head
   merging a
-  warning: conflicts during merge.
-  merging a incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging a! (edit, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   (no more unresolved files)
@@ -248,11 +246,11 @@ Test saving last-message.txt
   $ cd repo
 
   $ cat > $TESTTMP/commitfailure.py <<EOF
-  > from mercurial import util
+  > from mercurial import error
   > def reposetup(ui, repo):
   >     class commitfailure(repo.__class__):
   >         def commit(self, *args, **kwargs):
-  >             raise util.Abort('emulating unexpected abort')
+  >             raise error.Abort('emulating unexpected abort')
   >     repo.__class__ = commitfailure
   > EOF
   $ cat >> .hg/hgrc <<EOF

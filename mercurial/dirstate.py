@@ -7,7 +7,7 @@
 
 from node import nullid
 from i18n import _
-import scmutil, util, osutil, parsers, encoding, pathutil
+import scmutil, util, osutil, parsers, encoding, pathutil, error
 import os, stat, errno
 import match as matchmod
 
@@ -27,6 +27,31 @@ class rootcache(filecache):
     def join(self, obj, fname):
         return obj._join(fname)
 
+def _getfsnow(vfs):
+    '''Get "now" timestamp on filesystem'''
+    tmpfd, tmpname = vfs.mkstemp()
+    try:
+        return util.statmtimesec(os.fstat(tmpfd))
+    finally:
+        os.close(tmpfd)
+        vfs.unlink(tmpname)
+
+def _trypending(root, vfs, filename):
+    '''Open  file to be read according to HG_PENDING environment variable
+
+    This opens '.pending' of specified 'filename' only when HG_PENDING
+    is equal to 'root'.
+
+    This returns '(fp, is_pending_opened)' tuple.
+    '''
+    if root == os.environ.get('HG_PENDING'):
+        try:
+            return (vfs('%s.pending' % filename), True)
+        except IOError as inst:
+            if inst.errno != errno.ENOENT:
+                raise
+    return (vfs(filename), False)
+
 class dirstate(object):
 
     def __init__(self, opener, ui, root, validate):
@@ -42,6 +67,10 @@ class dirstate(object):
         # ntpath.join(root, '') of Python 2.7.9 does not add sep if root is
         # UNC path pointing to root share (issue4557)
         self._rootdir = pathutil.normasprefix(root)
+        # internal config: ui.forcecwd
+        forcecwd = ui.config('ui', 'forcecwd')
+        if forcecwd:
+            self._cwd = forcecwd
         self._dirty = False
         self._dirtypl = False
         self._lastnormaltime = 0
@@ -49,6 +78,10 @@ class dirstate(object):
         self._filecache = {}
         self._parentwriters = 0
         self._filename = 'dirstate'
+        self._pendingfilename = '%s.pending' % self._filename
+
+        # for consistent view between _pl() and _read() invocations
+        self._pendingmode = None
 
     def beginparentchange(self):
         '''Marks the beginning of a set of changes that involve changing
@@ -123,14 +156,14 @@ class dirstate(object):
     @propertycache
     def _pl(self):
         try:
-            fp = self._opener(self._filename)
+            fp = self._opendirstatefile()
             st = fp.read(40)
             fp.close()
             l = len(st)
             if l == 40:
                 return st[:20], st[20:40]
             elif l > 0 and l < 40:
-                raise util.Abort(_('working directory state appears damaged!'))
+                raise error.Abort(_('working directory state appears damaged!'))
         except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
@@ -220,6 +253,12 @@ class dirstate(object):
         return os.getcwd()
 
     def getcwd(self):
+        '''Return the path from which a canonical path is calculated.
+
+        This path should be used to resolve file patterns or to convert
+        canonical paths back to file paths for display. It shouldn't be
+        used to get real file paths. Use vfs functions instead.
+        '''
         cwd = self._cwd
         if cwd == self._root:
             return ''
@@ -322,11 +361,20 @@ class dirstate(object):
             f.discard()
             raise
 
+    def _opendirstatefile(self):
+        fp, mode = _trypending(self._root, self._opener, self._filename)
+        if self._pendingmode is not None and self._pendingmode != mode:
+            fp.close()
+            raise error.Abort(_('working directory state may be '
+                                'changed parallelly'))
+        self._pendingmode = mode
+        return fp
+
     def _read(self):
         self._map = {}
         self._copymap = {}
         try:
-            fp = self._opener.open(self._filename)
+            fp = self._opendirstatefile()
             try:
                 st = fp.read()
             finally:
@@ -402,13 +450,13 @@ class dirstate(object):
         if state == 'a' or oldstate == 'r':
             scmutil.checkfilename(f)
             if f in self._dirs:
-                raise util.Abort(_('directory %r already in dirstate') % f)
+                raise error.Abort(_('directory %r already in dirstate') % f)
             # shadows
             for d in util.finddirs(f):
                 if d in self._dirs:
                     break
                 if d in self._map and self[d] != 'r':
-                    raise util.Abort(
+                    raise error.Abort(
                         _('file %r in dirstate clashes with %r') % (d, f))
         if oldstate in "?r" and "_dirs" in self.__dict__:
             self._dirs.addpath(f)
@@ -418,7 +466,7 @@ class dirstate(object):
     def normal(self, f):
         '''Mark a file normal and clean.'''
         s = os.lstat(self._join(f))
-        mtime = int(s.st_mtime)
+        mtime = util.statmtimesec(s)
         self._addpath(f, 'n', s.st_mode,
                       s.st_size & _rangemask, mtime & _rangemask)
         if f in self._copymap:
@@ -454,7 +502,7 @@ class dirstate(object):
     def otherparent(self, f):
         '''Mark as coming from the other parent, always dirty.'''
         if self._pl[1] == nullid:
-            raise util.Abort(_("setting %r to other parent "
+            raise error.Abort(_("setting %r to other parent "
                                "only allowed in merges") % f)
         if f in self and self[f] == 'n':
             # merge-like
@@ -600,7 +648,7 @@ class dirstate(object):
         self._pl = (parent, nullid)
         self._dirty = True
 
-    def write(self):
+    def write(self, tr=False):
         if not self._dirty:
             return
 
@@ -611,10 +659,47 @@ class dirstate(object):
             import time # to avoid useless import
             time.sleep(delaywrite)
 
-        st = self._opener(self._filename, "w", atomictemp=True)
+        filename = self._filename
+        if tr is False: # not explicitly specified
+            if (self._ui.configbool('devel', 'all-warnings')
+                or self._ui.configbool('devel', 'check-dirstate-write')):
+                self._ui.develwarn('use dirstate.write with '
+                                   'repo.currenttransaction()')
+
+            if self._opener.lexists(self._pendingfilename):
+                # if pending file already exists, in-memory changes
+                # should be written into it, because it has priority
+                # to '.hg/dirstate' at reading under HG_PENDING mode
+                filename = self._pendingfilename
+        elif tr:
+            # 'dirstate.write()' is not only for writing in-memory
+            # changes out, but also for dropping ambiguous timestamp.
+            # delayed writing re-raise "ambiguous timestamp issue".
+            # See also the wiki page below for detail:
+            # https://www.mercurial-scm.org/wiki/DirstateTransactionPlan
+
+            # emulate dropping timestamp in 'parsers.pack_dirstate'
+            now = _getfsnow(self._opener)
+            dmap = self._map
+            for f, e in dmap.iteritems():
+                if e[0] == 'n' and e[3] == now:
+                    dmap[f] = dirstatetuple(e[0], e[1], e[2], -1)
+
+            # emulate that all 'dirstate.normal' results are written out
+            self._lastnormaltime = 0
+
+            # delay writing in-memory changes out
+            tr.addfilegenerator('dirstate', (self._filename,),
+                                self._writedirstate, location='plain')
+            return
+
+        st = self._opener(filename, "w", atomictemp=True)
+        self._writedirstate(st)
+
+    def _writedirstate(self, st):
         # use the modification time of the newly created temporary file as the
         # filesystem's notion of 'now'
-        now = util.fstat(st).st_mtime
+        now = util.statmtimesec(util.fstat(st)) & _rangemask
         st.write(parsers.pack_dirstate(self._map, self._copymap, self._pl, now))
         st.close()
         self._lastnormaltime = 0
@@ -918,8 +1003,14 @@ class dirstate(object):
                 # We may not have walked the full directory tree above,
                 # so stat and check everything we missed.
                 nf = iter(visit).next
-                for st in util.statfiles([join(i) for i in visit]):
-                    results[nf()] = st
+                pos = 0
+                while pos < len(visit):
+                    # visit in mid-sized batches so that we don't
+                    # block signals indefinitely
+                    xr = xrange(pos, min(len(visit), pos + 1000))
+                    for st in util.statfiles([join(visit[n]) for n in xr]):
+                        results[nf()] = st
+                    pos += 1000
         return results
 
     def status(self, match, subrepos, ignored, clean, unknown):
@@ -988,7 +1079,7 @@ class dirstate(object):
             if not st and state in "nma":
                 dadd(fn)
             elif state == 'n':
-                mtime = int(st.st_mtime)
+                mtime = util.statmtimesec(st)
                 if (size >= 0 and
                     ((size != st.st_size and size != st.st_size & _rangemask)
                      or ((mode ^ st.st_mode) & 0o100 and checkexec))
@@ -1032,3 +1123,45 @@ class dirstate(object):
             # that
             return list(files)
         return [f for f in dmap if match(f)]
+
+    def _actualfilename(self, tr):
+        if tr:
+            return self._pendingfilename
+        else:
+            return self._filename
+
+    def _savebackup(self, tr, suffix):
+        '''Save current dirstate into backup file with suffix'''
+        filename = self._actualfilename(tr)
+
+        # use '_writedirstate' instead of 'write' to write changes certainly,
+        # because the latter omits writing out if transaction is running.
+        # output file will be used to create backup of dirstate at this point.
+        self._writedirstate(self._opener(filename, "w", atomictemp=True))
+
+        if tr:
+            # ensure that subsequent tr.writepending returns True for
+            # changes written out above, even if dirstate is never
+            # changed after this
+            tr.addfilegenerator('dirstate', (self._filename,),
+                                self._writedirstate, location='plain')
+
+            # ensure that pending file written above is unlinked at
+            # failure, even if tr.writepending isn't invoked until the
+            # end of this transaction
+            tr.registertmp(filename, location='plain')
+
+        self._opener.write(filename + suffix, self._opener.tryread(filename))
+
+    def _restorebackup(self, tr, suffix):
+        '''Restore dirstate by backup file with suffix'''
+        # this "invalidate()" prevents "wlock.release()" from writing
+        # changes of dirstate out after restoring from backup file
+        self.invalidate()
+        filename = self._actualfilename(tr)
+        self._opener.rename(filename + suffix, filename)
+
+    def _clearbackup(self, tr, suffix):
+        '''Clear backup file with suffix'''
+        filename = self._actualfilename(tr)
+        self._opener.unlink(filename + suffix)

@@ -65,7 +65,7 @@ def fromlocalfunc(modulename, localmods):
     Mercurial specific) modules.
 
     This function assumes that module names not existing in
-    `localmods` are ones of Python standard libarary.
+    `localmods` are from the Python standard library.
 
     This function returns the function, which takes `name` argument,
     and returns `(absname, dottedpath, hassubmod)` tuple if `name`
@@ -164,7 +164,7 @@ def list_stdlib_modules():
     for m in ['msvcrt', '_winreg']:
         yield m
     # These get missed too
-    for m in 'ctypes', 'email':
+    for m in 'ctypes', 'email', 'multiprocessing':
         yield m
     yield 'builtins' # python3 only
     for m in 'fcntl', 'grp', 'pwd', 'termios':  # Unix only
@@ -200,8 +200,7 @@ def list_stdlib_modules():
             for name in files:
                 if name == '__init__.py':
                     continue
-                if not (name.endswith('.py') or name.endswith('.so')
-                        or name.endswith('.pyd')):
+                if not name.endswith(('.py', '.so', '.pyc', '.pyo', '.pyd')):
                     continue
                 full_path = os.path.join(top, name)
                 rel_path = full_path[len(libpath) + 1:]

@@ -11,12 +11,33 @@ This provides a read-only repository interface to bundles as if they
 were part of the actual repository.
 """
 
-from node import nullid
-from i18n import _
-import os, tempfile, shutil
-import changegroup, util, mdiff, discovery, cmdutil, scmutil, exchange
-import localrepo, changelog, manifest, filelog, revlog, error, phases, bundle2
-import pathutil
+from __future__ import absolute_import
+
+import os
+import shutil
+import tempfile
+
+from .i18n import _
+from .node import nullid
+
+from . import (
+    bundle2,
+    changegroup,
+    changelog,
+    cmdutil,
+    discovery,
+    error,
+    exchange,
+    filelog,
+    localrepo,
+    manifest,
+    mdiff,
+    pathutil,
+    phases,
+    revlog,
+    scmutil,
+    util,
+)
 
 class bundlerevlog(revlog.revlog):
     def __init__(self, opener, indexfile, bundle, linkmapper):
@@ -174,7 +195,15 @@ class bundlemanifest(bundlerevlog, manifest.manifest):
                               linkmapper)
 
     def baserevision(self, nodeorrev):
-        return manifest.manifest.revision(self, nodeorrev)
+        node = nodeorrev
+        if isinstance(node, int):
+            node = self.node(node)
+
+        if node in self._mancache:
+            result = self._mancache[node][0].text()
+        else:
+            result = manifest.manifest.revision(self, nodeorrev)
+        return result
 
 class bundlefilelog(bundlerevlog, filelog.filelog):
     def __init__(self, opener, path, bundle, linkmapper):
@@ -208,6 +237,27 @@ class bundlephasecache(phases.phasecache):
 
 class bundlerepository(localrepo.localrepository):
     def __init__(self, ui, path, bundlename):
+        def _writetempbundle(read, suffix, header=''):
+            """Write a temporary file to disk
+
+            This is closure because we need to make sure this tracked by
+            self.tempfile for cleanup purposes."""
+            fdtemp, temp = self.vfs.mkstemp(prefix="hg-bundle-",
+                                            suffix=".hg10un")
+            self.tempfile = temp
+            fptemp = os.fdopen(fdtemp, 'wb')
+
+            try:
+                fptemp.write(header)
+                while True:
+                    chunk = read(2**18)
+                    if not chunk:
+                        break
+                    fptemp.write(chunk)
+            finally:
+                fptemp.close()
+
+            return self.vfs.open(self.tempfile, mode="rb")
         self._tempparent = None
         try:
             localrepo.localrepository.__init__(self, ui, path)
@@ -225,44 +275,34 @@ class bundlerepository(localrepo.localrepository):
         self.tempfile = None
         f = util.posixfile(bundlename, "rb")
         self.bundlefile = self.bundle = exchange.readbundle(ui, f, bundlename)
-        if self.bundle.compressed():
-            fdtemp, temp = self.vfs.mkstemp(prefix="hg-bundle-",
-                                            suffix=".hg10un")
-            self.tempfile = temp
-            fptemp = os.fdopen(fdtemp, 'wb')
 
-            try:
-                fptemp.write("HG10UN")
-                while True:
-                    chunk = self.bundle.read(2**18)
-                    if not chunk:
-                        break
-                    fptemp.write(chunk)
-            finally:
-                fptemp.close()
+        if isinstance(self.bundle, bundle2.unbundle20):
+            cgstream = None
+            for part in self.bundle.iterparts():
+                if part.type == 'changegroup':
+                    if cgstream is not None:
+                        raise NotImplementedError("can't process "
+                                                  "multiple changegroups")
+                    cgstream = part
+                    version = part.params.get('version', '01')
+                    if version not in changegroup.packermap:
+                        msg = _('Unsupported changegroup version: %s')
+                        raise error.Abort(msg % version)
+                    if self.bundle.compressed():
+                        cgstream = _writetempbundle(part.read,
+                                                    ".cg%sun" % version)
 
-            f = self.vfs.open(self.tempfile, mode="rb")
+            if cgstream is None:
+                raise error.Abort('No changegroups found')
+            cgstream.seek(0)
+
+            self.bundle = changegroup.packermap[version][1](cgstream, 'UN')
+
+        elif self.bundle.compressed():
+            f = _writetempbundle(self.bundle.read, '.hg10un', header='HG10UN')
             self.bundlefile = self.bundle = exchange.readbundle(ui, f,
                                                                 bundlename,
                                                                 self.vfs)
-
-        if isinstance(self.bundle, bundle2.unbundle20):
-            cgparts = [part for part in self.bundle.iterparts()
-                       if (part.type == 'changegroup')
-                       and (part.params.get('version', '01')
-                            in changegroup.packermap)]
-
-            if not cgparts:
-                raise util.Abort('No changegroups found')
-            version = cgparts[0].params.get('version', '01')
-            cgparts = [p for p in cgparts
-                       if p.params.get('version', '01') == version]
-            if len(cgparts) > 1:
-                raise NotImplementedError("Can't process multiple changegroups")
-            part = cgparts[0]
-
-            part.seek(0)
-            self.bundle = changegroup.packermap[version][1](part, 'UN')
 
         # dict with the mapping 'filename' -> position in the bundle
         self.bundlefilespos = {}
@@ -345,7 +385,7 @@ class bundlerepository(localrepo.localrepository):
 
 def instance(ui, path, create):
     if create:
-        raise util.Abort(_('cannot create new bundle repository'))
+        raise error.Abort(_('cannot create new bundle repository'))
     # internal config: bundle.mainreporoot
     parentpath = ui.config("bundle", "mainreporoot", "")
     if not parentpath:
@@ -426,19 +466,33 @@ def getremotechanges(ui, repo, other, onlyheads=None, bundlename=None,
     if bundlename or not localrepo:
         # create a bundle (uncompressed if other repo is not local)
 
-        if other.capable('getbundle'):
-            cg = other.getbundle('incoming', common=common, heads=rheads)
-        elif onlyheads is None and not other.capable('changegroupsubset'):
-            # compat with older servers when pulling all remote heads
-            cg = other.changegroup(incoming, "incoming")
-            rheads = None
+        canbundle2 = (ui.configbool('experimental', 'bundle2-exp', True)
+                      and other.capable('getbundle')
+                      and other.capable('bundle2'))
+        if canbundle2:
+            kwargs = {}
+            kwargs['common'] = common
+            kwargs['heads'] = rheads
+            kwargs['bundlecaps'] = exchange.caps20to10(repo)
+            kwargs['cg'] = True
+            b2 = other.getbundle('incoming', **kwargs)
+            fname = bundle = changegroup.writechunks(ui, b2._forwardchunks(),
+                                                     bundlename)
         else:
-            cg = other.changegroupsubset(incoming, rheads, 'incoming')
-        if localrepo:
-            bundletype = "HG10BZ"
-        else:
-            bundletype = "HG10UN"
-        fname = bundle = changegroup.writebundle(ui, cg, bundlename, bundletype)
+            if other.capable('getbundle'):
+                cg = other.getbundle('incoming', common=common, heads=rheads)
+            elif onlyheads is None and not other.capable('changegroupsubset'):
+                # compat with older servers when pulling all remote heads
+                cg = other.changegroup(incoming, "incoming")
+                rheads = None
+            else:
+                cg = other.changegroupsubset(incoming, rheads, 'incoming')
+            if localrepo:
+                bundletype = "HG10BZ"
+            else:
+                bundletype = "HG10UN"
+            fname = bundle = changegroup.writebundle(ui, cg, bundlename,
+                                                     bundletype)
         # keep written bundle?
         if bundlename:
             bundle = None

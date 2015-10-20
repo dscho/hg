@@ -5,10 +5,18 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+from __future__ import absolute_import
+
 import collections
-from node import nullid, short
-from i18n import _
-import util, error
+
+from .i18n import _
+from .node import (
+    nullid,
+    short,
+)
+from . import (
+    error,
+)
 
 def findcommonincoming(repo, remote, heads=None, force=False):
     """Return a tuple (common, fetch, heads) used to identify the common
@@ -140,7 +148,7 @@ def findcommonincoming(repo, remote, heads=None, force=False):
         if force:
             repo.ui.warn(_("warning: repository is unrelated\n"))
         else:
-            raise util.Abort(_("repository is unrelated"))
+            raise error.Abort(_("repository is unrelated"))
 
     repo.ui.debug("found new changesets starting at " +
                  " ".join([short(f) for f in fetch]) + "\n")

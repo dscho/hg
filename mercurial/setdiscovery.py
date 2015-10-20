@@ -40,11 +40,20 @@ nodes that will maximize the number of nodes that will be
 classified with it (since all ancestors or descendants will be marked as well).
 """
 
+from __future__ import absolute_import
+
 import collections
-from node import nullid, nullrev
-from i18n import _
 import random
-import util, dagutil
+
+from .i18n import _
+from .node import (
+    nullid,
+    nullrev,
+)
+from . import (
+    dagutil,
+    error,
+)
 
 def _updatesample(dag, nodes, sample, quicksamplesize=0):
     """update an existing sample to match the expected size
@@ -138,22 +147,12 @@ def findcommonheads(ui, local, remote,
     sample = _limitsample(ownheads, initialsamplesize)
     # indices between sample and externalized version must match
     sample = list(sample)
-    if remote.local():
-        # stopgap until we have a proper localpeer that supports batch()
-        srvheadhashes = remote.heads()
-        yesno = remote.known(dag.externalizeall(sample))
-    elif remote.capable('batch'):
-        batch = remote.batch()
-        srvheadhashesref = batch.heads()
-        yesnoref = batch.known(dag.externalizeall(sample))
-        batch.submit()
-        srvheadhashes = srvheadhashesref.value
-        yesno = yesnoref.value
-    else:
-        # compatibility with pre-batch, but post-known remotes during 1.9
-        # development
-        srvheadhashes = remote.heads()
-        sample = []
+    batch = remote.batch()
+    srvheadhashesref = batch.heads()
+    yesnoref = batch.known(dag.externalizeall(sample))
+    batch.submit()
+    srvheadhashes = srvheadhashesref.value
+    yesno = yesnoref.value
 
     if cl.tip() == nullid:
         if srvheadhashes != [nullid]:
@@ -242,7 +241,7 @@ def findcommonheads(ui, local, remote,
 
     if not result and srvheadhashes != [nullid]:
         if abortwhenunrelated:
-            raise util.Abort(_("repository is unrelated"))
+            raise error.Abort(_("repository is unrelated"))
         else:
             ui.warn(_("warning: repository is unrelated\n"))
         return (set([nullid]), True, srvheadhashes,)

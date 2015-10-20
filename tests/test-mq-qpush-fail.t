@@ -56,7 +56,9 @@ test qpush on empty series
   applying bad-patch
   transaction abort!
   rollback completed
-  cleaning up working directory...done
+  cleaning up working directory...
+  reverting foo
+  done
   abort: decoding near '\xe9': 'ascii' codec can't decode byte 0xe9 in position 0: ordinal not in range(128)! (esc)
   [255]
   $ hg parents
@@ -231,22 +233,22 @@ test qpop --keep-changes
   [255]
   $ echo a >> a
   $ hg qpop --keep-changes
-  abort: local changes found, refresh first
+  abort: local changes found, qrefresh first
   [255]
   $ hg revert -qa a
   $ rm a
   $ hg qpop --keep-changes
-  abort: local changes found, refresh first
+  abort: local changes found, qrefresh first
   [255]
   $ hg rm -A a
   $ hg qpop --keep-changes
-  abort: local changes found, refresh first
+  abort: local changes found, qrefresh first
   [255]
   $ hg revert -qa a
   $ echo b > b
   $ hg add b
   $ hg qpop --keep-changes
-  abort: local changes found, refresh first
+  abort: local changes found, qrefresh first
   [255]
   $ hg forget b
   $ echo d > d
@@ -301,7 +303,7 @@ test qpush --force and backup files
   committing manifest
   committing changelog
   patch failed, rejects left in working directory
-  errors during apply, please fix and refresh p3
+  errors during apply, please fix and qrefresh p3
   [2]
   $ cat a.orig
   a
@@ -447,7 +449,7 @@ test mq.keepchanges setting
   now at: p2
   $ hg st b
   $ hg --config mq.keepchanges=1 qpush --exact
-  abort: local changes found, refresh first
+  abort: local changes found, qrefresh first
   [255]
   $ hg revert -qa a
   $ hg qpop

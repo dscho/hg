@@ -652,6 +652,12 @@ submodules)
   $ hg -R git-repo6-hg tip -T "{file_dels}\n"
   .hgsub .hgsubstate
 
+skip submodules in the conversion
+
+  $ hg convert -q git-repo6 no-submodules --config convert.git.skipsubmodules=True
+  $ hg -R no-submodules manifest --all
+  .gitmodules-renamed
+
 convert using a different remote prefix
   $ git init git-repo7
   Initialized empty Git repository in $TESTTMP/git-repo7/.git/
@@ -667,6 +673,28 @@ a block, so do this for now.
   $ git clone git-repo7 git-repo7-client
   Cloning into 'git-repo7-client'...
   done.
+  $ hg convert --config convert.git.remoteprefix=origin git-repo7-client hg-repo7
+  initializing destination hg-repo7 repository
+  scanning source...
+  sorting...
+  converting...
+  0 commit a
+  updating bookmarks
+  $ hg -R hg-repo7 bookmarks
+     master                    0:03bf38caa4c6
+     origin/master             0:03bf38caa4c6
+
+Run convert when the remote branches have changed
+(there was an old bug where the local convert read branches from the server)
+
+  $ cd git-repo7
+  $ echo a >> a
+  $ git commit -am "move master forward"
+  [master 0c81947] move master forward
+   Author: nottest <test@example.org>
+   1 file changed, 1 insertion(+)
+  $ cd ..
+  $ rm -rf hg-repo7
   $ hg convert --config convert.git.remoteprefix=origin git-repo7-client hg-repo7
   initializing destination hg-repo7 repository
   scanning source...

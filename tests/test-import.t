@@ -428,6 +428,215 @@ patches: import patch1 patch2; rollback
   working directory now based on revision 0
   $ hg --cwd b parents --template 'parent: {rev}\n'
   parent: 0
+
+Test that "hg rollback" doesn't restore dirstate to one at the
+beginning of the rollbacked transaction in not-"parent-gone" case.
+
+invoking pretxncommit hook will cause marking '.hg/dirstate' as a file
+to be restored at rollbacking, after DirstateTransactionPlan (see wiki
+page for detail).
+
+  $ hg --cwd b branch -q foobar
+  $ hg --cwd b commit -m foobar
+  $ hg --cwd b update 0 -q
+  $ hg --cwd b import ../patch1 ../patch2 --config hooks.pretxncommit=true
+  applying ../patch1
+  applying ../patch2
+  $ hg --cwd b update -q 1
+  $ hg --cwd b rollback -q
+  $ hg --cwd b parents --template 'parent: {rev}\n'
+  parent: 1
+
+  $ hg --cwd b update -q -C 0
+  $ hg --cwd b --config extensions.strip= strip -q 1
+
+Test visibility of in-memory distate changes inside transaction to
+external process
+
+  $ echo foo > a/foo
+  $ hg --cwd a commit -A -m 'adding foo' foo
+  $ hg --cwd a export -o '../patch%R' 3
+
+  $ cat > $TESTTMP/checkvisibility.sh <<EOF
+  > echo "===="
+  > hg parents --template "VISIBLE {rev}:{node|short}\n"
+  > hg status -amr
+  > # test that pending changes are hidden
+  > unset HG_PENDING
+  > hg parents --template "ACTUAL  {rev}:{node|short}\n"
+  > hg status -amr
+  > echo "===="
+  > EOF
+
+== test visibility to external editor
+
+  $ (cd b && sh "$TESTTMP/checkvisibility.sh")
+  ====
+  VISIBLE 0:80971e65b431
+  ACTUAL  0:80971e65b431
+  ====
+
+  $ HGEDITOR="sh $TESTTMP/checkvisibility.sh" hg --cwd b import -v --edit ../patch1 ../patch2 ../patch3
+  applying ../patch1
+  patching file a
+  ====
+  VISIBLE 0:80971e65b431
+  M a
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+  committing files:
+  a
+  committing manifest
+  committing changelog
+  created 1d4bd90af0e4
+  applying ../patch2
+  patching file a
+  ====
+  VISIBLE 1:1d4bd90af0e4
+  M a
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+  committing files:
+  a
+  committing manifest
+  committing changelog
+  created 6d019af21222
+  applying ../patch3
+  patching file foo
+  adding foo
+  ====
+  VISIBLE 2:6d019af21222
+  A foo
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+  committing files:
+  foo
+  committing manifest
+  committing changelog
+  created 55e3f75b2378
+
+  $ hg --cwd b rollback -q
+
+(content of file "a" is already changed and it should be recognized as
+"M", even though dirstate is restored to one before "hg import")
+
+  $ (cd b && sh "$TESTTMP/checkvisibility.sh")
+  ====
+  VISIBLE 0:80971e65b431
+  M a
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+  $ hg --cwd b revert --no-backup a
+  $ rm -f b/foo
+
+== test visibility to precommit external hook
+
+  $ cat >> b/.hg/hgrc <<EOF
+  > [hooks]
+  > precommit.visibility = sh $TESTTMP/checkvisibility.sh
+  > EOF
+
+  $ (cd b && sh "$TESTTMP/checkvisibility.sh")
+  ====
+  VISIBLE 0:80971e65b431
+  ACTUAL  0:80971e65b431
+  ====
+
+  $ hg --cwd b import ../patch1 ../patch2 ../patch3
+  applying ../patch1
+  ====
+  VISIBLE 0:80971e65b431
+  M a
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+  applying ../patch2
+  ====
+  VISIBLE 1:1d4bd90af0e4
+  M a
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+  applying ../patch3
+  ====
+  VISIBLE 2:6d019af21222
+  A foo
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+
+  $ hg --cwd b rollback -q
+  $ (cd b && sh "$TESTTMP/checkvisibility.sh")
+  ====
+  VISIBLE 0:80971e65b431
+  M a
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+  $ hg --cwd b revert --no-backup a
+  $ rm -f b/foo
+
+  $ cat >> b/.hg/hgrc <<EOF
+  > [hooks]
+  > precommit.visibility =
+  > EOF
+
+== test visibility to pretxncommit external hook
+
+  $ cat >> b/.hg/hgrc <<EOF
+  > [hooks]
+  > pretxncommit.visibility = sh $TESTTMP/checkvisibility.sh
+  > EOF
+
+  $ (cd b && sh "$TESTTMP/checkvisibility.sh")
+  ====
+  VISIBLE 0:80971e65b431
+  ACTUAL  0:80971e65b431
+  ====
+
+  $ hg --cwd b import ../patch1 ../patch2 ../patch3
+  applying ../patch1
+  ====
+  VISIBLE 0:80971e65b431
+  M a
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+  applying ../patch2
+  ====
+  VISIBLE 1:1d4bd90af0e4
+  M a
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+  applying ../patch3
+  ====
+  VISIBLE 2:6d019af21222
+  A foo
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+
+  $ hg --cwd b rollback -q
+  $ (cd b && sh "$TESTTMP/checkvisibility.sh")
+  ====
+  VISIBLE 0:80971e65b431
+  M a
+  ACTUAL  0:80971e65b431
+  M a
+  ====
+  $ hg --cwd b revert --no-backup a
+  $ rm -f b/foo
+
+  $ cat >> b/.hg/hgrc <<EOF
+  > [hooks]
+  > pretxncommit.visibility =
+  > EOF
+
   $ rm -r b
 
 
@@ -1505,3 +1714,49 @@ Importing multiple failing patches:
   $ hg status -c .
   C a
   C b
+
+Importing some extra header
+===========================
+
+  $ cat > $TESTTMP/parseextra.py <<EOF
+  > import mercurial.patch
+  > import mercurial.cmdutil
+  > 
+  > def processfoo(repo, data, extra, opts):
+  >     if 'foo' in data:
+  >         extra['foo'] = data['foo']
+  > def postimport(ctx):
+  >     if 'foo' in ctx.extra():
+  >         ctx.repo().ui.write('imported-foo: %s\n' % ctx.extra()['foo'])
+  > 
+  > mercurial.patch.patchheadermap.append(('Foo', 'foo'))
+  > mercurial.cmdutil.extrapreimport.append('foo')
+  > mercurial.cmdutil.extrapreimportmap['foo'] = processfoo
+  > mercurial.cmdutil.extrapostimport.append('foo')
+  > mercurial.cmdutil.extrapostimportmap['foo'] = postimport
+  > EOF
+  $ printf "[extensions]\nparseextra=$TESTTMP/parseextra.py" >> $HGRCPATH
+  $ hg up -C tip
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ cat > $TESTTMP/foo.patch <<EOF
+  > # HG changeset patch
+  > # User Rataxes
+  > # Date 0 0
+  > #      Thu Jan 01 00:00:00 1970 +0000
+  > # Foo bar
+  > height
+  > 
+  > --- a/a	Thu Jan 01 00:00:00 1970 +0000
+  > +++ b/a	Wed Oct 07 09:17:44 2015 +0000
+  > @@ -5,3 +5,4 @@
+  >  five
+  >  six
+  >  seven
+  > +heigt
+  > EOF
+  $ hg import $TESTTMP/foo.patch
+  applying $TESTTMP/foo.patch
+  imported-foo: bar
+  $ hg log --debug -r . | grep extra
+  extra:       branch=default
+  extra:       foo=bar

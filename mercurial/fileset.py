@@ -5,9 +5,17 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+from __future__ import absolute_import
+
 import re
-import parser, error, util, merge
-from i18n import _
+
+from .i18n import _
+from . import (
+    error,
+    merge,
+    parser,
+    util,
+)
 
 elements = {
     # token-type: binding-strength, primary, prefix, infix, suffix
@@ -46,7 +54,7 @@ def tokenize(program):
                 c = program[pos]
                 decode = lambda x: x
             else:
-                decode = lambda x: x.decode('string-escape')
+                decode = parser.unescapestr
             pos += 1
             s = pos
             while pos < l: # find closing quote
@@ -124,7 +132,7 @@ def listset(mctx, a, b):
 
 def modified(mctx, x):
     """``modified()``
-    File that is modified according to status.
+    File that is modified according to :hg:`status`.
     """
     # i18n: "modified" is a keyword
     getargs(x, 0, 0, _("modified takes no arguments"))
@@ -133,7 +141,7 @@ def modified(mctx, x):
 
 def added(mctx, x):
     """``added()``
-    File that is added according to status.
+    File that is added according to :hg:`status`.
     """
     # i18n: "added" is a keyword
     getargs(x, 0, 0, _("added takes no arguments"))
@@ -142,7 +150,7 @@ def added(mctx, x):
 
 def removed(mctx, x):
     """``removed()``
-    File that is removed according to status.
+    File that is removed according to :hg:`status`.
     """
     # i18n: "removed" is a keyword
     getargs(x, 0, 0, _("removed takes no arguments"))
@@ -151,7 +159,7 @@ def removed(mctx, x):
 
 def deleted(mctx, x):
     """``deleted()``
-    File that is deleted according to status.
+    File that is deleted according to :hg:`status`.
     """
     # i18n: "deleted" is a keyword
     getargs(x, 0, 0, _("deleted takes no arguments"))
@@ -160,7 +168,7 @@ def deleted(mctx, x):
 
 def unknown(mctx, x):
     """``unknown()``
-    File that is unknown according to status. These files will only be
+    File that is unknown according to :hg:`status`. These files will only be
     considered if this predicate is used.
     """
     # i18n: "unknown" is a keyword
@@ -170,7 +178,7 @@ def unknown(mctx, x):
 
 def ignored(mctx, x):
     """``ignored()``
-    File that is ignored according to status. These files will only be
+    File that is ignored according to :hg:`status`. These files will only be
     considered if this predicate is used.
     """
     # i18n: "ignored" is a keyword
@@ -180,7 +188,7 @@ def ignored(mctx, x):
 
 def clean(mctx, x):
     """``clean()``
-    File that is clean according to status.
+    File that is clean according to :hg:`status`.
     """
     # i18n: "clean" is a keyword
     getargs(x, 0, 0, _("clean takes no arguments"))
@@ -235,7 +243,7 @@ def symlink(mctx, x):
 
 def resolved(mctx, x):
     """``resolved()``
-    File that is marked resolved according to the resolve state.
+    File that is marked resolved according to :hg:`resolve -l`.
     """
     # i18n: "resolved" is a keyword
     getargs(x, 0, 0, _("resolved takes no arguments"))
@@ -246,7 +254,7 @@ def resolved(mctx, x):
 
 def unresolved(mctx, x):
     """``unresolved()``
-    File that is marked unresolved according to the resolve state.
+    File that is marked unresolved according to :hg:`resolve -l`.
     """
     # i18n: "unresolved" is a keyword
     getargs(x, 0, 0, _("unresolved takes no arguments"))
@@ -355,7 +363,7 @@ def encoding(mctx, x):
         try:
             d.decode(enc)
         except LookupError:
-            raise util.Abort(_("unknown encoding '%s'") % enc)
+            raise error.Abort(_("unknown encoding '%s'") % enc)
         except UnicodeDecodeError:
             continue
         s.append(f)
@@ -410,7 +418,7 @@ def subrepo(mctx, x):
         # i18n: "subrepo" is a keyword
         pat = getstring(x, _("subrepo requires a pattern or no arguments"))
 
-        import match as matchmod # avoid circular import issues
+        from . import match as matchmod # avoid circular import issues
         fast = not matchmod.patkind(pat)
         if fast:
             def m(s):

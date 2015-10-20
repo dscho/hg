@@ -39,7 +39,7 @@ help
   
   By default, mq will automatically use git patches when required to avoid
   losing file mode changes, copy records, binary files or empty files creations
-  or deletions. This behaviour can be configured with:
+  or deletions. This behavior can be configured with:
   
     [mq]
     git = auto/keep/yes/no
@@ -869,7 +869,7 @@ qpush failure
   1 out of 1 hunks FAILED -- saving rejects to file foo.rej
   patch failed, unable to continue (try -v)
   patch failed, rejects left in working directory
-  errors during apply, please fix and refresh bar
+  errors during apply, please fix and qrefresh bar
   [2]
   $ hg st
   ? foo

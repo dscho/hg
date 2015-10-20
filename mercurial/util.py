@@ -19,8 +19,11 @@ import error, osutil, encoding, parsers
 import errno, shutil, sys, tempfile, traceback
 import re as remod
 import os, time, datetime, calendar, textwrap, signal, collections
+import stat
 import imp, socket, urllib
 import gc
+import bz2
+import zlib
 
 if os.name == 'nt':
     import windows as platform
@@ -728,7 +731,11 @@ def _sethgexecutable(path):
     global _hgexecutable
     _hgexecutable = path
 
-def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None, out=None):
+def _isstdout(f):
+    fileno = getattr(f, 'fileno', None)
+    return fileno and fileno() == sys.__stdout__.fileno()
+
+def system(cmd, environ=None, cwd=None, onerr=None, errprefix=None, out=None):
     '''enhanced shell command execution.
     run with environment maybe modified, maybe in different dir.
 
@@ -737,6 +744,8 @@ def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None, out=None):
 
     if out is specified, it is assumed to be a file-like object that has a
     write() method. stdout and stderr will be redirected to out.'''
+    if environ is None:
+        environ = {}
     try:
         sys.stdout.flush()
     except Exception:
@@ -761,7 +770,7 @@ def system(cmd, environ={}, cwd=None, onerr=None, errprefix=None, out=None):
         env = dict(os.environ)
         env.update((k, py2shell(v)) for k, v in environ.iteritems())
         env['HG'] = hgexecutable()
-        if out is None or out == sys.__stdout__:
+        if out is None or _isstdout(out):
             rc = subprocess.call(cmd, shell=True, close_fds=closefds,
                                  env=env, cwd=cwd)
         else:
@@ -943,6 +952,20 @@ def fstat(fp):
         return os.fstat(fp.fileno())
     except AttributeError:
         return os.stat(fp.name)
+
+def statmtimesec(st):
+    """Get mtime as integer of seconds
+
+    'int(st.st_mtime)' cannot be used because st.st_mtime is computed as
+    'sec + 1e-9 * nsec' and double-precision floating-point type is too narrow
+    to represent nanoseconds. If 'nsec' is close to 1 sec, 'int(st.st_mtime)'
+    can be 'sec + 1'. (issue4836)
+    """
+    try:
+        return st[stat.ST_MTIME]
+    except (TypeError, IndexError):
+        # osutil.stat doesn't allow index access and its st_mtime is int
+        return st.st_mtime
 
 # File system features
 
@@ -1278,16 +1301,20 @@ class chunkbuffer(object):
                     yield chunk
         self.iter = splitbig(in_iter)
         self._queue = collections.deque()
+        self._chunkoffset = 0
 
     def read(self, l=None):
         """Read L bytes of data from the iterator of chunks of data.
         Returns less than L bytes if the iterator runs dry.
 
         If size parameter is omitted, read everything"""
+        if l is None:
+            return ''.join(self.iter)
+
         left = l
         buf = []
         queue = self._queue
-        while left is None or left > 0:
+        while left > 0:
             # refill the queue
             if not queue:
                 target = 2**18
@@ -1299,14 +1326,40 @@ class chunkbuffer(object):
                 if not queue:
                     break
 
-            chunk = queue.popleft()
-            if left is not None:
-                left -= len(chunk)
-            if left is not None and left < 0:
-                queue.appendleft(chunk[left:])
-                buf.append(chunk[:left])
-            else:
+            # The easy way to do this would be to queue.popleft(), modify the
+            # chunk (if necessary), then queue.appendleft(). However, for cases
+            # where we read partial chunk content, this incurs 2 dequeue
+            # mutations and creates a new str for the remaining chunk in the
+            # queue. Our code below avoids this overhead.
+
+            chunk = queue[0]
+            chunkl = len(chunk)
+            offset = self._chunkoffset
+
+            # Use full chunk.
+            if offset == 0 and left >= chunkl:
+                left -= chunkl
+                queue.popleft()
                 buf.append(chunk)
+                # self._chunkoffset remains at 0.
+                continue
+
+            chunkremaining = chunkl - offset
+
+            # Use all of unconsumed part of chunk.
+            if left >= chunkremaining:
+                left -= chunkremaining
+                queue.popleft()
+                # offset == 0 is enabled by block above, so this won't merely
+                # copy via ``chunk[0:]``.
+                buf.append(chunk[offset:])
+                self._chunkoffset = 0
+
+            # Partial chunk needed.
+            else:
+                buf.append(chunk[offset:offset + left])
+                self._chunkoffset += left
+                left -= chunkremaining
 
         return ''.join(buf)
 
@@ -1371,22 +1424,22 @@ def shortdate(date=None):
     """turn (timestamp, tzoff) tuple into iso 8631 date."""
     return datestr(date, format='%Y-%m-%d')
 
+def parsetimezone(tz):
+    """parse a timezone string and return an offset integer"""
+    if tz[0] in "+-" and len(tz) == 5 and tz[1:].isdigit():
+        sign = (tz[0] == "+") and 1 or -1
+        hours = int(tz[1:3])
+        minutes = int(tz[3:5])
+        return -sign * (hours * 60 + minutes) * 60
+    if tz == "GMT" or tz == "UTC":
+        return 0
+    return None
+
 def strdate(string, format, defaults=[]):
     """parse a localized time string and return a (unixtime, offset) tuple.
     if the string cannot be parsed, ValueError is raised."""
-    def timezone(string):
-        tz = string.split()[-1]
-        if tz[0] in "+-" and len(tz) == 5 and tz[1:].isdigit():
-            sign = (tz[0] == "+") and 1 or -1
-            hours = int(tz[1:3])
-            minutes = int(tz[3:5])
-            return -sign * (hours * 60 + minutes) * 60
-        if tz == "GMT" or tz == "UTC":
-            return 0
-        return None
-
     # NOTE: unixtime = localunixtime + offset
-    offset, date = timezone(string), string
+    offset, date = parsetimezone(string.split()[-1]), string
     if offset is not None:
         date = " ".join(string.split()[:-1])
 
@@ -1412,7 +1465,7 @@ def strdate(string, format, defaults=[]):
         unixtime = localunixtime + offset
     return unixtime, offset
 
-def parsedate(date, formats=None, bias={}):
+def parsedate(date, formats=None, bias=None):
     """parse a localized date/time and return a (unixtime, offset) tuple.
 
     The date may be a "unixtime offset" string or in one of the specified
@@ -1432,6 +1485,8 @@ def parsedate(date, formats=None, bias={}):
     >>> tz == strtz
     True
     """
+    if bias is None:
+        bias = {}
     if not date:
         return 0, 0
     if isinstance(date, tuple) and len(date) == 2:
@@ -1565,6 +1620,45 @@ def matchdate(date):
         start, stop = lower(date), upper(date)
         return lambda x: x >= start and x <= stop
 
+def stringmatcher(pattern):
+    """
+    accepts a string, possibly starting with 're:' or 'literal:' prefix.
+    returns the matcher name, pattern, and matcher function.
+    missing or unknown prefixes are treated as literal matches.
+
+    helper for tests:
+    >>> def test(pattern, *tests):
+    ...     kind, pattern, matcher = stringmatcher(pattern)
+    ...     return (kind, pattern, [bool(matcher(t)) for t in tests])
+
+    exact matching (no prefix):
+    >>> test('abcdefg', 'abc', 'def', 'abcdefg')
+    ('literal', 'abcdefg', [False, False, True])
+
+    regex matching ('re:' prefix)
+    >>> test('re:a.+b', 'nomatch', 'fooadef', 'fooadefbar')
+    ('re', 'a.+b', [False, False, True])
+
+    force exact matches ('literal:' prefix)
+    >>> test('literal:re:foobar', 'foobar', 're:foobar')
+    ('literal', 're:foobar', [False, True])
+
+    unknown prefixes are ignored and treated as literals
+    >>> test('foo:bar', 'foo', 'bar', 'foo:bar')
+    ('literal', 'foo:bar', [False, False, True])
+    """
+    if pattern.startswith('re:'):
+        pattern = pattern[3:]
+        try:
+            regex = remod.compile(pattern)
+        except remod.error as e:
+            raise error.ParseError(_('invalid regular expression: %s')
+                                   % e)
+        return 're', pattern, regex.search
+    elif pattern.startswith('literal:'):
+        pattern = pattern[8:]
+    return 'literal', pattern, pattern.__eq__
+
 def shortuser(user):
     """Return a short representation of a user name or email address."""
     f = user.find('@')
@@ -1667,7 +1761,7 @@ def MBTextWrapper(**kwargs):
             elif not cur_line:
                 cur_line.append(reversed_chunks.pop())
 
-        # this overriding code is imported from TextWrapper of python 2.6
+        # this overriding code is imported from TextWrapper of Python 2.6
         # to calculate columns of string by 'encoding.ucolwidth()'
         def _wrap_chunks(self, chunks):
             colwidth = encoding.ucolwidth
@@ -1831,7 +1925,7 @@ def getport(port):
 
     If port is an integer, it's returned as is. If it's a string, it's
     looked up using socket.getservbyname(). If there's no matching
-    service, util.Abort is raised.
+    service, error.Abort is raised.
     """
     try:
         return int(port)
@@ -2260,7 +2354,7 @@ def sizetoint(s):
 
 class hooks(object):
     '''A collection of hook functions that can be used to extend a
-    function's behaviour. Hooks are called in lexicographic order,
+    function's behavior. Hooks are called in lexicographic order,
     based on the names of their sources.'''
 
     def __init__(self):
@@ -2337,6 +2431,47 @@ def finddirs(path):
     while pos != -1:
         yield path[:pos]
         pos = path.rfind('/', 0, pos)
+
+# compression utility
+
+class nocompress(object):
+    def compress(self, x):
+        return x
+    def flush(self):
+        return ""
+
+compressors = {
+    None: nocompress,
+    # lambda to prevent early import
+    'BZ': lambda: bz2.BZ2Compressor(),
+    'GZ': lambda: zlib.compressobj(),
+    }
+# also support the old form by courtesies
+compressors['UN'] = compressors[None]
+
+def _makedecompressor(decompcls):
+    def generator(f):
+        d = decompcls()
+        for chunk in filechunkiter(f):
+            yield d.decompress(chunk)
+    def func(fh):
+        return chunkbuffer(generator(fh))
+    return func
+
+def _bz2():
+    d = bz2.BZ2Decompressor()
+    # Bzip2 stream start with BZ, but we stripped it.
+    # we put it back for good measure.
+    d.decompress('BZ')
+    return d
+
+decompressors = {None: lambda fh: fh,
+                 '_truncatedBZ': _makedecompressor(_bz2),
+                 'BZ': _makedecompressor(lambda: bz2.BZ2Decompressor()),
+                 'GZ': _makedecompressor(lambda: zlib.decompressobj()),
+                 }
+# also support the old form by courtesies
+decompressors['UN'] = decompressors[None]
 
 # convenient shortcut
 dst = debugstacktrace

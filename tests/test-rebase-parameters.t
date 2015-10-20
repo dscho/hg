@@ -485,17 +485,16 @@ Test --tool parameter:
   $ hg resolve -m c2
   (no more unresolved files)
   $ hg rebase -c --tool internal:fail
-  tool option will be ignored
   rebasing 2:e4e3f3546619 "c2b" (tip)
   note: rebase of 2:e4e3f3546619 created no changes to commit
   saved backup bundle to $TESTTMP/b3/.hg/strip-backup/e4e3f3546619-b0841178-backup.hg (glob)
 
   $ hg rebase -i
-  abort: interactive history editing is supported by the 'histedit' extension (see "hg help histedit")
+  abort: interactive history editing is supported by the 'histedit' extension (see "hg --config extensions.histedit= help -e histedit")
   [255]
 
   $ hg rebase --interactive
-  abort: interactive history editing is supported by the 'histedit' extension (see "hg help histedit")
+  abort: interactive history editing is supported by the 'histedit' extension (see "hg --config extensions.histedit= help -e histedit")
   [255]
 
   $ cd ..

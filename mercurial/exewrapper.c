@@ -67,10 +67,19 @@ int main(int argc, char *argv[])
 	}
 
 	pydll = NULL;
+	/*
+	We first check, that environment variable PYTHONHOME is *not* set.
+	This just mimicks the behavior of the regular python.exe, which uses
+	PYTHONHOME to find its installation directory (if it has been set).
+	Note: Users of HackableMercurial are expected to *not* set PYTHONHOME!
+	*/
 	if (GetEnvironmentVariable("PYTHONHOME", envpyhome,
 				   sizeof(envpyhome)) == 0)
 	{
-		/* environment var PYTHONHOME is not set */
+		/*
+		Environment var PYTHONHOME is *not* set. Let's see if we are
+		running inside a HackableMercurial.
+		*/
 
 		p = strrchr(pyhome, '\\');
 		if (p == NULL) {
@@ -90,7 +99,8 @@ int main(int argc, char *argv[])
 			strcat_s(pydllfile, sizeof(pydllfile), "\\" HGPYTHONLIB);
 			pydll = LoadLibrary(pydllfile);
 			if (pydll == NULL) {
-				err = "failed to load private Python DLL";
+				err = "failed to load private Python DLL "
+				      HGPYTHONLIB ".dll";
 				goto bail;
 			}
 			Py_SetPythonHome = (void*)GetProcAddress(pydll,
@@ -106,7 +116,7 @@ int main(int argc, char *argv[])
 	if (pydll == NULL) {
 		pydll = LoadLibrary(HGPYTHONLIB);
 		if (pydll == NULL) {
-			err = "failed to load Python DLL";
+			err = "failed to load Python DLL " HGPYTHONLIB ".dll";
 			goto bail;
 		}
 	}

@@ -37,13 +37,13 @@ we get conflicts that shouldn't be there
    ancestor: e6dc8efe11cc, local: 6a0df1dad128+, remote: 484bf6903104
    preserving foo for resolve of bar
    preserving foo for resolve of foo
-   bar: remote copied from foo -> m
-  picked tool 'internal:merge' for bar (binary False symlink False)
+   bar: remote copied from foo -> m (premerge)
+  picked tool ':merge' for bar (binary False symlink False)
   merging foo and bar to bar
   my bar@6a0df1dad128+ other bar@484bf6903104 ancestor foo@e6dc8efe11cc
    premerge successful
-   foo: versions differ -> m
-  picked tool 'internal:merge' for foo (binary False symlink False)
+   foo: versions differ -> m (premerge)
+  picked tool ':merge' for foo (binary False symlink False)
   merging foo
   my foo@6a0df1dad128+ other foo@484bf6903104 ancestor foo@e6dc8efe11cc
    premerge successful

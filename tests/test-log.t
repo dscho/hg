@@ -620,6 +620,21 @@ log --follow tests
   $ hg up -C 1
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ echo b1 > b1
+
+log -r "follow('set:clean()')"
+
+  $ hg log -r "follow('set:clean()')"
+  changeset:   0:67e992f2c4f3
+  user:        test
+  date:        Thu Jan 01 00:00:01 1970 +0000
+  summary:     base
+  
+  changeset:   1:3d5bf5654eda
+  user:        test
+  date:        Thu Jan 01 00:00:01 1970 +0000
+  summary:     r1
+  
+
   $ hg ci -Amb1 -d '1 0'
   adding b1
   created new head
@@ -646,7 +661,26 @@ log -f
   summary:     base
   
 
+log -r follow('glob:b*')
 
+  $ hg log -r "follow('glob:b*')"
+  changeset:   0:67e992f2c4f3
+  user:        test
+  date:        Thu Jan 01 00:00:01 1970 +0000
+  summary:     base
+  
+  changeset:   1:3d5bf5654eda
+  user:        test
+  date:        Thu Jan 01 00:00:01 1970 +0000
+  summary:     r1
+  
+  changeset:   3:e62f78d544b4
+  tag:         tip
+  parent:      1:3d5bf5654eda
+  user:        test
+  date:        Thu Jan 01 00:00:01 1970 +0000
+  summary:     b1
+  
 log -f -r '1 + 4'
 
   $ hg up -C 0
@@ -672,6 +706,16 @@ log -f -r '1 + 4'
   user:        test
   date:        Thu Jan 01 00:00:01 1970 +0000
   summary:     base
+  
+log -r "follow('set:grep(b2)')"
+
+  $ hg log -r "follow('set:grep(b2)')"
+  changeset:   4:ddb82e70d1a1
+  tag:         tip
+  parent:      0:67e992f2c4f3
+  user:        test
+  date:        Thu Jan 01 00:00:01 1970 +0000
+  summary:     b2
   
 log -f -r null
 
@@ -1229,8 +1273,7 @@ log -p -R repo
   created new head
   $ hg merge 7
   merging foo
-  warning: conflicts during merge.
-  merging foo incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging foo! (edit, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]
@@ -1241,8 +1284,7 @@ log -p -R repo
 
   $ hg merge 4
   merging foo
-  warning: conflicts during merge.
-  merging foo incomplete! (edit conflicts, then use 'hg resolve --mark')
+  warning: conflicts while merging foo! (edit, then use 'hg resolve --mark')
   1 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]

@@ -69,7 +69,7 @@ show the edit commands offered
   #  f, fold = use commit, but combine it with the one above
   #  r, roll = like fold, but discard this commit's description
   #  d, drop = remove commit from history
-  #  m, mess = edit message without changing commit content
+  #  m, mess = edit commit message without changing commit content
   #
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
@@ -347,7 +347,7 @@ Verify that revsetalias entries work with histedit:
   #  f, fold = use commit, but combine it with the one above
   #  r, roll = like fold, but discard this commit's description
   #  d, drop = remove commit from history
-  #  m, mess = edit message without changing commit content
+  #  m, mess = edit commit message without changing commit content
   #
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
@@ -424,6 +424,7 @@ Now, let's try to fold the second commit into the first:
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   saved backup bundle to $TESTTMP/issue4251/.hg/strip-backup/*-backup.hg (glob)
+  saved backup bundle to $TESTTMP/issue4251/.hg/strip-backup/b0f4233702ca-d99e7186-backup.hg (glob)
 
   $ hg --config diff.git=yes export 0
   # HG changeset patch

@@ -61,7 +61,7 @@ should give a 404 - static file that does not exist
   <div class="container">
   <div class="menu">
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial" /></a>
   </div>
   <ul>
@@ -169,7 +169,7 @@ should give a 404 - file does not exist
   <div class="container">
   <div class="menu">
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial" /></a>
   </div>
   <ul>
@@ -241,7 +241,7 @@ try bad style
   <div class="container">
   <div class="menu">
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
@@ -340,10 +340,10 @@ static file
 
   $ get-with-headers.py --twice localhost:$HGPORT 'static/style-gitweb.css' - date etag server
   200 Script output follows
-  content-length: 5372
+  content-length: 6521
   content-type: text/css
   
-  body { font-family: sans-serif; font-size: 12px; border:solid #d9d8d1; border-width:1px; margin:10px; }
+  body { font-family: sans-serif; font-size: 12px; border:solid #d9d8d1; border-width:1px; margin:10px; background: white; color: black; }
   a { color:#0000cc; }
   a:hover, a:visited, a:active { color:#880000; }
   div.page_header { height:25px; padding:8px; font-size:18px; font-weight:bold; background-color:#d9d8d1; }
@@ -374,9 +374,12 @@ static file
   a.list:hover { text-decoration:underline; color:#880000; }
   table { padding:8px 4px; }
   th { padding:2px 5px; font-size:12px; text-align:left; }
-  tr.light:hover, .parity0:hover { background-color:#edece6; }
-  tr.dark, .parity1 { background-color:#f6f6f0; }
-  tr.dark:hover, .parity1:hover { background-color:#edece6; }
+  tr.dark, .parity1, pre.sourcelines.stripes > :nth-child(4n+4) { background-color:#f6f6f0; }
+  tr.light:hover, .parity0:hover, tr.dark:hover, .parity1:hover,
+  pre.sourcelines.stripes > :nth-child(4n+2):hover,
+  pre.sourcelines.stripes > :nth-child(4n+4):hover,
+  pre.sourcelines.stripes > :nth-child(4n+1):hover + :nth-child(4n+2),
+  pre.sourcelines.stripes > :nth-child(4n+3):hover + :nth-child(4n+4) { background-color:#edece6; }
   td { padding:2px 5px; font-size:12px; vertical-align:top; }
   td.closed { background-color: #99f; }
   td.link { padding:2px 5px; font-family:sans-serif; font-size:10px; }
@@ -432,6 +435,43 @@ static file
   span.difflineplus { color:#008800; }
   span.difflineminus { color:#cc0000; }
   span.difflineat { color:#990099; }
+  div.diffblocks { counter-reset: lineno; }
+  div.diffblock { counter-increment: lineno; }
+  pre.sourcelines { position: relative; counter-reset: lineno; }
+  pre.sourcelines > span {
+  	display: inline-block;
+  	box-sizing: border-box;
+  	width: 100%;
+  	padding: 0 0 0 5em;
+  	counter-increment: lineno;
+  	vertical-align: top;
+  }
+  pre.sourcelines > span:before {
+  	-moz-user-select: -moz-none;
+  	-khtml-user-select: none;
+  	-webkit-user-select: none;
+  	-ms-user-select: none;
+  	user-select: none;
+  	display: inline-block;
+  	margin-left: -5em;
+  	width: 4em;
+  	color: #999;
+  	text-align: right;
+  	content: counters(lineno,".");
+  	float: left;
+  }
+  pre.sourcelines > a {
+  	display: inline-block;
+  	position: absolute;
+  	left: 0px;
+  	width: 4em;
+  	height: 1em;
+  }
+  tr:target td,
+  pre.sourcelines > span:target,
+  pre.sourcelines.stripes > span:target {
+  	background-color: #bfdfff;
+  }
   
   /* Graph */
   div#wrapper {
@@ -538,6 +578,10 @@ static file
   
   .scroll-loading-error {
       background-color: #FFCCCC !important;
+  }
+  
+  #doc {
+      margin: 0 8px;
   }
   304 Not Modified
   

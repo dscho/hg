@@ -5,9 +5,19 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-import os, sys, time
-import extensions, util, demandimport, error
+from __future__ import absolute_import
+
+import os
+import sys
+import time
+
+from .i18n import _
+from . import (
+    demandimport,
+    error,
+    extensions,
+    util,
+)
 
 def _pythonhook(ui, repo, name, hname, funcname, args, throw):
     '''call python hook. hook is callable object, looked up as
@@ -25,8 +35,9 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
     else:
         d = funcname.rfind('.')
         if d == -1:
-            raise util.Abort(_('%s hook is invalid ("%s" not in '
-                               'a module)') % (hname, funcname))
+            raise error.HookLoadError(
+                _('%s hook is invalid ("%s" not in a module)')
+                % (hname, funcname))
         modname = funcname[:d]
         oldpaths = sys.path
         if util.mainfrozen():
@@ -53,21 +64,21 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
                         ui.warn(_('exception from second failed import '
                                   'attempt:\n'))
                     ui.traceback(e2)
-                    raise util.Abort(_('%s hook is invalid '
-                                       '(import of "%s" failed)') %
-                                     (hname, modname))
+                    raise error.HookLoadError(
+                        _('%s hook is invalid (import of "%s" failed)') %
+                        (hname, modname))
         sys.path = oldpaths
         try:
             for p in funcname.split('.')[1:]:
                 obj = getattr(obj, p)
         except AttributeError:
-            raise util.Abort(_('%s hook is invalid '
-                               '("%s" is not defined)') %
-                             (hname, funcname))
+            raise error.HookLoadError(
+                _('%s hook is invalid ("%s" is not defined)')
+                % (hname, funcname))
         if not callable(obj):
-            raise util.Abort(_('%s hook is invalid '
-                               '("%s" is not callable)') %
-                             (hname, funcname))
+            raise error.HookLoadError(
+                _('%s hook is invalid ("%s" is not callable)')
+                % (hname, funcname))
 
     ui.note(_("calling hook %s: %s\n") % (hname, funcname))
     starttime = time.time()
@@ -81,7 +92,7 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
 
         r = obj(ui=ui, repo=repo, hooktype=name, **args)
     except Exception as exc:
-        if isinstance(exc, util.Abort):
+        if isinstance(exc, error.Abort):
             ui.warn(_('error: %s hook failed: %s\n') %
                          (hname, exc.args[0]))
         else:
@@ -90,7 +101,7 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
         if throw:
             raise
         ui.traceback()
-        return True
+        return True, True
     finally:
         sys.stdout, sys.stderr, sys.stdin = old
         duration = time.time() - starttime
@@ -100,13 +111,20 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
         if throw:
             raise error.HookAbort(_('%s hook failed') % hname)
         ui.warn(_('warning: %s hook failed\n') % hname)
-    return r
+    return r, False
 
 def _exthook(ui, repo, name, cmd, args, throw):
     ui.note(_("running hook %s: %s\n") % (name, cmd))
 
     starttime = time.time()
     env = {}
+
+    # make in-memory changes visible to external process
+    tr = repo.currenttransaction()
+    repo.dirstate.write(tr)
+    if tr and tr.writepending():
+        env['HG_PENDING'] = repo.root
+
     for k, v in args.iteritems():
         if callable(v):
             v = v()
@@ -151,14 +169,23 @@ def hook(ui, repo, name, throw=False, **args):
     if not ui.callhooks:
         return False
 
+    hooks = []
+    for hname, cmd in _allhooks(ui):
+        if hname.split('.')[0] == name and cmd:
+            hooks.append((hname, cmd))
+
+    res = runhooks(ui, repo, name, hooks, throw=throw, **args)
     r = False
+    for hname, cmd in hooks:
+        r = res[hname][0] or r
+    return r
+
+def runhooks(ui, repo, name, hooks, throw=False, **args):
+    res = {}
     oldstdout = -1
 
     try:
-        for hname, cmd in _allhooks(ui):
-            if hname.split('.')[0] != name or not cmd:
-                continue
-
+        for hname, cmd in hooks:
             if oldstdout == -1 and _redirect:
                 try:
                     stdoutno = sys.__stdout__.fileno()
@@ -173,7 +200,7 @@ def hook(ui, repo, name, throw=False, **args):
                     pass
 
             if callable(cmd):
-                r = _pythonhook(ui, repo, name, hname, cmd, args, throw) or r
+                r, raised = _pythonhook(ui, repo, name, hname, cmd, args, throw)
             elif cmd.startswith('python:'):
                 if cmd.count(':') >= 2:
                     path, cmd = cmd[7:].rsplit(':', 1)
@@ -188,9 +215,13 @@ def hook(ui, repo, name, throw=False, **args):
                     hookfn = getattr(mod, cmd)
                 else:
                     hookfn = cmd[7:].strip()
-                r = _pythonhook(ui, repo, name, hname, hookfn, args, throw) or r
+                r, raised = _pythonhook(ui, repo, name, hname, hookfn, args,
+                                        throw)
             else:
-                r = _exthook(ui, repo, hname, cmd, args, throw) or r
+                r = _exthook(ui, repo, hname, cmd, args, throw)
+                raised = False
+
+            res[hname] = r, raised
 
             # The stderr is fully buffered on Windows when connected to a pipe.
             # A forcible flush is required to make small stderr data in the
@@ -201,4 +232,4 @@ def hook(ui, repo, name, throw=False, **args):
             os.dup2(oldstdout, stdoutno)
             os.close(oldstdout)
 
-    return r
+    return res

@@ -8,12 +8,19 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+from __future__ import absolute_import
+
 import collections
 import os
-import error
-from i18n import _
-from node import short, hex
-import util
+
+from .i18n import _
+from .node import (
+    hex,
+    short,
+)
+from . import (
+    error,
+)
 
 def bisect(changelog, state):
     """find the next node (if any) for testing during a bisect search.
@@ -66,8 +73,8 @@ def bisect(changelog, state):
     if not ancestors: # now we're confused
         if (len(state['bad']) == 1 and len(state['good']) == 1 and
             state['bad'] != state['good']):
-            raise util.Abort(_("starting revisions are not directly related"))
-        raise util.Abort(_("inconsistent state, %s:%s is good and bad")
+            raise error.Abort(_("starting revisions are not directly related"))
+        raise error.Abort(_("inconsistent state, %s:%s is good and bad")
                          % (badrev, short(bad)))
 
     # build children dict
@@ -141,7 +148,7 @@ def load_state(repo):
             kind, node = l[:-1].split()
             node = repo.lookup(node)
             if kind not in state:
-                raise util.Abort(_("unknown bisect kind %s") % kind)
+                raise error.Abort(_("unknown bisect kind %s") % kind)
             state[kind].append(node)
     return state
 

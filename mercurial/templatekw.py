@@ -5,9 +5,16 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from node import hex
-import patch, scmutil, util, error
-import hbisect
+from __future__ import absolute_import
+
+from .node import hex
+from . import (
+    error,
+    hbisect,
+    patch,
+    scmutil,
+    util,
+)
 
 # This helper class allows us to handle both:
 #  "{files}" (legacy command-line-specific list hack) and
@@ -115,14 +122,21 @@ def getfiles(repo, ctx, revcache):
         revcache['files'] = repo.status(ctx.p1(), ctx)[:3]
     return revcache['files']
 
-def getlatesttags(repo, ctx, cache):
+def getlatesttags(repo, ctx, cache, pattern=None):
     '''return date, distance and name for the latest tag of rev'''
 
-    if 'latesttags' not in cache:
+    cachename = 'latesttags'
+    if pattern is not None:
+        cachename += '-' + pattern
+        match = util.stringmatcher(pattern)[2]
+    else:
+        match = util.always
+
+    if cachename not in cache:
         # Cache mapping from rev to a tuple with tag date, tag
         # distance and tag name
-        cache['latesttags'] = {-1: (0, 0, ['null'])}
-    latesttags = cache['latesttags']
+        cache[cachename] = {-1: (0, 0, ['null'])}
+    latesttags = cache[cachename]
 
     rev = ctx.rev()
     todo = [rev]
@@ -132,7 +146,8 @@ def getlatesttags(repo, ctx, cache):
             continue
         ctx = repo[rev]
         tags = [t for t in ctx.tags()
-                if (repo.tagtype(t) and repo.tagtype(t) != 'local')]
+                if (repo.tagtype(t) and repo.tagtype(t) != 'local'
+                    and match(t))]
         if tags:
             latesttags[rev] = ctx.date()[0], 0, [t for t in sorted(tags)]
             continue
@@ -198,7 +213,7 @@ def showbranch(**args):
 def showbranches(**args):
     """:branches: List of strings. The name of the branch on which the
     changeset was committed. Will be empty if the branch name was
-    default.
+    default. (DEPRECATED)
     """
     branch = args['ctx'].branch()
     if branch != 'default':
@@ -329,11 +344,27 @@ def showlatesttag(**args):
     """:latesttag: List of strings. The global tags on the most recent globally
     tagged ancestor of this changeset.
     """
+    return showlatesttags(None, **args)
+
+def showlatesttags(pattern, **args):
+    """helper method for the latesttag keyword and function"""
     repo, ctx = args['repo'], args['ctx']
     cache = args['cache']
-    latesttags = getlatesttags(repo, ctx, cache)[2]
+    latesttags = getlatesttags(repo, ctx, cache, pattern)
 
-    return showlist('latesttag', latesttags, separator=':', **args)
+    # latesttag[0] is an implementation detail for sorting csets on different
+    # branches in a stable manner- it is the date the tagged cset was created,
+    # not the date the tag was created.  Therefore it isn't made visible here.
+    makemap = lambda v: {
+        'changes': _showchangessincetag,
+        'distance': latesttags[1],
+        'latesttag': v,   # BC with {latesttag % '{latesttag}'}
+        'tag': v
+    }
+
+    tags = latesttags[2]
+    f = _showlist('latesttag', tags, separator=':', **args)
+    return _hybrid(f, tags, makemap, lambda x: x['latesttag'])
 
 def showlatesttagdistance(repo, ctx, templ, cache, **args):
     """:latesttagdistance: Integer. Longest path to the latest tag."""
@@ -342,15 +373,20 @@ def showlatesttagdistance(repo, ctx, templ, cache, **args):
 def showchangessincelatesttag(repo, ctx, templ, cache, **args):
     """:changessincelatesttag: Integer. All ancestors not in the latest tag."""
     latesttag = getlatesttags(repo, ctx, cache)[2][0]
+
+    return _showchangessincetag(repo, ctx, tag=latesttag, **args)
+
+def _showchangessincetag(repo, ctx, **args):
     offset = 0
     revs = [ctx.rev()]
+    tag = args['tag']
 
     # The only() revset doesn't currently support wdir()
     if ctx.rev() is None:
         offset = 1
         revs = [p.rev() for p in ctx.parents()]
 
-    return len(repo.revs('only(%ld, %s)', revs, latesttag)) + offset
+    return len(repo.revs('only(%ld, %s)', revs, tag)) + offset
 
 def showmanifest(**args):
     repo, ctx, templ = args['repo'], args['ctx'], args['templ']
@@ -390,6 +426,18 @@ def showp2node(repo, ctx, templ, **args):
     parent, all digits are 0."""
     return ctx.p2().hex()
 
+def showparents(**args):
+    """:parents: List of strings. The parents of the changeset in "rev:node"
+    format. If the changeset has only one "natural" parent (the predecessor
+    revision) nothing is shown."""
+    repo = args['repo']
+    ctx = args['ctx']
+    parents = [[('rev', p.rev()),
+                ('node', p.hex()),
+                ('phase', p.phasestr())]
+               for p in scmutil.meaningfulparents(repo, ctx)]
+    return showlist('parent', parents, **args)
+
 def showphase(repo, ctx, templ, **args):
     """:phase: String. The changeset phase name."""
     return ctx.phasestr()
@@ -401,6 +449,14 @@ def showphaseidx(repo, ctx, templ, **args):
 def showrev(repo, ctx, templ, **args):
     """:rev: Integer. The repository-local changeset revision number."""
     return scmutil.intrev(ctx.rev())
+
+def showrevslist(name, revs, **args):
+    """helper to generate a list of revisions in which a mapped template will
+    be evaluated"""
+    repo = args['ctx'].repo()
+    f = _showlist(name, revs, **args)
+    return _hybrid(f, revs,
+                   lambda x: {name: x, 'ctx': repo[x], 'revcache': {}})
 
 def showsubrepos(**args):
     """:subrepos: List of strings. Updated subrepositories in the changeset."""
@@ -470,6 +526,7 @@ keywords = {
     'p1node': showp1node,
     'p2rev': showp2rev,
     'p2node': showp2node,
+    'parents': showparents,
     'phase': showphase,
     'phaseidx': showphaseidx,
     'rev': showrev,
@@ -477,17 +534,5 @@ keywords = {
     'tags': showtags,
 }
 
-def _showparents(**args):
-    """:parents: List of strings. The parents of the changeset in "rev:node"
-    format. If the changeset has only one "natural" parent (the predecessor
-    revision) nothing is shown."""
-    pass
-
-dockeywords = {
-    'parents': _showparents,
-}
-dockeywords.update(keywords)
-del dockeywords['branches']
-
 # tell hggettext to extract docstrings from these functions:
-i18nfunctions = dockeywords.values()
+i18nfunctions = keywords.values()

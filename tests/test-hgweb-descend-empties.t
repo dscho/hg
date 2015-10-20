@@ -47,7 +47,7 @@ manifest with descending (paper)
   <div class="container">
   <div class="menu">
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
@@ -156,7 +156,8 @@ manifest with descending (coal)
   <head>
   <link rel="icon" href="/static/hgicon.png" type="image/png" />
   <meta name="robots" content="index, nofollow" />
-  <link rel="stylesheet" href="/static/style-coal.css" type="text/css" />
+  <link rel="stylesheet" href="/static/style-paper.css" type="text/css" />
+  <link rel="stylesheet" href="/static/style-extra-coal.css" type="text/css" />
   <script type="text/javascript" src="/static/mercurial.js"></script>
   
   <title>test: c9f45f7a1659 /</title>
@@ -166,7 +167,7 @@ manifest with descending (coal)
   <div class="container">
   <div class="menu">
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" alt="mercurial" /></a>
   </div>
   <ul>
@@ -370,13 +371,8 @@ manifest with descending (monoblue)
       </div>
   
       <div id="powered-by">
-          <p><a href="http://mercurial.selenic.com/" title="Mercurial"><img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial" /></a></p>
+          <p><a href="https://mercurial-scm.org/" title="Mercurial"><img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial" /></a></p>
       </div>
-  
-      <div id="corner-top-left"></div>
-      <div id="corner-top-right"></div>
-      <div id="corner-bottom-left"></div>
-      <div id="corner-bottom-right"></div>
   
   </div>
   
@@ -407,7 +403,7 @@ manifest with descending (gitweb)
   <body>
   
   <div class="page_header">
-  <a href="http://mercurial.selenic.com/" title="Mercurial" style="float: right;">Mercurial</a>
+  <a href="https://mercurial-scm.org/" title="Mercurial" style="float: right;">Mercurial</a>
   <a href="/">Mercurial</a>  / files
   </div>
   
@@ -558,7 +554,7 @@ manifest with descending (spartan)
   <script type="text/javascript">process_dates()</script>
   
   <div class="logo">
-  <a href="http://mercurial.selenic.com/">
+  <a href="https://mercurial-scm.org/">
   <img src="/static/hglogo.png" width=75 height=90 border=0 alt="mercurial"></a>
   </div>
   

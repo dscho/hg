@@ -60,7 +60,7 @@ You can set patchbomb to always ask for confirmation by setting
 import os, errno, socket, tempfile, cStringIO
 import email
 
-from mercurial import cmdutil, commands, hg, mail, patch, util
+from mercurial import cmdutil, commands, hg, mail, patch, util, error
 from mercurial import scmutil
 from mercurial.i18n import _
 from mercurial.node import bin
@@ -72,6 +72,24 @@ command = cmdutil.command(cmdtable)
 # be specifying the version(s) of Mercurial they are tested with, or
 # leave the attribute unspecified.
 testedwith = 'internal'
+
+def _addpullheader(seq, ctx):
+    """Add a header pointing to a public URL where the changeset is available
+    """
+    repo = ctx.repo()
+    # experimental config: patchbomb.publicurl
+    # waiting for some logic that check that the changeset are available on the
+    # destination before patchbombing anything.
+    pullurl = repo.ui.config('patchbomb', 'publicurl')
+    if pullurl is not None:
+        return ('Available At %s\n'
+                '#              hg pull %s -r %s' % (pullurl, pullurl, ctx))
+    return None
+
+def uisetup(ui):
+    cmdutil.extraexport.append('pullurl')
+    cmdutil.extraexportmap['pullurl'] = _addpullheader
+
 
 def prompt(ui, prompt, default=None, rest=':'):
     if default:
@@ -205,6 +223,9 @@ def _getbundle(repo, dest, **opts):
     ui = repo.ui
     tmpdir = tempfile.mkdtemp(prefix='hg-email-bundle-')
     tmpfn = os.path.join(tmpdir, 'bundle')
+    btype = ui.config('patchbomb', 'bundletype')
+    if btype:
+        opts['type'] = btype
     try:
         commands.bundle(ui, repo, tmpfn, dest, **opts)
         fp = open(tmpfn, 'rb')
@@ -416,7 +437,8 @@ def patchbomb(ui, repo, *revs, **opts):
 
     With -b/--bundle, changesets are selected as for --outgoing, but a
     single email containing a binary Mercurial bundle as an attachment
-    will be sent.
+    will be sent. Use the ``patchbomb.bundletype`` config option to
+    control the bundle type as with :hg:`bundle --type`.
 
     With -m/--mbox, instead of previewing each patchbomb message in a
     pager or sending the messages directly, it will create a UNIX
@@ -479,15 +501,15 @@ def patchbomb(ui, repo, *revs, **opts):
         mail.validateconfig(ui)
 
     if not (revs or rev or outgoing or bundle or patches):
-        raise util.Abort(_('specify at least one changeset with -r or -o'))
+        raise error.Abort(_('specify at least one changeset with -r or -o'))
 
     if outgoing and bundle:
-        raise util.Abort(_("--outgoing mode always on with --bundle;"
+        raise error.Abort(_("--outgoing mode always on with --bundle;"
                            " do not re-specify --outgoing"))
 
     if outgoing or bundle:
         if len(revs) > 1:
-            raise util.Abort(_("too many destinations"))
+            raise error.Abort(_("too many destinations"))
         if revs:
             dest = revs[0]
         else:
@@ -496,7 +518,7 @@ def patchbomb(ui, repo, *revs, **opts):
 
     if rev:
         if revs:
-            raise util.Abort(_('use only one form to specify the revision'))
+            raise error.Abort(_('use only one form to specify the revision'))
         revs = rev
 
     revs = scmutil.revrange(repo, revs)
@@ -504,6 +526,37 @@ def patchbomb(ui, repo, *revs, **opts):
         revs = _getoutgoing(repo, dest, revs)
     if bundle:
         opts['revs'] = [str(r) for r in revs]
+
+    # check if revision exist on the public destination
+    publicurl = repo.ui.config('patchbomb', 'publicurl')
+    if publicurl is not None:
+        repo.ui.debug('checking that revision exist in the public repo')
+        try:
+            publicpeer = hg.peer(repo, {}, publicurl)
+        except error.RepoError:
+            repo.ui.write_err(_('unable to access public repo: %s\n')
+                              % publicurl)
+            raise
+        if not publicpeer.capable('known'):
+            repo.ui.debug('skipping existence checks: public repo too old')
+        else:
+            out = [repo[r] for r in revs]
+            known = publicpeer.known(h.node() for h in out)
+            missing = []
+            for idx, h in enumerate(out):
+                if not known[idx]:
+                    missing.append(h)
+            if missing:
+                if 1 < len(missing):
+                    msg = _('public "%s" is missing %s and %i others')
+                    msg %= (publicurl, missing[0], len(missing) - 1)
+                else:
+                    msg = _('public url %s is missing %s')
+                    msg %= (publicurl, missing[0])
+                revhint = ''.join('-r %s' % h
+                                  for h in repo.set('heads(%ld)', missing))
+                hint = _('use "hg push %s %s"') % (publicurl, revhint)
+                raise error.Abort(msg, hint=hint)
 
     # start
     if date:
@@ -556,7 +609,7 @@ def patchbomb(ui, repo, *revs, **opts):
     to = getaddrs('To', ask=True)
     if not to:
         # we can get here in non-interactive mode
-        raise util.Abort(_('no recipient addresses provided'))
+        raise error.Abort(_('no recipient addresses provided'))
     cc = getaddrs('Cc', ask=True, default='') or []
     bcc = getaddrs('Bcc') or []
     replyto = getaddrs('Reply-To')
@@ -576,7 +629,7 @@ def patchbomb(ui, repo, *revs, **opts):
         ui.write('\n')
         if ui.promptchoice(_('are you sure you want to send (yn)?'
                              '$$ &Yes $$ &No')):
-            raise util.Abort(_('patchbomb canceled'))
+            raise error.Abort(_('patchbomb canceled'))
 
     ui.write('\n')
 

@@ -23,7 +23,7 @@ declared to be binary (``BIN``) are left unchanged. Additionally,
 ``native`` is an alias for checking out in the platform's default line
 ending: ``LF`` on Unix (including Mac OS X) and ``CRLF`` on
 Windows. Note that ``BIN`` (do nothing to line endings) is Mercurial's
-default behaviour; it is only needed if you need to override a later,
+default behavior; it is only needed if you need to override a later,
 more general pattern.
 
 The optional ``[repository]`` section specifies the line endings to
@@ -247,7 +247,7 @@ def _checkhook(ui, repo, node, headsonly):
         for node, target, f in failed:
             msgs.append(_("  %s in %s should not have %s line endings") %
                         (f, node, eols[target]))
-        raise util.Abort(_("end-of-line check failed:\n") + "\n".join(msgs))
+        raise error.Abort(_("end-of-line check failed:\n") + "\n".join(msgs))
 
 def checkallhook(ui, repo, node, hooktype, **kwargs):
     """verify that files have expected EOLs"""
@@ -333,7 +333,7 @@ def reposetup(ui, repo):
                     # so ignore the error.
                     pass
 
-        def commitctx(self, ctx, error=False):
+        def commitctx(self, ctx, haserror=False):
             for f in sorted(ctx.added() + ctx.modified()):
                 if not self._eolfile(f):
                     continue
@@ -347,8 +347,8 @@ def reposetup(ui, repo):
                     # have all non-binary files taken care of.
                     continue
                 if inconsistenteol(data):
-                    raise util.Abort(_("inconsistent newline style "
+                    raise error.Abort(_("inconsistent newline style "
                                        "in %s\n") % f)
-            return super(eolrepo, self).commitctx(ctx, error)
+            return super(eolrepo, self).commitctx(ctx, haserror)
     repo.__class__ = eolrepo
     repo._hgcleardirstate()

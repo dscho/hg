@@ -671,3 +671,73 @@ test named branch pruning
   |/
   o  0:c334dc3be0da@default "add" files: a
   
+  $ cd ..
+
+test converting merges into a repo that contains other files
+
+  $ hg init merge-test1
+  $ cd merge-test1
+  $ touch a && hg commit -Aqm 'add a'
+  $ echo a > a && hg commit -Aqm 'edit a'
+  $ hg up -q 0
+  $ touch b && hg commit -Aqm 'add b'
+  $ hg merge -q 1 && hg commit -qm 'merge a & b'
+
+  $ cd ..
+  $ hg init merge-test2
+  $ cd merge-test2
+  $ mkdir converted
+  $ touch converted/a toberemoved && hg commit -Aqm 'add converted/a & toberemoved'
+  $ touch x && rm toberemoved && hg commit -Aqm 'add x & remove tobremoved'
+  $ cd ..
+  $ hg log -G -T '{shortest(node)} {desc}' -R merge-test1
+  @    1191 merge a & b
+  |\
+  | o  9077 add b
+  | |
+  o |  d19f edit a
+  |/
+  o  ac82 add a
+  
+  $ hg log -G -T '{shortest(node)} {desc}' -R merge-test2
+  @  150e add x & remove tobremoved
+  |
+  o  bbac add converted/a & toberemoved
+  
+- Build a shamap where the target converted/a is in on top of an unrelated
+- change to 'x'. This simulates using convert to merge several repositories
+- together.
+  $ cat >> merge-test2/.hg/shamap <<EOF
+  > $(hg -R merge-test1 log -r 0 -T '{node}') $(hg -R merge-test2 log -r 0 -T '{node}')
+  > $(hg -R merge-test1 log -r 1 -T '{node}') $(hg -R merge-test2 log -r 1 -T '{node}')
+  > EOF
+  $ cat >> merge-test-filemap <<EOF
+  > rename . converted/
+  > EOF
+  $ hg convert --filemap merge-test-filemap merge-test1 merge-test2 --traceback
+  scanning source...
+  sorting...
+  converting...
+  1 add b
+  0 merge a & b
+  $ hg -R merge-test2 manifest -r tip
+  converted/a
+  converted/b
+  x
+  $ hg -R merge-test2 log -G -T '{shortest(node)} {desc}\n{files % "- {file}\n"}\n'
+  o    6eaa merge a & b
+  |\   - converted/a
+  | |  - toberemoved
+  | |
+  | o  2995 add b
+  | |  - converted/b
+  | |
+  @ |  150e add x & remove tobremoved
+  |/   - toberemoved
+  |    - x
+  |
+  o  bbac add converted/a & toberemoved
+     - converted/a
+     - toberemoved
+  
+

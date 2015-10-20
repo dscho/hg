@@ -6,7 +6,7 @@
 # GNU General Public License version 2 or any later version.
 
 from i18n import _
-import scmutil, util, parsers
+import scmutil, util, parsers, error
 import os, stat, errno
 
 _sha = util.sha1
@@ -404,8 +404,8 @@ class fncache(object):
             fp.seek(0)
             for n, line in enumerate(fp):
                 if not line.rstrip('\n'):
-                    t = _('invalid entry in fncache, line %s') % (n + 1)
-                    raise util.Abort(t)
+                    t = _('invalid entry in fncache, line %d') % (n + 1)
+                    raise error.Abort(t)
         fp.close()
 
     def write(self, tr):

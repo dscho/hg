@@ -7,7 +7,7 @@
 
 """recreates hardlinks between repository clones"""
 
-from mercurial import cmdutil, hg, util
+from mercurial import cmdutil, hg, util, error
 from mercurial.i18n import _
 import os, stat
 
@@ -47,7 +47,7 @@ def relink(ui, repo, origin=None, **opts):
     """
     if (not util.safehasattr(util, 'samefile') or
         not util.safehasattr(util, 'samedevice')):
-        raise util.Abort(_('hardlinks are not supported on this system'))
+        raise error.Abort(_('hardlinks are not supported on this system'))
     src = hg.repository(repo.baseui, ui.expandpath(origin or 'default-relink',
                                           origin or 'default'))
     ui.status(_('relinking %s to %s\n') % (src.store.path, repo.store.path))
@@ -57,7 +57,7 @@ def relink(ui, repo, origin=None, **opts):
 
     if not util.samedevice(src.store.path, repo.store.path):
         # No point in continuing
-        raise util.Abort(_('source and destination are on different devices'))
+        raise error.Abort(_('source and destination are on different devices'))
 
     locallock = repo.lock()
     try:
@@ -84,7 +84,7 @@ def collect(src, ui):
     total = live * 3 // 2
     src = src.store.path
     pos = 0
-    ui.status(_("tip has %d files, estimated total number of files: %s\n")
+    ui.status(_("tip has %d files, estimated total number of files: %d\n")
               % (live, total))
     for dirpath, dirnames, filenames in os.walk(src):
         dirnames.sort()
@@ -114,7 +114,7 @@ def prune(candidates, src, dst, ui):
             return False
         if not util.samedevice(src, dst):
             # No point in continuing
-            raise util.Abort(
+            raise error.Abort(
                 _('source and destination are on different devices'))
         if st.st_size != ts.st_size:
             return False

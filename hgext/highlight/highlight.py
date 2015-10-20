@@ -20,7 +20,7 @@ from pygments.formatters import HtmlFormatter
 SYNTAX_CSS = ('\n<link rel="stylesheet" href="{url}highlightcss" '
               'type="text/css" />')
 
-def pygmentize(field, fctx, style, tmpl):
+def pygmentize(field, fctx, style, tmpl, guessfilenameonly=False):
 
     # append a <link ...> to the syntax highlighting css
     old_header = tmpl.load('header')
@@ -46,10 +46,21 @@ def pygmentize(field, fctx, style, tmpl):
         lexer = guess_lexer_for_filename(fctx.path(), text[:1024],
                                          stripnl=False)
     except (ClassNotFound, ValueError):
+        # guess_lexer will return a lexer if *any* lexer matches. There is
+        # no way to specify a minimum match score. This can give a high rate of
+        # false positives on files with an unknown filename pattern.
+        if guessfilenameonly:
+            return
+
         try:
             lexer = guess_lexer(text[:1024], stripnl=False)
         except (ClassNotFound, ValueError):
-            lexer = TextLexer(stripnl=False)
+            # Don't highlight unknown files
+            return
+
+    # Don't highlight text files
+    if isinstance(lexer, TextLexer):
+        return
 
     formatter = HtmlFormatter(nowrap=True, style=style)
 

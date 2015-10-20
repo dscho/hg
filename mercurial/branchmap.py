@@ -5,13 +5,28 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from node import bin, hex, nullid, nullrev
-import encoding
-import scmutil
-import util
+from __future__ import absolute_import
+
+import array
+import struct
 import time
-from array import array
-from struct import calcsize, pack, unpack
+
+from .node import (
+    bin,
+    hex,
+    nullid,
+    nullrev,
+)
+from . import (
+    encoding,
+    error,
+    scmutil,
+)
+
+array = array.array
+calcsize = struct.calcsize
+pack = struct.pack
+unpack = struct.unpack
 
 def _filename(repo):
     """name of a branchcache file for a given repo or repoview"""
@@ -100,6 +115,38 @@ def updatecache(repo):
 
     assert partial.validfor(repo), filtername
     repo._branchcaches[repo.filtername] = partial
+
+def replacecache(repo, bm):
+    """Replace the branchmap cache for a repo with a branch mapping.
+
+    This is likely only called during clone with a branch map from a remote.
+    """
+    rbheads = []
+    closed = []
+    for bheads in bm.itervalues():
+        rbheads.extend(bheads)
+        for h in bheads:
+            r = repo.changelog.rev(h)
+            b, c = repo.changelog.branchinfo(r)
+            if c:
+                closed.append(h)
+
+    if rbheads:
+        rtiprev = max((int(repo.changelog.rev(node))
+                for node in rbheads))
+        cache = branchcache(bm,
+                            repo[rtiprev].node(),
+                            rtiprev,
+                            closednodes=closed)
+
+        # Try to stick it as low as possible
+        # filter above served are unlikely to be fetch from a clone
+        for candidate in ('base', 'immutable', 'served'):
+            rview = repo.filtered(candidate)
+            if cache.validfor(rview):
+                repo._branchcaches[candidate] = cache
+                cache.write(rview)
+                break
 
 class branchcache(dict):
     """A dict like object that hold branches heads cache.
@@ -203,7 +250,7 @@ class branchcache(dict):
             repo.ui.log('branchcache',
                         'wrote %s branch cache with %d labels and %d nodes\n',
                         repo.filtername, len(self), nodecount)
-        except (IOError, OSError, util.Abort) as inst:
+        except (IOError, OSError, error.Abort) as inst:
             repo.ui.debug("couldn't write branch cache: %s\n" % inst)
             # Abort may be raise by read only opener
             pass
@@ -418,7 +465,7 @@ class revbranchcache(object):
                                   for b in self._names[self._rbcnamescount:]))
                 self._rbcsnameslen = f.tell()
                 f.close()
-            except (IOError, OSError, util.Abort) as inst:
+            except (IOError, OSError, error.Abort) as inst:
                 repo.ui.debug("couldn't write revision branch cache names: "
                               "%s\n" % inst)
                 return
@@ -436,7 +483,7 @@ class revbranchcache(object):
                 end = revs * _rbcrecsize
                 f.write(self._rbcrevs[start:end])
                 f.close()
-            except (IOError, OSError, util.Abort) as inst:
+            except (IOError, OSError, error.Abort) as inst:
                 repo.ui.debug("couldn't write revision branch cache: %s\n" %
                               inst)
                 return

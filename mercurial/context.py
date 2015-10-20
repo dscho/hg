@@ -5,6 +5,8 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+import re
+
 from node import nullid, nullrev, wdirid, short, hex, bin
 from i18n import _
 import mdiff, error, util, scmutil, subrepo, patch, encoding, phases
@@ -21,6 +23,8 @@ propertycache = util.propertycache
 # manifests. Manifests support 21-byte hashes for nodes which are
 # dirty in the working copy.
 _newnode = '!' * 21
+
+nonascii = re.compile(r'[^\x21-\x7f]').search
 
 class basectx(object):
     """A basectx object represents the common logic for its children:
@@ -466,7 +470,7 @@ class changectx(basectx):
                 msg = _("working directory has unknown parent '%s'!")
                 raise error.Abort(msg % short(changeid))
             try:
-                if len(changeid) == 20:
+                if len(changeid) == 20 and nonascii(changeid):
                     changeid = hex(changeid)
             except TypeError:
                 pass
@@ -1060,7 +1064,7 @@ class filectx(basefilectx):
         except error.CensoredNodeError:
             if self._repo.ui.config("censor", "policy", "abort") == "ignore":
                 return ""
-            raise util.Abort(_("censored node: %s") % short(self._filenode),
+            raise error.Abort(_("censored node: %s") % short(self._filenode),
                              hint=_("set censor.policy to ignore errors"))
 
     def size(self):
@@ -1120,7 +1124,7 @@ class committablectx(basectx):
             try:
                 branch = encoding.fromlocal(self._repo.dirstate.branch())
             except UnicodeDecodeError:
-                raise util.Abort(_('branch name not in UTF-8!'))
+                raise error.Abort(_('branch name not in UTF-8!'))
             self._extra['branch'] = branch
         if self._extra['branch'] == '':
             self._extra['branch'] = 'default'
@@ -1320,7 +1324,7 @@ class committablectx(basectx):
         # write changes out explicitly, because nesting wlock at
         # runtime may prevent 'wlock.release()' in 'repo.commit()'
         # from immediately doing so for subsequent changing files
-        self._repo.dirstate.write()
+        self._repo.dirstate.write(self._repo.currenttransaction())
 
 class workingctx(committablectx):
     """A workingctx object makes access to data related to
@@ -1526,7 +1530,7 @@ class workingctx(committablectx):
                     # write changes out explicitly, because nesting
                     # wlock at runtime may prevent 'wlock.release()'
                     # below from doing so for subsequent changing files
-                    self._repo.dirstate.write()
+                    self._repo.dirstate.write(self._repo.currenttransaction())
                 finally:
                     wlock.release()
             except error.LockError:
@@ -1690,7 +1694,7 @@ class workingfilectx(committablefilectx):
     def date(self):
         t, tz = self._changectx.date()
         try:
-            return (int(self._repo.wvfs.lstat(self._path).st_mtime), tz)
+            return (util.statmtimesec(self._repo.wvfs.lstat(self._path)), tz)
         except OSError as err:
             if err.errno != errno.ENOENT:
                 raise
