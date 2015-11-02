@@ -179,3 +179,53 @@ conditional above.
   $ find src/.hg/largefiles/* | egrep "(dirstate|$hash)" | sort
   src/.hg/largefiles/dirstate
   src/.hg/largefiles/e2fb5f2139d086ded2cb600d5a91a196e76bf020
+
+Inject corruption into the largefiles store and see how update handles that:
+
+  $ cd src
+  $ hg up -qC
+  $ cat large
+  modified
+  $ rm large
+  $ cat .hglf/large
+  e2fb5f2139d086ded2cb600d5a91a196e76bf020
+  $ mv .hg/largefiles/e2fb5f2139d086ded2cb600d5a91a196e76bf020 ..
+  $ echo corruption > .hg/largefiles/e2fb5f2139d086ded2cb600d5a91a196e76bf020
+  $ hg up -C
+  getting changed largefiles
+  large: data corruption in $TESTTMP/src/.hg/largefiles/e2fb5f2139d086ded2cb600d5a91a196e76bf020 with hash 6a7bb2556144babe3899b25e5428123735bb1e27
+  0 largefiles updated, 0 removed
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg st
+  ! large
+  ? z
+  $ rm .hg/largefiles/e2fb5f2139d086ded2cb600d5a91a196e76bf020
+
+#if serve
+
+Test coverage of error handling from putlfile:
+
+  $ mkdir $TESTTMP/mirrorcache
+  $ hg serve -R ../mirror -d -p $HGPORT1 --pid-file hg.pid --config largefiles.usercache=$TESTTMP/mirrorcache
+  $ cat hg.pid >> $DAEMON_PIDS
+
+  $ hg push http://localhost:$HGPORT1 -f --config files.usercache=nocache
+  pushing to http://localhost:$HGPORT1/
+  searching for changes
+  abort: remotestore: could not open file $TESTTMP/src/.hg/largefiles/e2fb5f2139d086ded2cb600d5a91a196e76bf020: HTTP Error 403: ssl required
+  [255]
+
+  $ rm .hg/largefiles/e2fb5f2139d086ded2cb600d5a91a196e76bf020
+
+Test coverage of 'missing from store':
+
+  $ hg serve -R ../mirror -d -p $HGPORT2 --pid-file hg.pid --config largefiles.usercache=$TESTTMP/mirrorcache --config "web.allow_push=*" --config web.push_ssl=no
+  $ cat hg.pid >> $DAEMON_PIDS
+
+  $ hg push http://localhost:$HGPORT2 -f --config largefiles.usercache=nocache
+  pushing to http://localhost:$HGPORT2/
+  searching for changes
+  abort: largefile e2fb5f2139d086ded2cb600d5a91a196e76bf020 missing from store (needs to be uploaded)
+  [255]
+
+#endif

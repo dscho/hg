@@ -10,7 +10,6 @@
 
 import os
 import platform
-import shutil
 import stat
 import copy
 
@@ -207,7 +206,15 @@ def copyfromcache(repo, hash, filename):
     util.makedirs(os.path.dirname(repo.wjoin(filename)))
     # The write may fail before the file is fully written, but we
     # don't use atomic writes in the working copy.
-    shutil.copy(path, repo.wjoin(filename))
+    dest = repo.wjoin(filename)
+    with open(path, 'rb') as srcfd:
+        with open(dest, 'wb') as destfd:
+            gothash = copyandhash(srcfd, destfd)
+    if gothash != hash:
+        repo.ui.warn(_('%s: data corruption in %s with hash %s\n')
+                     % (filename, path, gothash))
+        util.unlink(dest)
+        return False
     return True
 
 def copytostore(repo, rev, file, uploaded=False):
@@ -562,8 +569,11 @@ def updatestandinsbymatch(repo, match):
     for f in match._files:
         fstandin = standin(f)
 
-        # ignore known largefiles and standins
-        if f in lfiles or fstandin in standins:
+        # For largefiles, only one of the normal and standin should be
+        # committed (except if one of them is a remove).
+        # Thus, skip plain largefile names but keep the standin.
+        if (f in lfiles or fstandin in standins) and \
+            repo.dirstate[f] != 'r' and repo.dirstate[fstandin] != 'r':
             continue
 
         actualfiles.append(f)
