@@ -5,7 +5,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import atexit
 import difflib
@@ -59,6 +59,13 @@ def _getsimilar(symbols, value):
     # probably be investigated and tweaked.
     return [s for s in symbols if sim(s) > 0.6]
 
+def _reportsimilar(write, similar):
+    if len(similar) == 1:
+        write(_("(did you mean %s?)\n") % similar[0])
+    elif similar:
+        ss = ", ".join(sorted(similar))
+        write(_("(did you mean one of %s?)\n") % ss)
+
 def _formatparse(write, inst):
     similar = []
     if isinstance(inst, error.UnknownIdentifier):
@@ -71,12 +78,7 @@ def _formatparse(write, inst):
             write(_("unexpected leading whitespace\n"))
     else:
         write(_("hg: parse error: %s\n") % inst.args[0])
-        if similar:
-            if len(similar) == 1:
-                write(_("(did you mean %r?)\n") % similar[0])
-            else:
-                ss = ", ".join(sorted(similar))
-                write(_("(did you mean one of %s?)\n") % ss)
+        _reportsimilar(write, similar)
 
 def dispatch(req):
     "run the command specified in req.args"
@@ -107,6 +109,8 @@ def dispatch(req):
         return -1
     except error.ParseError as inst:
         _formatparse(ferr.write, inst)
+        if inst.hint:
+            ferr.write(_("(%s)\n") % inst.hint)
         return -1
 
     msg = ' '.join(' ' in a and repr(a) or a for a in req.args)
@@ -202,6 +206,8 @@ def _runcatch(req):
                 (inst.args[0], " ".join(inst.args[1])))
     except error.ParseError as inst:
         _formatparse(ui.warn, inst)
+        if inst.hint:
+            ui.warn(_("(%s)\n") % inst.hint)
         return -1
     except error.LockHeld as inst:
         if inst.errno == errno.ETIMEDOUT:
@@ -258,13 +264,14 @@ def _runcatch(req):
             if len(inst.args) == 2:
                 sim = _getsimilar(inst.args[1], inst.args[0])
                 if sim:
-                    ui.warn(_('(did you mean one of %s?)\n') %
-                            ', '.join(sorted(sim)))
+                    _reportsimilar(ui.warn, sim)
                     suggested = True
             if not suggested:
                 commands.help_(ui, 'shortlist')
     except error.InterventionRequired as inst:
         ui.warn("%s\n" % inst)
+        if inst.hint:
+            ui.warn(_("(%s)\n") % inst.hint)
         return 1
     except error.Abort as inst:
         ui.warn(_("abort: %s\n") % inst)
@@ -320,7 +327,6 @@ def _runcatch(req):
     except socket.error as inst:
         ui.warn(_("abort: %s\n") % inst.args[-1])
     except: # re-raises
-        myver = util.version()
         # For compatibility checking, we discard the portion of the hg
         # version after the + on the assumption that if a "normal
         # user" is running a build with a + in it the packager
@@ -328,8 +334,7 @@ def _runcatch(req):
         # 'make local' copy of hg (where the version number can be out
         # of date) will be clueful enough to notice the implausible
         # version number and try updating.
-        compare = myver.split('+')[0]
-        ct = tuplever(compare)
+        ct = util.versiontuple(n=2)
         worst = None, ct, ''
         if ui.config('ui', 'supportcontact', None) is None:
             for name, mod in extensions.extensions():
@@ -344,7 +349,7 @@ def _runcatch(req):
                 if testedwith == 'internal':
                     continue
 
-                tested = [tuplever(t) for t in testedwith.split()]
+                tested = [util.versiontuple(t, 2) for t in testedwith.split()]
                 if ct in tested:
                     continue
 
@@ -369,7 +374,8 @@ def _runcatch(req):
             warning = (_("** unknown exception encountered, "
                          "please report by visiting\n** ") + bugtracker + '\n')
         warning += ((_("** Python %s\n") % sys.version.replace('\n', '')) +
-                    (_("** Mercurial Distributed SCM (version %s)\n") % myver) +
+                    (_("** Mercurial Distributed SCM (version %s)\n") %
+                     util.version()) +
                     (_("** Extensions loaded: %s\n") %
                      ", ".join([x[0] for x in extensions.extensions()])))
         ui.log("commandexception", "%s\n%s\n", warning, traceback.format_exc())
@@ -377,15 +383,6 @@ def _runcatch(req):
         raise
 
     return -1
-
-def tuplever(v):
-    try:
-        # Assertion: tuplever is only used for extension compatibility
-        # checking. Otherwise, the discarding of extra version fields is
-        # incorrect.
-        return tuple([int(i) for i in v.split('.')[0:2]])
-    except ValueError:
-        return tuple()
 
 def aliasargs(fn, givenargs):
     args = getattr(fn, 'args', [])
@@ -437,6 +434,7 @@ class cmdalias(object):
         self.help = ''
         self.norepo = True
         self.optionalrepo = False
+        self.inferrepo = False
         self.badalias = None
         self.unknowncmd = False
 
@@ -502,6 +500,8 @@ class cmdalias(object):
                 self.norepo = False
             if cmd in commands.optionalrepo.split(' '):
                 self.optionalrepo = True
+            if cmd in commands.inferrepo.split(' '):
+                self.inferrepo = True
             if self.help.startswith("hg " + cmd):
                 # drop prefix in old-style help lines so hg shows the alias
                 self.help = self.help[4 + len(cmd):]
@@ -560,6 +560,8 @@ def addaliases(ui, cmdtable):
             commands.norepo += ' %s' % alias
         if aliasdef.optionalrepo:
             commands.optionalrepo += ' %s' % alias
+        if aliasdef.inferrepo:
+            commands.inferrepo += ' %s' % alias
 
 def _parse(ui, args):
     options = {}
@@ -726,9 +728,11 @@ def _checkshellalias(lui, ui, args, precheck=True):
         strict = True
         norepo = commands.norepo
         optionalrepo = commands.optionalrepo
+        inferrepo = commands.inferrepo
         def restorecommands():
             commands.norepo = norepo
             commands.optionalrepo = optionalrepo
+            commands.inferrepo = inferrepo
         cmdtable = commands.table.copy()
         addaliases(lui, cmdtable)
     else:
@@ -864,7 +868,7 @@ def _dispatch(req):
     if options['version']:
         return commands.version_(ui)
     if options['help']:
-        return commands.help_(ui, cmd, command=True)
+        return commands.help_(ui, cmd, command=cmd is not None)
     elif not cmd:
         return commands.help_(ui, 'shortlist')
 
@@ -976,9 +980,9 @@ def flameprofile(ui, func, fp):
     finally:
         thread.stop()
         thread.join()
-        print 'Collected %d stack frames (%d unique) in %2.2f seconds.' % (
+        print('Collected %d stack frames (%d unique) in %2.2f seconds.' % (
             time.clock() - start_time, thread.num_frames(),
-            thread.num_frames(unique=True))
+            thread.num_frames(unique=True)))
 
 
 def statprofile(ui, func, fp):

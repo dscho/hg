@@ -281,8 +281,8 @@ def buildmap(exp, context):
 def runmap(context, mapping, data):
     func, data, ctmpl = data
     d = func(context, mapping, data)
-    if callable(d):
-        d = d()
+    if util.safehasattr(d, 'itermaps'):
+        d = d.itermaps()
 
     lm = mapping.copy()
 
@@ -336,7 +336,7 @@ def diff(context, mapping, args):
     specifying files to include or exclude."""
     if len(args) > 2:
         # i18n: "diff" is a keyword
-        raise error.ParseError(_("diff expects one, two or no arguments"))
+        raise error.ParseError(_("diff expects zero, one, or two arguments"))
 
     def getpatterns(i):
         if i < len(args):
@@ -432,7 +432,7 @@ def get(context, mapping, args):
         raise error.ParseError(_("get() expects a dict as first argument"))
 
     key = args[1][0](context, mapping, args[1][1])
-    yield dictarg.get(key)
+    return dictarg.get(key)
 
 def if_(context, mapping, args):
     """:if(expr, then[, else]): Conditionally execute based on the result of
@@ -483,9 +483,9 @@ def join(context, mapping, args):
         raise error.ParseError(_("join expects one or two arguments"))
 
     joinset = args[0][0](context, mapping, args[0][1])
-    if callable(joinset):
+    if util.safehasattr(joinset, 'itermaps'):
         jf = joinset.joinfmt
-        joinset = [jf(x) for x in joinset()]
+        joinset = [jf(x) for x in joinset.itermaps()]
 
     joiner = " "
     if len(args) > 1:
@@ -832,7 +832,7 @@ def stylelist():
     paths = templatepaths()
     if not paths:
         return _('no templates found, try `hg debuginstall` for more info')
-    dirlist =  os.listdir(paths[0])
+    dirlist = os.listdir(paths[0])
     stylelist = []
     for file in dirlist:
         split = file.split(".")

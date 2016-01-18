@@ -5,11 +5,25 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from node import nullid
-from i18n import _
-import scmutil, util, osutil, parsers, encoding, pathutil, error
-import os, stat, errno
-import match as matchmod
+from __future__ import absolute_import
+
+import collections
+import errno
+import os
+import stat
+
+from .i18n import _
+from .node import nullid
+from . import (
+    encoding,
+    error,
+    match as matchmod,
+    osutil,
+    parsers,
+    pathutil,
+    scmutil,
+    util,
+)
 
 propertycache = util.propertycache
 filecache = scmutil.filecache
@@ -31,10 +45,18 @@ def _getfsnow(vfs):
     '''Get "now" timestamp on filesystem'''
     tmpfd, tmpname = vfs.mkstemp()
     try:
-        return util.statmtimesec(os.fstat(tmpfd))
+        return os.fstat(tmpfd).st_mtime
     finally:
         os.close(tmpfd)
         vfs.unlink(tmpname)
+
+def nonnormalentries(dmap):
+    '''Compute the nonnormal dirstate entries from the dmap'''
+    try:
+        return parsers.nonnormalentries(dmap)
+    except AttributeError:
+        return set(fname for fname, e in dmap.iteritems()
+                   if e[0] != 'n' or e[3] == -1)
 
 def _trypending(root, vfs, filename):
     '''Open  file to be read according to HG_PENDING environment variable
@@ -119,6 +141,10 @@ class dirstate(object):
         return self._copymap
 
     @propertycache
+    def _nonnormalset(self):
+        return nonnormalentries(self._map)
+
+    @propertycache
     def _filefoldmap(self):
         try:
             makefilefoldmap = parsers.make_file_foldmap
@@ -178,15 +204,7 @@ class dirstate(object):
 
     @rootcache('.hgignore')
     def _ignore(self):
-        files = []
-        if os.path.exists(self._join('.hgignore')):
-            files.append(self._join('.hgignore'))
-        for name, path in self._ui.configitems("ui"):
-            if name == 'ignore' or name.startswith('ignore.'):
-                # we need to use os.path.join here rather than self._join
-                # because path is arbitrary and user-specified
-                files.append(os.path.join(self._rootdir, util.expandpath(path)))
-
+        files = self._ignorefiles()
         if not files:
             return util.never
 
@@ -418,7 +436,7 @@ class dirstate(object):
 
     def invalidate(self):
         for a in ("_map", "_copymap", "_filefoldmap", "_dirfoldmap", "_branch",
-                  "_pl", "_dirs", "_ignore"):
+                  "_pl", "_dirs", "_ignore", "_nonnormalset"):
             if a in self.__dict__:
                 delattr(self, a)
         self._lastnormaltime = 0
@@ -467,15 +485,19 @@ class dirstate(object):
             self._dirs.addpath(f)
         self._dirty = True
         self._map[f] = dirstatetuple(state, mode, size, mtime)
+        if state != 'n' or mtime == -1:
+            self._nonnormalset.add(f)
 
     def normal(self, f):
         '''Mark a file normal and clean.'''
         s = os.lstat(self._join(f))
-        mtime = util.statmtimesec(s)
+        mtime = s.st_mtime
         self._addpath(f, 'n', s.st_mode,
                       s.st_size & _rangemask, mtime & _rangemask)
         if f in self._copymap:
             del self._copymap[f]
+        if f in self._nonnormalset:
+            self._nonnormalset.remove(f)
         if mtime > self._lastnormaltime:
             # Remember the most recent modification timeslot for status(),
             # to make sure we won't miss future size-preserving file content
@@ -503,6 +525,8 @@ class dirstate(object):
         self._addpath(f, 'n', 0, -1, -1)
         if f in self._copymap:
             del self._copymap[f]
+        if f in self._nonnormalset:
+            self._nonnormalset.remove(f)
 
     def otherparent(self, f):
         '''Mark as coming from the other parent, always dirty.'''
@@ -538,6 +562,7 @@ class dirstate(object):
             elif entry[0] == 'n' and entry[2] == -2: # other parent
                 size = -2
         self._map[f] = dirstatetuple('r', 0, size, 0)
+        self._nonnormalset.add(f)
         if size == 0 and f in self._copymap:
             del self._copymap[f]
 
@@ -553,6 +578,8 @@ class dirstate(object):
             self._dirty = True
             self._droppath(f)
             del self._map[f]
+            if f in self._nonnormalset:
+                self._nonnormalset.remove(f)
 
     def _discoverpath(self, path, normed, ignoremissing, exists, storemap):
         if exists is None:
@@ -630,6 +657,7 @@ class dirstate(object):
 
     def clear(self):
         self._map = {}
+        self._nonnormalset = set()
         if "_dirs" in self.__dict__:
             delattr(self, "_dirs")
         self._copymap = {}
@@ -639,30 +667,30 @@ class dirstate(object):
 
     def rebuild(self, parent, allfiles, changedfiles=None):
         if changedfiles is None:
+            # Rebuild entire dirstate
             changedfiles = allfiles
-        oldmap = self._map
-        self.clear()
-        for f in allfiles:
-            if f not in changedfiles:
-                self._map[f] = oldmap[f]
+            lastnormaltime = self._lastnormaltime
+            self.clear()
+            self._lastnormaltime = lastnormaltime
+
+        for f in changedfiles:
+            mode = 0o666
+            if f in allfiles and 'x' in allfiles.flags(f):
+                mode = 0o777
+
+            if f in allfiles:
+                self._map[f] = dirstatetuple('n', mode, -1, 0)
             else:
-                if 'x' in allfiles.flags(f):
-                    self._map[f] = dirstatetuple('n', 0o777, -1, 0)
-                else:
-                    self._map[f] = dirstatetuple('n', 0o666, -1, 0)
+                self._map.pop(f, None)
+                if f in self._nonnormalset:
+                    self._nonnormalset.remove(f)
+
         self._pl = (parent, nullid)
         self._dirty = True
 
     def write(self, tr=False):
         if not self._dirty:
             return
-
-        # enough 'delaywrite' prevents 'pack_dirstate' from dropping
-        # timestamp of each entries in dirstate, because of 'now > mtime'
-        delaywrite = self._ui.configint('debug', 'dirstate.delaywrite', 0)
-        if delaywrite > 0:
-            import time # to avoid useless import
-            time.sleep(delaywrite)
 
         filename = self._filename
         if tr is False: # not explicitly specified
@@ -689,6 +717,7 @@ class dirstate(object):
             for f, e in dmap.iteritems():
                 if e[0] == 'n' and e[3] == now:
                     dmap[f] = dirstatetuple(e[0], e[1], e[2], -1)
+                    self._nonnormalset.add(f)
 
             # emulate that all 'dirstate.normal' results are written out
             self._lastnormaltime = 0
@@ -704,8 +733,26 @@ class dirstate(object):
     def _writedirstate(self, st):
         # use the modification time of the newly created temporary file as the
         # filesystem's notion of 'now'
-        now = util.statmtimesec(util.fstat(st)) & _rangemask
+        now = util.fstat(st).st_mtime & _rangemask
+
+        # enough 'delaywrite' prevents 'pack_dirstate' from dropping
+        # timestamp of each entries in dirstate, because of 'now > mtime'
+        delaywrite = self._ui.configint('debug', 'dirstate.delaywrite', 0)
+        if delaywrite > 0:
+            # do we have any files to delay for?
+            for f, e in self._map.iteritems():
+                if e[0] == 'n' and e[3] == now:
+                    import time # to avoid useless import
+                    # rather than sleep n seconds, sleep until the next
+                    # multiple of n seconds
+                    clock = time.time()
+                    start = int(clock) - (int(clock) % delaywrite)
+                    end = start + delaywrite
+                    time.sleep(end - clock)
+                    break
+
         st.write(parsers.pack_dirstate(self._map, self._copymap, self._pl, now))
+        self._nonnormalset = nonnormalentries(self._map)
         st.close()
         self._lastnormaltime = 0
         self._dirty = self._dirtypl = False
@@ -719,6 +766,37 @@ class dirstate(object):
             if self._ignore(p):
                 return True
         return False
+
+    def _ignorefiles(self):
+        files = []
+        if os.path.exists(self._join('.hgignore')):
+            files.append(self._join('.hgignore'))
+        for name, path in self._ui.configitems("ui"):
+            if name == 'ignore' or name.startswith('ignore.'):
+                # we need to use os.path.join here rather than self._join
+                # because path is arbitrary and user-specified
+                files.append(os.path.join(self._rootdir, util.expandpath(path)))
+        return files
+
+    def _ignorefileandline(self, f):
+        files = collections.deque(self._ignorefiles())
+        visited = set()
+        while files:
+            i = files.popleft()
+            patterns = matchmod.readpatternfile(i, self._ui.warn,
+                                                sourceinfo=True)
+            for pattern, lineno, line in patterns:
+                kind, p = matchmod._patsplit(pattern, 'glob')
+                if kind == "subinclude":
+                    if p not in visited:
+                        files.append(p)
+                    continue
+                m = matchmod.match(self._root, '', [], [pattern],
+                                   warn=self._ui.warn)
+                if m(f):
+                    return (i, lineno, line)
+            visited.add(i)
+        return (None, -1, "")
 
     def _walkexplicit(self, match, subrepos):
         '''Get stat data about the files explicitly specified by match.
@@ -1008,14 +1086,8 @@ class dirstate(object):
                 # We may not have walked the full directory tree above,
                 # so stat and check everything we missed.
                 nf = iter(visit).next
-                pos = 0
-                while pos < len(visit):
-                    # visit in mid-sized batches so that we don't
-                    # block signals indefinitely
-                    xr = xrange(pos, min(len(visit), pos + 1000))
-                    for st in util.statfiles([join(visit[n]) for n in xr]):
-                        results[nf()] = st
-                    pos += 1000
+                for st in util.statfiles([join(i) for i in visit]):
+                    results[nf()] = st
         return results
 
     def status(self, match, subrepos, ignored, clean, unknown):
@@ -1084,16 +1156,15 @@ class dirstate(object):
             if not st and state in "nma":
                 dadd(fn)
             elif state == 'n':
-                mtime = util.statmtimesec(st)
                 if (size >= 0 and
                     ((size != st.st_size and size != st.st_size & _rangemask)
                      or ((mode ^ st.st_mode) & 0o100 and checkexec))
                     or size == -2 # other parent
                     or fn in copymap):
                     madd(fn)
-                elif time != mtime and time != mtime & _rangemask:
+                elif time != st.st_mtime and time != st.st_mtime & _rangemask:
                     ladd(fn)
-                elif mtime == lastnormaltime:
+                elif st.st_mtime == lastnormaltime:
                     # fn may have just been marked as normal and it may have
                     # changed in the same second without changing its size.
                     # This can happen if we quickly do multiple commits.

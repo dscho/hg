@@ -133,6 +133,8 @@ class _demandmod(object):
         self._load()
         setattr(self._module, attr, val)
 
+_pypy = '__pypy__' in sys.builtin_module_names
+
 def _demandimport(name, globals=None, locals=None, fromlist=None, level=level):
     if not locals or name in ignore or fromlist == ('*',):
         # these cases we can't really delay
@@ -182,16 +184,28 @@ def _demandimport(name, globals=None, locals=None, fromlist=None, level=level):
                 symbol._addref(globalname)
 
         if level >= 0:
-            # Mercurial's enforced import style does not use
-            # "from a import b,c,d" or "from .a import b,c,d" syntax. In
-            # addition, this appears to be giving errors with some modules
-            # for unknown reasons. Since we shouldn't be using this syntax
-            # much, work around the problems.
+            # The "from a import b,c,d" or "from .a import b,c,d"
+            # syntax gives errors with some modules for unknown
+            # reasons. Work around the problem.
             if name:
                 return _hgextimport(_origimport, name, globals, locals,
                                     fromlist, level)
 
-            mod = _hgextimport(_origimport, name, globals, locals, level=level)
+            if _pypy:
+                # PyPy's __import__ throws an exception if invoked
+                # with an empty name and no fromlist.  Recreate the
+                # desired behaviour by hand.
+                mn = globalname
+                mod = sys.modules[mn]
+                if getattr(mod, '__path__', nothing) is nothing:
+                    mn = mn.rsplit('.', 1)[0]
+                    mod = sys.modules[mn]
+                if level > 1:
+                    mn = mn.rsplit('.', level - 1)[0]
+                    mod = sys.modules[mn]
+            else:
+                mod = _hgextimport(_origimport, name, globals, locals,
+                                   level=level)
 
             for x in fromlist:
                 processfromitem(mod, x)

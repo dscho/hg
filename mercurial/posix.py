@@ -15,7 +15,6 @@ import os
 import pwd
 import re
 import select
-import socket
 import stat
 import sys
 import tempfile
@@ -29,7 +28,16 @@ from . import (
 posixfile = open
 normpath = os.path.normpath
 samestat = os.path.samestat
-oslink = os.link
+try:
+    oslink = os.link
+except AttributeError:
+    # Some platforms build Python without os.link on systems that are
+    # vaguely unix-like but don't have hardlink support. For those
+    # poor souls, just say we tried and that it failed so we fall back
+    # to copies.
+    def oslink(src, dst):
+        raise OSError(errno.EINVAL,
+                      'hardlinks not supported: %s to %s' % (src, dst))
 unlink = os.unlink
 rename = os.rename
 removedirs = os.removedirs
@@ -261,40 +269,17 @@ if sys.platform == 'darwin':
         except UnicodeDecodeError:
             # OS X percent-encodes any bytes that aren't valid utf-8
             s = ''
-            g = ''
-            l = 0
-            for c in path:
-                o = ord(c)
-                if l and o < 128 or o >= 192:
-                    # we want a continuation byte, but didn't get one
-                    s += ''.join(["%%%02X" % ord(x) for x in g])
-                    g = ''
-                    l = 0
-                if l == 0 and o < 128:
-                    # ascii
-                    s += c
-                elif l == 0 and 194 <= o < 245:
-                    # valid leading bytes
-                    if o < 224:
-                        l = 1
-                    elif o < 240:
-                        l = 2
-                    else:
-                        l = 3
-                    g = c
-                elif l > 0 and 128 <= o < 192:
-                    # valid continuations
-                    g += c
-                    l -= 1
-                    if not l:
-                        s += g
-                        g = ''
-                else:
-                    # invalid
-                    s += "%%%02X" % o
+            pos = 0
+            l = len(path)
+            while pos < l:
+                try:
+                    c = encoding.getutf8char(path, pos)
+                    pos += len(c)
+                except ValueError:
+                    c = '%%%02X' % ord(path[pos])
+                    pos += 1
+                s += c
 
-            # any remaining partial characters
-            s += ''.join(["%%%02X" % ord(x) for x in g])
             u = s.decode('utf-8')
 
         # Decompose then lowercase (HFS+ technote specifies lower)
@@ -568,46 +553,6 @@ class cachestat(object):
 
 def executablepath():
     return None # available on Windows only
-
-class unixdomainserver(socket.socket):
-    def __init__(self, join, subsystem):
-        '''Create a unix domain socket with the given prefix.'''
-        super(unixdomainserver, self).__init__(socket.AF_UNIX)
-        sockname = subsystem + '.sock'
-        self.realpath = self.path = join(sockname)
-        if os.path.islink(self.path):
-            if os.path.exists(self.path):
-                self.realpath = os.readlink(self.path)
-            else:
-                os.unlink(self.path)
-        try:
-            self.bind(self.realpath)
-        except socket.error as err:
-            if err.args[0] == 'AF_UNIX path too long':
-                tmpdir = tempfile.mkdtemp(prefix='hg-%s-' % subsystem)
-                self.realpath = os.path.join(tmpdir, sockname)
-                try:
-                    self.bind(self.realpath)
-                    os.symlink(self.realpath, self.path)
-                except (OSError, socket.error):
-                    self.cleanup()
-                    raise
-            else:
-                raise
-        self.listen(5)
-
-    def cleanup(self):
-        def okayifmissing(f, path):
-            try:
-                f(path)
-            except OSError as err:
-                if err.errno != errno.ENOENT:
-                    raise
-
-        okayifmissing(os.unlink, self.path)
-        if self.realpath != self.path:
-            okayifmissing(os.unlink, self.realpath)
-            okayifmissing(os.rmdir, os.path.dirname(self.realpath))
 
 def statislink(st):
     '''check whether a stat result is a symlink'''

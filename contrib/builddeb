@@ -8,12 +8,18 @@
 
 BUILD=1
 CLEANUP=1
-DEBVERSION=jessie
+DISTID=`(lsb_release -is 2> /dev/null | tr '[:upper:]' '[:lower:]') || echo debian`
+CODENAME=`lsb_release -cs 2> /dev/null || echo unknown`
 while [ "$1" ]; do
     case "$1" in
-    --release )
+    --distid )
         shift
-        DEBVERSION="$1"
+        DISTID="$1"
+        shift
+        ;;
+    --codename )
+        shift
+        CODENAME="$1"
         shift
         ;;
     --cleanup )
@@ -23,11 +29,6 @@ while [ "$1" ]; do
     --build )
         shift
         CLEANUP=
-        ;;
-    --debbuilddir )
-        shift
-        DEBBUILDDIR="$1"
-        shift
         ;;
     * )
         echo "Invalid parameter $1!" 1>&2
@@ -82,7 +83,8 @@ if [ "$BUILD" ]; then
 fi
 if [ "$CLEANUP" ] ; then
     echo
-    OUTPUTDIR=${OUTPUTDIR:=packages/debian-$DEBVERSION}
+    OUTPUTDIR=${OUTPUTDIR:=packages/$DISTID-$CODENAME}
+    mkdir -p "$OUTPUTDIR"
     find ../mercurial*.deb ../mercurial_*.build ../mercurial_*.changes \
           -type f -newer $control -print0 | \
       xargs -Inarf -0 mv narf "$OUTPUTDIR"

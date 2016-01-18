@@ -5,6 +5,8 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+from __future__ import absolute_import
+
 from .i18n import _
 from . import (
     bookmarks,
@@ -198,3 +200,21 @@ def destmerge(repo):
     else:
         node = _destmergebranch(repo)
     return repo[node].rev()
+
+histeditdefaultrevset = 'reverse(only(.) and not public() and not ::merge())'
+
+def desthistedit(ui, repo):
+    """Default base revision to edit for `hg histedit`."""
+    # Avoid cycle: scmutil -> revset -> destutil
+    from . import scmutil
+
+    default = ui.config('histedit', 'defaultrev', histeditdefaultrevset)
+    if default:
+        revs = scmutil.revrange(repo, [default])
+        if revs:
+            # The revset supplied by the user may not be in ascending order nor
+            # take the first revision. So do this manually.
+            revs.sort()
+            return revs.first()
+
+    return None

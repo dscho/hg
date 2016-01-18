@@ -6,14 +6,36 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import collections
-import cStringIO, email, os, errno, re, posixpath, copy
-import tempfile, zlib, shutil
+from __future__ import absolute_import
 
-from i18n import _
-from node import hex, short
-import base85, mdiff, scmutil, util, diffhelpers, copies, encoding, error
-import pathutil
+import cStringIO
+import collections
+import copy
+import email
+import errno
+import os
+import posixpath
+import re
+import shutil
+import tempfile
+import zlib
+
+from .i18n import _
+from .node import (
+    hex,
+    short,
+)
+from . import (
+    base85,
+    copies,
+    diffhelpers,
+    encoding,
+    error,
+    mdiff,
+    pathutil,
+    scmutil,
+    util,
+)
 
 gitre = re.compile('diff --git a/(.*) b/(.*)')
 tabsplitter = re.compile(r'(\t+|[^\t]+)')
@@ -1106,8 +1128,8 @@ the hunk is left unchanged.
                         applied[newhunk.filename()].append(newhunk)
             else:
                 fixoffset += chunk.removed - chunk.added
-    return sum([h for h in applied.itervalues()
-               if h[0].special() or len(h) > 1], [])
+    return (sum([h for h in applied.itervalues()
+               if h[0].special() or len(h) > 1], []), {})
 class hunk(object):
     def __init__(self, desc, num, lr, context):
         self.number = num
@@ -1446,7 +1468,7 @@ def reversehunks(hunks):
 
     '''
 
-    import crecord as crecordmod
+    from . import crecord as crecordmod
     newhunks = []
     for c in hunks:
         if isinstance(c, crecordmod.uihunk):
@@ -1491,7 +1513,6 @@ def parsepatch(originalchunks):
                 self.toline += len(self.before) + h.added
                 self.before = []
                 self.hunk = []
-                self.proc = ''
             self.context = context
 
         def addhunk(self, hunk):
@@ -2078,8 +2099,7 @@ def patch(ui, repo, patchname, strip=1, prefix='', files=None, eolmode='strict',
 
 def changedfiles(ui, repo, patchpath, strip=1):
     backend = fsbackend(ui, repo.root)
-    fp = open(patchpath, 'rb')
-    try:
+    with open(patchpath, 'rb') as fp:
         changed = set()
         for state, values in iterhunks(fp):
             if state == 'file':
@@ -2097,8 +2117,6 @@ def changedfiles(ui, repo, patchpath, strip=1):
             elif state not in ('hunk', 'git'):
                 raise error.Abort(_('unsupported parser state: %s') % state)
         return changed
-    finally:
-        fp.close()
 
 class GitDiffRequired(Exception):
     pass
@@ -2146,7 +2164,7 @@ def difffeatureopts(ui, opts=None, untrusted=False, section='diff', git=False,
                                             'ignoreblanklines')
     if formatchanging:
         buildopts['text'] = opts and opts.get('text')
-        buildopts['nobinary'] = get('nobinary')
+        buildopts['nobinary'] = get('nobinary', forceplain=False)
         buildopts['noprefix'] = get('noprefix', forceplain=False)
 
     return mdiff.diffopts(**buildopts)
@@ -2238,6 +2256,29 @@ def diff(repo, node1=None, node2=None, match=None, changes=None, opts=None,
                      if dst.startswith(relroot)
                      and src.startswith(relroot)))
 
+    modifiedset = set(modified)
+    addedset = set(added)
+    removedset = set(removed)
+    for f in modified:
+        if f not in ctx1:
+            # Fix up added, since merged-in additions appear as
+            # modifications during merges
+            modifiedset.remove(f)
+            addedset.add(f)
+    for f in removed:
+        if f not in ctx1:
+            # Merged-in additions that are then removed are reported as removed.
+            # They are not in ctx1, so We don't want to show them in the diff.
+            removedset.remove(f)
+    modified = sorted(modifiedset)
+    added = sorted(addedset)
+    removed = sorted(removedset)
+    for dst, src in copy.items():
+        if src not in ctx1:
+            # Files merged in during a merge and then copied/renamed are
+            # reported as copies. We want to show them in the diff as additions.
+            del copy[dst]
+
     def difffn(opts, losedata):
         return trydiff(repo, revs, ctx1, ctx2, modified, added, removed,
                        copy, getfilectx, opts, losedata, prefix, relroot)
@@ -2309,7 +2350,7 @@ def diffui(*args, **kw):
     '''like diff(), but yields 2-tuples of (output, label) for ui.write()'''
     return difflabel(diff, *args, **kw)
 
-def _filepairs(ctx1, modified, added, removed, copy, opts):
+def _filepairs(modified, added, removed, copy, opts):
     '''generates tuples (f1, f2, copyop), where f1 is the name of the file
     before and f2 is the the name after. For added files, f1 will be None,
     and for removed files, f2 will be None. copyop may be set to None, 'copy'
@@ -2319,11 +2360,6 @@ def _filepairs(ctx1, modified, added, removed, copy, opts):
     copyto = dict([(v, k) for k, v in copy.items()])
 
     addedset, removedset = set(added), set(removed)
-    # Fix up  added, since merged-in additions appear as
-    # modifications during merges
-    for f in modified:
-        if f not in ctx1:
-            addedset.add(f)
 
     for f in sorted(modified + added + removed):
         copyop = None
@@ -2389,8 +2425,7 @@ def trydiff(repo, revs, ctx1, ctx2, modified, added, removed,
                 raise AssertionError(
                     "file %s doesn't start with relroot %s" % (f, relroot))
 
-    for f1, f2, copyop in _filepairs(
-            ctx1, modified, added, removed, copy, opts):
+    for f1, f2, copyop in _filepairs(modified, added, removed, copy, opts):
         content1 = None
         content2 = None
         flag1 = None

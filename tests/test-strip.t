@@ -1,3 +1,5 @@
+  $ echo "[format]" >> $HGRCPATH
+  $ echo "usegeneraldelta=yes" >> $HGRCPATH
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "strip=" >> $HGRCPATH
 
@@ -208,7 +210,9 @@
   summary:     b
   
   $ hg debugbundle .hg/strip-backup/*
-  264128213d290d868c54642d13aeaa3675551a78
+  Stream params: {'Compression': 'BZ'}
+  changegroup -- "{'version': '02'}"
+      264128213d290d868c54642d13aeaa3675551a78
   $ hg pull .hg/strip-backup/*
   pulling from .hg/strip-backup/264128213d29-0b39d6bf-backup.hg
   searching for changes
@@ -548,12 +552,19 @@ Strip adds, removes, modifies with --keep
   $ echo b > b
   $ echo d > d
   $ hg strip --keep tip
-  saved backup bundle to $TESTTMP/test/.hg/strip-backup/57e364c8a475-4cfed93c-backup.hg (glob)
+  saved backup bundle to $TESTTMP/test/.hg/strip-backup/*-backup.hg (glob)
   $ hg status
   M b
   ! bar
   ? c
   ? d
+
+... after updating the dirstate
+  $ hg add c
+  $ hg commit -mc
+  $ hg rm c
+  $ hg commit -mc
+  $ hg strip --keep '.^' -q
   $ cd ..
 
 stripping many nodes on a complex graph (issue3299)
@@ -569,11 +580,15 @@ test hg strip -B bookmark
   $ cd ..
   $ hg init bookmarks
   $ cd bookmarks
-  $ hg debugbuilddag '..<2.*1/2:m<2+3:c<m+3:a<2.:b'
+  $ hg debugbuilddag '..<2.*1/2:m<2+3:c<m+3:a<2.:b<m+2:d<2.:e<m+1:f'
   $ hg bookmark -r 'a' 'todelete'
   $ hg bookmark -r 'b' 'B'
   $ hg bookmark -r 'b' 'nostrip'
   $ hg bookmark -r 'c' 'delete'
+  $ hg bookmark -r 'd' 'multipledelete1'
+  $ hg bookmark -r 'e' 'multipledelete2'
+  $ hg bookmark -r 'f' 'singlenode1'
+  $ hg bookmark -r 'f' 'singlenode2'
   $ hg up -C todelete
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (activating bookmark todelete)
@@ -593,6 +608,36 @@ test hg strip -B bookmark
   $ hg bookmarks
      B                         9:ff43616e5d0f
      delete                    6:2702dd0c91e7
+     multipledelete1           11:e46a4836065c
+     multipledelete2           12:b4594d867745
+     singlenode1               13:43227190fef8
+     singlenode2               13:43227190fef8
+  $ hg strip -B multipledelete1 -B multipledelete2
+  saved backup bundle to $TESTTMP/bookmarks/.hg/strip-backup/e46a4836065c-89ec65c2-backup.hg (glob)
+  bookmark 'multipledelete1' deleted
+  bookmark 'multipledelete2' deleted
+  $ hg id -ir e46a4836065c
+  abort: unknown revision 'e46a4836065c'!
+  [255]
+  $ hg id -ir b4594d867745
+  abort: unknown revision 'b4594d867745'!
+  [255]
+  $ hg strip -B singlenode1 -B singlenode2
+  saved backup bundle to $TESTTMP/bookmarks/.hg/strip-backup/43227190fef8-8da858f2-backup.hg (glob)
+  bookmark 'singlenode1' deleted
+  bookmark 'singlenode2' deleted
+  $ hg id -ir 43227190fef8
+  abort: unknown revision '43227190fef8'!
+  [255]
+  $ hg strip -B unknownbookmark
+  abort: bookmark 'unknownbookmark' not found
+  [255]
+  $ hg strip -B unknownbookmark1 -B unknownbookmark2
+  abort: bookmark 'unknownbookmark1,unknownbookmark2' not found
+  [255]
+  $ hg strip -B delete -B unknownbookmark
+  abort: bookmark 'unknownbookmark' not found
+  [255]
   $ hg strip -B delete
   saved backup bundle to $TESTTMP/bookmarks/.hg/strip-backup/*-backup.hg (glob)
   bookmark 'delete' deleted
@@ -622,14 +667,14 @@ Make sure no one adds back a -b option:
   
   options ([+] can be repeated):
   
-   -r --rev REV [+]    strip specified revision (optional, can specify revisions
-                       without this option)
-   -f --force          force removal of changesets, discard uncommitted changes
-                       (no backup)
-      --no-backup      no backups
-   -k --keep           do not modify working directory during strip
-   -B --bookmark VALUE remove revs only reachable from given bookmark
-      --mq             operate on patch repository
+   -r --rev REV [+]        strip specified revision (optional, can specify
+                           revisions without this option)
+   -f --force              force removal of changesets, discard uncommitted
+                           changes (no backup)
+      --no-backup          no backups
+   -k --keep               do not modify working directory during strip
+   -B --bookmark VALUE [+] remove revs only reachable from given bookmark
+      --mq                 operate on patch repository
   
   (use "hg strip -h" to show more help)
   [255]
@@ -751,6 +796,8 @@ check strip behavior
   list of changesets:
   6625a516847449b6f0fa3737b9ba56e9f0f3032c
   d8db9d1372214336d2b5570f20ee468d2c72fa8b
+  bundle2-output-bundle: "HG20", (1 params) 1 parts total
+  bundle2-output-part: "changegroup" (params: 1 mandatory) streamed payload
   saved backup bundle to $TESTTMP/issue4736/.hg/strip-backup/6625a5168474-345bb43d-backup.hg (glob)
   invalid branchheads cache (served): tip differs
   truncating cache/rbc-revs-v1 to 24

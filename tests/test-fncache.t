@@ -96,6 +96,7 @@ Non store repo:
   .hg/phaseroots
   .hg/requires
   .hg/undo
+  .hg/undo.backup.dirstate
   .hg/undo.backupfiles
   .hg/undo.bookmarks
   .hg/undo.branch
@@ -132,6 +133,7 @@ Non fncache repo:
   .hg/store/undo
   .hg/store/undo.backupfiles
   .hg/store/undo.phaseroots
+  .hg/undo.backup.dirstate
   .hg/undo.bookmarks
   .hg/undo.branch
   .hg/undo.desc
@@ -203,18 +205,36 @@ Aborting lock does not prevent fncache writes
   $ cat > exceptionext.py <<EOF
   > import os
   > from mercurial import commands, error
-  > from mercurial.extensions import wrapfunction
+  > from mercurial.extensions import wrapcommand, wrapfunction
   > 
   > def lockexception(orig, vfs, lockname, wait, releasefn, *args, **kwargs):
   >     def releasewrap():
+  >         l.held = False # ensure __del__ is a noop
   >         raise error.Abort("forced lock failure")
-  >     return orig(vfs, lockname, wait, releasewrap, *args, **kwargs)
+  >     l = orig(vfs, lockname, wait, releasewrap, *args, **kwargs)
+  >     return l
   > 
   > def reposetup(ui, repo):
   >     wrapfunction(repo, '_lock', lockexception)
   > 
   > cmdtable = {}
   > 
+  > # wrap "commit" command to prevent wlock from being '__del__()'-ed
+  > # at the end of dispatching (for intentional "forced lcok failure")
+  > def commitwrap(orig, ui, repo, *pats, **opts):
+  >     repo = repo.unfiltered() # to use replaced repo._lock certainly
+  >     wlock = repo.wlock()
+  >     try:
+  >         return orig(ui, repo, *pats, **opts)
+  >     finally:
+  >         # multiple 'relase()' is needed for complete releasing wlock,
+  >         # because "forced" abort at last releasing store lock
+  >         # prevents wlock from being released at same 'lockmod.release()'
+  >         for i in range(wlock.held):
+  >             wlock.release()
+  > 
+  > def extsetup(ui):
+  >     wrapcommand(commands.table, "commit", commitwrap)
   > EOF
   $ extpath=`pwd`/exceptionext.py
   $ hg init fncachetxn

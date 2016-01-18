@@ -5,16 +5,35 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-from node import hex, nullid
-import errno, urllib, urllib2
-import util, scmutil, changegroup, base85, error
-import discovery, phases, obsolete, bookmarks as bookmod, bundle2, pushkey
-import lock as lockmod
-import streamclone
-import sslutil
-import tags
-import url as urlmod
+from __future__ import absolute_import
+
+import errno
+import urllib
+import urllib2
+
+from .i18n import _
+from .node import (
+    hex,
+    nullid,
+)
+from . import (
+    base85,
+    bookmarks as bookmod,
+    bundle2,
+    changegroup,
+    discovery,
+    error,
+    lock as lockmod,
+    obsolete,
+    phases,
+    pushkey,
+    scmutil,
+    sslutil,
+    streamclone,
+    tags,
+    url as urlmod,
+    util,
+)
 
 # Maps bundle compression human names to internal representation.
 _bundlespeccompressions = {'none': None,
@@ -167,6 +186,59 @@ def readbundle(ui, fh, fname, vfs=None):
         return streamclone.streamcloneapplier(fh)
     else:
         raise error.Abort(_('%s: unknown bundle version %s') % (fname, version))
+
+def getbundlespec(ui, fh):
+    """Infer the bundlespec from a bundle file handle.
+
+    The input file handle is seeked and the original seek position is not
+    restored.
+    """
+    def speccompression(alg):
+        for k, v in _bundlespeccompressions.items():
+            if v == alg:
+                return k
+        return None
+
+    b = readbundle(ui, fh, None)
+    if isinstance(b, changegroup.cg1unpacker):
+        alg = b._type
+        if alg == '_truncatedBZ':
+            alg = 'BZ'
+        comp = speccompression(alg)
+        if not comp:
+            raise error.Abort(_('unknown compression algorithm: %s') % alg)
+        return '%s-v1' % comp
+    elif isinstance(b, bundle2.unbundle20):
+        if 'Compression' in b.params:
+            comp = speccompression(b.params['Compression'])
+            if not comp:
+                raise error.Abort(_('unknown compression algorithm: %s') % comp)
+        else:
+            comp = 'none'
+
+        version = None
+        for part in b.iterparts():
+            if part.type == 'changegroup':
+                version = part.params['version']
+                if version in ('01', '02'):
+                    version = 'v2'
+                else:
+                    raise error.Abort(_('changegroup version %s does not have '
+                                        'a known bundlespec') % version,
+                                      hint=_('try upgrading your Mercurial '
+                                              'client'))
+
+        if not version:
+            raise error.Abort(_('could not identify changegroup version in '
+                                'bundle'))
+
+        return '%s-%s' % (comp, version)
+    elif isinstance(b, streamclone.streamcloneapplier):
+        requirements = streamclone.readbundle1header(fh)[2]
+        params = 'requirements=%s' % ','.join(sorted(requirements))
+        return 'none-packed1;%s' % urllib.quote(params)
+    else:
+        raise error.Abort(_('unknown bundle type: %s') % b)
 
 def buildobsmarkerspart(bundler, markers):
     """add an obsmarker part to the bundler with <markers>
@@ -571,13 +643,7 @@ def _pushcheckoutgoing(pushop):
                 elif ctx.troubled():
                     raise error.Abort(mst[ctx.troubles()[0]] % ctx)
 
-        # internal config: bookmarks.pushing
-        newbm = pushop.ui.configlist('bookmarks', 'pushing')
-        discovery.checkheads(unfi, pushop.remote, outgoing,
-                             pushop.remoteheads,
-                             pushop.newbranch,
-                             bool(pushop.incoming),
-                             newbm)
+        discovery.checkheads(pushop)
     return True
 
 # List of names of steps to perform for an outgoing bundle2, order matters.
@@ -640,7 +706,8 @@ def _pushb2ctx(pushop, bundler):
         cg = changegroup.getlocalchangegroupraw(pushop.repo, 'push',
                                                 pushop.outgoing)
     else:
-        cgversions = [v for v in cgversions if v in changegroup.packermap]
+        cgversions = [v for v in cgversions
+                      if v in changegroup.supportedversions(pushop.repo)]
         if not cgversions:
             raise ValueError(_('no common changegroup version'))
         version = max(cgversions)
@@ -1386,10 +1453,14 @@ def _pullobsolete(pullop):
         remoteobs = pullop.remote.listkeys('obsolete')
         if 'dump0' in remoteobs:
             tr = pullop.gettransaction()
+            markers = []
             for key in sorted(remoteobs, reverse=True):
                 if key.startswith('dump'):
                     data = base85.b85decode(remoteobs[key])
-                    pullop.repo.obsstore.mergemarkers(tr, data)
+                    version, newmarks = obsolete._readmarkers(data)
+                    markers += newmarks
+            if markers:
+                pullop.repo.obsstore.add(tr, markers)
             pullop.repo.invalidatevolatilesets()
     return tr
 
@@ -1427,6 +1498,11 @@ def getbundle2partsgenerator(stepname, idx=None):
         return func
     return dec
 
+def bundle2requested(bundlecaps):
+    if bundlecaps is not None:
+        return any(cap.startswith('HG2') for cap in bundlecaps)
+    return False
+
 def getbundle(repo, source, heads=None, common=None, bundlecaps=None,
               **kwargs):
     """return a full bundle (with potentially multiple kind of parts)
@@ -1442,10 +1518,8 @@ def getbundle(repo, source, heads=None, common=None, bundlecaps=None,
     The implementation is at a very early stage and will get massive rework
     when the API of bundle is refined.
     """
+    usebundle2 = bundle2requested(bundlecaps)
     # bundle10 case
-    usebundle2 = False
-    if bundlecaps is not None:
-        usebundle2 = any((cap.startswith('HG2') for cap in bundlecaps))
     if not usebundle2:
         if bundlecaps and not kwargs.get('cg', True):
             raise ValueError(_('request for bundle10 must include changegroup'))
@@ -1485,7 +1559,8 @@ def _getbundlechangegrouppart(bundler, repo, source, bundlecaps=None,
         cgversions = b2caps.get('changegroup')
         getcgkwargs = {}
         if cgversions:  # 3.1 and 3.2 ship with an empty value
-            cgversions = [v for v in cgversions if v in changegroup.packermap]
+            cgversions = [v for v in cgversions
+                          if v in changegroup.supportedversions(repo)]
             if not cgversions:
                 raise ValueError(_('no common changegroup version'))
             version = getcgkwargs['version'] = max(cgversions)
@@ -1499,6 +1574,8 @@ def _getbundlechangegrouppart(bundler, repo, source, bundlecaps=None,
         if version is not None:
             part.addparam('version', version)
         part.addparam('nbchanges', str(len(outgoing.missing)), mandatory=False)
+        if 'treemanifest' in repo.requirements:
+            part.addparam('treemanifest', '1')
 
 @getbundle2partsgenerator('listkeys')
 def _getbundlelistkeysparts(bundler, repo, source, bundlecaps=None,
@@ -1655,7 +1732,7 @@ def _maybeapplyclonebundle(pullop):
     repo = pullop.repo
     remote = pullop.remote
 
-    if not repo.ui.configbool('experimental', 'clonebundles', False):
+    if not repo.ui.configbool('ui', 'clonebundles', True):
         return
 
     # Only run if local repo is empty.
@@ -1711,7 +1788,7 @@ def _maybeapplyclonebundle(pullop):
                           hint=_('if this error persists, consider contacting '
                                  'the server operator or disable clone '
                                  'bundles via '
-                                 '"--config experimental.clonebundles=false"'))
+                                 '"--config ui.clonebundles=false"'))
 
 def parseclonebundlesmanifest(repo, s):
     """Parses the raw text of a clone bundles manifest.
@@ -1783,8 +1860,7 @@ def filterclonebundleentries(repo, entries):
     return newentries
 
 def sortclonebundleentries(ui, entries):
-    # experimental config: experimental.clonebundleprefers
-    prefers = ui.configlist('experimental', 'clonebundleprefers', default=[])
+    prefers = ui.configlist('ui', 'clonebundleprefers', default=[])
     if not prefers:
         return list(entries)
 

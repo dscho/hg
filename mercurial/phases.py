@@ -308,9 +308,19 @@ class phasecache(object):
                 raise error.Abort(_('cannot change null revision phase'))
             currentroots = currentroots.copy()
             currentroots.update(newroots)
-            ctxs = repo.set('roots(%ln::)', currentroots)
-            currentroots.intersection_update(ctx.node() for ctx in ctxs)
-            self._updateroots(targetphase, currentroots, tr)
+
+            # Only compute new roots for revs above the roots that are being
+            # retracted.
+            minnewroot = min(repo[n].rev() for n in newroots)
+            aboveroots = [n for n in currentroots
+                          if repo[n].rev() >= minnewroot]
+            updatedroots = repo.set('roots(%ln::)', aboveroots)
+
+            finalroots = set(n for n in currentroots if repo[n].rev() <
+                             minnewroot)
+            finalroots.update(ctx.node() for ctx in updatedroots)
+
+            self._updateroots(targetphase, finalroots, tr)
         repo.invalidatevolatilesets()
 
     def filterunknown(self, repo):
@@ -394,26 +404,19 @@ def listphases(repo):
 def pushphase(repo, nhex, oldphasestr, newphasestr):
     """List phases root for serialization over pushkey"""
     repo = repo.unfiltered()
-    tr = None
-    lock = repo.lock()
-    try:
+    with repo.lock():
         currentphase = repo[nhex].phase()
         newphase = abs(int(newphasestr)) # let's avoid negative index surprise
         oldphase = abs(int(oldphasestr)) # let's avoid negative index surprise
         if currentphase == oldphase and newphase < oldphase:
-            tr = repo.transaction('pushkey-phase')
-            advanceboundary(repo, tr, newphase, [bin(nhex)])
-            tr.close()
+            with repo.transaction('pushkey-phase') as tr:
+                advanceboundary(repo, tr, newphase, [bin(nhex)])
             return 1
         elif currentphase == newphase:
             # raced, but got correct result
             return 1
         else:
             return 0
-    finally:
-        if tr:
-            tr.release()
-        lock.release()
 
 def analyzeremotephases(repo, subset, roots):
     """Compute phases heads and root in a subset of node from root dict

@@ -1163,6 +1163,12 @@ test '0000' != '0' in `_list`
   0
   -1
 
+test ',' in `_list`
+  $ log '0,1'
+  hg: parse error: can't use a list in this context
+  (see hg help "revsets.x or y")
+  [255]
+
 test that chained `or` operations make balanced addsets
 
   $ try '0:1|1:2|2:3|3:4|4:5'
@@ -1476,11 +1482,11 @@ parentrevspec
 Bogus function gets suggestions
   $ log 'add()'
   hg: parse error: unknown identifier: add
-  (did you mean 'adds'?)
+  (did you mean adds?)
   [255]
   $ log 'added()'
   hg: parse error: unknown identifier: added
-  (did you mean 'adds'?)
+  (did you mean adds?)
   [255]
   $ log 'remo()'
   hg: parse error: unknown identifier: remo
@@ -1493,7 +1499,7 @@ Bogus function gets suggestions
 Bogus function with a similar internal name doesn't suggest the internal name
   $ log 'matches()'
   hg: parse error: unknown identifier: matches
-  (did you mean 'matching'?)
+  (did you mean matching?)
   [255]
 
 Undocumented functions aren't suggested as similar either
@@ -2181,5 +2187,45 @@ test error message of bad revset
   $ hg log -r 'foo\\'
   hg: parse error at 3: syntax error in revset 'foo\\'
   [255]
+
+  $ cd ..
+
+Test registrar.delayregistrar via revset.extpredicate
+
+'extpredicate' decorator shouldn't register any functions until
+'setup()' on it.
+
+  $ cd repo
+
+  $ cat <<EOF > $TESTTMP/custompredicate.py
+  > from mercurial import revset
+  > 
+  > revsetpredicate = revset.extpredicate()
+  > 
+  > @revsetpredicate('custom1()')
+  > def custom1(repo, subset, x):
+  >     return revset.baseset([1])
+  > @revsetpredicate('custom2()')
+  > def custom2(repo, subset, x):
+  >     return revset.baseset([2])
+  > 
+  > def uisetup(ui):
+  >     if ui.configbool('custompredicate', 'enabled'):
+  >         revsetpredicate.setup()
+  > EOF
+  $ cat <<EOF > .hg/hgrc
+  > [extensions]
+  > custompredicate = $TESTTMP/custompredicate.py
+  > EOF
+
+  $ hg debugrevspec "custom1()"
+  hg: parse error: unknown identifier: custom1
+  [255]
+  $ hg debugrevspec "custom2()"
+  hg: parse error: unknown identifier: custom2
+  [255]
+  $ hg debugrevspec "custom1() or custom2()" --config custompredicate.enabled=true
+  1
+  2
 
   $ cd ..

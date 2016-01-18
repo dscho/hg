@@ -11,8 +11,8 @@ a setting into your environment.
 See :hg:`help config.syntax` and :hg:`help config.files`
 for information about how and where to override things.
 
-Format
-======
+Structure
+=========
 
 The configuration files use a simple ini-file format. A configuration
 file consists of sections, led by a ``[section]`` header and followed
@@ -30,10 +30,19 @@ Files
 
 Mercurial reads configuration data from several files, if they exist.
 These files do not exist by default and you will have to create the
-appropriate configuration files yourself: global configuration like
-the username setting is typically put into
-``%USERPROFILE%\mercurial.ini`` or ``$HOME/.hgrc`` and local
-configuration is put into the per-repository ``<repo>/.hg/hgrc`` file.
+appropriate configuration files yourself:
+
+Local configuration is put into the per-repository ``<repo>/.hg/hgrc`` file.
+
+Global configuration like the username setting is typically put into:
+
+.. container:: windows
+
+  ``%USERPROFILE%\mercurial.ini``
+
+.. container:: unix.plan9
+
+  ``$HOME/.hgrc``
 
 The names of these files depend on the system on which Mercurial is
 installed. ``*.rc`` files from a single directory are read in
@@ -72,6 +81,10 @@ ones.
    The registry key ``HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Mercurial``
    is used when running 32-bit Python on 64-bit Windows.
 
+.. container:: windows
+
+  On Windows 9x, ``%HOME%`` is replaced by ``%APPDATA%``.
+
 .. container:: verbose.plan9
 
   On Plan9, the following files are consulted:
@@ -87,23 +100,29 @@ ones.
 Per-repository configuration options only apply in a
 particular repository. This file is not version-controlled, and
 will not get transferred during a "clone" operation. Options in
-this file override options in all other configuration files. On
-Plan 9 and Unix, most of this file will be ignored if it doesn't
-belong to a trusted user or to a trusted group. See
-:hg:`help config.trusted` for more details.
+this file override options in all other configuration files.
 
-Per-user configuration file(s) are for the user running Mercurial. On
-Windows 9x, ``%HOME%`` is replaced by ``%APPDATA%``. Options in these
-files apply to all Mercurial commands executed by this user in any
+.. container:: unix.plan9
+
+  On Plan 9 and Unix, most of this file will be ignored if it doesn't
+  belong to a trusted user or to a trusted group. See
+  :hg:`help config.trusted` for more details.
+
+Per-user configuration file(s) are for the user running Mercurial.  Options
+in these files apply to all Mercurial commands executed by this user in any
 directory. Options in these files override per-system and per-installation
 options.
 
 Per-installation configuration files are searched for in the
 directory where Mercurial is installed. ``<install-root>`` is the
-parent directory of the **hg** executable (or symlink) being run. For
-example, if installed in ``/shared/tools/bin/hg``, Mercurial will look
-in ``/shared/tools/etc/mercurial/hgrc``. Options in these files apply
-to all Mercurial commands executed by any user in any directory.
+parent directory of the **hg** executable (or symlink) being run.
+
+.. container:: unix.plan9
+
+  For example, if installed in ``/shared/tools/bin/hg``, Mercurial
+  will look in ``/shared/tools/etc/mercurial/hgrc``. Options in these
+  files apply to all Mercurial commands executed by any user in any
+  directory.
 
 Per-installation configuration files are for the system on
 which Mercurial is running. Options in these files apply to all
@@ -516,11 +535,13 @@ filtered by the command. The string ``OUTFILE`` is replaced with the name
 of an empty temporary file, where the filtered data must be written by
 the command.
 
-.. note::
+.. container:: windows
 
-   The tempfile mechanism is recommended for Windows systems,
-   where the standard shell I/O redirection operators often have
-   strange effects and may corrupt the contents of your files.
+   .. note::
+
+     The tempfile mechanism is recommended for Windows systems,
+     where the standard shell I/O redirection operators often have
+     strange effects and may corrupt the contents of your files.
 
 This filter mechanism is used internally by the ``eol`` extension to
 translate line ending characters between Windows (CRLF) and Unix (LF)
@@ -666,29 +687,45 @@ Example for ``~/.hgrc``::
 ``format``
 ----------
 
-``usestore``
-    Enable or disable the "store" repository format which improves
-    compatibility with systems that fold case or otherwise mangle
-    filenames. Enabled by default. Disabling this option will allow
-    you to store longer filenames in some situations at the expense of
-    compatibility and ensures that the on-disk format of newly created
-    repositories will be compatible with Mercurial before version 0.9.4.
+``usegeneraldelta``
+    Enable or disable the "generaldelta" repository format which improves
+    repository compression by allowing "revlog" to store delta against arbitrary
+    revision instead of the previous stored one. This provides significant
+    improvement for repositories with branches.
 
-``usefncache``
-    Enable or disable the "fncache" repository format which enhances
-    the "store" repository format (which has to be enabled to use
-    fncache) to allow longer filenames and avoids using Windows
-    reserved names, e.g. "nul". Enabled by default. Disabling this
-    option ensures that the on-disk format of newly created
-    repositories will be compatible with Mercurial before version 1.1.
+    Repositories with this on-disk format require Mercurial version 1.9.
+
+    Enabled by default.
 
 ``dotencode``
     Enable or disable the "dotencode" repository format which enhances
     the "fncache" repository format (which has to be enabled to use
     dotencode) to avoid issues with filenames starting with ._ on
-    Mac OS X and spaces on Windows. Enabled by default. Disabling this
-    option ensures that the on-disk format of newly created
-    repositories will be compatible with Mercurial before version 1.7.
+    Mac OS X and spaces on Windows.
+
+    Repositories with this on-disk format require Mercurial version 1.7.
+
+    Enabled by default.
+
+``usefncache``
+    Enable or disable the "fncache" repository format which enhances
+    the "store" repository format (which has to be enabled to use
+    fncache) to allow longer filenames and avoids using Windows
+    reserved names, e.g. "nul".
+
+    Repositories with this on-disk format require Mercurial version 1.1.
+
+    Enabled by default.
+
+``usestore``
+    Enable or disable the "store" repository format which improves
+    compatibility with systems that fold case or otherwise mangle
+    filenames. Disabling this option will allow you to store longer filenames
+    in some situations at the expense of compatibility.
+
+    Repositories with this on-disk format require Mercurial version 0.9.4.
+
+    Enabled by default.
 
 ``graph``
 ---------
@@ -726,7 +763,7 @@ various actions such as starting or finishing a commit. Multiple
 hooks can be run for the same action by appending a suffix to the
 action. Overriding a site-wide hook can be done by changing its
 value or setting it to an empty string.  Hooks can be prioritized
-by adding a prefix of ``priority`` to the hook name on a new line
+by adding a prefix of ``priority.`` to the hook name on a new line
 and setting the priority. The default priority is 0.
 
 Example ``.hg/hgrc``::
@@ -746,9 +783,9 @@ additional information. For each hook below, the environment
 variables it is passed are listed with names of the form ``$HG_foo``.
 
 ``changegroup``
-  Run after a changegroup has been added via push, pull or unbundle.
-  ID of the first new changeset is in ``$HG_NODE``. URL from which
-  changes came is in ``$HG_URL``.
+  Run after a changegroup has been added via push, pull or unbundle.  ID of the
+  first new changeset is in ``$HG_NODE`` and last in ``$HG_NODE_LAST``. URL
+  from which changes came is in ``$HG_URL``.
 
 ``commit``
   Run after a changeset has been created in the local repository. ID
@@ -779,7 +816,7 @@ variables it is passed are listed with names of the form ``$HG_foo``.
   command line are passed as ``$HG_ARGS``. Parsed command line arguments
   are passed as ``$HG_PATS`` and ``$HG_OPTS``. These contain string
   representations of the data internally passed to <command>. ``$HG_OPTS``
-  is a  dictionary of options (with unspecified options set to their
+  is a dictionary of options (with unspecified options set to their
   defaults). ``$HG_PATS`` is a list of arguments. If the hook returns
   failure, the command doesn't execute and Mercurial returns the failure
   code.
@@ -830,17 +867,16 @@ variables it is passed are listed with names of the form ``$HG_foo``.
   transaction from being opened.
 
 ``pretxnclose``
-  Run right before the transaction is actually finalized. Any
-  repository change will be visible to the hook program. This lets you
-  validate the transaction content or change it. Exit status 0 allows
-  the commit to proceed. Non-zero status will cause the transaction to
-  be rolled back. The reason for the transaction opening will be in
-  ``$HG_TXNNAME`` and a unique identifier for the transaction will be in
-  ``HG_TXNID``. The rest of the available data will vary according the
-  transaction type. New changesets will add ``$HG_NODE`` (id of the
-  first added changeset), ``$HG_URL`` and ``$HG_SOURCE`` variables,
-  bookmarks and phases changes will set ``HG_BOOKMARK_MOVED`` and
-  ``HG_PHASES_MOVED`` to ``1``, etc.
+  Run right before the transaction is actually finalized. Any repository change
+  will be visible to the hook program. This lets you validate the transaction
+  content or change it. Exit status 0 allows the commit to proceed. Non-zero
+  status will cause the transaction to be rolled back. The reason for the
+  transaction opening will be in ``$HG_TXNNAME`` and a unique identifier for
+  the transaction will be in ``HG_TXNID``. The rest of the available data will
+  vary according the transaction type. New changesets will add ``$HG_NODE`` (id
+  of the first added changeset), ``$HG_NODE_LAST`` (id of the last added
+  changeset), ``$HG_URL`` and ``$HG_SOURCE`` variables, bookmarks and phases
+  changes will set ``HG_BOOKMARK_MOVED`` and ``HG_PHASES_MOVED`` to ``1``, etc.
 
 ``txnclose``
   Run after any repository transaction has been committed. At this
@@ -853,14 +889,13 @@ variables it is passed are listed with names of the form ``$HG_foo``.
   docs for details about available variables.
 
 ``pretxnchangegroup``
-  Run after a changegroup has been added via push, pull or unbundle,
-  but before the transaction has been committed. Changegroup is
-  visible to hook program. This lets you validate incoming changes
-  before accepting them. Passed the ID of the first new changeset in
-  ``$HG_NODE``. Exit status 0 allows the transaction to commit. Non-zero
-  status will cause the transaction to be rolled back and the push,
-  pull or unbundle will fail. URL that was source of changes is in
-  ``$HG_URL``.
+  Run after a changegroup has been added via push, pull or unbundle, but before
+  the transaction has been committed. Changegroup is visible to hook program.
+  This lets you validate incoming changes before accepting them. Passed the ID
+  of the first new changeset in ``$HG_NODE`` and last in ``$HG_NODE_LAST``.
+  Exit status 0 allows the transaction to commit. Non-zero status will cause
+  the transaction to be rolled back and the push, pull or unbundle will fail.
+  URL that was source of changes is in ``$HG_URL``.
 
 ``pretxncommit``
   Run after a changeset has been created but the transaction not yet
@@ -971,6 +1006,25 @@ proxy.
     Optional. Always use the proxy, even for localhost and any entries
     in ``http_proxy.no``. (default: False)
 
+``merge``
+---------
+
+This section specifies behavior during merges and updates.
+
+``checkignored``
+   Controls behavior when an ignored file on disk has the same name as a tracked
+   file in the changeset being merged or updated to, and has different
+   contents. Options are ``abort``, ``warn`` and ``ignore``. With ``abort``,
+   abort on such files. With ``warn``, warn on such files and back them up as
+   .orig. With ``ignore``, don't print a warning and back them up as
+   .orig. (default: ``abort``)
+
+``checkunknown``
+   Controls behavior when an unknown file that isn't ignored has the same name
+   as a tracked file in the changeset being merged or updated to, and has
+   different contents. Similar to ``merge.checkignored``, except for files that
+   are not ignored. (default: ``abort``)
+
 ``merge-patterns``
 ------------------
 
@@ -1021,8 +1075,13 @@ Supported arguments:
   (default: 0)
 
 ``executable``
-  Either just the name of the executable or its pathname.  On Windows,
-  the path can use environment variables with ${ProgramFiles} syntax.
+  Either just the name of the executable or its pathname.
+
+  .. container:: windows
+
+    On Windows, the path can use environment variables with ${ProgramFiles}
+    syntax.
+
   (default: the tool name)
 
 ``args``
@@ -1070,27 +1129,29 @@ Supported arguments:
 ``gui``
   This tool requires a graphical interface to run. (default: False)
 
-``regkey``
-  Windows registry key which describes install location of this
-  tool. Mercurial will search for this key first under
-  ``HKEY_CURRENT_USER`` and then under ``HKEY_LOCAL_MACHINE``.
-  (default: None)
+.. container:: windows
 
-``regkeyalt``
-  An alternate Windows registry key to try if the first key is not
-  found.  The alternate key uses the same ``regname`` and ``regappend``
-  semantics of the primary key.  The most common use for this key
-  is to search for 32bit applications on 64bit operating systems.
-  (default: None)
+  ``regkey``
+    Windows registry key which describes install location of this
+    tool. Mercurial will search for this key first under
+    ``HKEY_CURRENT_USER`` and then under ``HKEY_LOCAL_MACHINE``.
+    (default: None)
 
-``regname``
-  Name of value to read from specified registry key.
-  (default: the unnamed (default) value)
+  ``regkeyalt``
+    An alternate Windows registry key to try if the first key is not
+    found.  The alternate key uses the same ``regname`` and ``regappend``
+    semantics of the primary key.  The most common use for this key
+    is to search for 32bit applications on 64bit operating systems.
+    (default: None)
 
-``regappend``
-  String to append to the value read from the registry, typically
-  the executable name of the tool.
-  (default: None)
+  ``regname``
+    Name of value to read from specified registry key.
+    (default: the unnamed (default) value)
+
+  ``regappend``
+    String to append to the value read from the registry, typically
+    the executable name of the tool.
+    (default: None)
 
 
 ``patch``
@@ -1119,29 +1180,43 @@ command or with Mercurial Queues extension.
 ``paths``
 ---------
 
-Assigns symbolic names to repositories. The left side is the
-symbolic name, and the right gives the directory or URL that is the
-location of the repository. Default paths can be declared by setting
-the following entries.
+Assigns symbolic names and behavior to repositories.
 
-``default``
-    Directory or URL to use when pulling if no source is specified.
-    (default: repository from which the current repository was cloned)
-
-``default-push``
-    Optional. Directory or URL to use when pushing if no destination
-    is specified.
-
-Custom paths can be defined by assigning the path to a name that later can be
-used from the command line. Example::
+Options are symbolic names defining the URL or directory that is the
+location of the repository. Example::
 
     [paths]
-    my_path = http://example.com/path
+    my_server = https://example.com/my_repo
+    local_path = /home/me/repo
 
-To push to the path defined in ``my_path`` run the command::
+These symbolic names can be used from the command line. To pull
+from ``my_server``: :hg:`pull my_server`. To push to ``local_path``:
+:hg:`push local_path`.
 
-    hg push my_path
+Options containing colons (``:``) denote sub-options that can influence
+behavior for that specific path. Example::
 
+    [paths]
+    my_server = https://example.com/my_path
+    my_server:pushurl = ssh://example.com/my_path
+
+The following sub-options can be defined:
+
+``pushurl``
+   The URL to use for push operations. If not defined, the location
+   defined by the path's main entry is used.
+
+The following special named paths exist:
+
+``default``
+   The URL or directory to use when no source or remote is specified.
+
+   :hg:`clone` will automatically define this path to the location the
+   repository was cloned from.
+
+``default-push``
+   (deprecated) The URL or directory for the default :hg:`push` location.
+   ``default:pushurl`` should be used instead.
 
 ``phases``
 ----------
@@ -1256,12 +1331,12 @@ have a definite end point.
     Format of the progress bar.
 
     Valid entries for the format field are ``topic``, ``bar``, ``number``,
-    ``unit``, ``estimate``, speed, and item. item defaults to the last 20
-    characters of the item, but this can be changed by adding either ``-<num>``
-    which would take the last num characters, or ``+<num>`` for the first num
-    characters.
+    ``unit``, ``estimate``, ``speed``, and ``item``. ``item`` defaults to the
+    last 20 characters of the item, but this can be changed by adding either
+    ``-<num>`` which would take the last num characters, or ``+<num>`` for the
+    first num characters.
 
-    (default: Topic bar number estimate)
+    (default: topic bar number estimate)
 
 ``width``
     If set, the maximum width of the progress information (that is, min(width,
@@ -1275,6 +1350,13 @@ have a definite end point.
 
 ``assume-tty``
     If true, ALWAYS show a progress bar, unless disable is given.
+
+``rebase``
+----------
+
+``allowdivergence``
+    Default to False, when True allow creating divergence when performing
+    rebase of obsolete changesets.
 
 ``revsetalias``
 ---------------
@@ -1310,6 +1392,35 @@ Controls generic server settings.
 ``maxhttpheaderlen``
     Instruct HTTP clients not to send request headers longer than this
     many bytes. (default: 1024)
+
+``bundle1``
+    Whether to allow clients to push and pull using the legacy bundle1
+    exchange format. (default: True)
+
+``bundle1gd``
+    Like ``bundle1`` but only used if the repository is using the
+    *generaldelta* storage format. (default: True)
+
+``bundle1.push``
+    Whether to allow clients to push using the legacy bundle1 exchange
+    format. (default: True)
+
+``bundle1gd.push``
+    Like ``bundle1.push`` but only used if the repository is using the
+    *generaldelta* storage format. (default: True)
+
+``bundle1.pull``
+    Whether to allow clients to pull using the legacy bundle1 exchange
+    format. (default: True)
+
+``bundle1gd.pull``
+    Like ``bundle1.pull`` but only used if the repository is using the
+    *generaldelta* storage format. (default: True)
+
+    Large repositories using the *generaldelta* storage format should
+    consider setting this option because converting *generaldelta*
+    repositories to the exchange format required by the bundle1 data
+    format can consume a lot of CPU.
 
 ``smtp``
 --------
@@ -1415,6 +1526,16 @@ User interface controls.
     default ``USER@HOST`` is used instead.
     (default: False)
 
+``clonebundles``
+    Whether the "clone bundles" feature is enabled.
+
+    When enabled, :hg:`clone` may download and apply a server-advertised
+    bundle file from a URL instead of using the normal exchange mechanism.
+
+    This can likely result in faster and more reliable clones.
+
+    (default: True)
+
 ``clonebundlefallback``
     Whether failure to apply an advertised "clone bundle" from a server
     should result in fallback to a regular clone.
@@ -1429,6 +1550,30 @@ User interface controls.
     fails.
 
     (default: False)
+
+``clonebundleprefers``
+    Defines preferences for which "clone bundles" to use.
+
+    Servers advertising "clone bundles" may advertise multiple available
+    bundles. Each bundle may have different attributes, such as the bundle
+    type and compression format. This option is used to prefer a particular
+    bundle over another.
+
+    The following keys are defined by Mercurial:
+
+    BUNDLESPEC
+       A bundle type specifier. These are strings passed to :hg:`bundle -t`.
+       e.g. ``gzip-v2`` or ``bzip2-v1``.
+
+    COMPRESSION
+       The compression format of the bundle. e.g. ``gzip`` and ``bzip2``.
+
+    Server operators may define custom keys.
+
+    Example values: ``COMPRESSION=bzip2``,
+    ``BUNDLESPEC=gzip-v2, COMPRESSION=gzip``.
+
+    By default, the first bundle advertised by the server is used.
 
 ``commitsubrepos``
     Whether to commit modified subrepositories when committing the
@@ -1445,6 +1590,10 @@ User interface controls.
 ``fallbackencoding``
     Encoding to try if it's not possible to decode the changelog using
     UTF-8. (default: ISO-8859-1)
+
+``graphnodetemplate``
+    The template used to print changeset nodes in an ASCII revision graph.
+    (default: ``{graphnode}``)
 
 ``ignore``
     A file to read per-user ignore patterns from. This file should be
@@ -1488,6 +1637,10 @@ User interface controls.
     markers is different from the encoding of the merged files,
     serious problems may occur.
 
+``origbackuppath``
+    The path to a directory used to store generated .orig files. If the path is
+    not a directory, one will be created.
+
 ``patch``
     An optional external tool that ``hg import`` and some extensions
     will use for applying patches. By default Mercurial uses an
@@ -1504,24 +1657,42 @@ User interface controls.
 ``portablefilenames``
     Check for portable filenames. Can be ``warn``, ``ignore`` or ``abort``.
     (default: ``warn``)
-    If set to ``warn`` (or ``true``), a warning message is printed on POSIX
-    platforms, if a file with a non-portable filename is added (e.g. a file
-    with a name that can't be created on Windows because it contains reserved
-    parts like ``AUX``, reserved characters like ``:``, or would cause a case
-    collision with an existing file).
-    If set to ``ignore`` (or ``false``), no warning is printed.
-    If set to ``abort``, the command is aborted.
-    On Windows, this configuration option is ignored and the command aborted.
+
+    ``warn``
+      Print a warning message on POSIX platforms, if a file with a non-portable
+      filename is added (e.g. a file with a name that can't be created on
+      Windows because it contains reserved parts like ``AUX``, reserved
+      characters like ``:``, or would cause a case collision with an existing
+      file).
+
+    ``ignore``
+      Don't print a warning.
+
+    ``abort``
+      The command is aborted.
+
+    ``true``
+      Alias for ``warn``.
+
+    ``false``
+      Alias for ``ignore``.
+
+    .. container:: windows
+
+      On Windows, this configuration option is ignored and the command aborted.
 
 ``quiet``
-    Reduce the amount of output printed. (default: False)
+    Reduce the amount of output printed.
+    (default: False)
 
 ``remotecmd``
-    Remote command to use for clone/push/pull operations. (default: ``hg``)
+    Remote command to use for clone/push/pull operations.
+    (default: ``hg``)
 
 ``report_untrusted``
     Warn if a ``.hg/hgrc`` file is ignored due to not being owned by a
-    trusted user or group. (default: True)
+    trusted user or group.
+    (default: True)
 
 ``slash``
     Display paths using a slash (``/``) as the path separator. This
@@ -1565,7 +1736,7 @@ User interface controls.
     username are expanded.
 
     (default: ``$EMAIL`` or ``username@hostname``. If the username in
-    hgrc is empty, e.g. if the system admin set ``username =``  in the
+    hgrc is empty, e.g. if the system admin set ``username =`` in the
     system hgrc, it has to be specified manually or in a different
     hgrc file)
 
@@ -1866,3 +2037,27 @@ helps performance.
     Number of CPUs to use for parallel operations. A zero or
     negative value is treated as ``use the default``.
     (default: 4 or the number of CPUs on the system, whichever is larger)
+
+``backgroundclose``
+    Whether to enable closing file handles on background threads during certain
+    operations. Some platforms aren't very efficient at closing file
+    handles that have been written or appened to. By performing file closing
+    on background threads, file write rate can increase substantially.
+    (default: true on Windows, false elsewhere)
+
+``backgroundcloseminfilecount``
+    Minimum number of files required to trigger background file closing.
+    Operations not writing this many files won't start background close
+    threads.
+    (default: 2048)
+
+``backgroundclosemaxqueue``
+    The maximum number of opened file handles waiting to be closed in the
+    background. This option only has an effect if ``backgroundclose`` is
+    enabled.
+    (default: 384)
+
+``backgroundclosethreadcount``
+    Number of threads to process background file closes. Only relevant if
+    ``backgroundclose`` is enabled.
+    (default: 4)

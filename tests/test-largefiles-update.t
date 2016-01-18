@@ -158,7 +158,15 @@ mark the non-existing file as normal in lfdirstate)
   0 largefiles updated, 0 removed
   0 files updated, 2 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
-  $ hg commit -m '1-2-3 testing'
+  $ hg commit -m '1-2-3 testing' --config largefiles.usercache=not
+  large1: largefile 58e24f733a964da346e2407a2bee99d9001184f5 not available from local store
+  $ hg up -C . --config largefiles.usercache=not
+  getting changed largefiles
+  large1: largefile 58e24f733a964da346e2407a2bee99d9001184f5 not available from file:/*/$TESTTMP/repo (glob)
+  0 largefiles updated, 0 removed
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg st large1
+  ! large1
   $ hg rollback -q
   $ mv 58e24f733a964da346e2407a2bee99d9001184f5 .hg/largefiles/
 
@@ -590,13 +598,14 @@ the 1st commit of resuming.
   $ echo "manually modified before 'hg rebase --continue'" > large1
   $ hg resolve -m normal1
   (no more unresolved files)
+  continue: hg rebase --continue
   $ hg rebase --continue --config ui.interactive=True <<EOF
   > c
   > EOF
   rebasing 1:72518492caa6 "#1"
   rebasing 4:07d6153b5c04 "#4"
   local changed .hglf/large1 which remote deleted
-  use (c)hanged version or (d)elete? c
+  use (c)hanged version, (d)elete, or leave (u)nresolved? c
 
   $ hg diff -c "tip~1" --nodates .hglf/large1 | grep '^[+-][0-9a-z]'
   -e5bb990443d6a92aaf7223813720f7566c9dd05b
@@ -622,7 +631,7 @@ changed, even if it is aborted by conflict of other.
   Hunk #1 FAILED at 0
   1 out of 1 hunks FAILED -- saving rejects to file .hglf/large1.rej
   patch failed to apply
-  abort: fix up the merge and run hg transplant --continue
+  abort: fix up the working directory and run hg transplant --continue
   [255]
   $ hg status -A large1
   C large1

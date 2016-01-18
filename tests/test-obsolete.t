@@ -238,6 +238,14 @@ And that we can't push bumped changeset
 Fixing "bumped" situation
 We need to create a clone of 5 and add a special marker with a flag
 
+  $ hg summary
+  parent: 5:5601fb93a350 tip
+   add new_3_c
+  branch: default
+  commit: (clean)
+  update: 1 new changesets, 2 branch heads (merge)
+  phases: 1 draft
+  bumped: 1 changesets
   $ hg up '5^'
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg revert -ar 5
@@ -465,6 +473,14 @@ detect outgoing obsolete and unstable
   94b33453f93bdb8d457ef9b770851a618bf413e1 0 {6f96419950729f3671185b847352890f074f7557} (Thu Jan 01 00:00:00 1970 +0000) {'user': 'test'}
   $ hg log -r 'obsolete()'
   4:94b33453f93b (draft) [ ] add original_d
+  $ hg summary
+  parent: 5:cda648ca50f5 tip
+   add original_e
+  branch: default
+  commit: (clean)
+  update: 1 new changesets, 2 branch heads (merge)
+  phases: 3 draft
+  unstable: 1 changesets
   $ hg log -G -r '::unstable()'
   @  5:cda648ca50f5 (draft) [tip ] add original_e
   |
@@ -712,34 +728,40 @@ This test issue 3805
 
   $ hg init repo-issue3805
   $ cd repo-issue3805
+  $ echo "base" > base
+  $ hg ci -Am "base"
+  adding base
   $ echo "foo" > foo
   $ hg ci -Am "A"
   adding foo
   $ hg clone . ../other-issue3805
   updating to branch default
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ echo "bar" >> foo
   $ hg ci --amend
   $ cd ../other-issue3805
   $ hg log -G
-  @  0:193e9254ce7e (draft) [tip ] A
+  @  1:29f0c6921ddd (draft) [tip ] A
+  |
+  o  0:d20a80d4def3 (draft) [ ] base
   
   $ hg log -G -R ../repo-issue3805
-  @  2:3816541e5485 (draft) [tip ] A
+  @  3:323a9c3ddd91 (draft) [tip ] A
+  |
+  o  0:d20a80d4def3 (draft) [ ] base
   
   $ hg incoming
   comparing with $TESTTMP/tmpe/repo-issue3805 (glob)
   searching for changes
-  2:3816541e5485 (draft) [tip ] A
+  3:323a9c3ddd91 (draft) [tip ] A
   $ hg incoming --bundle ../issue3805.hg
   comparing with $TESTTMP/tmpe/repo-issue3805 (glob)
   searching for changes
-  2:3816541e5485 (draft) [tip ] A
+  3:323a9c3ddd91 (draft) [tip ] A
   $ hg outgoing
   comparing with $TESTTMP/tmpe/repo-issue3805 (glob)
   searching for changes
-  no changes found
-  [1]
+  1:29f0c6921ddd (draft) [tip ] A
 
 #if serve
 
@@ -749,12 +771,11 @@ This test issue 3805
   $ hg incoming http://localhost:$HGPORT
   comparing with http://localhost:$HGPORT/
   searching for changes
-  1:3816541e5485 (draft) [tip ] A
+  2:323a9c3ddd91 (draft) [tip ] A
   $ hg outgoing http://localhost:$HGPORT
   comparing with http://localhost:$HGPORT/
   searching for changes
-  no changes found
-  [1]
+  1:29f0c6921ddd (draft) [tip ] A
 
   $ killdaemons.py
 
@@ -767,13 +788,13 @@ This test issue 3814
   $ cd ..
   $ hg init repo-issue3814
   $ cd repo-issue3805
-  $ hg push -r 3816541e5485 ../repo-issue3814
+  $ hg push -r 323a9c3ddd91 ../repo-issue3814
   pushing to ../repo-issue3814
   searching for changes
   adding changesets
   adding manifests
   adding file changes
-  added 1 changesets with 1 changes to 1 files
+  added 2 changesets with 2 changes to 2 files
   2 new obsolescence markers
   $ hg out ../repo-issue3814
   comparing with ../repo-issue3814
@@ -783,24 +804,26 @@ This test issue 3814
 
 Test that a local tag blocks a changeset from being hidden
 
-  $ hg tag -l visible -r 0 --hidden
+  $ hg tag -l visible -r 1 --hidden
   $ hg log -G
-  @  2:3816541e5485 (draft) [tip ] A
-  
-  x  0:193e9254ce7e (draft) [visible ] A
+  @  3:323a9c3ddd91 (draft) [tip ] A
+  |
+  | x  1:29f0c6921ddd (draft) [visible ] A
+  |/
+  o  0:d20a80d4def3 (draft) [ ] base
   
 Test that removing a local tag does not cause some commands to fail
 
   $ hg tag -l -r tip tiptag
   $ hg tags
-  tiptag                             2:3816541e5485
-  tip                                2:3816541e5485
-  visible                            0:193e9254ce7e
+  tiptag                             3:323a9c3ddd91
+  tip                                3:323a9c3ddd91
+  visible                            1:29f0c6921ddd
   $ hg --config extensions.strip= strip -r tip --no-backup
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg tags
-  visible                            0:193e9254ce7e
-  tip                                0:193e9254ce7e
+  visible                            1:29f0c6921ddd
+  tip                                1:29f0c6921ddd
 
 Test bundle overlay onto hidden revision
 

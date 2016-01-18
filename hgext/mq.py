@@ -68,6 +68,7 @@ from mercurial.lock import release
 from mercurial import commands, cmdutil, hg, scmutil, util, revset
 from mercurial import extensions, error, phases
 from mercurial import patch as patchmod
+from mercurial import lock as lockmod
 from mercurial import localrepo
 from mercurial import subrepo
 import os, re, errno, shutil
@@ -699,11 +700,13 @@ class queue(object):
             absf = repo.wjoin(f)
             if os.path.lexists(absf):
                 self.ui.note(_('saving current version of %s as %s\n') %
-                             (f, f + '.orig'))
+                             (f, scmutil.origpath(self.ui, repo, f)))
+
+                absorig = scmutil.origpath(self.ui, repo, absf)
                 if copy:
-                    util.copyfile(absf, absf + '.orig')
+                    util.copyfile(absf, absorig)
                 else:
-                    util.rename(absf, absf + '.orig')
+                    util.rename(absf, absorig)
 
     def printdiff(self, repo, diffopts, node1, node2=None, files=None,
                   fp=None, changes=None, opts={}):
@@ -1038,12 +1041,8 @@ class queue(object):
             oldqbase = repo[qfinished[0]]
             tphase = repo.ui.config('phases', 'new-commit', phases.draft)
             if oldqbase.phase() > tphase and oldqbase.p1().phase() <= tphase:
-                tr = repo.transaction('qfinish')
-                try:
+                with repo.transaction('qfinish') as tr:
                     phases.advanceboundary(repo, tr, tphase, qfinished)
-                    tr.close()
-                finally:
-                    tr.release()
 
     def delete(self, repo, patches, opts):
         if not patches and not opts.get('rev'):
@@ -1165,8 +1164,7 @@ class queue(object):
             raise error.Abort(_('cannot manage merge changesets'))
         self.checktoppatch(repo)
         insert = self.fullseriesend()
-        wlock = repo.wlock()
-        try:
+        with repo.wlock():
             try:
                 # if patch file write fails, abort early
                 p = self.opener(patchfn, "w")
@@ -1236,8 +1234,6 @@ class queue(object):
                     self.ui.warn(_('error unlinking %s\n') % patchpath)
                 raise
             self.removeundo(repo)
-        finally:
-            release(wlock)
 
     def isapplied(self, patch):
         """returns (index, rev, patch)"""
@@ -1318,8 +1314,7 @@ class queue(object):
              keepchanges=False):
         self.checkkeepchanges(keepchanges, force)
         diffopts = self.diffopts()
-        wlock = repo.wlock()
-        try:
+        with repo.wlock():
             heads = []
             for hs in repo.branchmap().itervalues():
                 heads.extend(hs)
@@ -1461,14 +1456,10 @@ class queue(object):
                 self.ui.write(_("now at: %s\n") % top)
             return ret[0]
 
-        finally:
-            wlock.release()
-
     def pop(self, repo, patch=None, force=False, update=True, all=False,
             nobackup=False, keepchanges=False):
         self.checkkeepchanges(keepchanges, force)
-        wlock = repo.wlock()
-        try:
+        with repo.wlock():
             if patch:
                 # index, rev, patch
                 info = self.isapplied(patch)
@@ -1572,8 +1563,6 @@ class queue(object):
                 self.ui.write(_("now at: %s\n") % self.applied[-1].name)
             else:
                 self.ui.write(_("patch queue now empty\n"))
-        finally:
-            wlock.release()
 
     def diff(self, repo, pats, opts):
         top, patch = self.checktoppatch(repo)
@@ -1790,27 +1779,34 @@ class queue(object):
 
                 # Ensure we create a new changeset in the same phase than
                 # the old one.
-                n = newcommit(repo, oldphase, message, user, ph.date,
+                lock = tr = None
+                try:
+                    lock = repo.lock()
+                    tr = repo.transaction('mq')
+                    n = newcommit(repo, oldphase, message, user, ph.date,
                               match=match, force=True, editor=editor)
-                # only write patch after a successful commit
-                c = [list(x) for x in refreshchanges]
-                if inclsubs:
-                    self.putsubstate2changes(substatestate, c)
-                chunks = patchmod.diff(repo, patchparent,
-                                       changes=c, opts=diffopts)
-                comments = str(ph)
-                if comments:
-                    patchf.write(comments)
-                for chunk in chunks:
-                    patchf.write(chunk)
-                patchf.close()
+                    # only write patch after a successful commit
+                    c = [list(x) for x in refreshchanges]
+                    if inclsubs:
+                        self.putsubstate2changes(substatestate, c)
+                    chunks = patchmod.diff(repo, patchparent,
+                                           changes=c, opts=diffopts)
+                    comments = str(ph)
+                    if comments:
+                        patchf.write(comments)
+                    for chunk in chunks:
+                        patchf.write(chunk)
+                    patchf.close()
 
-                marks = repo._bookmarks
-                for bm in bmlist:
-                    marks[bm] = n
-                marks.write()
+                    marks = repo._bookmarks
+                    for bm in bmlist:
+                        marks[bm] = n
+                    marks.recordchange(tr)
+                    tr.close()
 
-                self.applied.append(statusentry(n, patchfn))
+                    self.applied.append(statusentry(n, patchfn))
+                finally:
+                    lockmod.release(lock, tr)
             except: # re-raises
                 ctx = repo[cparents[0]]
                 repo.dirstate.rebuild(ctx.node(), ctx.manifest())
@@ -2083,8 +2079,7 @@ class queue(object):
                 lastparent = None
 
             diffopts = self.diffopts({'git': git})
-            tr = repo.transaction('qimport')
-            try:
+            with repo.transaction('qimport') as tr:
                 for r in rev:
                     if not repo[r].mutable():
                         raise error.Abort(_('revision %d is not mutable') % r,
@@ -2125,9 +2120,6 @@ class queue(object):
                     self.parseseries()
                     self.applieddirty = True
                     self.seriesdirty = True
-                tr.close()
-            finally:
-                tr.release()
 
         for i, filename in enumerate(files):
             if existing:
@@ -2316,8 +2308,7 @@ def qimport(ui, repo, *filename, **opts):
 
     Returns 0 if import succeeded.
     """
-    lock = repo.lock() # cause this may move phase
-    try:
+    with repo.lock(): # cause this may move phase
         q = repo.mq
         try:
             imported = q.qimport(
@@ -2326,8 +2317,6 @@ def qimport(ui, repo, *filename, **opts):
                 rev=opts.get('rev'), git=opts.get('git'))
         finally:
             q.savedirty()
-    finally:
-        lock.release()
 
     if imported and opts.get('push') and not opts.get('rev'):
         return q.push(repo, imported[-1])
@@ -2627,13 +2616,10 @@ def refresh(ui, repo, *pats, **opts):
     q = repo.mq
     message = cmdutil.logmessage(ui, opts)
     setupheaderopts(ui, opts)
-    wlock = repo.wlock()
-    try:
+    with repo.wlock():
         ret = q.refresh(repo, pats, msg=message, **opts)
         q.savedirty()
         return ret
-    finally:
-        wlock.release()
 
 @command("^qdiff",
          commands.diffopts + commands.diffopts2 + commands.walkopts,
@@ -2718,14 +2704,11 @@ def fold(ui, repo, *files, **opts):
         message = '\n'.join(message)
 
     diffopts = q.patchopts(q.diffopts(), *patches)
-    wlock = repo.wlock()
-    try:
+    with repo.wlock():
         q.refresh(repo, msg=message, git=diffopts.git, edit=opts.get('edit'),
                   editform='mq.qfold')
         q.delete(repo, patches, opts)
         q.savedirty()
-    finally:
-        wlock.release()
 
 @command("qgoto",
          [('', 'keep-changes', None,
@@ -2995,16 +2978,13 @@ def rename(ui, repo, patch, name=None, **opts):
     r = q.qrepo()
     if r and patch in r.dirstate:
         wctx = r[None]
-        wlock = r.wlock()
-        try:
+        with r.wlock():
             if r.dirstate[patch] == 'a':
                 r.dirstate.drop(patch)
                 r.dirstate.add(name)
             else:
                 wctx.copy(patch, name)
                 wctx.forget([patch])
-        finally:
-            wlock.release()
 
     q.savedirty()
 
@@ -3208,12 +3188,9 @@ def finish(ui, repo, *revrange, **opts):
     # queue.finish may changes phases but leave the responsibility to lock the
     # repo to the caller to avoid deadlock with wlock. This command code is
     # responsibility for this locking.
-    lock = repo.lock()
-    try:
+    with repo.lock():
         q.finish(repo, revs)
         q.savedirty()
-    finally:
-        lock.release()
     return 0
 
 @command("qqueue",
@@ -3548,9 +3525,11 @@ def summaryhook(ui, repo):
         # i18n: column positioning for "hg summary"
         ui.note(_("mq:     (empty queue)\n"))
 
+revsetpredicate = revset.extpredicate()
+
+@revsetpredicate('mq()')
 def revsetmq(repo, subset, x):
-    """``mq()``
-    Changesets managed by MQ.
+    """Changesets managed by MQ.
     """
     revset.getargs(x, 0, 0, _("mq takes no arguments"))
     applied = set([repo[r.node].rev() for r in repo.mq.applied])
@@ -3586,7 +3565,7 @@ def extsetup(ui):
         if extmodule.__file__ != __file__:
             dotable(getattr(extmodule, 'cmdtable', {}))
 
-    revset.symbols['mq'] = revsetmq
+    revsetpredicate.setup()
 
 colortable = {'qguard.negative': 'red',
               'qguard.positive': 'yellow',

@@ -91,12 +91,10 @@ editing a changeset without any actual change would corrupt the repository
   | edit e860deea161a 4 e
   | pick 652413bf663e 5 f
   0 files updated, 0 files merged, 2 files removed, 0 files unresolved
-  Make changes as needed, you may commit or record as needed now.
-  When you are finished, run hg histedit --continue to resume.
+  Editing (e860deea161a), you may commit or record as needed now.
+  (hg histedit --continue to resume)
   $ continueediting true "(leaving commit message unaltered)"
   % finalize changeset editing (leaving commit message unaltered)
-  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
 
 check state of working copy
@@ -144,13 +142,12 @@ check state of working copy
   | edit e860deea161a 4 e
   | pick 652413bf663e 5 f
   0 files updated, 0 files merged, 3 files removed, 0 files unresolved
-  Make changes as needed, you may commit or record as needed now.
-  When you are finished, run hg histedit --continue to resume.
+  Editing (055a42cdd887), you may commit or record as needed now.
+  (hg histedit --continue to resume)
   $ continueediting true "(leaving commit message unaltered)"
   % finalize changeset editing (leaving commit message unaltered)
-  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  Make changes as needed, you may commit or record as needed now.
-  When you are finished, run hg histedit --continue to resume.
+  Editing (e860deea161a), you may commit or record as needed now.
+  (hg histedit --continue to resume)
   $ graphlog "log after first edit"
   % log after first edit
   @  6 e5ae3ca2f1ffdbd89ec41ebc273a231f7c3022f2 "d"
@@ -187,7 +184,6 @@ abort editing session, after first forcibly updating away
   hist:   2 remaining (histedit --continue)
 
   $ hg histedit --abort 2>&1 | fixbundle
-  [1]
 
 modified files should survive the abort when we've moved away already
   $ hg st
@@ -208,5 +204,15 @@ modified files should survive the abort when we've moved away already
   |
   @  0 cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b "a"
   
+aborting and not changing files can skip mentioning updating (no) files
+  $ hg up
+  5 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg commit --close-branch -m 'closebranch'
+  $ startediting 1 1 "(not changing anything)" # edit the 3rd of 3 changesets
+  % start editing the history (not changing anything)
+  | edit 292aec348d9e 6 closebranch
+  Editing (292aec348d9e), you may commit or record as needed now.
+  (hg histedit --continue to resume)
+  $ hg histedit --abort
 
   $ cd ..

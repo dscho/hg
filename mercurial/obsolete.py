@@ -67,10 +67,20 @@ The header is followed by the markers. Marker format depend of the version. See
 comment associated with each format for details.
 
 """
-import errno, struct
-import util, base85, node, parsers, error
-import phases
-from i18n import _
+from __future__ import absolute_import
+
+import errno
+import struct
+
+from .i18n import _
+from . import (
+    base85,
+    error,
+    node,
+    parsers,
+    phases,
+    util,
+)
 
 _pack = struct.pack
 _unpack = struct.unpack
@@ -1109,12 +1119,11 @@ def clearobscaches(repo):
 def _computeobsoleteset(repo):
     """the set of obsolete revisions"""
     obs = set()
-    getrev = repo.changelog.nodemap.get
-    getphase = repo._phasecache.phase
-    for n in repo.obsstore.successors:
-        rev = getrev(n)
-        if rev is not None and getphase(repo, rev):
-            obs.add(rev)
+    getnode = repo.changelog.node
+    notpublic = repo.revs("not public()")
+    for r in notpublic:
+        if getnode(r) in repo.obsstore.successors:
+            obs.add(r)
     return obs
 
 @cachefor('unstable')

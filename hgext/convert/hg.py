@@ -23,6 +23,7 @@ from mercurial.i18n import _
 from mercurial.node import bin, hex, nullid
 from mercurial import hg, util, context, bookmarks, error, scmutil, exchange
 from mercurial import phases
+from mercurial import lock as lockmod
 from mercurial import merge as mergemod
 
 from common import NoRepo, commit, converter_source, converter_sink, mapfile
@@ -191,7 +192,6 @@ class mercurial_sink(converter_sink):
             self.repo, p1ctx, p2ctx, anc,
             True,  # branchmerge
             True,  # force
-            False, # partial
             False, # acceptremote
             False, # followcopies
         )
@@ -323,9 +323,7 @@ class mercurial_sink(converter_sink):
             self.repo.ui.setconfig('phases', 'new-commit',
                                    phases.phasenames[commit.phase], 'convert')
 
-            tr = self.repo.transaction("convert")
-
-            try:
+            with self.repo.transaction("convert") as tr:
                 node = hex(self.repo.commitctx(ctx))
 
                 # If the node value has changed, but the phase is lower than
@@ -336,9 +334,6 @@ class mercurial_sink(converter_sink):
                     if ctx.phase() < phases.draft:
                         phases.retractboundary(self.repo, tr, phases.draft,
                                                [ctx.node()])
-                tr.close()
-            finally:
-                tr.release()
 
             text = "(octopus merge fixup)\n"
             p2 = node
@@ -410,12 +405,19 @@ class mercurial_sink(converter_sink):
     def putbookmarks(self, updatedbookmark):
         if not len(updatedbookmark):
             return
-
-        self.ui.status(_("updating bookmarks\n"))
-        destmarks = self.repo._bookmarks
-        for bookmark in updatedbookmark:
-            destmarks[bookmark] = bin(updatedbookmark[bookmark])
-        destmarks.write()
+        wlock = lock = tr = None
+        try:
+            wlock = self.repo.wlock()
+            lock = self.repo.lock()
+            tr = self.repo.transaction('bookmark')
+            self.ui.status(_("updating bookmarks\n"))
+            destmarks = self.repo._bookmarks
+            for bookmark in updatedbookmark:
+                destmarks[bookmark] = bin(updatedbookmark[bookmark])
+            destmarks.recordchange(tr)
+            tr.close()
+        finally:
+            lockmod.release(lock, wlock, tr)
 
     def hascommitfrommap(self, rev):
         # the exact semantics of clonebranches is unclear so we can't say no
@@ -481,13 +483,13 @@ class mercurial_source(converter_source):
             self.keep = nodes.__contains__
             self._heads = nodes - parents
 
-    def changectx(self, rev):
+    def _changectx(self, rev):
         if self.lastrev != rev:
             self.lastctx = self.repo[rev]
             self.lastrev = rev
         return self.lastctx
 
-    def parents(self, ctx):
+    def _parents(self, ctx):
         return [p for p in ctx.parents() if p and self.keep(p.node())]
 
     def getheads(self):
@@ -495,36 +497,50 @@ class mercurial_source(converter_source):
 
     def getfile(self, name, rev):
         try:
-            fctx = self.changectx(rev)[name]
+            fctx = self._changectx(rev)[name]
             return fctx.data(), fctx.flags()
         except error.LookupError:
             return None, None
 
+    def _changedfiles(self, ctx1, ctx2):
+        ma, r = [], []
+        maappend = ma.append
+        rappend = r.append
+        d = ctx1.manifest().diff(ctx2.manifest())
+        for f, ((node1, flag1), (node2, flag2)) in d.iteritems():
+            if node2 is None:
+                rappend(f)
+            else:
+                maappend(f)
+        return ma, r
+
     def getchanges(self, rev, full):
-        ctx = self.changectx(rev)
-        parents = self.parents(ctx)
+        ctx = self._changectx(rev)
+        parents = self._parents(ctx)
         if full or not parents:
             files = copyfiles = ctx.manifest()
         if parents:
             if self._changescache[0] == rev:
-                m, a, r = self._changescache[1]
+                ma, r = self._changescache[1]
             else:
-                m, a, r = self.repo.status(parents[0].node(), ctx.node())[:3]
+                ma, r = self._changedfiles(parents[0], ctx)
             if not full:
-                files = m + a + r
-            copyfiles = m + a
-        # getcopies() is also run for roots and before filtering so missing
+                files = ma + r
+            copyfiles = ma
+        # _getcopies() is also run for roots and before filtering so missing
         # revlogs are detected early
-        copies = self.getcopies(ctx, parents, copyfiles)
+        copies = self._getcopies(ctx, parents, copyfiles)
         cleanp2 = set()
         if len(parents) == 2:
-            cleanp2.update(self.repo.status(parents[1].node(), ctx.node(),
-                                            clean=True).clean)
+            d = parents[1].manifest().diff(ctx.manifest(), clean=True)
+            for f, value in d.iteritems():
+                if value is None:
+                    cleanp2.add(f)
         changes = [(f, rev) for f in files if f not in self.ignored]
         changes.sort()
         return changes, copies, cleanp2
 
-    def getcopies(self, ctx, parents, files):
+    def _getcopies(self, ctx, parents, files):
         copies = {}
         for name in files:
             if name in self.ignored:
@@ -552,8 +568,8 @@ class mercurial_source(converter_source):
         return copies
 
     def getcommit(self, rev):
-        ctx = self.changectx(rev)
-        parents = [p.hex() for p in self.parents(ctx)]
+        ctx = self._changectx(rev)
+        parents = [p.hex() for p in self._parents(ctx)]
         crev = rev
 
         return commit(author=ctx.user(),
@@ -571,20 +587,20 @@ class mercurial_source(converter_source):
                      if self.keep(node)])
 
     def getchangedfiles(self, rev, i):
-        ctx = self.changectx(rev)
-        parents = self.parents(ctx)
+        ctx = self._changectx(rev)
+        parents = self._parents(ctx)
         if not parents and i is None:
             i = 0
-            changes = [], ctx.manifest().keys(), []
+            ma, r = ctx.manifest().keys(), []
         else:
             i = i or 0
-            changes = self.repo.status(parents[i].node(), ctx.node())[:3]
-        changes = [[f for f in l if f not in self.ignored] for l in changes]
+            ma, r = self._changedfiles(parents[i], ctx)
+        ma, r = [[f for f in l if f not in self.ignored] for l in (ma, r)]
 
         if i == 0:
-            self._changescache = (rev, changes)
+            self._changescache = (rev, (ma, r))
 
-        return changes[0] + changes[1] + changes[2]
+        return ma + r
 
     def converted(self, rev, destrev):
         if self.convertfp is None:

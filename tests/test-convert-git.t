@@ -54,7 +54,7 @@ Remove the directory, then try to replace it with a file (issue754)
   $ hg convert --config extensions.progress= --config progress.assume-tty=1 \
   >   --config progress.delay=0 --config progress.changedelay=0 \
   >   --config progress.refresh=0 --config progress.width=60 \
-  > --datesort git-repo
+  >   --config progress.format='topic, bar, number' --datesort git-repo
   \r (no-eol) (esc)
   scanning [======>                                     ] 1/6\r (no-eol) (esc)
   scanning [=============>                              ] 2/6\r (no-eol) (esc)
@@ -173,7 +173,8 @@ full conversion
   $ hg convert --datesort git-repo2 fullrepo \
   > --config extensions.progress= --config progress.assume-tty=1 \
   > --config progress.delay=0 --config progress.changedelay=0 \
-  > --config progress.refresh=0 --config progress.width=60
+  > --config progress.refresh=0 --config progress.width=60 \
+  > --config progress.format='topic, bar, number'
   \r (no-eol) (esc)
   scanning [===>                                        ] 1/9\r (no-eol) (esc)
   scanning [========>                                   ] 2/9\r (no-eol) (esc)
@@ -533,8 +534,7 @@ test missing .gitmodules
   $ git commit -q -m "remove .gitmodules" .gitmodules
   $ git commit -q -m "missing .gitmodules"
   $ cd ..
-  $ hg convert git-repo6 hg-repo6 --traceback
-  fatal: Path '.gitmodules' does not exist in '*' (glob)
+  $ hg convert git-repo6 hg-repo6 --traceback 2>&1 | grep -v "fatal: Path '.gitmodules' does not exist"
   initializing destination hg-repo6 repository
   scanning source...
   sorting...
@@ -689,10 +689,7 @@ Run convert when the remote branches have changed
 
   $ cd git-repo7
   $ echo a >> a
-  $ git commit -am "move master forward"
-  [master 0c81947] move master forward
-   Author: nottest <test@example.org>
-   1 file changed, 1 insertion(+)
+  $ git commit -q -am "move master forward"
   $ cd ..
   $ rm -rf hg-repo7
   $ hg convert --config convert.git.remoteprefix=origin git-repo7-client hg-repo7

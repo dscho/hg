@@ -6,15 +6,32 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import os, copy
-import re
-from mercurial import match, patch, error, ui, util, pathutil, context
-from mercurial.i18n import _
-from mercurial.node import hex, nullid, short
-from mercurial.templatefilters import revescape
-from common import ErrorResponse, paritygen
-from common import HTTP_NOT_FOUND
+from __future__ import absolute_import
+
+import copy
 import difflib
+import os
+import re
+
+from ..i18n import _
+from ..node import hex, nullid, short
+
+from .common import (
+    ErrorResponse,
+    HTTP_NOT_FOUND,
+    paritygen,
+)
+
+from .. import (
+    context,
+    error,
+    match,
+    patch,
+    pathutil,
+    templatefilters,
+    ui as uimod,
+    util,
+)
 
 def up(p):
     if p[0] != "/":
@@ -124,20 +141,28 @@ class filerevnav(revnav):
     def hex(self, rev):
         return hex(self._changelog.node(self._revlog.linkrev(rev)))
 
+class _siblings(object):
+    def __init__(self, siblings=[], hiderev=None):
+        self.siblings = [s for s in siblings if s.node() != nullid]
+        if len(self.siblings) == 1 and self.siblings[0].rev() == hiderev:
+            self.siblings = []
 
-def _siblings(siblings=[], hiderev=None):
-    siblings = [s for s in siblings if s.node() != nullid]
-    if len(siblings) == 1 and siblings[0].rev() == hiderev:
-        return
-    for s in siblings:
-        d = {'node': s.hex(), 'rev': s.rev()}
-        d['user'] = s.user()
-        d['date'] = s.date()
-        d['description'] = s.description()
-        d['branch'] = s.branch()
-        if util.safehasattr(s, 'path'):
-            d['file'] = s.path()
-        yield d
+    def __iter__(self):
+        for s in self.siblings:
+            d = {
+                'node': s.hex(),
+                'rev': s.rev(),
+                'user': s.user(),
+                'date': s.date(),
+                'description': s.description(),
+                'branch': s.branch(),
+            }
+            if util.safehasattr(s, 'path'):
+                d['file'] = s.path()
+            yield d
+
+    def __len__(self):
+        return len(self.siblings)
 
 def parents(ctx, hide=None):
     if isinstance(ctx, context.basefilectx):
@@ -283,6 +308,25 @@ def filectx(repo, req):
 
     return fctx
 
+def commonentry(repo, ctx):
+    node = ctx.node()
+    return {
+        'rev': ctx.rev(),
+        'node': hex(node),
+        'author': ctx.user(),
+        'desc': ctx.description(),
+        'date': ctx.date(),
+        'extra': ctx.extra(),
+        'phase': ctx.phasestr(),
+        'branch': nodebranchnodefault(ctx),
+        'inbranch': nodeinbranch(repo, ctx),
+        'branches': nodebranchdict(repo, ctx),
+        'tags': nodetagsdict(repo, node),
+        'bookmarks': nodebookmarksdict(repo, node),
+        'parent': lambda **x: parents(ctx),
+        'child': lambda **x: children(ctx),
+    }
+
 def changelistentry(web, ctx, tmpl):
     '''Obtain a dictionary to be used for entries in a changelist.
 
@@ -295,26 +339,18 @@ def changelistentry(web, ctx, tmpl):
     showtags = showtag(repo, tmpl, 'changelogtag', n)
     files = listfilediffs(tmpl, ctx.files(), n, web.maxfiles)
 
-    return {
-        "author": ctx.user(),
-        "parent": parents(ctx, rev - 1),
-        "child": children(ctx, rev + 1),
-        "changelogtag": showtags,
-        "desc": ctx.description(),
-        "extra": ctx.extra(),
-        "date": ctx.date(),
-        "files": files,
-        "rev": rev,
-        "node": hex(n),
-        "tags": nodetagsdict(repo, n),
-        "bookmarks": nodebookmarksdict(repo, n),
-        "inbranch": nodeinbranch(repo, ctx),
-        "branches": nodebranchdict(repo, ctx)
-    }
+    entry = commonentry(repo, ctx)
+    entry.update(
+        parent=lambda **x: parents(ctx, rev - 1),
+        child=lambda **x: children(ctx, rev + 1),
+        changelogtag=showtags,
+        files=files,
+    )
+    return entry
 
 def symrevorshortnode(req, ctx):
     if 'node' in req.form:
-        return revescape(req.form['node'][0])
+        return templatefilters.revescape(req.form['node'][0])
     else:
         return short(ctx.node())
 
@@ -351,29 +387,16 @@ def changesetentry(web, req, tmpl, ctx):
 
     return dict(
         diff=diff,
-        rev=ctx.rev(),
-        node=ctx.hex(),
         symrev=symrevorshortnode(req, ctx),
-        parent=tuple(parents(ctx)),
-        child=children(ctx),
         basenode=basectx.hex(),
         changesettag=showtags,
         changesetbookmark=showbookmarks,
         changesetbranch=showbranch,
-        author=ctx.user(),
-        desc=ctx.description(),
-        extra=ctx.extra(),
-        date=ctx.date(),
-        phase=ctx.phasestr(),
         files=files,
         diffsummary=lambda **x: diffsummary(diffstatsgen),
         diffstat=diffstats,
         archives=web.archivelist(ctx.hex()),
-        tags=nodetagsdict(web.repo, ctx.node()),
-        bookmarks=nodebookmarksdict(web.repo, ctx.node()),
-        branch=showbranch,
-        inbranch=nodeinbranch(web.repo, ctx),
-        branches=nodebranchdict(web.repo, ctx))
+        **commonentry(web.repo, ctx))
 
 def listfilediffs(tmpl, files, node, max):
     for f in files[:max]:
@@ -537,7 +560,7 @@ class sessionvars(object):
             yield {'name': key, 'value': str(value), 'separator': separator}
             separator = '&'
 
-class wsgiui(ui.ui):
+class wsgiui(uimod.ui):
     # default termwidth breaks under mod_wsgi
     def termwidth(self):
         return 80

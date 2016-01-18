@@ -4,21 +4,60 @@
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
-from node import hex, nullid, wdirrev, short
-from i18n import _
+
+from __future__ import absolute_import
+
+import errno
+import inspect
+import os
+import random
+import time
 import urllib
-import peer, changegroup, subrepo, pushkey, obsolete, repoview
-import changelog, dirstate, filelog, manifest, context, bookmarks, phases
-import lock as lockmod
-import transaction, store, encoding, exchange, bundle2
-import scmutil, util, extensions, hook, error, revset, cmdutil
-import match as matchmod
-import merge as mergemod
-import tags as tagsmod
-from lock import release
-import weakref, errno, os, time, inspect, random
-import branchmap, pathutil
-import namespaces
+import weakref
+
+from .i18n import _
+from .node import (
+    hex,
+    nullid,
+    short,
+    wdirrev,
+)
+from . import (
+    bookmarks,
+    branchmap,
+    bundle2,
+    changegroup,
+    changelog,
+    cmdutil,
+    context,
+    dirstate,
+    encoding,
+    error,
+    exchange,
+    extensions,
+    filelog,
+    hook,
+    lock as lockmod,
+    manifest,
+    match as matchmod,
+    merge as mergemod,
+    namespaces,
+    obsolete,
+    pathutil,
+    peer,
+    phases,
+    pushkey,
+    repoview,
+    revset,
+    scmutil,
+    store,
+    subrepo,
+    tags as tagsmod,
+    transaction,
+    util,
+)
+
+release = lockmod.release
 propertycache = util.propertycache
 filecache = scmutil.filecache
 
@@ -214,6 +253,8 @@ class localrepository(object):
         self.path = self.wvfs.join(".hg")
         self.origroot = path
         self.auditor = pathutil.pathauditor(self.root, self._checknested)
+        self.nofsauditor = pathutil.pathauditor(self.root, self._checknested,
+                                                realfs=False)
         self.vfs = scmutil.vfs(self.path)
         self.opener = self.vfs
         self.baseui = baseui
@@ -258,8 +299,7 @@ class localrepository(object):
                         '\0\0\0\2' # represents revlogv2
                         ' dummy changelog to prevent using the old repo layout'
                     )
-                # experimental config: format.generaldelta
-                if self.ui.configbool('format', 'generaldelta', False):
+                if scmutil.gdinitconfig(self.ui):
                     self.requirements.add("generaldelta")
                 if self.ui.configbool('experimental', 'treemanifest', False):
                     self.requirements.add("treemanifest")
@@ -359,6 +399,7 @@ class localrepository(object):
         aggressivemergedeltas = self.ui.configbool('format',
             'aggressivemergedeltas', False)
         self.svfs.options['aggressivemergedeltas'] = aggressivemergedeltas
+        self.svfs.options['lazydeltabase'] = not scmutil.gddeltaconfig(self.ui)
 
     def _writerequirements(self):
         scmutil.writerequires(self.vfs, self.requirements)
@@ -418,13 +459,13 @@ class localrepository(object):
             pass
         return proxycls(self, name)
 
-    @repofilecache('bookmarks')
+    @repofilecache('bookmarks', 'bookmarks.current')
     def _bookmarks(self):
         return bookmarks.bmstore(self)
 
-    @repofilecache('bookmarks.current')
+    @property
     def _activebookmark(self):
-        return bookmarks.readactive(self)
+        return self._bookmarks.active
 
     def bookmarkheads(self, bookmark):
         name = bookmark.split('@', 1)[0]
@@ -517,15 +558,23 @@ class localrepository(object):
         return iter(self.changelog)
 
     def revs(self, expr, *args):
-        '''Return a list of revisions matching the given revset'''
+        '''Find revisions matching a revset.
+
+        The revset is specified as a string ``expr`` that may contain
+        %-formatting to escape certain types. See ``revset.formatspec``.
+
+        Return a revset.abstractsmartset, which is a list-like interface
+        that contains integer revisions.
+        '''
         expr = revset.formatspec(expr, *args)
         m = revset.match(None, expr)
         return m(self)
 
     def set(self, expr, *args):
-        '''
-        Yield a context for each matching revision, after doing arg
-        replacement via revset.formatspec
+        '''Find revisions matching a revset and emit changectx instances.
+
+        This is a convenience wrapper around ``revs()`` that iterates the
+        result and is a generator of changectx instances.
         '''
         for r in self.revs(expr, *args):
             yield self[r]
@@ -751,6 +800,7 @@ class localrepository(object):
         return self._tagscache.nodetagscache.get(node, [])
 
     def nodebookmarks(self, node):
+        """return the list of bookmarks pointing to the specified node"""
         marks = []
         for bookmark, n in self._bookmarks.iteritems():
             if n == node:
@@ -797,12 +847,13 @@ class localrepository(object):
         return repo[key].branch()
 
     def known(self, nodes):
-        nm = self.changelog.nodemap
-        pc = self._phasecache
+        cl = self.changelog
+        nm = cl.nodemap
+        filtered = cl.filteredrevs
         result = []
         for n in nodes:
             r = nm.get(n)
-            resp = not (r is None or pc.phase(self, r) >= phases.secret)
+            resp = not (r is None or r in filtered)
             result.append(resp)
         return result
 
@@ -840,12 +891,14 @@ class localrepository(object):
             f = f[1:]
         return filelog.filelog(self.svfs, f)
 
-    def changectx(self, changeid):
-        return self[changeid]
-
     def parents(self, changeid=None):
         '''get list of changectxs for parents of changeid'''
+        msg = 'repo.parents() is deprecated, use repo[%r].parents()' % changeid
+        self.ui.deprecwarn(msg, '3.7')
         return self[changeid].parents()
+
+    def changectx(self, changeid):
+        return self[changeid]
 
     def setparents(self, p1, p2=nullid):
         self.dirstate.beginparentchange()
@@ -1032,9 +1085,15 @@ class localrepository(object):
         def txnclosehook(tr2):
             """To be run if transaction is successful, will schedule a hook run
             """
+            # Don't reference tr2 in hook() so we don't hold a reference.
+            # This reduces memory consumption when there are multiple
+            # transactions per lock. This can likely go away if issue5045
+            # fixes the function accumulation.
+            hookargs = tr2.hookargs
+
             def hook():
                 reporef().hook('txnclose', throw=False, txnname=desc,
-                               **tr2.hookargs)
+                               **hookargs)
             reporef()._afterlock(hook)
         tr.addfinalize('txnclose-hook', txnclosehook)
         def txnaborthook(tr2):
@@ -1073,8 +1132,7 @@ class localrepository(object):
                            self.svfs.tryread("phaseroots"))
 
     def recover(self):
-        lock = self.lock()
-        try:
+        with self.lock():
             if self.svfs.exists("journal"):
                 self.ui.status(_("rolling back interrupted transaction\n"))
                 vfsmap = {'': self.svfs,
@@ -1086,8 +1144,6 @@ class localrepository(object):
             else:
                 self.ui.warn(_("no interrupted transaction available\n"))
                 return False
-        finally:
-            lock.release()
 
     def rollback(self, dryrun=False, force=False):
         wlock = lock = dsguard = None
@@ -1161,15 +1217,14 @@ class localrepository(object):
                         % self.dirstate.branch())
 
             self.dirstate.invalidate()
-            parents = tuple([p.rev() for p in self.parents()])
+            parents = tuple([p.rev() for p in self[None].parents()])
             if len(parents) > 1:
                 ui.status(_('working directory now based on '
                             'revisions %d and %d\n') % parents)
             else:
                 ui.status(_('working directory now based on '
                             'revision %d\n') % parents)
-            ms = mergemod.mergestate(self)
-            ms.reset(self['.'].node())
+            mergemod.mergestate.clean(self, self['.'].node())
 
         # TODO: if we know which new heads may result from this rollback, pass
         # them to destroy(), which will prevent the branchhead cache from being
@@ -1456,8 +1511,11 @@ class localrepository(object):
             match.explicitdir = vdirs.append
             match.bad = fail
 
-        wlock = self.wlock()
+        wlock = lock = tr = None
         try:
+            wlock = self.wlock()
+            lock = self.lock() # for recent changelog (see issue4368)
+
             wctx = self[None]
             merge = len(wctx.parents()) > 1
 
@@ -1556,7 +1614,7 @@ class localrepository(object):
             if merge and cctx.deleted():
                 raise error.Abort(_("cannot commit merge with missing files"))
 
-            ms = mergemod.mergestate(self)
+            ms = mergemod.mergestate.read(self)
 
             if list(ms.unresolved()):
                 raise error.Abort(_('unresolved merge conflicts '
@@ -1589,19 +1647,21 @@ class localrepository(object):
             try:
                 self.hook("precommit", throw=True, parent1=hookp1,
                           parent2=hookp2)
+                tr = self.transaction('commit')
                 ret = self.commitctx(cctx, True)
             except: # re-raises
                 if edited:
                     self.ui.write(
                         _('note: commit message saved in %s\n') % msgfn)
                 raise
-
             # update bookmarks, dirstate and mergestate
             bookmarks.update(self, [p1, p2], ret)
             cctx.markcommitted(ret)
             ms.reset()
+            tr.close()
+
         finally:
-            wlock.release()
+            lockmod.release(tr, lock, wlock)
 
         def commithook(node=hex(ret), parent1=hookp1, parent2=hookp2):
             # hack for command that use a temporary commit (eg: histedit)
@@ -1837,22 +1897,6 @@ class localrepository(object):
         functions, which are called before pushing changesets.
         """
         return util.hooks()
-
-    def clone(self, remote, heads=[], stream=None):
-        '''clone remote repository.
-
-        keyword arguments:
-        heads: list of revs to clone (forces use of pull)
-        stream: use streaming clone if possible'''
-        # internal config: ui.quietbookmarkmove
-        quiet = self.ui.backupconfig('ui', 'quietbookmarkmove')
-        try:
-            self.ui.setconfig('ui', 'quietbookmarkmove', True, 'clone')
-            pullop = exchange.pull(self, remote, heads,
-                                   streamclonerequested=stream)
-            return pullop.cgresult
-        finally:
-            self.ui.restoreconfig(quiet)
 
     def pushkey(self, namespace, key, old, new):
         try:

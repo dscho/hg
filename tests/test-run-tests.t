@@ -7,12 +7,19 @@ Avoid interference from actual test env:
   $ unset HGTEST_PORT
   $ unset HGTEST_SHELL
 
-Smoke test
+Smoke test with install
 ============
 
-  $ run-tests.py $HGTEST_RUN_TESTS_PURE
+  $ run-tests.py $HGTEST_RUN_TESTS_PURE -l
   
   # Ran 0 tests, 0 skipped, 0 warned, 0 failed.
+
+Define a helper to avoid the install step
+=============
+  $ rt()
+  > {
+  >     run-tests.py --with-hg=`which hg` "$@"
+  > }
 
 a succesful test
 =======================
@@ -26,7 +33,7 @@ a succesful test
   >   nor this (?)
   > EOF
 
-  $ run-tests.py --with-hg=`which hg`
+  $ rt
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -44,7 +51,7 @@ failing test
   >>> fh.write(u'  $ echo babar\u03b1\n'.encode('utf-8')) and None
   >>> fh.write(u'  l\u03b5\u03b5t\n'.encode('utf-8')) and None
 
-  $ run-tests.py --with-hg=`which hg`
+  $ rt
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
@@ -73,7 +80,7 @@ failing test
   [1]
 
 test --xunit support
-  $ run-tests.py --with-hg=`which hg` --xunit=xunit.xml
+  $ rt --xunit=xunit.xml
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
@@ -129,7 +136,7 @@ test --xunit support
 test for --retest
 ====================
 
-  $ run-tests.py --with-hg=`which hg` --retest
+  $ rt --retest
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
@@ -152,18 +159,18 @@ Selecting Tests To Run
 
 successful
 
-  $ run-tests.py --with-hg=`which hg` test-success.t
+  $ rt test-success.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
 success w/ keyword
-  $ run-tests.py --with-hg=`which hg` -k xyzzy
+  $ rt -k xyzzy
   .
   # Ran 2 tests, 1 skipped, 0 warned, 0 failed.
 
 failed
 
-  $ run-tests.py --with-hg=`which hg` test-failure.t
+  $ rt test-failure.t
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
@@ -182,7 +189,7 @@ failed
   [1]
 
 failure w/ keyword
-  $ run-tests.py --with-hg=`which hg` -k rataxes
+  $ rt -k rataxes
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
@@ -202,36 +209,45 @@ failure w/ keyword
 
 Verify that when a process fails to start we show a useful message
 ==================================================================
-NOTE: there is currently a bug where this shows "2 failed" even though
-it's actually the same test being reported for failure twice.
 
   $ cat > test-serve-fail.t <<EOF
   >   $ echo 'abort: child process failed to start blah'
   > EOF
-  $ run-tests.py --with-hg=`which hg` test-serve-fail.t
+  $ rt test-serve-fail.t
   
   ERROR: test-serve-fail.t output changed
   !
-  ERROR: test-serve-fail.t output changed
-  !
   Failed test-serve-fail.t: server failed to start (HGPORT=*) (glob)
-  Failed test-serve-fail.t: output changed
-  # Ran 1 tests, 0 skipped, 0 warned, 2 failed.
+  # Ran 1 tests, 0 skipped, 0 warned, 1 failed.
   python hash seed: * (glob)
   [1]
   $ rm test-serve-fail.t
 
+Verify that we can try other ports
+===================================
+  $ hg init inuse
+  $ hg serve -R inuse -p $HGPORT -d --pid-file=blocks.pid
+  $ cat blocks.pid >> $DAEMON_PIDS
+  $ cat > test-serve-inuse.t <<EOF
+  >   $ hg serve -R `pwd`/inuse -p \$HGPORT -d --pid-file=hg.pid
+  >   $ cat hg.pid >> \$DAEMON_PIDS
+  > EOF
+  $ rt test-serve-inuse.t
+  .
+  # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
+  $ rm test-serve-inuse.t
+
 Running In Debug Mode
 ======================
 
-  $ run-tests.py --with-hg=`which hg` --debug 2>&1 | grep -v pwd
+  $ rt --debug 2>&1 | grep -v pwd
   + echo *SALT* 0 0 (glob)
   *SALT* 0 0 (glob)
   + echo babar
   babar
   + echo *SALT* 4 0 (glob)
   *SALT* 4 0 (glob)
-  .+ echo *SALT* 0 0 (glob)
+  *+ echo *SALT* 0 0 (glob)
   *SALT* 0 0 (glob)
   + echo babar
   babar
@@ -250,7 +266,7 @@ Parallel runs
 (duplicate the failing test to get predictable output)
   $ cp test-failure.t test-failure-copy.t
 
-  $ run-tests.py --with-hg=`which hg` --jobs 2 test-failure*.t -n
+  $ rt --jobs 2 test-failure*.t -n
   !!
   Failed test-failure*.t: output changed (glob)
   Failed test-failure*.t: output changed (glob)
@@ -262,7 +278,7 @@ failures in parallel with --first should only print one failure
   >>> f = open('test-nothing.t', 'w')
   >>> f.write('foo\n' * 1024) and None
   >>> f.write('  $ sleep 1') and None
-  $ run-tests.py --with-hg=`which hg` --jobs 2 --first
+  $ rt --jobs 2 --first
   
   --- $TESTTMP/test-failure*.t (glob)
   +++ $TESTTMP/test-failure*.t.err (glob)
@@ -292,7 +308,7 @@ Interactive run
 
 Refuse the fix
 
-  $ echo 'n' | run-tests.py --with-hg=`which hg` -i
+  $ echo 'n' | rt -i
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
@@ -318,7 +334,7 @@ Refuse the fix
 
 Interactive with custom view
 
-  $ echo 'n' | run-tests.py --with-hg=`which hg` -i --view echo
+  $ echo 'n' | rt -i --view echo
   $TESTTMP/test-failure.t $TESTTMP/test-failure.t.err (glob)
   Accept this change? [n]* (glob)
   ERROR: test-failure.t output changed
@@ -330,7 +346,7 @@ Interactive with custom view
 
 View the fix
 
-  $ echo 'y' | run-tests.py --with-hg=`which hg` --view echo
+  $ echo 'y' | rt --view echo
   $TESTTMP/test-failure.t $TESTTMP/test-failure.t.err (glob)
   
   ERROR: test-failure.t output changed
@@ -348,8 +364,7 @@ Accept the fix
   $ echo "  saved backup bundle to \$TESTTMP/foo.hg (glob)" >> test-failure.t
   $ echo "  $ echo 'saved backup bundle to \$TESTTMP/foo.hg'" >> test-failure.t
   $ echo "  saved backup bundle to \$TESTTMP/*.hg (glob)" >> test-failure.t
-  $ echo 'y' | run-tests.py --with-hg=`which hg` -i 2>&1 | \
-  >   sed -e 's,(glob)$,&<,g'
+  $ echo 'y' | rt -i 2>&1
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
@@ -361,9 +376,9 @@ Accept the fix
    this test is still more bytes than success.
      $ echo 'saved backup bundle to $TESTTMP/foo.hg'
   -  saved backup bundle to $TESTTMP/foo.hg
-  +  saved backup bundle to $TESTTMP/foo.hg (glob)<
+  +  saved backup bundle to $TESTTMP/foo.hg* (glob)
      $ echo 'saved backup bundle to $TESTTMP/foo.hg'
-     saved backup bundle to $TESTTMP/foo.hg (glob)<
+     saved backup bundle to $TESTTMP/foo.hg* (glob)
      $ echo 'saved backup bundle to $TESTTMP/foo.hg'
   Accept this change? [n] ..
   # Ran 2 tests, 0 skipped, 0 warned, 0 failed.
@@ -386,7 +401,7 @@ Accept the fix
 No Diff
 ===============
 
-  $ run-tests.py --with-hg=`which hg` --nodiff
+  $ rt --nodiff
   !.
   Failed test-failure.t: output changed
   # Ran 2 tests, 0 skipped, 0 warned, 1 failed.
@@ -394,17 +409,42 @@ No Diff
   [1]
 
 test --tmpdir support
-  $ run-tests.py --with-hg=`which hg` --tmpdir=$TESTTMP/keep test-success.t
+  $ rt --tmpdir=$TESTTMP/keep test-success.t
   
   Keeping testtmp dir: $TESTTMP/keep/child1/test-success.t (glob)
   Keeping threadtmp dir: $TESTTMP/keep/child1  (glob)
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
+timeouts
+========
+  $ cat > test-timeout.t <<EOF
+  >   $ sleep 2
+  >   $ echo pass
+  >   pass
+  > EOF
+  > echo '#require slow' > test-slow-timeout.t
+  > cat test-timeout.t >> test-slow-timeout.t
+  $ rt --timeout=1 --slowtimeout=3 test-timeout.t test-slow-timeout.t
+  st
+  Skipped test-slow-timeout.t: missing feature: allow slow tests
+  Failed test-timeout.t: timed out
+  # Ran 1 tests, 1 skipped, 0 warned, 1 failed.
+  python hash seed: * (glob)
+  [1]
+  $ rt --timeout=1 --slowtimeout=3 \
+  > test-timeout.t test-slow-timeout.t --allow-slow-tests
+  .t
+  Failed test-timeout.t: timed out
+  # Ran 2 tests, 0 skipped, 0 warned, 1 failed.
+  python hash seed: * (glob)
+  [1]
+  $ rm test-timeout.t test-slow-timeout.t
+
 test for --time
 ==================
 
-  $ run-tests.py --with-hg=`which hg` test-success.t --time
+  $ rt test-success.t --time
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
   # Producing time report
@@ -414,7 +454,7 @@ test for --time
 test for --time with --job enabled
 ====================================
 
-  $ run-tests.py --with-hg=`which hg` test-success.t --time --jobs 2
+  $ rt test-success.t --time --jobs 2
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
   # Producing time report
@@ -427,24 +467,24 @@ Skips
   >   $ echo xyzzy
   > #require false
   > EOF
-  $ run-tests.py --with-hg=`which hg` --nodiff
+  $ rt --nodiff
   !.s
-  Skipped test-skip.t: skipped
+  Skipped test-skip.t: missing feature: nail clipper
   Failed test-failure.t: output changed
   # Ran 2 tests, 1 skipped, 0 warned, 1 failed.
   python hash seed: * (glob)
   [1]
 
-  $ run-tests.py --with-hg=`which hg` --keyword xyzzy
+  $ rt --keyword xyzzy
   .s
-  Skipped test-skip.t: skipped
+  Skipped test-skip.t: missing feature: nail clipper
   # Ran 2 tests, 2 skipped, 0 warned, 0 failed.
 
 Skips with xml
-  $ run-tests.py --with-hg=`which hg` --keyword xyzzy \
+  $ rt --keyword xyzzy \
   >  --xunit=xunit.xml
   .s
-  Skipped test-skip.t: skipped
+  Skipped test-skip.t: missing feature: nail clipper
   # Ran 2 tests, 2 skipped, 0 warned, 0 failed.
   $ cat xunit.xml
   <?xml version="1.0" encoding="utf-8"?>
@@ -454,7 +494,7 @@ Skips with xml
 
 Missing skips or blacklisted skips don't count as executed:
   $ echo test-failure.t > blacklist
-  $ run-tests.py --with-hg=`which hg` --blacklist=blacklist \
+  $ rt --blacklist=blacklist \
   >   test-failure.t test-bogus.t
   ss
   Skipped test-bogus.t: Doesn't exist
@@ -466,7 +506,7 @@ Missing skips or blacklisted skips don't count as executed:
 test for --json
 ==================
 
-  $ run-tests.py --with-hg=`which hg` --json
+  $ rt --json
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
@@ -479,7 +519,7 @@ test for --json
   
   ERROR: test-failure.t output changed
   !.s
-  Skipped test-skip.t: skipped
+  Skipped test-skip.t: missing feature: nail clipper
   Failed test-failure.t: output changed
   # Ran 2 tests, 1 skipped, 0 warned, 1 failed.
   python hash seed: * (glob)
@@ -490,6 +530,7 @@ test for --json
       "test-failure.t": [\{] (re)
           "csys": "\s*[\d\.]{4,5}", ? (re)
           "cuser": "\s*[\d\.]{4,5}", ? (re)
+          "diff": "---.+\+\+\+.+", ? (re)
           "end": "\s*[\d\.]{4,5}", ? (re)
           "result": "failure", ? (re)
           "start": "\s*[\d\.]{4,5}", ? (re)
@@ -498,6 +539,7 @@ test for --json
       "test-skip.t": {
           "csys": "\s*[\d\.]{4,5}", ? (re)
           "cuser": "\s*[\d\.]{4,5}", ? (re)
+          "diff": "", ? (re)
           "end": "\s*[\d\.]{4,5}", ? (re)
           "result": "skip", ? (re)
           "start": "\s*[\d\.]{4,5}", ? (re)
@@ -506,6 +548,7 @@ test for --json
       "test-success.t": [\{] (re)
           "csys": "\s*[\d\.]{4,5}", ? (re)
           "cuser": "\s*[\d\.]{4,5}", ? (re)
+          "diff": "", ? (re)
           "end": "\s*[\d\.]{4,5}", ? (re)
           "result": "success", ? (re)
           "start": "\s*[\d\.]{4,5}", ? (re)
@@ -516,7 +559,7 @@ test for --json
 Test that failed test accepted through interactive are properly reported:
 
   $ cp test-failure.t backup
-  $ echo y | run-tests.py --with-hg=`which hg` --json -i
+  $ echo y | rt --json -i
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
@@ -527,7 +570,7 @@ Test that failed test accepted through interactive are properly reported:
    This is a noop statement so that
    this test is still more bytes than success.
   Accept this change? [n] ..s
-  Skipped test-skip.t: skipped
+  Skipped test-skip.t: missing feature: nail clipper
   # Ran 2 tests, 1 skipped, 0 warned, 0 failed.
 
   $ cat report.json
@@ -535,6 +578,7 @@ Test that failed test accepted through interactive are properly reported:
       "test-failure.t": [\{] (re)
           "csys": "\s*[\d\.]{4,5}", ? (re)
           "cuser": "\s*[\d\.]{4,5}", ? (re)
+          "diff": "", ? (re)
           "end": "\s*[\d\.]{4,5}", ? (re)
           "result": "success", ? (re)
           "start": "\s*[\d\.]{4,5}", ? (re)
@@ -543,6 +587,7 @@ Test that failed test accepted through interactive are properly reported:
       "test-skip.t": {
           "csys": "\s*[\d\.]{4,5}", ? (re)
           "cuser": "\s*[\d\.]{4,5}", ? (re)
+          "diff": "", ? (re)
           "end": "\s*[\d\.]{4,5}", ? (re)
           "result": "skip", ? (re)
           "start": "\s*[\d\.]{4,5}", ? (re)
@@ -551,6 +596,7 @@ Test that failed test accepted through interactive are properly reported:
       "test-success.t": [\{] (re)
           "csys": "\s*[\d\.]{4,5}", ? (re)
           "cuser": "\s*[\d\.]{4,5}", ? (re)
+          "diff": "", ? (re)
           "end": "\s*[\d\.]{4,5}", ? (re)
           "result": "success", ? (re)
           "start": "\s*[\d\.]{4,5}", ? (re)
@@ -568,7 +614,7 @@ backslash on end of line with glob matching is handled properly
   >   foo * \ (glob)
   > EOF
 
-  $ run-tests.py --with-hg=`which hg` test-glob-backslash.t
+  $ rt test-glob-backslash.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -588,7 +634,7 @@ Mercurial source tree.
   >   $ echo foo
   >   foo
   > EOF
-  $ run-tests.py $HGTEST_RUN_TESTS_PURE test-hghave.t
+  $ rt $HGTEST_RUN_TESTS_PURE test-hghave.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -600,14 +646,18 @@ running is placed.
   > - \$TESTDIR, in which test-runtestdir.t is placed (expanded at runtime)
   > - \$RUNTESTDIR, in which run-tests.py is placed (expanded at runtime)
   > 
+  > #if windows
+  >   $ test "\$TESTDIR" = "$TESTTMP\anothertests"
+  > #else
   >   $ test "\$TESTDIR" = "$TESTTMP"/anothertests
+  > #endif
   >   $ test "\$RUNTESTDIR" = "$TESTDIR"
   >   $ head -n 3 "\$RUNTESTDIR"/../contrib/check-code.py
   >   #!/usr/bin/env python
   >   #
   >   # check-code - a style and portability checker for Mercurial
   > EOF
-  $ run-tests.py $HGTEST_RUN_TESTS_PURE test-runtestdir.t
+  $ rt $HGTEST_RUN_TESTS_PURE test-runtestdir.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -624,7 +674,7 @@ test that TESTDIR is referred in PATH
   >   $ custom-command.sh
   >   hello world
   > EOF
-  $ run-tests.py $HGTEST_RUN_TESTS_PURE test-testdir-path.t
+  $ rt $HGTEST_RUN_TESTS_PURE test-testdir-path.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -636,10 +686,10 @@ test support for --allow-slow-tests
   >   $ echo pass
   >   pass
   > EOF
-  $ run-tests.py $HGTEST_RUN_TESTS_PURE test-very-slow-test.t
+  $ rt $HGTEST_RUN_TESTS_PURE test-very-slow-test.t
   s
-  Skipped test-very-slow-test.t: skipped
+  Skipped test-very-slow-test.t: missing feature: allow slow tests
   # Ran 0 tests, 1 skipped, 0 warned, 0 failed.
-  $ run-tests.py $HGTEST_RUN_TESTS_PURE --allow-slow-tests test-very-slow-test.t
+  $ rt $HGTEST_RUN_TESTS_PURE --allow-slow-tests test-very-slow-test.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.

@@ -5,11 +5,21 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-import mdiff, parsers, error, revlog, util
-import array, struct
-import os
+from __future__ import absolute_import
+
+import array
 import heapq
+import os
+import struct
+
+from .i18n import _
+from . import (
+    error,
+    mdiff,
+    parsers,
+    revlog,
+    util,
+)
 
 propertycache = util.propertycache
 
@@ -334,36 +344,44 @@ class manifestdict(object):
         # zero copy representation of base as a buffer
         addbuf = util.buffer(base)
 
-        # start with a readonly loop that finds the offset of
-        # each line and creates the deltas
-        for f, todelete in changes:
-            # bs will either be the index of the item or the insert point
-            start, end = _msearch(addbuf, f, start)
-            if not todelete:
-                h, fl = self._lm[f]
-                l = "%s\0%s%s\n" % (f, revlog.hex(h), fl)
-            else:
-                if start == end:
-                    # item we want to delete was not found, error out
-                    raise AssertionError(
-                            _("failed to remove %s from manifest") % f)
-                l = ""
-            if dstart is not None and dstart <= start and dend >= start:
-                if dend < end:
+        changes = list(changes)
+        if len(changes) < 1000:
+            # start with a readonly loop that finds the offset of
+            # each line and creates the deltas
+            for f, todelete in changes:
+                # bs will either be the index of the item or the insert point
+                start, end = _msearch(addbuf, f, start)
+                if not todelete:
+                    h, fl = self._lm[f]
+                    l = "%s\0%s%s\n" % (f, revlog.hex(h), fl)
+                else:
+                    if start == end:
+                        # item we want to delete was not found, error out
+                        raise AssertionError(
+                                _("failed to remove %s from manifest") % f)
+                    l = ""
+                if dstart is not None and dstart <= start and dend >= start:
+                    if dend < end:
+                        dend = end
+                    if l:
+                        dline.append(l)
+                else:
+                    if dstart is not None:
+                        delta.append([dstart, dend, "".join(dline)])
+                    dstart = start
                     dend = end
-                if l:
-                    dline.append(l)
-            else:
-                if dstart is not None:
-                    delta.append([dstart, dend, "".join(dline)])
-                dstart = start
-                dend = end
-                dline = [l]
+                    dline = [l]
 
-        if dstart is not None:
-            delta.append([dstart, dend, "".join(dline)])
-        # apply the delta to the base, and get a delta for addrevision
-        deltatext, arraytext = _addlistdelta(base, delta)
+            if dstart is not None:
+                delta.append([dstart, dend, "".join(dline)])
+            # apply the delta to the base, and get a delta for addrevision
+            deltatext, arraytext = _addlistdelta(base, delta)
+        else:
+            # For large changes, it's much cheaper to just build the text and
+            # diff it.
+            arraytext = array.array('c', self.text())
+            deltatext = mdiff.textdiff(base, arraytext)
+
         return arraytext, deltatext
 
 def _msearch(m, s, lo=0, hi=None):
@@ -609,7 +627,7 @@ class treemanifest(object):
 
     def setflag(self, f, flags):
         """Set the flags (symlink, executable) for path f."""
-        assert 'd' not in flags
+        assert 't' not in flags
         self._load()
         dir, subpath = _splittopdir(f)
         if dir:
@@ -732,9 +750,12 @@ class treemanifest(object):
     def _matches(self, match):
         '''recursively generate a new manifest filtered by the match argument.
         '''
-        ret = treemanifest(self._dir)
 
-        if not match.visitdir(self._dir[:-1] or '.'):
+        visit = match.visitdir(self._dir[:-1] or '.')
+        if visit == 'all':
+            return self.copy()
+        ret = treemanifest(self._dir)
+        if not visit:
             return ret
 
         self._load()
@@ -807,7 +828,7 @@ class treemanifest(object):
 
     def parse(self, text, readsubtree):
         for f, n, fl in _parse(text):
-            if fl == 'd':
+            if fl == 't':
                 f = f + '/'
                 self._dirs[f] = readsubtree(self._subpath(f), n)
             elif '/' in f:
@@ -838,7 +859,7 @@ class treemanifest(object):
         """
         self._load()
         flags = self.flags
-        dirs = [(d[:-1], self._dirs[d]._node, 'd') for d in self._dirs]
+        dirs = [(d[:-1], self._dirs[d]._node, 't') for d in self._dirs]
         files = [(f, self._files[f], flags(f)) for f in self._files]
         return _text(sorted(dirs + files), usemanifestv2)
 
@@ -1024,3 +1045,8 @@ class manifest(revlog.revlog):
         # Save nodeid so parent manifest can calculate its nodeid
         m.setnode(n)
         return n
+
+    def clearcaches(self):
+        super(manifest, self).clearcaches()
+        self._mancache.clear()
+        self._dirlogcache = {'': self}

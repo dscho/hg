@@ -54,6 +54,7 @@ shelve has a help message
   
    -A --addremove           mark new/missing files as added/removed before
                             shelving
+   -u --unknown             Store unknown files in the shelve
       --cleanup             delete all shelved changes
       --date DATE           shelve with the specified commit date
    -d --delete              delete the named shelved change(s)
@@ -140,11 +141,11 @@ the common case - no options or filenames
 ensure that our shelved changes exist
 
   $ hg shelve -l
-  default-01      (*)* changes to '[mq]: second.patch' (glob)
-  default         (*)* changes to '[mq]: second.patch' (glob)
+  default-01      (*)* changes to: [mq]: second.patch (glob)
+  default         (*)* changes to: [mq]: second.patch (glob)
 
   $ hg shelve -l -p default
-  default         (*)* changes to '[mq]: second.patch' (glob)
+  default         (*)* changes to: [mq]: second.patch (glob)
   
   diff --git a/a/a b/a/a
   --- a/a/a
@@ -177,7 +178,7 @@ local edits should not prevent a shelved change from applying
   unshelving change 'default-01'
   temporarily committing pending changes (restore with 'hg unshelve --abort')
   rebasing shelved changes
-  rebasing 4:4702e8911fe0 "changes to '[mq]: second.patch'" (tip)
+  rebasing 4:32c69314e062 "changes to: [mq]: second.patch" (tip)
   merging a/a
 
   $ hg revert --all -q
@@ -299,7 +300,7 @@ force a conflicted merge to occur
   unshelving change 'default'
   temporarily committing pending changes (restore with 'hg unshelve --abort')
   rebasing shelved changes
-  rebasing 5:4702e8911fe0 "changes to '[mq]: second.patch'" (tip)
+  rebasing 5:32c69314e062 "changes to: [mq]: second.patch" (tip)
   merging a/a
   warning: conflicts while merging a/a! (edit, then use 'hg resolve --mark')
   unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
@@ -329,7 +330,7 @@ ensure that we have a merge with unresolved conflicts
    c
   +=======
   +a
-  +>>>>>>> source: 4702e8911fe0 - shelve: changes to '[mq]: second.patch'
+  +>>>>>>> source: 32c69314e062 - shelve: changes to: [mq]: second.patch
   diff --git a/b/b b/b.rename/b
   rename from b/b
   rename to b.rename/b
@@ -395,6 +396,7 @@ attempt to continue
   $ hg revert -r . a/a
   $ hg resolve -m a/a
   (no more unresolved files)
+  continue: hg unshelve --continue
 
   $ hg commit -m 'commit while unshelve in progress'
   abort: unshelve already in progress
@@ -402,7 +404,7 @@ attempt to continue
   [255]
 
   $ hg unshelve -c
-  rebasing 5:4702e8911fe0 "changes to '[mq]: second.patch'" (tip)
+  rebasing 5:32c69314e062 "changes to: [mq]: second.patch" (tip)
   unshelve of 'default' complete
 
 ensure the repo is as we hope
@@ -469,13 +471,36 @@ set up another conflict between a commit and a shelved change
 
 if we resolve a conflict while unshelving, the unshelve should succeed
 
+  $ hg unshelve --tool :merge-other --keep
+  unshelving change 'default'
+  temporarily committing pending changes (restore with 'hg unshelve --abort')
+  rebasing shelved changes
+  rebasing 6:2f694dd83a13 "changes to: second" (tip)
+  merging a/a
+  $ hg parents -q
+  4:33f7f61e6c5e
+  $ hg shelve -l
+  default         (*)* changes to: second (glob)
+  $ hg status
+  M a/a
+  A foo/foo
+  $ cat a/a
+  a
+  c
+  a
+  $ cat > a/a << EOF
+  > a
+  > c
+  > x
+  > EOF
+
   $ HGMERGE=true hg unshelve
   unshelving change 'default'
   temporarily committing pending changes (restore with 'hg unshelve --abort')
   rebasing shelved changes
-  rebasing 6:c5e6910e7601 "changes to 'second'" (tip)
+  rebasing 6:2f694dd83a13 "changes to: second" (tip)
   merging a/a
-  note: rebase of 6:c5e6910e7601 created no changes to commit
+  note: rebase of 6:2f694dd83a13 created no changes to commit
   $ hg parents -q
   4:33f7f61e6c5e
   $ hg shelve -l
@@ -492,11 +517,11 @@ test keep and cleanup
   shelved as default
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg shelve --list
-  default         (*)    changes to 'create conflict' (glob)
-  $ hg unshelve --keep
+  default         (*)* changes to: create conflict (glob)
+  $ hg unshelve -k
   unshelving change 'default'
   $ hg shelve --list
-  default         (*)    changes to 'create conflict' (glob)
+  default         (*)* changes to: create conflict (glob)
   $ hg shelve --cleanup
   $ hg shelve --list
 
@@ -531,7 +556,7 @@ shelve should still work even if mq is disabled
   shelved as test
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg --config extensions.mq=! shelve --list
-  test            (*)    changes to 'create conflict' (glob)
+  test            (*)* changes to: create conflict (glob)
   $ hg bookmark
    * test                      4:33f7f61e6c5e
   $ hg --config extensions.mq=! unshelve
@@ -564,7 +589,7 @@ shelve should leave dirstate clean (issue4055)
   $ hg unshelve
   unshelving change 'default'
   rebasing shelved changes
-  rebasing 4:b8fefe789ed0 "changes to 'xyz'" (tip)
+  rebasing 4:82a0d7d6ba61 "changes to: xyz" (tip)
   $ hg status
   M z
 
@@ -591,7 +616,7 @@ shelve should only unshelve pending changes (issue4068)
   $ hg unshelve
   unshelving change 'default'
   rebasing shelved changes
-  rebasing 3:0cae6656c016 "changes to 'c'" (tip)
+  rebasing 3:958bcbd1776e "changes to: c" (tip)
   $ hg status
   A d
 
@@ -605,7 +630,7 @@ unshelve should work on an ancestor of the original commit
   $ hg unshelve
   unshelving change 'default'
   rebasing shelved changes
-  rebasing 3:be58f65f55fb "changes to 'b'" (tip)
+  rebasing 3:013284d9655e "changes to: b" (tip)
   $ hg status
   A d
 
@@ -688,7 +713,7 @@ unshelve and conflicts with tracked and untracked files
   shelved as default
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg log -G --template '{rev}  {desc|firstline}  {author}' -R bundle://.hg/shelved/default.hg -r 'bundle()'
-  o  4  changes to 'commit stuff'  shelve@localhost
+  o  4  changes to: commit stuff  shelve@localhost
   |
   $ hg log -G --template '{rev}  {desc|firstline}  {author}'
   @  3  commit stuff  test
@@ -703,13 +728,13 @@ unshelve and conflicts with tracked and untracked files
   unshelving change 'default'
   temporarily committing pending changes (restore with 'hg unshelve --abort')
   rebasing shelved changes
-  rebasing 5:23b29cada8ba "changes to 'commit stuff'" (tip)
+  rebasing 5:81152db69da7 "changes to: commit stuff" (tip)
   merging f
   warning: conflicts while merging f! (edit, then use 'hg resolve --mark')
   unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
   [1]
   $ hg log -G --template '{rev}  {desc|firstline}  {author}  {date|isodate}'
-  @  5  changes to 'commit stuff'  shelve@localhost  1970-01-01 00:00 +0000
+  @  5  changes to: commit stuff  shelve@localhost  1970-01-01 00:00 +0000
   |
   | @  4  pending changes temporary commit  shelve@localhost  2004-01-10 13:37 +0000
   |/
@@ -727,10 +752,11 @@ unshelve and conflicts with tracked and untracked files
   g
   =======
   f
-  >>>>>>> source: 23b29cada8ba - shelve: changes to 'commit stuff'
+  >>>>>>> source: 81152db69da7 - shelve: changes to: commit stuff
   $ cat f.orig
   g
-  $ hg unshelve --abort
+  $ hg unshelve --abort -t false
+  tool option will be ignored
   rebase aborted
   unshelve of 'default' aborted
   $ hg st
@@ -742,7 +768,7 @@ unshelve and conflicts with tracked and untracked files
   unshelving change 'default'
   temporarily committing pending changes (restore with 'hg unshelve --abort')
   rebasing shelved changes
-  rebasing 5:23b29cada8ba "changes to 'commit stuff'" (tip)
+  rebasing 5:81152db69da7 "changes to: commit stuff" (tip)
   $ hg st
   M a
   A f
@@ -758,7 +784,7 @@ unshelve and conflicts with tracked and untracked files
   $ hg unshelve
   unshelving change 'default'
   rebasing shelved changes
-  rebasing 5:23b29cada8ba "changes to 'commit stuff'" (tip)
+  rebasing 5:81152db69da7 "changes to: commit stuff" (tip)
   merging f
   warning: conflicts while merging f! (edit, then use 'hg resolve --mark')
   unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
@@ -771,7 +797,7 @@ unshelve and conflicts with tracked and untracked files
   g
   =======
   f
-  >>>>>>> source: 23b29cada8ba - shelve: changes to 'commit stuff'
+  >>>>>>> source: 81152db69da7 - shelve: changes to: commit stuff
   $ cat f.orig
   g
   $ hg unshelve --abort
@@ -801,7 +827,7 @@ Recreate some conflict again
   $ hg unshelve
   unshelving change 'default'
   rebasing shelved changes
-  rebasing 5:4b555fdb4e96 "changes to 'second'" (tip)
+  rebasing 5:e42a7da90865 "changes to: second" (tip)
   merging a/a
   warning: conflicts while merging a/a! (edit, then use 'hg resolve --mark')
   unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
@@ -816,9 +842,10 @@ is a no-op), works (issue4398)
   reverting a/a (glob)
   $ hg resolve -m a/a
   (no more unresolved files)
+  continue: hg unshelve --continue
   $ hg unshelve -c
-  rebasing 5:4b555fdb4e96 "changes to 'second'" (tip)
-  note: rebase of 5:4b555fdb4e96 created no changes to commit
+  rebasing 5:e42a7da90865 "changes to: second" (tip)
+  note: rebase of 5:e42a7da90865 created no changes to commit
   unshelve of 'default' complete
   $ hg bookmark
    * test                      4:33f7f61e6c5e
@@ -911,7 +938,7 @@ Test interactive shelve
   unshelving change 'test'
   temporarily committing pending changes (restore with 'hg unshelve --abort')
   rebasing shelved changes
-  rebasing 6:65b5d1c34c34 "changes to 'create conflict'" (tip)
+  rebasing 6:96a1354f65f6 "changes to: create conflict" (tip)
   merging a/a
   $ hg bookmark
    * test                      4:33f7f61e6c5e
@@ -945,7 +972,7 @@ shelve --patch and shelve --stat should work with a single valid shelfname
   abort: --stat expects a single shelf
   [255]
   $ hg shelve --patch default
-  default         (* ago)    changes to 'create conflict' (glob)
+  default         (*)* changes to: create conflict (glob)
   
   diff --git a/shelf-patch-a b/shelf-patch-a
   new file mode 100644
@@ -954,7 +981,7 @@ shelve --patch and shelve --stat should work with a single valid shelfname
   @@ -0,0 +1,1 @@
   +patch a
   $ hg shelve --stat default
-  default         (* ago)    changes to 'create conflict' (glob)
+  default         (*)* changes to: create conflict (glob)
    shelf-patch-a |  1 +
    1 files changed, 1 insertions(+), 0 deletions(-)
   $ hg shelve --patch nonexistentshelf
@@ -971,7 +998,7 @@ Shelve from general delta repo uses bundle2 on disk
 
 no general delta
 
-  $ hg clone --pull repo bundle1 --config format.generaldelta=0
+  $ hg clone --pull repo bundle1 --config format.usegeneraldelta=0
   requesting all changes
   adding changesets
   adding manifests
@@ -986,12 +1013,12 @@ no general delta
   shelved as default
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg debugbundle .hg/shelved/*.hg
-  7e30d8ac6f23cfc84330fd7e698730374615d21a
+  45993d65fe9dc3c6d8764b9c3b07fa831ee7d92d
   $ cd ..
 
 with general delta
 
-  $ hg clone --pull repo bundle2 --config format.generaldelta=1
+  $ hg clone --pull repo bundle2 --config format.usegeneraldelta=1
   requesting all changes
   adding changesets
   adding manifests
@@ -1008,7 +1035,7 @@ with general delta
   $ hg debugbundle .hg/shelved/*.hg
   Stream params: {'Compression': 'BZ'}
   changegroup -- "{'version': '02'}"
-      7e30d8ac6f23cfc84330fd7e698730374615d21a
+      45993d65fe9dc3c6d8764b9c3b07fa831ee7d92d
   $ cd ..
 
 Test visibility of in-memory changes inside transaction to external hook
@@ -1062,13 +1089,13 @@ Test visibility of in-memory changes inside transaction to external hook
   $ hg unshelve --keep default
   temporarily committing pending changes (restore with 'hg unshelve --abort')
   rebasing shelved changes
-  rebasing 7:fcbb97608399 "changes to 'create conflict'" (tip)
+  rebasing 7:206bf5d4f922 "changes to: create conflict" (tip)
   ==== preupdate:
   VISIBLE 6:66b86db80ee4
   ACTUAL  5:703117a2acfb
   ====
   ==== preupdate:
-  VISIBLE 8:cb2a4e59c2d5
+  VISIBLE 8:a0e04704317e
   ACTUAL  5:703117a2acfb
   ====
   ==== preupdate:
@@ -1107,10 +1134,10 @@ Test visibility of in-memory changes inside transaction to external hook
   $ hg unshelve --keep default
   temporarily committing pending changes (restore with 'hg unshelve --abort')
   rebasing shelved changes
-  rebasing 7:fcbb97608399 "changes to 'create conflict'" (tip)
+  rebasing 7:206bf5d4f922 "changes to: create conflict" (tip)
   ==== update:
   VISIBLE 6:66b86db80ee4
-  VISIBLE 7:fcbb97608399
+  VISIBLE 7:206bf5d4f922
   ACTUAL  5:703117a2acfb
   ====
   ==== update:
@@ -1135,7 +1162,7 @@ Test visibility of in-memory changes inside transaction to external hook
 
   $ cd ..
 
-test Abort unshelve always gets user out of the unshelved state
+test .orig files go where the user wants them to
 ---------------------------------------------------------------
   $ hg init salvage
   $ cd salvage
@@ -1144,15 +1171,21 @@ test Abort unshelve always gets user out of the unshelved state
   $ echo '' > root
   $ hg shelve -q
   $ echo 'contADDent' > root
-  $ hg unshelve -q
+  $ hg unshelve -q --config 'ui.origbackuppath=.hg/origbackups'
   warning: conflicts while merging root! (edit, then use 'hg resolve --mark')
   unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
   [1]
+  $ ls .hg/origbackups
+  root.orig
+  $ rm -rf .hg/origbackups
+
+test Abort unshelve always gets user out of the unshelved state
+---------------------------------------------------------------
 Wreak havoc on the unshelve process
   $ rm .hg/unshelverebasestate
   $ hg unshelve --abort
   unshelve of 'default' aborted
-  abort: No such file or directory
+  abort: (No such file or directory|The system cannot find the file specified) (re)
   [255]
 Can the user leave the current state?
   $ hg up -C .
@@ -1211,5 +1244,73 @@ Keep active bookmark while (un)shelving even on shared repo (issue4940)
   $ hg bookmarks
    * foo                       5:703117a2acfb
      test                      4:33f7f61e6c5e
+
+  $ cd ..
+
+Shelve and unshelve unknown files. For the purposes of unshelve, a shelved
+unknown file is the same as a shelved added file, except that it will be in
+unknown state after unshelve if and only if it was either absent or unknown
+before the unshelve operation.
+
+  $ hg init unknowns
+  $ cd unknowns
+
+The simplest case is if I simply have an unknown file that I shelve and unshelve
+
+  $ echo unknown > unknown
+  $ hg status
+  ? unknown
+  $ hg shelve --unknown
+  shelved as default
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg status
+  $ hg unshelve
+  unshelving change 'default'
+  $ hg status
+  ? unknown
+  $ rm unknown
+
+If I shelve, add the file, and unshelve, does it stay added?
+
+  $ echo unknown > unknown
+  $ hg shelve -u
+  shelved as default
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg status
+  $ touch unknown
+  $ hg add unknown
+  $ hg status
+  A unknown
+  $ hg unshelve
+  unshelving change 'default'
+  temporarily committing pending changes (restore with 'hg unshelve --abort')
+  rebasing shelved changes
+  rebasing 1:098df96e7410 "(changes in empty repository)" (tip)
+  merging unknown
+  $ hg status
+  A unknown
+  $ hg forget unknown
+  $ rm unknown
+
+And if I shelve, commit, then unshelve, does it become modified?
+
+  $ echo unknown > unknown
+  $ hg shelve -u
+  shelved as default
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg status
+  $ touch unknown
+  $ hg add unknown
+  $ hg commit -qm "Add unknown"
+  $ hg status
+  $ hg unshelve
+  unshelving change 'default'
+  rebasing shelved changes
+  rebasing 1:098df96e7410 "(changes in empty repository)" (tip)
+  merging unknown
+  $ hg status
+  M unknown
+  $ hg remove --force unknown
+  $ hg commit -qm "Remove unknown"
 
   $ cd ..

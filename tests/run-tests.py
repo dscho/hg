@@ -154,6 +154,7 @@ if 'java' in sys.platform:
 defaults = {
     'jobs': ('HGTEST_JOBS', 1),
     'timeout': ('HGTEST_TIMEOUT', 180),
+    'slowtimeout': ('HGTEST_SLOWTIMEOUT', 500),
     'port': ('HGTEST_PORT', 20059),
     'shell': ('HGTEST_SHELL', 'sh'),
 }
@@ -236,6 +237,9 @@ def getparser():
     parser.add_option("-t", "--timeout", type="int",
         help="kill errant tests after TIMEOUT seconds"
              " (default: $%s or %d)" % defaults['timeout'])
+    parser.add_option("--slowtimeout", type="int",
+        help="kill errant slow tests after SLOWTIMEOUT seconds"
+             " (default: $%s or %d)" % defaults['slowtimeout'])
     parser.add_option("--time", action="store_true",
         help="time how long each test takes")
     parser.add_option("--json", action="store_true",
@@ -263,6 +267,8 @@ def getparser():
                       help='run statprof on run-tests')
     parser.add_option('--allow-slow-tests', action='store_true',
                       help='allow extremely slow tests')
+    parser.add_option('--showchannels', action='store_true',
+                      help='show scheduling channels')
 
     for option, (envvar, default) in defaults.items():
         defaults[option] = type(default)(os.environ.get(envvar, default))
@@ -327,7 +333,11 @@ def parseargs(args, parser):
         if options.timeout != defaults['timeout']:
             sys.stderr.write(
                 'warning: --timeout option ignored with --debug\n')
+        if options.slowtimeout != defaults['slowtimeout']:
+            sys.stderr.write(
+                'warning: --slowtimeout option ignored with --debug\n')
         options.timeout = 0
+        options.slowtimeout = 0
     if options.py3k_warnings:
         if PYTHON3:
             parser.error(
@@ -338,6 +348,9 @@ def parseargs(args, parser):
         options.whitelisted = parselistfiles(options.whitelist, 'whitelist')
     else:
         options.whitelisted = {}
+
+    if options.showchannels:
+        options.nodiff = True
 
     return (options, args)
 
@@ -430,7 +443,8 @@ class Test(unittest.TestCase):
                  debug=False,
                  timeout=defaults['timeout'],
                  startport=defaults['port'], extraconfigopts=None,
-                 py3kwarnings=False, shell=None):
+                 py3kwarnings=False, shell=None,
+                 slowtimeout=defaults['slowtimeout']):
         """Create a test from parameters.
 
         path is the full path to the file defining the test.
@@ -444,7 +458,9 @@ class Test(unittest.TestCase):
         output.
 
         timeout controls the maximum run time of the test. It is ignored when
-        debug is True.
+        debug is True. See slowtimeout for tests with #require slow.
+
+        slowtimeout overrides timeout if the test has #require slow.
 
         startport controls the starting port number to use for this test. Each
         test will reserve 3 port numbers for execution. It is the caller's
@@ -469,6 +485,7 @@ class Test(unittest.TestCase):
         self._keeptmpdir = keeptmpdir
         self._debug = debug
         self._timeout = timeout
+        self._slowtimeout = slowtimeout
         self._startport = startport
         self._extraconfigopts = extraconfigopts or []
         self._py3kwarnings = py3kwarnings
@@ -568,6 +585,8 @@ class Test(unittest.TestCase):
                 result.testsRun -= 1
             except WarnTest as e:
                 result.addWarn(self, str(e))
+            except ReportedTest as e:
+                pass
             except self.failureException as e:
                 # This differs from unittest in that we don't capture
                 # the stack trace. This is for historical reasons and
@@ -922,7 +941,12 @@ class TTest(Test):
             print(stdout)
             sys.exit(1)
 
-        return ret == 0
+        if ret != 0:
+            return False, stdout
+
+        if 'slow' in reqs:
+            self._timeout = self._slowtimeout
+        return True, None
 
     def _parsetest(self, lines):
         # We generate a shell script which outputs unique markers to line
@@ -967,8 +991,9 @@ class TTest(Test):
                 lsplit = l.split()
                 if len(lsplit) < 2 or lsplit[0] != b'#require':
                     after.setdefault(pos, []).append('  !!! invalid #require\n')
-                if not self._hghave(lsplit[1:]):
-                    script = [b"exit 80\n"]
+                haveresult, message = self._hghave(lsplit[1:])
+                if not haveresult:
+                    script = [b'echo "%s"\nexit 80\n' % message]
                     break
                 after.setdefault(pos, []).append(l)
             elif l.startswith(b'#if'):
@@ -977,7 +1002,7 @@ class TTest(Test):
                     after.setdefault(pos, []).append('  !!! invalid #if\n')
                 if skipping is not None:
                     after.setdefault(pos, []).append('  !!! nested #if\n')
-                skipping = not self._hghave(lsplit[1:])
+                skipping = not self._hghave(lsplit[1:])[0]
                 after.setdefault(pos, []).append(l)
             elif l.startswith(b'#else'):
                 if skipping is None:
@@ -1220,6 +1245,9 @@ class IgnoreTest(Exception):
 class WarnTest(Exception):
     """Raised to indicate that a test warned."""
 
+class ReportedTest(Exception):
+    """Raised to indicate that a test already reported."""
+
 class TestResult(unittest._TextTestResult):
     """Holds results when executing via unittest."""
     # Don't worry too much about accessing the non-public _TextTestResult.
@@ -1244,7 +1272,7 @@ class TestResult(unittest._TextTestResult):
         self.warned = []
 
         self.times = []
-        self._firststarttime =  None
+        self._firststarttime = None
         # Data stored for the benefit of generating xunit reports.
         self.successes = []
         self.faildata = {}
@@ -1256,10 +1284,13 @@ class TestResult(unittest._TextTestResult):
             self.stop()
         else:
             with iolock:
-                if not self._options.nodiff:
-                    self.stream.write('\nERROR: %s output changed\n' % test)
+                if reason == "timed out":
+                    self.stream.write('t')
+                else:
+                    if not self._options.nodiff:
+                        self.stream.write('\nERROR: %s output changed\n' % test)
+                    self.stream.write('!')
 
-                self.stream.write('!')
                 self.stream.flush()
 
     def addSuccess(self, test):
@@ -1335,6 +1366,7 @@ class TestResult(unittest._TextTestResult):
                     self.addFailure(
                         test,
                         'server failed to start (HGPORT=%s)' % test._startport)
+                    raise ReportedTest('server failed to start')
                 else:
                     self.stream.write('\n')
                     for line in lines:
@@ -1398,7 +1430,7 @@ class TestSuite(unittest.TestSuite):
 
     def __init__(self, testdir, jobs=1, whitelist=None, blacklist=None,
                  retest=False, keywords=None, loop=False, runs_per_test=1,
-                 loadtest=None,
+                 loadtest=None, showchannels=False,
                  *args, **kwargs):
         """Create a new instance that can run tests with a configuration.
 
@@ -1409,6 +1441,8 @@ class TestSuite(unittest.TestSuite):
         jobs specifies the number of jobs to run concurrently. Each test
         executes on its own thread. Tests actually spawn new processes, so
         state mutation should not be an issue.
+
+        If there is only one job, it will use the main thread.
 
         whitelist and blacklist denote tests that have been whitelisted and
         blacklisted, respectively. These arguments don't belong in TestSuite.
@@ -1435,6 +1469,7 @@ class TestSuite(unittest.TestSuite):
         self._loop = loop
         self._runs_per_test = runs_per_test
         self._loadtest = loadtest
+        self._showchannels = showchannels
 
     def run(self, result):
         # We have a number of filters that need to be applied. We do this
@@ -1481,7 +1516,14 @@ class TestSuite(unittest.TestSuite):
         done = queue.Queue()
         running = 0
 
+        channels = [""] * self._jobs
+
         def job(test, result):
+            for n, v in enumerate(channels):
+                if not v:
+                    channel = n
+                    break
+            channels[channel] = "=" + test.name[5:].split(".")[0]
             try:
                 test(result)
                 done.put(None)
@@ -1490,8 +1532,32 @@ class TestSuite(unittest.TestSuite):
             except: # re-raises
                 done.put(('!', test, 'run-test raised an error, see traceback'))
                 raise
+            channels[channel] = ''
+
+        def stat():
+            count = 0
+            while channels:
+                d = '\n%03s  ' % count
+                for n, v in enumerate(channels):
+                    if v:
+                        d += v[0]
+                        channels[n] = v[1:] or '.'
+                    else:
+                        d += ' '
+                    d += ' '
+                with iolock:
+                    sys.stdout.write(d + '  ')
+                    sys.stdout.flush()
+                for x in xrange(10):
+                    if channels:
+                        time.sleep(.1)
+                count += 1
 
         stoppedearly = False
+
+        if self._showchannels:
+            statthread = threading.Thread(target=stat, name="stat")
+            statthread.start()
 
         try:
             while tests or running:
@@ -1513,9 +1579,12 @@ class TestSuite(unittest.TestSuite):
                                 self._loadtest(test.name, num_tests[0]))
                         else:
                             tests.append(test)
-                    t = threading.Thread(target=job, name=test.name,
-                                         args=(test, result))
-                    t.start()
+                    if self._jobs == 1:
+                        job(test, result)
+                    else:
+                        t = threading.Thread(target=job, name=test.name,
+                                             args=(test, result))
+                        t.start()
                     running += 1
 
             # If we stop early we still need to wait on started tests to
@@ -1533,7 +1602,52 @@ class TestSuite(unittest.TestSuite):
             for test in runtests:
                 test.abort()
 
+        channels = []
+
         return result
+
+# Save the most recent 5 wall-clock runtimes of each test to a
+# human-readable text file named .testtimes. Tests are sorted
+# alphabetically, while times for each test are listed from oldest to
+# newest.
+
+def loadtimes(testdir):
+    times = []
+    try:
+        with open(os.path.join(testdir, '.testtimes-')) as fp:
+            for line in fp:
+                ts = line.split()
+                times.append((ts[0], [float(t) for t in ts[1:]]))
+    except IOError as err:
+        if err.errno != errno.ENOENT:
+            raise
+    return times
+
+def savetimes(testdir, result):
+    saved = dict(loadtimes(testdir))
+    maxruns = 5
+    skipped = set([str(t[0]) for t in result.skipped])
+    for tdata in result.times:
+        test, real = tdata[0], tdata[3]
+        if test not in skipped:
+            ts = saved.setdefault(test, [])
+            ts.append(real)
+            ts[:] = ts[-maxruns:]
+
+    fd, tmpname = tempfile.mkstemp(prefix='.testtimes',
+                                   dir=testdir, text=True)
+    with os.fdopen(fd, 'w') as fp:
+        for name, ts in sorted(saved.iteritems()):
+            fp.write('%s %s\n' % (name, ' '.join(['%.3f' % (t,) for t in ts])))
+    timepath = os.path.join(testdir, '.testtimes')
+    try:
+        os.unlink(timepath)
+    except OSError:
+        pass
+    try:
+        os.rename(tmpname, timepath)
+    except OSError:
+        pass
 
 class TextTestRunner(unittest.TextTestRunner):
     """Custom unittest test runner that uses appropriate settings."""
@@ -1568,8 +1682,7 @@ class TextTestRunner(unittest.TextTestRunner):
                 self.stream.writeln('Errored %s: %s' % (test.name, msg))
 
             if self._runner.options.xunit:
-                xuf = open(self._runner.options.xunit, 'wb')
-                try:
+                with open(self._runner.options.xunit, 'wb') as xuf:
                     timesd = dict((t[0], t[3]) for t in result.times)
                     doc = minidom.Document()
                     s = doc.createElement('testsuite')
@@ -1596,15 +1709,12 @@ class TextTestRunner(unittest.TextTestRunner):
                         t.appendChild(cd)
                         s.appendChild(t)
                     xuf.write(doc.toprettyxml(indent='  ', encoding='utf-8'))
-                finally:
-                    xuf.close()
 
             if self._runner.options.json:
                 if json is None:
                     raise ImportError("json module not installed")
                 jsonpath = os.path.join(self._runner._testdir, 'report.json')
-                fp = open(jsonpath, 'w')
-                try:
+                with open(jsonpath, 'w') as fp:
                     timesd = {}
                     for tdata in result.times:
                         test = tdata[0]
@@ -1622,15 +1732,16 @@ class TextTestRunner(unittest.TextTestRunner):
                                     'cuser': ('%0.3f' % timesd[tc.name][0]),
                                     'csys': ('%0.3f' % timesd[tc.name][1]),
                                     'start': ('%0.3f' % timesd[tc.name][3]),
-                                    'end': ('%0.3f' % timesd[tc.name][4])}
+                                    'end': ('%0.3f' % timesd[tc.name][4]),
+                                    'diff': result.faildata.get(tc.name, ''),
+                                    }
                             outcome[tc.name] = tres
                     jsonout = json.dumps(outcome, sort_keys=True, indent=4)
                     fp.writelines(("testreport =", jsonout))
-                finally:
-                    fp.close()
 
             self._runner._checkhglib('Tested')
 
+            savetimes(self._runner._testdir, result)
             self.stream.writeln(
                 '# Ran %d tests, %d skipped, %d warned, %d failed.'
                 % (result.testsRun,
@@ -1724,21 +1835,37 @@ class TestRunner(object):
         else:
             # keywords for slow tests
             slow = {b'svn': 10,
-                    b'gendoc': 10,
-                    b'check-code-hg': 100,
+                    b'cvs': 10,
+                    b'hghave': 10,
+                    b'largefiles-update': 10,
+                    b'run-tests': 10,
+                    b'corruption': 10,
+                    b'race': 10,
+                    b'i18n': 10,
+                    b'check': 100,
+                    b'gendoc': 100,
+                    b'contrib-perf': 200,
                    }
+            perf = {}
             def sortkey(f):
                 # run largest tests first, as they tend to take the longest
                 try:
-                    val = -os.stat(f).st_size
-                except OSError as e:
-                    if e.errno != errno.ENOENT:
-                        raise
-                    return -1e9 # file does not exist, tell early
-                for kw, mul in slow.items():
-                    if kw in f:
-                        val *= mul
-                return val
+                    return perf[f]
+                except KeyError:
+                    try:
+                        val = -os.stat(f).st_size
+                    except OSError as e:
+                        if e.errno != errno.ENOENT:
+                            raise
+                        perf[f] = -1e9 # file does not exist, tell early
+                        return -1e9
+                    for kw, mul in slow.items():
+                        if kw in f:
+                            val *= mul
+                    if f.endswith('.py'):
+                        val /= 10.0
+                    perf[f] = val / 1000.0
+                    return perf[f]
             tests.sort(key=sortkey)
 
         self._testdir = osenvironb[b'TESTDIR'] = getattr(
@@ -1914,6 +2041,7 @@ class TestRunner(object):
                               keywords=kws,
                               loop=self.options.loop,
                               runs_per_test=self.options.runs_per_test,
+                              showchannels=self.options.showchannels,
                               tests=tests, loadtest=self._gettest)
             verbosity = 1
             if self.options.verbose:
@@ -1940,11 +2068,11 @@ class TestRunner(object):
     def _getport(self, count):
         port = self._ports.get(count) # do we have a cached entry?
         if port is None:
-            port = self.options.port + self._portoffset
             portneeded = 3
             # above 100 tries we just give up and let test reports failure
             for tries in xrange(100):
                 allfree = True
+                port = self.options.port + self._portoffset
                 for idx in xrange(portneeded):
                     if not checkportisavailable(port + idx):
                         allfree = False

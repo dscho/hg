@@ -357,14 +357,11 @@ def _kwfwrite(ui, repo, expand, *pats, **opts):
     if len(wctx.parents()) > 1:
         raise error.Abort(_('outstanding uncommitted merge'))
     kwt = kwtools['templater']
-    wlock = repo.wlock()
-    try:
+    with repo.wlock():
         status = _status(ui, repo, wctx, kwt, *pats, **opts)
         if status.modified or status.added or status.removed or status.deleted:
             raise error.Abort(_('outstanding uncommitted changes'))
         kwt.overwrite(wctx, status.clean, True, expand)
-    finally:
-        wlock.release()
 
 @command('kwdemo',
          [('d', 'default', None, _('show default keyword template maps')),
@@ -447,11 +444,8 @@ def demo(ui, repo, *args, **opts):
     repo[None].add([fn])
     ui.note(_('\nkeywords written to %s:\n') % fn)
     ui.note(keywords)
-    wlock = repo.wlock()
-    try:
+    with repo.wlock():
         repo.dirstate.setbranch('demobranch')
-    finally:
-        wlock.release()
     for name, cmd in ui.configitems('hooks'):
         if name.split('.', 1)[0].find('commit') > -1:
             repo.ui.setconfig('hooks', name, '', 'keyword')
@@ -659,8 +653,7 @@ def reposetup(ui, repo):
 
     def kw_amend(orig, ui, repo, commitfunc, old, extra, pats, opts):
         '''Wraps cmdutil.amend expanding keywords after amend.'''
-        wlock = repo.wlock()
-        try:
+        with repo.wlock():
             kwt.postcommit = True
             newid = orig(ui, repo, commitfunc, old, extra, pats, opts)
             if newid != old.node():
@@ -669,8 +662,6 @@ def reposetup(ui, repo):
                 kwt.overwrite(ctx, ctx.files(), False, True)
                 kwt.restrict = False
             return newid
-        finally:
-            wlock.release()
 
     def kw_copy(orig, ui, repo, pats, opts, rename=False):
         '''Wraps cmdutil.copy so that copy/rename destinations do not
@@ -682,8 +673,7 @@ def reposetup(ui, repo):
         For the latter we have to follow the symlink to find out whether its
         target is configured for expansion and we therefore must unexpand the
         keywords in the destination.'''
-        wlock = repo.wlock()
-        try:
+        with repo.wlock():
             orig(ui, repo, pats, opts, rename)
             if opts.get('dry_run'):
                 return
@@ -703,13 +693,10 @@ def reposetup(ui, repo):
             candidates = [f for f in repo.dirstate.copies() if
                           'l' not in wctx.flags(f) and haskwsource(f)]
             kwt.overwrite(wctx, candidates, False, False)
-        finally:
-            wlock.release()
 
     def kw_dorecord(orig, ui, repo, commitfunc, *pats, **opts):
         '''Wraps record.dorecord expanding keywords after recording.'''
-        wlock = repo.wlock()
-        try:
+        with repo.wlock():
             # record returns 0 even when nothing has changed
             # therefore compare nodes before and after
             kwt.postcommit = True
@@ -724,8 +711,6 @@ def reposetup(ui, repo):
                 kwt.overwrite(recctx, added, False, True, True)
                 kwt.restrict = True
             return ret
-        finally:
-            wlock.release()
 
     def kwfilectx_cmp(orig, self, fctx):
         # keyword affects data size, comparing wdir and filelog size does

@@ -851,13 +851,15 @@ class bundlepart(object):
                               self._advisoryparams, self._data, self.mandatory)
 
     # methods used to defines the part content
-    def __setdata(self, data):
+    @property
+    def data(self):
+        return self._data
+
+    @data.setter
+    def data(self, data):
         if self._generated is not None:
             raise error.ReadOnlyPartError('part is being generated')
         self._data = data
-    def __getdata(self):
-        return self._data
-    data = property(__getdata, __setdata)
 
     @property
     def mandatoryparams(self):
@@ -1240,7 +1242,7 @@ def getrepocaps(repo, allowpushback=False):
     Exists to allow extensions (like evolution) to mutate the capabilities.
     """
     caps = capabilities.copy()
-    caps['changegroup'] = tuple(sorted(changegroup.packermap.keys()))
+    caps['changegroup'] = tuple(sorted(changegroup.supportedversions(repo)))
     if obsolete.isenabled(repo, obsolete.exchangeopt):
         supportedformat = tuple('V%i' % v for v in obsolete.formats)
         caps['obsmarkers'] = supportedformat
@@ -1262,7 +1264,7 @@ def obsmarkersversion(caps):
     obscaps = caps.get('obsmarkers', ())
     return [int(c[1:]) for c in obscaps if c.startswith('V')]
 
-@parthandler('changegroup', ('version', 'nbchanges'))
+@parthandler('changegroup', ('version', 'nbchanges', 'treemanifest'))
 def handlechangegroup(op, inpart):
     """apply a changegroup part on the repo
 
@@ -1277,13 +1279,21 @@ def handlechangegroup(op, inpart):
     op.gettransaction()
     unpackerversion = inpart.params.get('version', '01')
     # We should raise an appropriate exception here
-    unpacker = changegroup.packermap[unpackerversion][1]
-    cg = unpacker(inpart, None)
+    cg = changegroup.getunbundler(unpackerversion, inpart, None)
     # the source and url passed here are overwritten by the one contained in
     # the transaction.hookargs argument. So 'bundle2' is a placeholder
     nbchangesets = None
     if 'nbchanges' in inpart.params:
         nbchangesets = int(inpart.params.get('nbchanges'))
+    if ('treemanifest' in inpart.params and
+        'treemanifest' not in op.repo.requirements):
+        if len(op.repo.changelog) != 0:
+            raise error.Abort(_(
+                "bundle contains tree manifests, but local repo is "
+                "non-empty and does not use tree manifests"))
+        op.repo.requirements.add('treemanifest')
+        op.repo._applyopenerreqs()
+        op.repo._writerequirements()
     ret = cg.apply(op.repo, 'bundle2', 'bundle2', expectedtotal=nbchangesets)
     op.records.add('changegroup', {'return': ret})
     if op.reply is not None:

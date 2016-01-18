@@ -5,17 +5,37 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from i18n import _
-from mercurial.node import wdirrev
-import util, error, osutil, revset, similar, encoding, phases
-import pathutil
-import match as matchmod
-import os, errno, re, glob, tempfile, shutil, stat
+from __future__ import absolute_import
+
+import Queue
+import contextlib
+import errno
+import glob
+import os
+import re
+import shutil
+import stat
+import tempfile
+import threading
+
+from .i18n import _
+from .node import wdirrev
+from . import (
+    encoding,
+    error,
+    match as matchmod,
+    osutil,
+    pathutil,
+    phases,
+    revset,
+    similar,
+    util,
+)
 
 if os.name == 'nt':
-    import scmwindows as scmplatform
+    from . import scmwindows as scmplatform
 else:
-    import scmposix as scmplatform
+    from . import scmposix as scmplatform
 
 systemrcpath = scmplatform.systemrcpath
 userrcpath = scmplatform.userrcpath
@@ -237,7 +257,7 @@ class abstractvfs(object):
         return []
 
     def open(self, path, mode="r", text=False, atomictemp=False,
-             notindexed=False):
+             notindexed=False, backgroundclose=False):
         '''Open ``path`` file, which is relative to vfs root.
 
         Newly created directories are marked as "not to be indexed by
@@ -245,42 +265,28 @@ class abstractvfs(object):
         for "write" mode access.
         '''
         self.open = self.__call__
-        return self.__call__(path, mode, text, atomictemp, notindexed)
+        return self.__call__(path, mode, text, atomictemp, notindexed,
+                             backgroundclose=backgroundclose)
 
     def read(self, path):
-        fp = self(path, 'rb')
-        try:
+        with self(path, 'rb') as fp:
             return fp.read()
-        finally:
-            fp.close()
 
     def readlines(self, path, mode='rb'):
-        fp = self(path, mode=mode)
-        try:
+        with self(path, mode=mode) as fp:
             return fp.readlines()
-        finally:
-            fp.close()
 
     def write(self, path, data):
-        fp = self(path, 'wb')
-        try:
+        with self(path, 'wb') as fp:
             return fp.write(data)
-        finally:
-            fp.close()
 
     def writelines(self, path, data, mode='wb', notindexed=False):
-        fp = self(path, mode=mode, notindexed=notindexed)
-        try:
+        with self(path, mode=mode, notindexed=notindexed) as fp:
             return fp.writelines(data)
-        finally:
-            fp.close()
 
     def append(self, path, data):
-        fp = self(path, 'ab')
-        try:
+        with self(path, 'ab') as fp:
             return fp.write(data)
-        finally:
-            fp.close()
 
     def basename(self, path):
         """return base element of a path (as os.path.basename would do)
@@ -434,6 +440,27 @@ class abstractvfs(object):
         for dirpath, dirs, files in os.walk(self.join(path), onerror=onerror):
             yield (dirpath[prefixlen:], dirs, files)
 
+    @contextlib.contextmanager
+    def backgroundclosing(self, ui, expectedcount=-1):
+        """Allow files to be closed asynchronously.
+
+        When this context manager is active, ``backgroundclose`` can be passed
+        to ``__call__``/``open`` to result in the file possibly being closed
+        asynchronously, on a background thread.
+        """
+        # This is an arbitrary restriction and could be changed if we ever
+        # have a use case.
+        vfs = getattr(self, 'vfs', self)
+        if getattr(vfs, '_backgroundfilecloser', None):
+            raise error.Abort('can only have 1 active background file closer')
+
+        with backgroundfilecloser(ui, expectedcount=expectedcount) as bfc:
+            try:
+                vfs._backgroundfilecloser = bfc
+                yield bfc
+            finally:
+                vfs._backgroundfilecloser = None
+
 class vfs(abstractvfs):
     '''Operate files relative to a base directory
 
@@ -446,21 +473,21 @@ class vfs(abstractvfs):
         if realpath:
             base = os.path.realpath(base)
         self.base = base
-        self._setmustaudit(audit)
+        self.mustaudit = audit
         self.createmode = None
         self._trustnlink = None
 
-    def _getmustaudit(self):
+    @property
+    def mustaudit(self):
         return self._audit
 
-    def _setmustaudit(self, onoff):
+    @mustaudit.setter
+    def mustaudit(self, onoff):
         self._audit = onoff
         if onoff:
             self.audit = pathutil.pathauditor(self.base)
         else:
             self.audit = util.always
-
-    mustaudit = property(_getmustaudit, _setmustaudit)
 
     @util.propertycache
     def _cansymlink(self):
@@ -476,12 +503,25 @@ class vfs(abstractvfs):
         os.chmod(name, self.createmode & 0o666)
 
     def __call__(self, path, mode="r", text=False, atomictemp=False,
-                 notindexed=False):
+                 notindexed=False, backgroundclose=False):
         '''Open ``path`` file, which is relative to vfs root.
 
         Newly created directories are marked as "not to be indexed by
         the content indexing service", if ``notindexed`` is specified
         for "write" mode access.
+
+        If ``backgroundclose`` is passed, the file may be closed asynchronously.
+        It can only be used if the ``self.backgroundclosing()`` context manager
+        is active. This should only be specified if the following criteria hold:
+
+        1. There is a potential for writing thousands of files. Unless you
+           are writing thousands of files, the performance benefits of
+           asynchronously closing files is not realized.
+        2. Files are opened exactly once for the ``backgroundclosing``
+           active duration and are therefore free of race conditions between
+           closing a file on a background thread and reopening it. (If the
+           file were opened multiple times, there could be unflushed data
+           because the original file handle hasn't been flushed/closed yet.)
         '''
         if self._audit:
             r = util.checkosfilename(path)
@@ -509,11 +549,10 @@ class vfs(abstractvfs):
                     else:
                         # nlinks() may behave differently for files on Windows
                         # shares if the file is open.
-                        fd = util.posixfile(f)
-                        nlink = util.nlinks(f)
-                        if nlink < 1:
-                            nlink = 2 # force mktempcopy (issue1922)
-                        fd.close()
+                        with util.posixfile(f):
+                            nlink = util.nlinks(f)
+                            if nlink < 1:
+                                nlink = 2 # force mktempcopy (issue1922)
                 except (OSError, IOError) as e:
                     if e.errno != errno.ENOENT:
                         raise
@@ -527,6 +566,14 @@ class vfs(abstractvfs):
         fp = util.posixfile(f, mode)
         if nlink == 0:
             self._fixfilemode(f)
+
+        if backgroundclose:
+            if not self._backgroundfilecloser:
+                raise error.Abort('backgroundclose can only be used when a '
+                                  'backgroundclosing context manager is active')
+
+            fp = delayclosedfile(fp, self._backgroundfilecloser)
+
         return fp
 
     def symlink(self, src, dst):
@@ -560,13 +607,13 @@ class auditvfs(object):
     def __init__(self, vfs):
         self.vfs = vfs
 
-    def _getmustaudit(self):
+    @property
+    def mustaudit(self):
         return self.vfs.mustaudit
 
-    def _setmustaudit(self, onoff):
+    @mustaudit.setter
+    def mustaudit(self, onoff):
         self.vfs.mustaudit = onoff
-
-    mustaudit = property(_getmustaudit, _setmustaudit)
 
 class filtervfs(abstractvfs, auditvfs):
     '''Wrapper vfs for filtering filenames with a function.'''
@@ -821,6 +868,26 @@ def matchfiles(repo, files, badfn=None):
     '''Return a matcher that will efficiently match exactly these files.'''
     return matchmod.exact(repo.root, repo.getcwd(), files, badfn=badfn)
 
+def origpath(ui, repo, filepath):
+    '''customize where .orig files are created
+
+    Fetch user defined path from config file: [ui] origbackuppath = <path>
+    Fall back to default (filepath) if not specified
+    '''
+    origbackuppath = ui.config('ui', 'origbackuppath', None)
+    if origbackuppath is None:
+        return filepath + ".orig"
+
+    filepathfromroot = os.path.relpath(filepath, start=repo.root)
+    fullorigpath = repo.wjoin(origbackuppath, filepathfromroot)
+
+    origbackupdir = repo.vfs.dirname(fullorigpath)
+    if not repo.vfs.exists(origbackupdir):
+        ui.note(_('creating directory: %s\n') % origbackupdir)
+        util.makedirs(origbackupdir)
+
+    return fullorigpath + ".orig"
+
 def addremove(repo, matcher, prefix, opts=None, dry_run=None, similarity=None):
     if opts is None:
         opts = {}
@@ -962,14 +1029,11 @@ def _markchanges(repo, unknown, deleted, renames):
     '''Marks the files in unknown as added, the files in deleted as removed,
     and the files in renames as copied.'''
     wctx = repo[None]
-    wlock = repo.wlock()
-    try:
+    with repo.wlock():
         wctx.forget(deleted)
         wctx.add(unknown)
         for new, old in renames.iteritems():
             wctx.copy(old, new)
-    finally:
-        wlock.release()
 
 def dirstatecopy(ui, repo, wctx, src, dst, dryrun=False, cwd=None):
     """Update the dirstate to reflect the intent of copying src to dst. For
@@ -1010,10 +1074,9 @@ def readrequires(opener, supported):
     return requirements
 
 def writerequires(opener, requirements):
-    reqfile = opener("requires", "w")
-    for r in sorted(requirements):
-        reqfile.write("%s\n" % r)
-    reqfile.close()
+    with opener('requires', 'w') as fp:
+        for r in sorted(requirements):
+            fp.write("%s\n" % r)
 
 class filecachesubentry(object):
     def __init__(self, path, stat):
@@ -1181,3 +1244,136 @@ def wlocksub(repo, cmd, *args, **kwargs):
     subprocess."""
     return _locksub(repo, repo.currentwlock(), 'HG_WLOCK_LOCKER', cmd, *args,
                     **kwargs)
+
+def gdinitconfig(ui):
+    """helper function to know if a repo should be created as general delta
+    """
+    # experimental config: format.generaldelta
+    return (ui.configbool('format', 'generaldelta', False)
+            or ui.configbool('format', 'usegeneraldelta', True))
+
+def gddeltaconfig(ui):
+    """helper function to know if incoming delta should be optimised
+    """
+    # experimental config: format.generaldelta
+    return ui.configbool('format', 'generaldelta', False)
+
+class delayclosedfile(object):
+    """Proxy for a file object whose close is delayed.
+
+    Do not instantiate outside of the vfs layer.
+    """
+
+    def __init__(self, fh, closer):
+        object.__setattr__(self, '_origfh', fh)
+        object.__setattr__(self, '_closer', closer)
+
+    def __getattr__(self, attr):
+        return getattr(self._origfh, attr)
+
+    def __setattr__(self, attr, value):
+        return setattr(self._origfh, attr, value)
+
+    def __delattr__(self, attr):
+        return delattr(self._origfh, attr)
+
+    def __enter__(self):
+        return self._origfh.__enter__()
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        self._closer.close(self._origfh)
+
+    def close(self):
+        self._closer.close(self._origfh)
+
+class backgroundfilecloser(object):
+    """Coordinates background closing of file handles on multiple threads."""
+    def __init__(self, ui, expectedcount=-1):
+        self._running = False
+        self._entered = False
+        self._threads = []
+        self._threadexception = None
+
+        # Only Windows/NTFS has slow file closing. So only enable by default
+        # on that platform. But allow to be enabled elsewhere for testing.
+        defaultenabled = os.name == 'nt'
+        enabled = ui.configbool('worker', 'backgroundclose', defaultenabled)
+
+        if not enabled:
+            return
+
+        # There is overhead to starting and stopping the background threads.
+        # Don't do background processing unless the file count is large enough
+        # to justify it.
+        minfilecount = ui.configint('worker', 'backgroundcloseminfilecount',
+                                    2048)
+        # FUTURE dynamically start background threads after minfilecount closes.
+        # (We don't currently have any callers that don't know their file count)
+        if expectedcount > 0 and expectedcount < minfilecount:
+            return
+
+        # Windows defaults to a limit of 512 open files. A buffer of 128
+        # should give us enough headway.
+        maxqueue = ui.configint('worker', 'backgroundclosemaxqueue', 384)
+        threadcount = ui.configint('worker', 'backgroundclosethreadcount', 4)
+
+        ui.debug('starting %d threads for background file closing\n' %
+                 threadcount)
+
+        self._queue = Queue.Queue(maxsize=maxqueue)
+        self._running = True
+
+        for i in range(threadcount):
+            t = threading.Thread(target=self._worker, name='backgroundcloser')
+            self._threads.append(t)
+            t.start()
+
+    def __enter__(self):
+        self._entered = True
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        self._running = False
+
+        # Wait for threads to finish closing so open files don't linger for
+        # longer than lifetime of context manager.
+        for t in self._threads:
+            t.join()
+
+    def _worker(self):
+        """Main routine for worker thread."""
+        while True:
+            try:
+                fh = self._queue.get(block=True, timeout=0.100)
+                # Need to catch or the thread will terminate and
+                # we could orphan file descriptors.
+                try:
+                    fh.close()
+                except Exception as e:
+                    # Stash so can re-raise from main thread later.
+                    self._threadexception = e
+            except Queue.Empty:
+                if not self._running:
+                    break
+
+    def close(self, fh):
+        """Schedule a file for closing."""
+        if not self._entered:
+            raise error.Abort('can only call close() when context manager '
+                              'active')
+
+        # If a background thread encountered an exception, raise now so we fail
+        # fast. Otherwise we may potentially go on for minutes until the error
+        # is acted on.
+        if self._threadexception:
+            e = self._threadexception
+            self._threadexception = None
+            raise e
+
+        # If we're not actively running, close synchronously.
+        if not self._running:
+            fh.close()
+            return
+
+        self._queue.put(fh, block=True, timeout=None)
+

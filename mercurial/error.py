@@ -50,7 +50,7 @@ class ManifestLookupError(LookupError):
 class CommandError(Exception):
     """Exception raised on errors in parsing the command line."""
 
-class InterventionRequired(Exception):
+class InterventionRequired(HintException):
     """Exception raised when a command requires human intervention."""
 
 class Abort(HintException):
@@ -72,14 +72,16 @@ class ConfigError(Abort):
 class UpdateAbort(Abort):
     """Raised when an update is aborted for destination issue"""
 
-class OutOfBandError(Exception):
+class ResponseExpected(Abort):
+    """Raised when an EOF is received for a prompt"""
+    def __init__(self):
+        from .i18n import _
+        Abort.__init__(self, _('response expected'))
+
+class OutOfBandError(HintException):
     """Exception raised when a remote repo reports failure"""
 
-    def __init__(self, *args, **kw):
-        Exception.__init__(self, *args)
-        self.hint = kw.get('hint')
-
-class ParseError(Exception):
+class ParseError(HintException):
     """Raised when parsing config files and {rev,file}sets (msg[, pos])"""
 
 class UnknownIdentifier(ParseError):
@@ -105,6 +107,16 @@ class CapabilityError(RepoError):
 
 class RequirementError(RepoError):
     """Exception raised if .hg/requires has an unknown entry."""
+
+class UnsupportedMergeRecords(Abort):
+    def __init__(self, recordtypes):
+        from .i18n import _
+        self.recordtypes = sorted(recordtypes)
+        s = ' '.join(self.recordtypes)
+        Abort.__init__(
+            self, _('unsupported merge state records: %s') % s,
+            hint=_('see https://mercurial-scm.org/wiki/MergeStateRecords for '
+                   'more information'))
 
 class LockError(IOError):
     def __init__(self, errno, strerror, filename, desc):

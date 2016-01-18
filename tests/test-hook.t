@@ -81,10 +81,10 @@ pretxncommit and commit hooks can see both parents of merge
   pretxncommit hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b HG_PENDING=$TESTTMP/a
   2:ee9deb46ab31
   pretxnclose hook: HG_PENDING=$TESTTMP/a HG_TXNID=TXN:* HG_TXNNAME=commit (glob)
+  created new head
   txnclose hook: HG_TXNID=TXN:* HG_TXNNAME=commit (glob)
   commit hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b
   commit.b hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_PARENT1=cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b
-  created new head
   $ hg merge 1
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
@@ -118,7 +118,7 @@ test generic hooks
   adding manifests
   adding file changes
   added 3 changesets with 2 changes to 2 files
-  changegroup hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_SOURCE=pull HG_TXNID=TXN:* HG_URL=file:$TESTTMP/a (glob)
+  changegroup hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_NODE_LAST=07f3376c1e655977439df2a814e3cc14b27abac2 HG_SOURCE=pull HG_TXNID=TXN:* HG_URL=file:$TESTTMP/a (glob)
   incoming hook: HG_NODE=ab228980c14deea8b9555d91c9581127383e40fd HG_SOURCE=pull HG_TXNID=TXN:* HG_URL=file:$TESTTMP/a (glob)
   incoming hook: HG_NODE=ee9deb46ab31e4cc3310f3cf0c3d668e4d8fffc2 HG_SOURCE=pull HG_TXNID=TXN:* HG_URL=file:$TESTTMP/a (glob)
   incoming hook: HG_NODE=07f3376c1e655977439df2a814e3cc14b27abac2 HG_SOURCE=pull HG_TXNID=TXN:* HG_URL=file:$TESTTMP/a (glob)
@@ -326,7 +326,7 @@ incoming changes no longer there after
   adding file changes
   added 1 changesets with 1 changes to 1 files
   4:539e4b31b6dc
-  pretxnchangegroup.forbid hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PENDING=$TESTTMP/b HG_SOURCE=pull HG_TXNID=TXN:* HG_URL=file:$TESTTMP/a (glob)
+  pretxnchangegroup.forbid hook: HG_NODE=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_NODE_LAST=539e4b31b6dc99b3cfbaa6b53cbc1c1f9a1e3a10 HG_PENDING=$TESTTMP/b HG_SOURCE=pull HG_TXNID=TXN:* HG_URL=file:$TESTTMP/a (glob)
   transaction abort!
   rollback completed
   abort: pretxnchangegroup.forbid1 hook exited with status 1
@@ -563,9 +563,9 @@ make sure --traceback works
   foo
   committing manifest
   committing changelog
+  committed changeset 1:52998019f6252a2b893452765fcb0a47351a5708
   calling hook commit.auto: hgext_hookext.autohook
   Automatically installed hook
-  committed changeset 1:52998019f6252a2b893452765fcb0a47351a5708
 
   $ hg showconfig hooks
   hooks.commit.auto=<function autohook at *> (glob)

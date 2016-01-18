@@ -6,9 +6,21 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import socket, cgi, errno
-from mercurial import util
-from common import ErrorResponse, statusmessage, HTTP_NOT_MODIFIED
+from __future__ import absolute_import
+
+import cgi
+import errno
+import socket
+
+from .common import (
+    ErrorResponse,
+    HTTP_NOT_MODIFIED,
+    statusmessage,
+)
+
+from .. import (
+    util,
+)
 
 shortcuts = {
     'cl': [('cmd', ['changelog']), ('rev', None)],
@@ -80,7 +92,7 @@ class wsgirequest(object):
         if self._start_response is not None:
             self.headers.append(('Content-Type', type))
             if filename:
-                filename = (filename.split('/')[-1]
+                filename = (filename.rpartition('/')[-1]
                             .replace('\\', '\\\\').replace('"', '\\"'))
                 self.headers.append(('Content-Disposition',
                                      'inline; filename="%s"' % filename))

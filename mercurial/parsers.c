@@ -547,6 +547,44 @@ quit:
 }
 
 /*
+ * Build a set of non-normal entries from the dirstate dmap
+*/
+static PyObject *nonnormalentries(PyObject *self, PyObject *args)
+{
+	PyObject *dmap, *nonnset = NULL, *fname, *v;
+	Py_ssize_t pos;
+
+	if (!PyArg_ParseTuple(args, "O!:nonnormalentries",
+			      &PyDict_Type, &dmap))
+		goto bail;
+
+	nonnset = PySet_New(NULL);
+	if (nonnset == NULL)
+		goto bail;
+
+	pos = 0;
+	while (PyDict_Next(dmap, &pos, &fname, &v)) {
+		dirstateTupleObject *t;
+		if (!dirstate_tuple_check(v)) {
+			PyErr_SetString(PyExc_TypeError,
+					"expected a dirstate tuple");
+			goto bail;
+		}
+		t = (dirstateTupleObject *)v;
+
+		if (t->state == 'n' && t->mtime != -1)
+			continue;
+		if (PySet_Add(nonnset, fname) == -1)
+			goto bail;
+	}
+
+	return nonnset;
+bail:
+	Py_XDECREF(nonnset);
+	return NULL;
+}
+
+/*
  * Efficiently pack a dirstate object into its on-disk format.
  */
 static PyObject *pack_dirstate(PyObject *self, PyObject *args)
@@ -1286,19 +1324,21 @@ static PyObject *compute_phases_map_sets(indexObject *self, PyObject *args)
 	long phase;
 
 	if (!PyArg_ParseTuple(args, "O", &roots))
-		goto release_none;
+		goto done;
 	if (roots == NULL || !PyList_Check(roots))
-		goto release_none;
+		goto done;
 
 	phases = calloc(len, 1); /* phase per rev: {0: public, 1: draft, 2: secret} */
-	if (phases == NULL)
-		goto release_none;
+	if (phases == NULL) {
+		PyErr_NoMemory();
+		goto done;
+	}
 	/* Put the phase information of all the roots in phases */
 	numphase = PyList_GET_SIZE(roots)+1;
 	minrevallphases = len + 1;
 	phasessetlist = PyList_New(numphase);
 	if (phasessetlist == NULL)
-		goto release_none;
+		goto done;
 
 	PyList_SET_ITEM(phasessetlist, 0, Py_None);
 	Py_INCREF(Py_None);
@@ -1307,13 +1347,13 @@ static PyObject *compute_phases_map_sets(indexObject *self, PyObject *args)
 		phaseroots = PyList_GET_ITEM(roots, i);
 		phaseset = PySet_New(NULL);
 		if (phaseset == NULL)
-			goto release_phasesetlist;
+			goto release;
 		PyList_SET_ITEM(phasessetlist, i+1, phaseset);
 		if (!PyList_Check(phaseroots))
-			goto release_phasesetlist;
+			goto release;
 		minrevphase = add_roots_get_min(self, phaseroots, i+1, phases);
 		if (minrevphase == -2) /* Error from add_roots_get_min */
-			goto release_phasesetlist;
+			goto release;
 		minrevallphases = MIN(minrevallphases, minrevphase);
 	}
 	/* Propagate the phase information from the roots to the revs */
@@ -1322,43 +1362,40 @@ static PyObject *compute_phases_map_sets(indexObject *self, PyObject *args)
 		for (i = minrevallphases; i < len; i++) {
 			if (index_get_parents(self, i, parents,
 					      (int)len - 1) < 0)
-				goto release_phasesetlist;
+				goto release;
 			set_phase_from_parents(phases, parents[0], parents[1], i);
 		}
 	}
 	/* Transform phase list to a python list */
 	phaseslist = PyList_New(len);
 	if (phaseslist == NULL)
-		goto release_phasesetlist;
+		goto release;
 	for (i = 0; i < len; i++) {
+		PyObject *phaseval;
+
 		phase = phases[i];
 		/* We only store the sets of phase for non public phase, the public phase
 		 * is computed as a difference */
 		if (phase != 0) {
 			phaseset = PyList_GET_ITEM(phasessetlist, phase);
 			rev = PyInt_FromLong(i);
+			if (rev == NULL)
+				goto release;
 			PySet_Add(phaseset, rev);
 			Py_XDECREF(rev);
 		}
-		PyList_SET_ITEM(phaseslist, i, PyInt_FromLong(phase));
+		phaseval = PyInt_FromLong(phase);
+		if (phaseval == NULL)
+			goto release;
+		PyList_SET_ITEM(phaseslist, i, phaseval);
 	}
-	ret = PyList_New(2);
-	if (ret == NULL)
-		goto release_phaseslist;
+	ret = PyTuple_Pack(2, phaseslist, phasessetlist);
 
-	PyList_SET_ITEM(ret, 0, phaseslist);
-	PyList_SET_ITEM(ret, 1, phasessetlist);
-	/* We don't release phaseslist and phasessetlist as we return them to
-	 * python */
-	goto release_phases;
-
-release_phaseslist:
+release:
 	Py_XDECREF(phaseslist);
-release_phasesetlist:
 	Py_XDECREF(phasessetlist);
-release_phases:
+done:
 	free(phases);
-release_none:
 	return ret;
 }
 
@@ -1404,8 +1441,10 @@ static PyObject *index_headrevs(indexObject *self, PyObject *args)
 	}
 
 	nothead = calloc(len, 1);
-	if (nothead == NULL)
+	if (nothead == NULL) {
+		PyErr_NoMemory();
 		goto bail;
+	}
 
 	for (i = 0; i < len; i++) {
 		int isfiltered;
@@ -1801,7 +1840,7 @@ static PyObject *index_m_get(indexObject *self, PyObject *args)
 	if (node_check(val, &node, &nodelen) == -1)
 		return NULL;
 	rev = index_find_node(self, node, nodelen);
-	if (rev ==  -3)
+	if (rev == -3)
 		return NULL;
 	if (rev == -2)
 		Py_RETURN_NONE;
@@ -1995,19 +2034,19 @@ static PyObject *find_deepest(indexObject *self, PyObject *revs)
 
 		for (i = 0; i < 2; i++) {
 			int p = parents[i];
-			long nsp, sp;
+			long sp;
 			int dp;
 
 			if (p == -1)
 				continue;
 
 			dp = depth[p];
-			nsp = sp = seen[p];
+			sp = seen[p];
 			if (dp <= dv) {
 				depth[p] = dv + 1;
 				if (sp != sv) {
 					interesting[sv] += 1;
-					nsp = seen[p] = sv;
+					seen[p] = sv;
 					if (sp) {
 						interesting[sp] -= 1;
 						if (interesting[sp] == 0)
@@ -2016,7 +2055,7 @@ static PyObject *find_deepest(indexObject *self, PyObject *revs)
 				}
 			}
 			else if (dv == dp - 1) {
-				nsp = sp | sv;
+				long nsp = sp | sv;
 				if (nsp == sp)
 					continue;
 				seen[p] = nsp;
@@ -2739,6 +2778,8 @@ PyObject *lowerencode(PyObject *self, PyObject *args);
 
 static PyMethodDef methods[] = {
 	{"pack_dirstate", pack_dirstate, METH_VARARGS, "pack a dirstate\n"},
+	{"nonnormalentries", nonnormalentries, METH_VARARGS,
+	"create a set containing non-normal entries of given dirstate\n"},
 	{"parse_manifest", parse_manifest, METH_VARARGS, "parse a manifest\n"},
 	{"parse_dirstate", parse_dirstate, METH_VARARGS, "parse a dirstate\n"},
 	{"parse_index2", parse_index2, METH_VARARGS, "parse a revlog index\n"},

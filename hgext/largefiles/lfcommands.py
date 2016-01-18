@@ -141,12 +141,7 @@ def lfconvert(ui, src, dest, *pats, **opts):
                     if path is None:
                         raise error.Abort(_("missing largefile for '%s' in %s")
                                           % (realname, realrev))
-                    fp = open(path, 'rb')
-
-                    try:
-                        return (fp.read(), f[1])
-                    finally:
-                        fp.close()
+                    return util.readfile(path), f[1]
 
             class converter(convcmd.converter):
                 def __init__(self, ui, source, dest, revmapfile, opts):
@@ -431,8 +426,7 @@ def updatelfiles(ui, repo, filelist=None, printmessage=None,
     ignore, for false) message forcibly".
     '''
     statuswriter = lfutil.getstatuswriter(ui, repo, printmessage)
-    wlock = repo.wlock()
-    try:
+    with repo.wlock():
         lfdirstate = lfutil.openlfdirstate(ui, repo)
         lfiles = set(lfutil.listlfiles(repo)) | set(lfdirstate)
 
@@ -444,12 +438,14 @@ def updatelfiles(ui, repo, filelist=None, printmessage=None,
         updated, removed = 0, 0
         for lfile in lfiles:
             abslfile = repo.wjoin(lfile)
+            abslfileorig = scmutil.origpath(ui, repo, abslfile)
             absstandin = repo.wjoin(lfutil.standin(lfile))
+            absstandinorig = scmutil.origpath(ui, repo, absstandin)
             if os.path.exists(absstandin):
-                if (os.path.exists(absstandin + '.orig') and
+                if (os.path.exists(absstandinorig) and
                     os.path.exists(abslfile)):
-                    shutil.copyfile(abslfile, abslfile + '.orig')
-                    util.unlinkpath(absstandin + '.orig')
+                    shutil.copyfile(abslfile, abslfileorig)
+                    util.unlinkpath(absstandinorig)
                 expecthash = lfutil.readstandin(repo, lfile)
                 if expecthash != '':
                     if lfile not in repo[None]: # not switched to normal file
@@ -507,8 +503,6 @@ def updatelfiles(ui, repo, filelist=None, printmessage=None,
         if lfiles:
             statuswriter(_('%d largefiles updated, %d removed\n') % (updated,
                 removed))
-    finally:
-        wlock.release()
 
 @command('lfpull',
     [('r', 'rev', [], _('pull largefiles for these revisions'))

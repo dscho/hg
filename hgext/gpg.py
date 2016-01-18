@@ -168,7 +168,7 @@ def sigs(ui, repo):
             ui.write("%-30s %s\n" % (keystr(ui, k), r))
 
 @command("sigcheck", [], _('hg sigcheck REV'))
-def check(ui, repo, rev):
+def sigcheck(ui, repo, rev):
     """verify all the signatures there may be for a particular revision"""
     mygpg = newgpg(ui)
     rev = repo.lookup(rev)
@@ -222,7 +222,10 @@ def sign(ui, repo, *revs, **opts):
 
     See :hg:`help dates` for a list of formats valid for -d/--date.
     """
+    with repo.wlock():
+        return _dosign(ui, repo, *revs, **opts)
 
+def _dosign(ui, repo, *revs, **opts):
     mygpg = newgpg(ui, **opts)
     sigver = "0"
     sigmessage = ""

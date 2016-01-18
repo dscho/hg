@@ -80,6 +80,7 @@ Show debug commands if there are no other candidates
   debugdag
   debugdata
   debugdate
+  debugdeltachain
   debugdirstate
   debugdiscovery
   debugextensions
@@ -223,7 +224,7 @@ Show all commands + options
   update: clean, check, date, rev, tool
   addremove: similarity, subrepos, include, exclude, dry-run
   archive: no-decode, prefix, rev, type, subrepos, include, exclude
-  backout: merge, commit, parent, rev, edit, tool, include, exclude, message, logfile, date, user
+  backout: merge, commit, no-commit, parent, rev, edit, tool, include, exclude, message, logfile, date, user
   bisect: reset, good, bad, skip, extend, command, noupdate
   bookmarks: force, rev, delete, rename, inactive, template
   branch: force, clean
@@ -235,7 +236,7 @@ Show all commands + options
   debugancestor: 
   debugapplystreamclonebundle: 
   debugbuilddag: mergeable-file, overwritten-file, new-file
-  debugbundle: all
+  debugbundle: all, spec
   debugcheckstate: 
   debugcommands: 
   debugcomplete: options
@@ -243,6 +244,7 @@ Show all commands + options
   debugdag: tags, branches, dots, spaces
   debugdata: changelog, manifest, dir
   debugdate: extended
+  debugdeltachain: changelog, manifest, dir, template
   debugdirstate: nodates, datesort
   debugdiscovery: old, nonheads, ssh, remotecmd, insecure
   debugextensions: template
@@ -251,7 +253,7 @@ Show all commands + options
   debuggetbundle: head, common, type
   debugignore: 
   debugindex: changelog, manifest, dir, format
-  debugindexdot: 
+  debugindexdot: changelog, manifest, dir
   debuginstall: 
   debugknown: 
   debuglabelcomplete: 
@@ -276,7 +278,7 @@ Show all commands + options
   graft: rev, continue, edit, log, force, currentdate, currentuser, date, user, tool, dry-run
   grep: print0, all, text, follow, ignore-case, files-with-matches, line-number, rev, user, date, include, exclude
   heads: rev, topo, active, closed, style, template
-  help: extension, command, keyword
+  help: extension, command, keyword, system
   identify: rev, num, id, branch, tags, bookmarks, ssh, remotecmd, insecure
   import: strip, base, edit, force, no-commit, bypass, partial, exact, prefix, import-branch, message, logfile, date, user, similarity
   incoming: force, newest-first, bundle, rev, bookmarks, branch, patch, git, limit, no-merges, stat, graph, style, template, ssh, remotecmd, insecure, subrepos
@@ -284,7 +286,7 @@ Show all commands + options
   manifest: rev, all, template
   outgoing: force, rev, newest-first, bookmarks, branch, patch, git, limit, no-merges, stat, graph, style, template, ssh, remotecmd, insecure, subrepos
   parents: rev, style, template
-  paths: 
+  paths: template
   phase: public, draft, secret, force, rev
   recover: 
   rename: after, force, include, exclude, dry-run

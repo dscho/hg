@@ -128,47 +128,99 @@ def minusset(mctx, x, y):
     return [f for f in xl if f not in yl]
 
 def listset(mctx, a, b):
-    raise error.ParseError(_("can't use a list in this context"))
+    raise error.ParseError(_("can't use a list in this context"),
+                           hint=_('see hg help "filesets.x or y"'))
 
+# symbols are callable like:
+#  fun(mctx, x)
+# with:
+#  mctx - current matchctx instance
+#  x - argument in tree form
+symbols = {}
+
+# filesets using matchctx.status()
+_statuscallers = set()
+
+# filesets using matchctx.existing()
+_existingcallers = set()
+
+def predicate(decl, callstatus=False, callexisting=False):
+    """Return a decorator for fileset predicate function
+
+    'decl' argument is the declaration (including argument list like
+    'adds(pattern)') or the name (for internal use only) of predicate.
+
+    Optional 'callstatus' argument indicates whether predicate implies
+    'matchctx.status()' at runtime or not (False, by default).
+
+    Optional 'callexisting' argument indicates whether predicate
+    implies 'matchctx.existing()' at runtime or not (False, by
+    default).
+    """
+    def decorator(func):
+        i = decl.find('(')
+        if i > 0:
+            name = decl[:i]
+        else:
+            name = decl
+        symbols[name] = func
+        if callstatus:
+            _statuscallers.add(name)
+        if callexisting:
+            _existingcallers.add(name)
+        if func.__doc__:
+            func.__doc__ = "``%s``\n    %s" % (decl, func.__doc__.strip())
+        return func
+    return decorator
+
+@predicate('modified()', callstatus=True)
 def modified(mctx, x):
-    """``modified()``
-    File that is modified according to :hg:`status`.
+    """File that is modified according to :hg:`status`.
     """
     # i18n: "modified" is a keyword
     getargs(x, 0, 0, _("modified takes no arguments"))
     s = mctx.status().modified
     return [f for f in mctx.subset if f in s]
 
+@predicate('added()', callstatus=True)
 def added(mctx, x):
-    """``added()``
-    File that is added according to :hg:`status`.
+    """File that is added according to :hg:`status`.
     """
     # i18n: "added" is a keyword
     getargs(x, 0, 0, _("added takes no arguments"))
     s = mctx.status().added
     return [f for f in mctx.subset if f in s]
 
+@predicate('removed()', callstatus=True)
 def removed(mctx, x):
-    """``removed()``
-    File that is removed according to :hg:`status`.
+    """File that is removed according to :hg:`status`.
     """
     # i18n: "removed" is a keyword
     getargs(x, 0, 0, _("removed takes no arguments"))
     s = mctx.status().removed
     return [f for f in mctx.subset if f in s]
 
+@predicate('deleted()', callstatus=True)
 def deleted(mctx, x):
-    """``deleted()``
-    File that is deleted according to :hg:`status`.
+    """Alias for ``missing()``.
     """
     # i18n: "deleted" is a keyword
     getargs(x, 0, 0, _("deleted takes no arguments"))
     s = mctx.status().deleted
     return [f for f in mctx.subset if f in s]
 
+@predicate('missing()', callstatus=True)
+def missing(mctx, x):
+    """File that is missing according to :hg:`status`.
+    """
+    # i18n: "missing" is a keyword
+    getargs(x, 0, 0, _("missing takes no arguments"))
+    s = mctx.status().deleted
+    return [f for f in mctx.subset if f in s]
+
+@predicate('unknown()', callstatus=True)
 def unknown(mctx, x):
-    """``unknown()``
-    File that is unknown according to :hg:`status`. These files will only be
+    """File that is unknown according to :hg:`status`. These files will only be
     considered if this predicate is used.
     """
     # i18n: "unknown" is a keyword
@@ -176,9 +228,9 @@ def unknown(mctx, x):
     s = mctx.status().unknown
     return [f for f in mctx.subset if f in s]
 
+@predicate('ignored()', callstatus=True)
 def ignored(mctx, x):
-    """``ignored()``
-    File that is ignored according to :hg:`status`. These files will only be
+    """File that is ignored according to :hg:`status`. These files will only be
     considered if this predicate is used.
     """
     # i18n: "ignored" is a keyword
@@ -186,9 +238,9 @@ def ignored(mctx, x):
     s = mctx.status().ignored
     return [f for f in mctx.subset if f in s]
 
+@predicate('clean()', callstatus=True)
 def clean(mctx, x):
-    """``clean()``
-    File that is clean according to :hg:`status`.
+    """File that is clean according to :hg:`status`.
     """
     # i18n: "clean" is a keyword
     getargs(x, 0, 0, _("clean takes no arguments"))
@@ -197,7 +249,13 @@ def clean(mctx, x):
 
 def func(mctx, a, b):
     if a[0] == 'symbol' and a[1] in symbols:
-        return symbols[a[1]](mctx, b)
+        funcname = a[1]
+        enabled = mctx._existingenabled
+        mctx._existingenabled = funcname in _existingcallers
+        try:
+            return symbols[funcname](mctx, b)
+        finally:
+            mctx._existingenabled = enabled
 
     keep = lambda fn: getattr(fn, '__doc__', None) is not None
 
@@ -217,64 +275,64 @@ def getargs(x, min, max, err):
         raise error.ParseError(err)
     return l
 
+@predicate('binary()', callexisting=True)
 def binary(mctx, x):
-    """``binary()``
-    File that appears to be binary (contains NUL bytes).
+    """File that appears to be binary (contains NUL bytes).
     """
     # i18n: "binary" is a keyword
     getargs(x, 0, 0, _("binary takes no arguments"))
     return [f for f in mctx.existing() if util.binary(mctx.ctx[f].data())]
 
+@predicate('exec()', callexisting=True)
 def exec_(mctx, x):
-    """``exec()``
-    File that is marked as executable.
+    """File that is marked as executable.
     """
     # i18n: "exec" is a keyword
     getargs(x, 0, 0, _("exec takes no arguments"))
     return [f for f in mctx.existing() if mctx.ctx.flags(f) == 'x']
 
+@predicate('symlink()', callexisting=True)
 def symlink(mctx, x):
-    """``symlink()``
-    File that is marked as a symlink.
+    """File that is marked as a symlink.
     """
     # i18n: "symlink" is a keyword
     getargs(x, 0, 0, _("symlink takes no arguments"))
     return [f for f in mctx.existing() if mctx.ctx.flags(f) == 'l']
 
+@predicate('resolved()')
 def resolved(mctx, x):
-    """``resolved()``
-    File that is marked resolved according to :hg:`resolve -l`.
+    """File that is marked resolved according to :hg:`resolve -l`.
     """
     # i18n: "resolved" is a keyword
     getargs(x, 0, 0, _("resolved takes no arguments"))
     if mctx.ctx.rev() is not None:
         return []
-    ms = merge.mergestate(mctx.ctx.repo())
+    ms = merge.mergestate.read(mctx.ctx.repo())
     return [f for f in mctx.subset if f in ms and ms[f] == 'r']
 
+@predicate('unresolved()')
 def unresolved(mctx, x):
-    """``unresolved()``
-    File that is marked unresolved according to :hg:`resolve -l`.
+    """File that is marked unresolved according to :hg:`resolve -l`.
     """
     # i18n: "unresolved" is a keyword
     getargs(x, 0, 0, _("unresolved takes no arguments"))
     if mctx.ctx.rev() is not None:
         return []
-    ms = merge.mergestate(mctx.ctx.repo())
+    ms = merge.mergestate.read(mctx.ctx.repo())
     return [f for f in mctx.subset if f in ms and ms[f] == 'u']
 
+@predicate('hgignore()')
 def hgignore(mctx, x):
-    """``hgignore()``
-    File that matches the active .hgignore pattern.
+    """File that matches the active .hgignore pattern.
     """
     # i18n: "hgignore" is a keyword
     getargs(x, 0, 0, _("hgignore takes no arguments"))
     ignore = mctx.ctx.repo().dirstate._ignore
     return [f for f in mctx.subset if ignore(f)]
 
+@predicate('portable()')
 def portable(mctx, x):
-    """``portable()``
-    File that has a portable name. (This doesn't include filenames with case
+    """File that has a portable name. (This doesn't include filenames with case
     collisions.)
     """
     # i18n: "portable" is a keyword
@@ -282,9 +340,9 @@ def portable(mctx, x):
     checkwinfilename = util.checkwinfilename
     return [f for f in mctx.subset if checkwinfilename(f) is None]
 
+@predicate('grep(regex)', callexisting=True)
 def grep(mctx, x):
-    """``grep(regex)``
-    File contains the given regular expression.
+    """File contains the given regular expression.
     """
     try:
         # i18n: "grep" is a keyword
@@ -309,9 +367,9 @@ def _sizetomax(s):
     except ValueError:
         raise error.ParseError(_("couldn't parse size: %s") % s)
 
+@predicate('size(expression)', callexisting=True)
 def size(mctx, x):
-    """``size(expression)``
-    File size matches the given expression. Examples:
+    """File size matches the given expression. Examples:
 
     - 1k (files from 1024 to 2047 bytes)
     - < 20k (files less than 20480 bytes)
@@ -347,9 +405,9 @@ def size(mctx, x):
 
     return [f for f in mctx.existing() if m(mctx.ctx[f].size())]
 
+@predicate('encoding(name)', callexisting=True)
 def encoding(mctx, x):
-    """``encoding(name)``
-    File can be successfully decoded with the given character
+    """File can be successfully decoded with the given character
     encoding. May not be useful for encodings other than ASCII and
     UTF-8.
     """
@@ -370,9 +428,9 @@ def encoding(mctx, x):
 
     return s
 
+@predicate('eol(style)', callexisting=True)
 def eol(mctx, x):
-    """``eol(style)``
-    File contains newlines of the given style (dos, unix, mac). Binary
+    """File contains newlines of the given style (dos, unix, mac). Binary
     files are excluded, files with mixed line endings match multiple
     styles.
     """
@@ -393,9 +451,9 @@ def eol(mctx, x):
             s.append(f)
     return s
 
+@predicate('copied()')
 def copied(mctx, x):
-    """``copied()``
-    File that is recorded as being copied.
+    """File that is recorded as being copied.
     """
     # i18n: "copied" is a keyword
     getargs(x, 0, 0, _("copied takes no arguments"))
@@ -406,9 +464,9 @@ def copied(mctx, x):
             s.append(f)
     return s
 
+@predicate('subrepo([pattern])')
 def subrepo(mctx, x):
-    """``subrepo([pattern])``
-    Subrepositories whose paths match the given pattern.
+    """Subrepositories whose paths match the given pattern.
     """
     # i18n: "subrepo" is a keyword
     getargs(x, 0, 1, _("subrepo takes at most one argument"))
@@ -429,29 +487,6 @@ def subrepo(mctx, x):
     else:
         return [sub for sub in sstate]
 
-symbols = {
-    'added': added,
-    'binary': binary,
-    'clean': clean,
-    'copied': copied,
-    'deleted': deleted,
-    'encoding': encoding,
-    'eol': eol,
-    'exec': exec_,
-    'grep': grep,
-    'ignored': ignored,
-    'hgignore': hgignore,
-    'modified': modified,
-    'portable': portable,
-    'removed': removed,
-    'resolved': resolved,
-    'size': size,
-    'symlink': symlink,
-    'unknown': unknown,
-    'unresolved': unresolved,
-    'subrepo': subrepo,
-}
-
 methods = {
     'string': stringset,
     'symbol': stringset,
@@ -469,6 +504,7 @@ class matchctx(object):
         self.ctx = ctx
         self.subset = subset
         self._status = status
+        self._existingenabled = False
     def status(self):
         return self._status
     def matcher(self, patterns):
@@ -476,6 +512,7 @@ class matchctx(object):
     def filter(self, files):
         return [f for f in files if f in self.subset]
     def existing(self):
+        assert self._existingenabled, 'unexpected existing() invocation'
         if self._status is not None:
             removed = set(self._status[3])
             unknown = set(self._status[4] + self._status[5])
@@ -497,21 +534,11 @@ def _intree(funcs, tree):
                 return True
     return False
 
-# filesets using matchctx.existing()
-_existingcallers = [
-    'binary',
-    'exec',
-    'grep',
-    'size',
-    'symlink',
-]
-
 def getfileset(ctx, expr):
     tree = parse(expr)
 
     # do we need status info?
-    if (_intree(['modified', 'added', 'removed', 'deleted',
-                 'unknown', 'ignored', 'clean'], tree) or
+    if (_intree(_statuscallers, tree) or
         # Using matchctx.existing() on a workingctx requires us to check
         # for deleted files.
         (ctx.rev() is None and _intree(_existingcallers, tree))):

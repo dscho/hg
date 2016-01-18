@@ -5,8 +5,15 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import error
-import unicodedata, locale, os
+from __future__ import absolute_import
+
+import locale
+import os
+import unicodedata
+
+from . import (
+    error,
+)
 
 # These unicode characters are ignored by HFS+ (Apple Technote 1150,
 # "Unicode Subtleties"), so we need to ignore them in some places for
@@ -194,7 +201,7 @@ def trim(s, width, ellipsis='', leftside=False):
     'ellipsis' is always placed at trimmed side.
 
     >>> ellipsis = '+++'
-    >>> from mercurial import encoding
+    >>> from . import encoding
     >>> encoding.encoding = 'utf-8'
     >>> t= '1234567890'
     >>> print trim(t, 12, ellipsis=ellipsis)
@@ -290,7 +297,7 @@ def _asciilower(s):
 def asciilower(s):
     # delay importing avoids cyclic dependency around "parsers" in
     # pure Python build (util => i18n => encoding => parsers => util)
-    import parsers
+    from . import parsers
     impl = getattr(parsers, 'asciilower', _asciilower)
     global asciilower
     asciilower = impl
@@ -306,7 +313,7 @@ def _asciiupper(s):
 def asciiupper(s):
     # delay importing avoids cyclic dependency around "parsers" in
     # pure Python build (util => i18n => encoding => parsers => util)
-    import parsers
+    from . import parsers
     impl = getattr(parsers, 'asciiupper', _asciiupper)
     global asciiupper
     asciiupper = impl
@@ -388,8 +395,10 @@ def jsonescape(s):
 
     >>> jsonescape('this is a test')
     'this is a test'
-    >>> jsonescape('escape characters: \\0 \\x0b \\t \\n \\r \\" \\\\')
-    'escape characters: \\\\u0000 \\\\u000b \\\\t \\\\n \\\\r \\\\" \\\\\\\\'
+    >>> jsonescape('escape characters: \\0 \\x0b \\x7f')
+    'escape characters: \\\\u0000 \\\\u000b \\\\u007f'
+    >>> jsonescape('escape characters: \\t \\n \\r \\" \\\\')
+    'escape characters: \\\\t \\\\n \\\\r \\\\" \\\\\\\\'
     >>> jsonescape('a weird byte: \\xdd')
     'a weird byte: \\xed\\xb3\\x9d'
     >>> jsonescape('utf-8: caf\\xc3\\xa9')
@@ -400,10 +409,11 @@ def jsonescape(s):
 
     if not _jsonmap:
         for x in xrange(32):
-            _jsonmap[chr(x)] = "\u%04x" %x
+            _jsonmap[chr(x)] = "\\u%04x" % x
         for x in xrange(32, 256):
             c = chr(x)
             _jsonmap[c] = c
+        _jsonmap['\x7f'] = '\\u007f'
         _jsonmap['\t'] = '\\t'
         _jsonmap['\n'] = '\\n'
         _jsonmap['\"'] = '\\"'
@@ -413,6 +423,25 @@ def jsonescape(s):
         _jsonmap['\r'] = '\\r'
 
     return ''.join(_jsonmap[c] for c in toutf8b(s))
+
+_utf8len = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 4]
+
+def getutf8char(s, pos):
+    '''get the next full utf-8 character in the given string, starting at pos
+
+    Raises a UnicodeError if the given location does not start a valid
+    utf-8 character.
+    '''
+
+    # find how many bytes to attempt decoding from first nibble
+    l = _utf8len[ord(s[pos]) >> 4]
+    if not l: # ascii
+        return s[pos]
+
+    c = s[pos:pos + l]
+    # validate with attempted decode
+    c.decode("utf-8")
+    return c
 
 def toutf8b(s):
     '''convert a local, possibly-binary string into UTF-8b
@@ -444,24 +473,32 @@ def toutf8b(s):
     internal surrogate encoding as a UTF-8 string.)
     '''
 
-    if isinstance(s, localstr):
-        return s._utf8
+    if "\xed" not in s:
+        if isinstance(s, localstr):
+            return s._utf8
+        try:
+            s.decode('utf-8')
+            return s
+        except UnicodeDecodeError:
+            pass
 
-    try:
-        s.decode('utf-8')
-        return s
-    except UnicodeDecodeError:
-        # surrogate-encode any characters that don't round-trip
-        s2 = s.decode('utf-8', 'ignore').encode('utf-8')
-        r = ""
-        pos = 0
-        for c in s:
-            if s2[pos:pos + 1] == c:
-                r += c
+    r = ""
+    pos = 0
+    l = len(s)
+    while pos < l:
+        try:
+            c = getutf8char(s, pos)
+            if "\xed\xb0\x80" <= c <= "\xed\xb3\xbf":
+                # have to re-escape existing U+DCxx characters
+                c = unichr(0xdc00 + ord(s[pos])).encode('utf-8')
                 pos += 1
             else:
-                r += unichr(0xdc00 + ord(c)).encode('utf-8')
-        return r
+                pos += len(c)
+        except UnicodeDecodeError:
+            c = unichr(0xdc00 + ord(s[pos])).encode('utf-8')
+            pos += 1
+        r += c
+    return r
 
 def fromutf8b(s):
     '''Given a UTF-8b string, return a local, possibly-binary string.
@@ -470,11 +507,19 @@ def fromutf8b(s):
     is a round-trip process for strings like filenames, but metadata
     that's was passed through tolocal will remain in UTF-8.
 
+    >>> roundtrip = lambda x: fromutf8b(toutf8b(x)) == x
     >>> m = "\\xc3\\xa9\\x99abcd"
-    >>> n = toutf8b(m)
-    >>> n
+    >>> toutf8b(m)
     '\\xc3\\xa9\\xed\\xb2\\x99abcd'
-    >>> fromutf8b(n) == m
+    >>> roundtrip(m)
+    True
+    >>> roundtrip("\\xc2\\xc2\\x80")
+    True
+    >>> roundtrip("\\xef\\xbf\\xbd")
+    True
+    >>> roundtrip("\\xef\\xef\\xbf\\xbd")
+    True
+    >>> roundtrip("\\xf1\\x80\\x80\\x80\\x80")
     True
     '''
 
@@ -482,11 +527,19 @@ def fromutf8b(s):
     if "\xed" not in s:
         return s
 
-    u = s.decode("utf-8")
+    # We could do this with the unicode type but some Python builds
+    # use UTF-16 internally (issue5031) which causes non-BMP code
+    # points to be escaped. Instead, we use our handy getutf8char
+    # helper again to walk the string without "decoding" it.
+
     r = ""
-    for c in u:
-        if ord(c) & 0xff00 == 0xdc00:
-            r += chr(ord(c) & 0xff)
-        else:
-            r += c.encode("utf-8")
+    pos = 0
+    l = len(s)
+    while pos < l:
+        c = getutf8char(s, pos)
+        pos += len(c)
+        # unescape U+DCxx characters
+        if "\xed\xb0\x80" <= c <= "\xed\xb3\xbf":
+            c = chr(ord(c.decode("utf-8")) & 0xff)
+        r += c
     return r

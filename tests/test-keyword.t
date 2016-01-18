@@ -141,8 +141,8 @@ Commit with several checks
   committing manifest
   committing changelog
   overwriting a expanding keywords
-  running hook commit.test: cp a hooktest
   committed changeset 1:ef63ca68695bc9495032c6fda1350c71e6d256e9
+  running hook commit.test: cp a hooktest
   $ hg status
   ? hooktest
   $ hg debugrebuildstate
@@ -1204,7 +1204,7 @@ Test restricted mode with unshelve
   +xxxx
   $ hg shelve -q --name tmp
   $ hg shelve --list --patch
-  tmp             (*)    changes to 'localresolve' (glob)
+  tmp             (*)* changes to: localresolve (glob)
   
   diff --git a/a b/a
   --- a/a
@@ -1288,7 +1288,7 @@ Test restricted mode with graft
 
 Test restricted mode with backout
 
-  $ hg backout -q 11
+  $ hg backout -q 11 --no-commit
   $ hg diff a
   diff -r 01a68de1003a a
   --- a/a	Thu Jan 01 00:00:00 1970 +0000

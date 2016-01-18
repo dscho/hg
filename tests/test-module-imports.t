@@ -68,6 +68,33 @@ Run additional tests for the import checker
   > from .. import parent
   > EOF
 
+  $ touch testpackage/subpackage/foo.py
+  $ cat > testpackage/subpackage/__init__.py << EOF
+  > from __future__ import absolute_import
+  > from . import levelpriority  # should not cause cycle
+  > EOF
+
+  $ cat > testpackage/subpackage/localimport.py << EOF
+  > from __future__ import absolute_import
+  > from . import foo
+  > def bar():
+  >     # should not cause "higher-level import should come first"
+  >     from .. import unsorted
+  >     # but other errors should be detected
+  >     from .. import more
+  >     import testpackage.subpackage.levelpriority
+  > EOF
+
+  $ cat > testpackage/importmodulefromsub.py << EOF
+  > from __future__ import absolute_import
+  > from .subpackage import foo  # not a "direct symbol import"
+  > EOF
+
+  $ cat > testpackage/importsymbolfromsub.py << EOF
+  > from __future__ import absolute_import
+  > from .subpackage import foo, nonmodule
+  > EOF
+
   $ cat > testpackage/sortedentries.py << EOF
   > from __future__ import absolute_import
   > from . import (
@@ -87,20 +114,23 @@ Run additional tests for the import checker
   > EOF
 
   $ python "$import_checker" testpackage/*.py testpackage/subpackage/*.py
-  testpackage/importalias.py ui module must be "as" aliased to uimod
-  testpackage/importfromalias.py ui from testpackage must be "as" aliased to uimod
-  testpackage/importfromrelative.py import should be relative: testpackage.unsorted
-  testpackage/importfromrelative.py direct symbol import from testpackage.unsorted
-  testpackage/latesymbolimport.py symbol import follows non-symbol import: mercurial.node
-  testpackage/multiple.py multiple imported names: os, sys
-  testpackage/multiplegroups.py multiple "from . import" statements
-  testpackage/relativestdlib.py relative import of stdlib module
-  testpackage/requirerelative.py import should be relative: testpackage.unsorted
-  testpackage/sortedentries.py imports from testpackage not lexically sorted: bar < foo
-  testpackage/stdafterlocal.py stdlib import follows local import: os
-  testpackage/subpackage/levelpriority.py higher-level import should come first: testpackage
-  testpackage/symbolimport.py direct symbol import from testpackage.unsorted
-  testpackage/unsorted.py imports not lexically sorted: os < sys
+  testpackage/importalias.py:2: ui module must be "as" aliased to uimod
+  testpackage/importfromalias.py:2: ui from testpackage must be "as" aliased to uimod
+  testpackage/importfromrelative.py:2: import should be relative: testpackage.unsorted
+  testpackage/importfromrelative.py:2: direct symbol import foo from testpackage.unsorted
+  testpackage/importsymbolfromsub.py:2: direct symbol import nonmodule from testpackage.subpackage
+  testpackage/latesymbolimport.py:3: symbol import follows non-symbol import: mercurial.node
+  testpackage/multiple.py:2: multiple imported names: os, sys
+  testpackage/multiplegroups.py:3: multiple "from . import" statements
+  testpackage/relativestdlib.py:2: relative import of stdlib module
+  testpackage/requirerelative.py:2: import should be relative: testpackage.unsorted
+  testpackage/sortedentries.py:2: imports from testpackage not lexically sorted: bar < foo
+  testpackage/stdafterlocal.py:3: stdlib import follows local import: os
+  testpackage/subpackage/levelpriority.py:3: higher-level import should come first: testpackage
+  testpackage/subpackage/localimport.py:7: multiple "from .. import" statements
+  testpackage/subpackage/localimport.py:8: import should be relative: testpackage.subpackage.levelpriority
+  testpackage/symbolimport.py:2: direct symbol import foo from testpackage.unsorted
+  testpackage/unsorted.py:3: imports not lexically sorted: os < sys
   [1]
 
   $ cd "$TESTDIR"/..

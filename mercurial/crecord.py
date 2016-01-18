@@ -24,6 +24,7 @@ from . import (
     encoding,
     error,
     patch as patchmod,
+    util,
 )
 
 # This is required for ncurses to display non-ASCII characters in default user
@@ -455,11 +456,11 @@ def filterpatch(ui, chunks, chunkselector, operation=None):
 
     # if there are no changed files
     if len(headers) == 0:
-        return []
+        return [], {}
     uiheaders = [uiheader(h) for h in headers]
     # let user choose headers/hunks/lines, and mark their applied flags
     # accordingly
-    chunkselector(ui, uiheaders)
+    ret = chunkselector(ui, uiheaders)
     appliedhunklist = []
     for hdr in uiheaders:
         if (hdr.applied and
@@ -477,7 +478,7 @@ def filterpatch(ui, chunks, chunkselector, operation=None):
                 else:
                     fixoffset += hnk.removed - hnk.added
 
-    return appliedhunklist
+    return (appliedhunklist, ret)
 
 def gethw():
     """
@@ -506,6 +507,7 @@ def chunkselector(ui, headerlist):
         raise error.Abort(chunkselector.initerr)
     # ncurses does not restore signal handler for SIGTSTP
     signal.signal(signal.SIGTSTP, f)
+    return chunkselector.opts
 
 def testdecorator(testfn, f):
     def u(*args, **kwargs):
@@ -526,6 +528,7 @@ def testchunkselector(testfn, ui, headerlist):
         while True:
             if chunkselector.handlekeypressed(testcommands.pop(0), test=True):
                 break
+    return chunkselector.opts
 
 class curseschunkselector(object):
     def __init__(self, headerlist, ui):
@@ -533,6 +536,7 @@ class curseschunkselector(object):
         self.headerlist = patch(headerlist)
 
         self.ui = ui
+        self.opts = {}
 
         self.errorstr = None
         # list of all chunks
@@ -1012,7 +1016,7 @@ class curseschunkselector(object):
                         pairname="legend")
             printstring(self.statuswin,
                         " (f)old/unfold; (c)onfirm applied; (q)uit; (?) help "
-                        "| [X]=hunk applied **=folded",
+                        "| [X]=hunk applied **=folded, toggle [a]mend mode",
                         pairname="legend")
         except curses.error:
             pass
@@ -1368,7 +1372,7 @@ the following are valid keystrokes:
                       F : fold / unfold parent item and all of its ancestors
                       m : edit / resume editing the commit message
                       e : edit the currently selected hunk
-                      a : toggle amend mode (hg rev >= 2.2)
+                      a : toggle amend mode (hg rev >= 2.2), only with commit -i
                       c : confirm selected changes
                       r : review/edit and confirm selected changes
                       q : quit without confirming (no changes will be made)
@@ -1434,6 +1438,35 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
             return True
         else:
             return False
+
+    def toggleamend(self, opts, test):
+        """Toggle the amend flag.
+
+        When the amend flag is set, a commit will modify the most recently
+        committed changeset, instead of creating a new changeset.  Otherwise, a
+        new changeset will be created (the normal commit behavior).
+
+        """
+        try:
+            ver = float(util.version()[:3])
+        except ValueError:
+            ver = 1
+        if ver < 2.19:
+            msg = ("The amend option is unavailable with hg versions < 2.2\n\n"
+                   "Press any key to continue.")
+        elif opts.get('amend') is None:
+            opts['amend'] = True
+            msg = ("Amend option is turned on -- commiting the currently "
+                   "selected changes will not create a new changeset, but "
+                   "instead update the most recently committed changeset.\n\n"
+                   "Press any key to continue.")
+        elif opts.get('amend') is True:
+            opts['amend'] = None
+            msg = ("Amend option is turned off -- commiting the currently "
+                   "selected changes will create a new changeset.\n\n"
+                   "Press any key to continue.")
+        if not test:
+            self.confirmationwindow(msg)
 
     def recenterdisplayedarea(self):
         """
@@ -1572,6 +1605,8 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
             self.leftarrowshiftevent()
         elif keypressed in ["q"]:
             raise error.Abort(_('user quit'))
+        elif keypressed in ['a']:
+            self.toggleamend(self.opts, test)
         elif keypressed in ["c"]:
             if self.confirmcommit():
                 return True

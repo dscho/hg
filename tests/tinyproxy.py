@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+from __future__ import absolute_import
+
 __doc__ = """Tiny HTTP Proxy.
 
 This module implements GET, HEAD, POST, PUT and DELETE methods
@@ -12,7 +14,12 @@ Any help will be greatly appreciated.           SUZUKI Hisao
 
 __version__ = "0.2.1"
 
-import BaseHTTPServer, select, socket, SocketServer, urlparse, os
+import BaseHTTPServer
+import os
+import select
+import socket
+import SocketServer
+import urlparse
 
 class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
     __base = BaseHTTPServer.BaseHTTPRequestHandler
@@ -22,7 +29,7 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
     rbufsize = 0                        # self.rfile Be unbuffered
 
     def handle(self):
-        (ip, port) =  self.client_address
+        (ip, port) = self.client_address
         allowed = getattr(self, 'allowed_clients', None)
         if allowed is not None and ip not in allowed:
             self.raw_requestline = self.rfile.readline()

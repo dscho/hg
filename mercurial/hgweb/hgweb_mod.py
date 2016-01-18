@@ -6,15 +6,41 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
+from __future__ import absolute_import
+
 import contextlib
 import os
-from mercurial import ui, hg, hook, error, encoding, templater, util, repoview
-from mercurial.templatefilters import websub
-from common import ErrorResponse, permhooks, caching
-from common import HTTP_OK, HTTP_NOT_MODIFIED, HTTP_BAD_REQUEST
-from common import HTTP_NOT_FOUND, HTTP_SERVER_ERROR
-from request import wsgirequest
-import webcommands, protocol, webutil
+
+from .common import (
+    ErrorResponse,
+    HTTP_BAD_REQUEST,
+    HTTP_NOT_FOUND,
+    HTTP_NOT_MODIFIED,
+    HTTP_OK,
+    HTTP_SERVER_ERROR,
+    caching,
+    permhooks,
+)
+from .request import wsgirequest
+
+from .. import (
+    encoding,
+    error,
+    hg,
+    hook,
+    repoview,
+    templatefilters,
+    templater,
+    ui as uimod,
+    util,
+)
+
+from . import (
+    protocol,
+    webcommands,
+    webutil,
+    wsgicgi,
+)
 
 perms = {
     'changegroup': 'pull',
@@ -158,7 +184,7 @@ class requestcontext(object):
                              or req.url.strip('/') or self.repo.root)
 
         def websubfilter(text):
-            return websub(text, self.websubtable)
+            return templatefilters.websub(text, self.websubtable)
 
         # create the templater
 
@@ -195,7 +221,7 @@ class hgweb(object):
             if baseui:
                 u = baseui.copy()
             else:
-                u = ui.ui()
+                u = uimod.ui()
             r = hg.repository(u, repo)
         else:
             # we trust caller to give us a private copy
@@ -260,7 +286,6 @@ class hgweb(object):
         if not os.environ.get('GATEWAY_INTERFACE', '').startswith("CGI/1."):
             raise RuntimeError("This function is only intended to be "
                                "called while running as a CGI script.")
-        import mercurial.hgweb.wsgicgi as wsgicgi
         wsgicgi.launch(self)
 
     def __call__(self, env, respond):
@@ -304,8 +329,8 @@ class hgweb(object):
                 parts = parts[len(repo_parts):]
             query = '/'.join(parts)
         else:
-            query = req.env['QUERY_STRING'].split('&', 1)[0]
-            query = query.split(';', 1)[0]
+            query = req.env['QUERY_STRING'].partition('&')[0]
+            query = query.partition(';')[0]
 
         # process this if it's a protocol request
         # protocol bits don't need to create any URLs

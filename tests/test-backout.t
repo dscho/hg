@@ -61,7 +61,7 @@ commit option
   $ echo grapes >> a
   $ hg commit -d '2 0' -m grapes
 
-  $ hg backout --commit -d '4 0' 1 --tool=:fail
+  $ hg backout -d '4 0' 1 --tool=:fail
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   changeset 3:1c2161e97c0a backs out changeset 1:22cb4f70d813
   $ hg summary
@@ -75,7 +75,7 @@ commit option
   $ echo ypples > a
   $ hg commit -d '5 0' -m ypples
 
-  $ hg backout --commit -d '6 0' 2 --tool=:fail
+  $ hg backout -d '6 0' 2 --tool=:fail
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges
   [1]
@@ -371,7 +371,7 @@ backout should not back out subsequent changesets
   phases: 3 draft
 
 without --merge
-  $ hg backout -d '3 0' 1 --tool=true
+  $ hg backout --no-commit -d '3 0' 1 --tool=true
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   changeset 22bca4c721e5 backed out, don't forget to commit.
   $ hg locate b
@@ -511,7 +511,7 @@ named branches
   adding file2
 
 without --merge
-  $ hg backout -r 1 --tool=true
+  $ hg backout --no-commit -r 1 --tool=true
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   changeset bf1602f437f3 backed out, don't forget to commit.
   $ hg branch
@@ -686,7 +686,7 @@ Test usage of `hg resolve` in case of conflict
   * version 2 records
   local: b71750c4b0fdf719734971e3ef90dbeab5919a2d
   other: a30dd8addae3ce71b8667868478542bc417439e6
-  file: foo (state "u", hash 0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33)
+  file: foo (record type "F", state "u", hash 0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33)
     local path: foo (flags "")
     ancestor path: foo (node f89532f44c247a0e993d63e3a734dd781ab04708)
     other path: foo (node f50039b486d6fa1a90ae51778388cad161f425ee)
@@ -694,7 +694,7 @@ Test usage of `hg resolve` in case of conflict
   $ hg debugmergestate
   * version 1 records
   local: b71750c4b0fdf719734971e3ef90dbeab5919a2d
-  file: foo (state "u", hash 0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33)
+  file: foo (record type "F", state "u", hash 0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33)
     local path: foo (flags "")
     ancestor path: foo (node f89532f44c247a0e993d63e3a734dd781ab04708)
     other path: foo (node not stored in v1 format)
@@ -709,11 +709,12 @@ Test usage of `hg resolve` in case of conflict
   update: (current)
   phases: 3 draft
   $ hg resolve --all --debug
-  picked tool ':merge' for foo (binary False symlink False)
+  picked tool ':merge' for foo (binary False symlink False changedelete False)
   merging foo
   my foo@b71750c4b0fd+ other foo@a30dd8addae3 ancestor foo@913609522437
    premerge successful
   (no more unresolved files)
+  continue: hg commit
   $ hg status
   M foo
   ? foo.orig

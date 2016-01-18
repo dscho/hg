@@ -362,6 +362,45 @@ hg status -A --change 1 and revset:
 
   $ cd ..
 
+hg status with --rev and reverted changes:
+
+  $ hg init reverted-changes-repo
+  $ cd reverted-changes-repo
+  $ echo a > file
+  $ hg add file
+  $ hg ci -m a
+  $ echo b > file
+  $ hg ci -m b
+
+reverted file should appear clean
+
+  $ hg revert -r 0 .
+  reverting file
+  $ hg status -A --rev 0
+  C file
+
+#if execbit
+reverted file with changed flag should appear modified
+
+  $ chmod +x file
+  $ hg status -A --rev 0
+  M file
+
+  $ hg revert -r 0 .
+  reverting file
+
+reverted and committed file with changed flag should appear modified
+
+  $ hg co -C .
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ chmod +x file
+  $ hg ci -m 'change flag'
+  $ hg status -A --rev 1 --rev 2
+  M file
+  $ hg diff -r 1 -r 2
+
+#endif
+
 hg status of binary file starting with '\1\n', a separator for metadata:
 
   $ hg init repo5

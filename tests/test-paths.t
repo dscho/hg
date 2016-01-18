@@ -3,6 +3,19 @@
   updating to branch default
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ cd a
+
+with no paths:
+
+  $ hg paths
+  $ hg paths unknown
+  not found!
+  [1]
+  $ hg paths -Tjson
+  [
+  ]
+
+with paths:
+
   $ echo '[paths]' >> .hg/hgrc
   $ echo 'dupe = ../b#tip' >> .hg/hgrc
   $ echo 'expand = $SOMETHING/bar' >> .hg/hgrc
@@ -42,6 +55,101 @@
   [1]
   $ hg paths -q unknown
   [1]
+
+formatter output with paths:
+
+  $ echo 'dupe:pushurl = https://example.com/dupe' >> .hg/hgrc
+  $ hg paths -Tjson
+  [
+   {
+    "name": "dupe",
+    "pushurl": "https://example.com/dupe",
+    "url": "$TESTTMP/b#tip"
+   },
+   {
+    "name": "expand",
+    "url": "$TESTTMP/a/$SOMETHING/bar"
+   }
+  ]
+  $ hg paths -Tjson dupe
+  [
+   {
+    "name": "dupe",
+    "pushurl": "https://example.com/dupe",
+    "url": "$TESTTMP/b#tip"
+   }
+  ]
+  $ hg paths -Tjson -q unknown
+  [
+  ]
+  [1]
+
+password should be masked in plain output, but not in machine-readable output:
+
+  $ echo 'insecure = http://foo:insecure@example.com/' >> .hg/hgrc
+  $ hg paths insecure
+  http://foo:***@example.com/
+  $ hg paths -Tjson insecure
+  [
+   {
+    "name": "insecure",
+    "url": "http://foo:insecure@example.com/"
+   }
+  ]
+
+  $ cd ..
+
+sub-options for an undeclared path are ignored
+
+  $ hg init suboptions
+  $ cd suboptions
+
+  $ cat > .hg/hgrc << EOF
+  > [paths]
+  > path0 = https://example.com/path0
+  > path1:pushurl = https://example.com/path1
+  > EOF
+  $ hg paths
+  path0 = https://example.com/path0
+
+unknown sub-options aren't displayed
+
+  $ cat > .hg/hgrc << EOF
+  > [paths]
+  > path0 = https://example.com/path0
+  > path0:foo = https://example.com/path1
+  > EOF
+
+  $ hg paths
+  path0 = https://example.com/path0
+
+:pushurl must be a URL
+
+  $ cat > .hg/hgrc << EOF
+  > [paths]
+  > default = /path/to/nothing
+  > default:pushurl = /not/a/url
+  > EOF
+
+  $ hg paths
+  (paths.default:pushurl not a URL; ignoring)
+  default = /path/to/nothing
+
+#fragment is not allowed in :pushurl
+
+  $ cat > .hg/hgrc << EOF
+  > [paths]
+  > default = https://example.com/repo
+  > invalid = https://example.com/repo
+  > invalid:pushurl = https://example.com/repo#branch
+  > EOF
+
+  $ hg paths
+  ("#fragment" in paths.invalid:pushurl not supported; ignoring)
+  default = https://example.com/repo
+  invalid = https://example.com/repo
+  invalid:pushurl = https://example.com/repo
+
   $ cd ..
 
 'file:' disables [paths] entries for clone destination

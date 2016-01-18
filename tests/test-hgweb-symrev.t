@@ -165,7 +165,8 @@ Set up the repo
   <li><a href="/comparison/xyzzy/foo?style=paper">comparison</a></li>
   <li><a href="/annotate/xyzzy/foo?style=paper">annotate</a></li>
   <li><a href="/raw-file/xyzzy/foo">raw</a></li>
-  <a href="/atom-log/a7c1559b7bba/foo" title="subscribe to atom feed">
+  <a href="/atom-log/tip/foo" title="subscribe to atom feed">
+   log foo @ 1:<a href="/rev/a7c1559b7bba?style=paper">a7c1559b7bba</a>
   <a href="/log/xyzzy/foo?revcount=30&style=paper">less</a>
   <a href="/log/xyzzy/foo?revcount=120&style=paper">more</a>
   | <a href="/log/43c799df6e75/foo?style=paper">(0)</a> <a href="/log/tip/foo?style=paper">tip</a> </div>
@@ -352,7 +353,8 @@ Set up the repo
   <li><a href="/comparison/xyzzy/foo?style=coal">comparison</a></li>
   <li><a href="/annotate/xyzzy/foo?style=coal">annotate</a></li>
   <li><a href="/raw-file/xyzzy/foo">raw</a></li>
-  <a href="/atom-log/a7c1559b7bba/foo" title="subscribe to atom feed">
+  <a href="/atom-log/tip/foo" title="subscribe to atom feed">
+   log foo @ 1:<a href="/rev/a7c1559b7bba?style=coal">a7c1559b7bba</a>
   <a href="/log/xyzzy/foo?revcount=30&style=coal">less</a>
   <a href="/log/xyzzy/foo?revcount=120&style=coal">more</a>
   | <a href="/log/43c799df6e75/foo?style=coal">(0)</a> <a href="/log/tip/foo?style=coal">tip</a> </div>
@@ -816,7 +818,7 @@ Set up the repo
   <a href="/file/43c799df6e75/foo?style=monoblue">file</a> |
   <a href="/diff/43c799df6e75/foo?style=monoblue">diff</a> |
   <a href="/annotate/43c799df6e75/foo?style=monoblue">annotate</a>
-      <a href="/log/43c799df6e75/foo?style=monoblue">(0)</a><a href="/log/tip/foo?style=monoblue">tip</a>
+      <a href="/log/43c799df6e75/foo?style=monoblue">(0)</a> <a href="/log/tip/foo?style=monoblue">tip</a> 
 
   $ "$TESTDIR/get-with-headers.py" 127.0.0.1:$HGPORT 'annotate/xyzzy/foo?style=monoblue' | egrep $REVLINKS
               <li><a href="/graph/xyzzy?style=monoblue">graph</a></li>

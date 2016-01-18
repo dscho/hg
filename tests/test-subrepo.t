@@ -297,11 +297,11 @@ merge tests
    ancestor: 6747d179aa9a, local: 20a0db6fbf6c+, remote: 7af322bc1198
    preserving t for resolve of t
    t: versions differ -> m (premerge)
-  picked tool ':merge' for t (binary False symlink False)
+  picked tool ':merge' for t (binary False symlink False changedelete False)
   merging t
   my t@20a0db6fbf6c+ other t@7af322bc1198 ancestor t@6747d179aa9a
    t: versions differ -> m (merge)
-  picked tool ':merge' for t (binary False symlink False)
+  picked tool ':merge' for t (binary False symlink False changedelete False)
   my t@20a0db6fbf6c+ other t@7af322bc1198 ancestor t@6747d179aa9a
   warning: conflicts while merging t! (edit, then use 'hg resolve --mark')
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
@@ -671,7 +671,7 @@ update
 backout calls revert internally with minimal opts, which should not raise
 KeyError
 
-  $ hg backout ".^"
+  $ hg backout ".^" --no-commit
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   changeset c373c8102e68 backed out, don't forget to commit.
 

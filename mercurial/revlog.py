@@ -11,13 +11,30 @@ This provides efficient delta storage with O(1) retrieve and append
 and O(changes) merge between branches.
 """
 
-# import stuff from node for others to import from revlog
+from __future__ import absolute_import
+
 import collections
+import errno
 import os
-from node import bin, hex, nullid, nullrev
-from i18n import _
-import ancestor, mdiff, parsers, error, util, templatefilters
-import struct, zlib, errno
+import struct
+import zlib
+
+# import stuff from node for others to import from revlog
+from .node import (
+    bin,
+    hex,
+    nullid,
+    nullrev,
+)
+from .i18n import _
+from . import (
+    ancestor,
+    error,
+    mdiff,
+    parsers,
+    templatefilters,
+    util,
+)
 
 _pack = struct.pack
 _unpack = struct.unpack
@@ -93,7 +110,7 @@ def decompress(bin):
         except zlib.error as e:
             raise RevlogError(_("revlog decompress error: %s") % str(e))
     if t == 'u':
-        return bin[1:]
+        return util.buffer(bin, 1)
     raise RevlogError(_("unknown compression type %r") % t)
 
 # index v0:
@@ -113,7 +130,7 @@ class revlogoldio(object):
     def parseindex(self, data, inline):
         s = self.size
         index = []
-        nodemap =  {nullid: nullrev}
+        nodemap = {nullid: nullrev}
         n = off = 0
         l = len(data)
         while off + s <= l:
@@ -206,14 +223,21 @@ class revlog(object):
         self.indexfile = indexfile
         self.datafile = indexfile[:-2] + ".d"
         self.opener = opener
+        # 3-tuple of (node, rev, text) for a raw revision.
         self._cache = None
+        # 2-tuple of (rev, baserev) defining the base revision the delta chain
+        # begins at for a revision.
         self._basecache = None
+        # 2-tuple of (offset, data) of raw data from the revlog at an offset.
         self._chunkcache = (0, '')
+        # How much data to read and cache into the raw revlog data cache.
         self._chunkcachesize = 65536
         self._maxchainlen = None
         self._aggressivemergedeltas = False
         self.index = []
+        # Mapping of partial identifiers to full nodes.
         self._pcache = {}
+        # Mapping of revision integer to full node.
         self._nodecache = {nullid: nullrev}
         self._nodepos = None
 
@@ -231,6 +255,7 @@ class revlog(object):
                 self._maxchainlen = opts['maxchainlen']
             if 'aggressivemergedeltas' in opts:
                 self._aggressivemergedeltas = opts['aggressivemergedeltas']
+            self._lazydeltabase = bool(opts.get('lazydeltabase', False))
 
         if self._chunkcachesize <= 0:
             raise RevlogError(_('revlog chunk cache size %r is not greater '
@@ -314,6 +339,11 @@ class revlog(object):
             return False
 
     def clearcaches(self):
+        self._cache = None
+        self._basecache = None
+        self._chunkcache = (0, '')
+        self._pcache = {}
+
         try:
             self._nodecache.clearcaches()
         except AttributeError:
@@ -399,6 +429,41 @@ class revlog(object):
         r = (clen, compresseddeltalen)
         chaininfocache[rev] = r
         return r
+
+    def _deltachain(self, rev, stoprev=None):
+        """Obtain the delta chain for a revision.
+
+        ``stoprev`` specifies a revision to stop at. If not specified, we
+        stop at the base of the chain.
+
+        Returns a 2-tuple of (chain, stopped) where ``chain`` is a list of
+        revs in ascending order and ``stopped`` is a bool indicating whether
+        ``stoprev`` was hit.
+        """
+        chain = []
+
+        # Alias to prevent attribute lookup in tight loop.
+        index = self.index
+        generaldelta = self._generaldelta
+
+        iterrev = rev
+        e = index[iterrev]
+        while iterrev != e[3] and iterrev != stoprev:
+            chain.append(iterrev)
+            if generaldelta:
+                iterrev = e[3]
+            else:
+                iterrev -= 1
+            e = index[iterrev]
+
+        if iterrev == stoprev:
+            stopped = True
+        else:
+            chain.append(iterrev)
+            stopped = False
+
+        chain.reverse()
+        return chain, stopped
 
     def flags(self, rev):
         return self.index[rev][0] & 0xFFFF
@@ -926,6 +991,10 @@ class revlog(object):
         return hash(text, p1, p2) != node
 
     def _addchunk(self, offset, data):
+        """Add a segment to the revlog cache.
+
+        Accepts an absolute offset and the data that is at that location.
+        """
         o, d = self._chunkcache
         # try to add to existing cache
         if o + len(d) == offset and len(d) + len(data) < _chunksize:
@@ -934,13 +1003,15 @@ class revlog(object):
             self._chunkcache = offset, data
 
     def _loadchunk(self, offset, length, df=None):
-        """Load a chunk/segment from the revlog.
+        """Load a segment of raw data from the revlog.
 
-        Accepts absolute offset, length to read, and an optional existing
+        Accepts an absolute offset, length to read, and an optional existing
         file handle to read from.
 
         If an existing file handle is passed, it will be seeked and the
         original seek position will NOT be restored.
+
+        Returns a str or buffer of raw byte data.
         """
         if df is not None:
             closehandle = False
@@ -968,6 +1039,16 @@ class revlog(object):
         return d
 
     def _getchunk(self, offset, length, df=None):
+        """Obtain a segment of raw data from the revlog.
+
+        Accepts an absolute offset, length of bytes to obtain, and an
+        optional file handle to the already-opened revlog. If the file
+        handle is used, it's original seek position will not be preserved.
+
+        Requests for data may be returned from a cache.
+
+        Returns a str or a buffer instance of raw byte data.
+        """
         o, d = self._chunkcache
         l = len(d)
 
@@ -982,21 +1063,54 @@ class revlog(object):
         return self._loadchunk(offset, length, df=df)
 
     def _chunkraw(self, startrev, endrev, df=None):
+        """Obtain a segment of raw data corresponding to a range of revisions.
+
+        Accepts the start and end revisions and an optional already-open
+        file handle to be used for reading. If the file handle is read, its
+        seek position will not be preserved.
+
+        Requests for data may be satisfied by a cache.
+
+        Returns a 2-tuple of (offset, data) for the requested range of
+        revisions. Offset is the integer offset from the beginning of the
+        revlog and data is a str or buffer of the raw byte data.
+
+        Callers will need to call ``self.start(rev)`` and ``self.length(rev)``
+        to determine where each revision's data begins and ends.
+        """
         start = self.start(startrev)
         end = self.end(endrev)
         if self._inline:
             start += (startrev + 1) * self._io.size
             end += (endrev + 1) * self._io.size
         length = end - start
-        return self._getchunk(start, length, df=df)
+
+        return start, self._getchunk(start, length, df=df)
 
     def _chunk(self, rev, df=None):
-        return decompress(self._chunkraw(rev, rev, df=df))
+        """Obtain a single decompressed chunk for a revision.
+
+        Accepts an integer revision and an optional already-open file handle
+        to be used for reading. If used, the seek position of the file will not
+        be preserved.
+
+        Returns a str holding uncompressed data for the requested revision.
+        """
+        return decompress(self._chunkraw(rev, rev, df=df)[1])
 
     def _chunks(self, revs, df=None):
-        '''faster version of [self._chunk(rev) for rev in revs]
+        """Obtain decompressed chunks for the specified revisions.
 
-        Assumes that revs is in ascending order.'''
+        Accepts an iterable of numeric revisions that are assumed to be in
+        ascending order. Also accepts an optional already-open file handle
+        to be used for reading. If used, the seek position of the file will
+        not be preserved.
+
+        This function is similar to calling ``self._chunk()`` multiple times,
+        but is faster.
+
+        Returns a list with decompressed data for each requested revision.
+        """
         if not revs:
             return []
         start = self.start
@@ -1008,15 +1122,8 @@ class revlog(object):
         l = []
         ladd = l.append
 
-        # preload the cache
         try:
-            while True:
-                # ensure that the cache doesn't change out from under us
-                _cache = self._chunkcache
-                self._chunkraw(revs[0], revs[-1], df=df)
-                if _cache == self._chunkcache:
-                    break
-            offset, data = _cache
+            offset, data = self._chunkraw(revs[0], revs[-1], df=df)
         except OverflowError:
             # issue4215 - we can't cache a run of chunks greater than
             # 2G on Windows
@@ -1032,6 +1139,7 @@ class revlog(object):
         return l
 
     def _chunkclear(self):
+        """Clear the raw chunk cache."""
         self._chunkcache = (0, '')
 
     def deltaparent(self, rev):
@@ -1084,26 +1192,9 @@ class revlog(object):
             raise RevlogError(_('incompatible revision flag %x') %
                               (self.flags(rev) & ~REVIDX_KNOWN_FLAGS))
 
-        # build delta chain
-        chain = []
-        index = self.index # for performance
-        generaldelta = self._generaldelta
-        iterrev = rev
-        e = index[iterrev]
-        while iterrev != e[3] and iterrev != cachedrev:
-            chain.append(iterrev)
-            if generaldelta:
-                iterrev = e[3]
-            else:
-                iterrev -= 1
-            e = index[iterrev]
-
-        if iterrev == cachedrev:
-            # cache hit
+        chain, stopped = self._deltachain(rev, stoprev=cachedrev)
+        if stopped:
             text = self._cache[2]
-        else:
-            chain.append(iterrev)
-        chain.reverse()
 
         # drop cache to save memory
         self._cache = None
@@ -1173,7 +1264,7 @@ class revlog(object):
         df = self.opener(self.datafile, 'w')
         try:
             for r in self:
-                df.write(self._chunkraw(r, r))
+                df.write(self._chunkraw(r, r)[1])
         finally:
             df.close()
 
@@ -1353,9 +1444,8 @@ class revlog(object):
         curr = len(self)
         prev = curr - 1
         base = chainbase = curr
-        chainlen = None
         offset = self.end(prev)
-        d = None
+        delta = None
         if self._basecache is None:
             self._basecache = (prev, self.chainbase(prev))
         basecache = self._basecache
@@ -1371,40 +1461,39 @@ class revlog(object):
 
         # should we try to build a delta?
         if prev != nullrev:
-            if self._generaldelta:
-                if p2r != nullrev and self._aggressivemergedeltas:
-                    d = builddelta(p1r)
-                    d2 = builddelta(p2r)
-                    p1good = self._isgooddelta(d, textlen)
-                    p2good = self._isgooddelta(d2, textlen)
-                    if p1good and p2good:
-                        # If both are good deltas, choose the smallest
-                        if d2[1] < d[1]:
-                            d = d2
-                    elif p2good:
-                        # If only p2 is good, use it
-                        d = d2
-                    elif p1good:
-                        pass
-                    else:
-                        # Neither is good, try against prev to hopefully save us
-                        # a fulltext.
-                        d = builddelta(prev)
-                else:
+            tested = set()
+            if cachedelta and self._generaldelta and self._lazydeltabase:
+                # Assume what we received from the server is a good choice
+                # build delta will reuse the cache
+                candidatedelta = builddelta(cachedelta[0])
+                tested.add(cachedelta[0])
+                if self._isgooddelta(candidatedelta, textlen):
+                    delta = candidatedelta
+            if delta is None and self._generaldelta:
+                # exclude already lazy tested base if any
+                parents = [p for p in (p1r, p2r)
+                           if p != nullrev and p not in tested]
+                if parents and not self._aggressivemergedeltas:
                     # Pick whichever parent is closer to us (to minimize the
-                    # chance of having to build a fulltext). Since
-                    # nullrev == -1, any non-merge commit will always pick p1r.
-                    drev = p2r if p2r > p1r else p1r
-                    d = builddelta(drev)
-                    # If the chosen delta will result in us making a full text,
-                    # give it one last try against prev.
-                    if drev != prev and not self._isgooddelta(d, textlen):
-                        d = builddelta(prev)
-            else:
-                d = builddelta(prev)
-            dist, l, data, base, chainbase, chainlen, compresseddeltalen = d
-
-        if not self._isgooddelta(d, textlen):
+                    # chance of having to build a fulltext).
+                    parents = [max(parents)]
+                tested.update(parents)
+                pdeltas = []
+                for p in parents:
+                    pd = builddelta(p)
+                    if self._isgooddelta(pd, textlen):
+                        pdeltas.append(pd)
+                if pdeltas:
+                    delta = min(pdeltas, key=lambda x: x[1])
+            if delta is None and prev not in tested:
+                # other approach failed try against prev to hopefully save us a
+                # fulltext.
+                candidatedelta = builddelta(prev)
+                if self._isgooddelta(candidatedelta, textlen):
+                    delta = candidatedelta
+        if delta is not None:
+            dist, l, data, base, chainbase, chainlen, compresseddeltalen = delta
+        else:
             text = buildtext()
             data = self.compress(text)
             l = len(data[1]) + len(data[0])
@@ -1503,6 +1592,7 @@ class revlog(object):
                 cs = chunkdata['cs']
                 deltabase = chunkdata['deltabase']
                 delta = chunkdata['delta']
+                flags = chunkdata['flags'] or REVIDX_DEFAULT_FLAGS
 
                 content.append(node)
 
@@ -1533,8 +1623,7 @@ class revlog(object):
                         raise error.CensoredBaseError(self.indexfile,
                                                       self.node(baserev))
 
-                flags = REVIDX_DEFAULT_FLAGS
-                if self._peek_iscensored(baserev, delta, flush):
+                if not flags and self._peek_iscensored(baserev, delta, flush):
                     flags |= REVIDX_ISCENSORED
 
                 # We assume consumers of addrevisioncb will want to retrieve

@@ -74,7 +74,8 @@ def _collectbrokencsets(repo, files, striprev):
     return s
 
 def strip(ui, repo, nodelist, backup=True, topic='backup'):
-
+    # This function operates within a transaction of its own, but does
+    # not take any lock on the repo.
     # Simple way to maintain backwards compatibility for this
     # argument.
     if backup in ['none', 'strip']:
@@ -159,26 +160,22 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
         msg = _('programming error: cannot strip from inside a transaction')
         raise error.Abort(msg, hint=_('contact your extension maintainer'))
 
-    tr = repo.transaction("strip")
-    offset = len(tr.entries)
-
     try:
-        tr.startgroup()
-        cl.strip(striprev, tr)
-        mfst.strip(striprev, tr)
-        for fn in files:
-            repo.file(fn).strip(striprev, tr)
-        tr.endgroup()
+        with repo.transaction("strip") as tr:
+            offset = len(tr.entries)
 
-        try:
+            tr.startgroup()
+            cl.strip(striprev, tr)
+            mfst.strip(striprev, tr)
+            for fn in files:
+                repo.file(fn).strip(striprev, tr)
+            tr.endgroup()
+
             for i in xrange(offset, len(tr.entries)):
                 file, troffset, ignore = tr.entries[i]
                 repo.svfs(file, 'a').truncate(troffset)
                 if troffset == 0:
                     repo.store.markremoved(file)
-            tr.close()
-        finally:
-            tr.release()
 
         if saveheads or savebases:
             ui.note(_("adding branch\n"))
@@ -188,20 +185,28 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
                 # silence internal shuffling chatter
                 repo.ui.pushbuffer()
             if isinstance(gen, bundle2.unbundle20):
-                tr = repo.transaction('strip')
-                tr.hookargs = {'source': 'strip',
-                               'url': 'bundle:' + vfs.join(chgrpfile)}
-                try:
+                with repo.transaction('strip') as tr:
+                    tr.hookargs = {'source': 'strip',
+                                   'url': 'bundle:' + vfs.join(chgrpfile)}
                     bundle2.applybundle(repo, gen, tr, source='strip',
                                         url='bundle:' + vfs.join(chgrpfile))
-                    tr.close()
-                finally:
-                    tr.release()
             else:
                 gen.apply(repo, 'strip', 'bundle:' + vfs.join(chgrpfile), True)
             if not repo.ui.verbose:
                 repo.ui.popbuffer()
             f.close()
+
+        for m in updatebm:
+            bm[m] = repo[newbmtarget].node()
+        lock = tr = None
+        try:
+            lock = repo.lock()
+            tr = repo.transaction('repair')
+            bm.recordchange(tr)
+            tr.close()
+        finally:
+            tr.release()
+            lock.release()
 
         # remove undo files
         for undovfs, undofile in repo.undofiles():
@@ -212,9 +217,6 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
                     ui.warn(_('error removing %s: %s\n') %
                             (undovfs.join(undofile), str(e)))
 
-        for m in updatebm:
-            bm[m] = repo[newbmtarget].node()
-        bm.write()
     except: # re-raises
         if backupfile:
             ui.warn(_("strip failed, full bundle stored in '%s'\n")
@@ -242,8 +244,7 @@ def rebuildfncache(ui, repo):
                   'support fncache)\n'))
         return
 
-    lock = repo.lock()
-    try:
+    with repo.lock():
         fnc = repo.store.fncache
         # Trigger load of fncache.
         if 'irrelevant' in fnc:
@@ -287,16 +288,10 @@ def rebuildfncache(ui, repo):
             fnc.entries = newentries
             fnc._dirty = True
 
-            tr = repo.transaction('fncache')
-            try:
+            with repo.transaction('fncache') as tr:
                 fnc.write(tr)
-                tr.close()
-            finally:
-                tr.release()
         else:
             ui.write(_('fncache already up to date\n'))
-    finally:
-        lock.release()
 
 def stripbmrevset(repo, mark):
     """

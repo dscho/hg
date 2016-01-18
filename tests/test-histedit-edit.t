@@ -57,6 +57,13 @@ log before edit
      date:        Thu Jan 01 00:00:00 1970 +0000
      summary:     a
   
+dirty a file
+  $ echo a > g
+  $ hg histedit 177f92b77385 --commands - 2>&1 << EOF
+  > EOF
+  abort: uncommitted changes
+  [255]
+  $ echo g > g
 
 edit the history
   $ hg histedit 177f92b77385 --commands - 2>&1 << EOF| fixbundle
@@ -67,8 +74,8 @@ edit the history
   > pick 3c6a8ed2ebe8 g
   > EOF
   0 files updated, 0 files merged, 3 files removed, 0 files unresolved
-  Make changes as needed, you may commit or record as needed now.
-  When you are finished, run hg histedit --continue to resume.
+  Editing (e860deea161a), you may commit or record as needed now.
+  (hg histedit --continue to resume)
 
 edit the plan via the editor
   $ cat >> $TESTTMP/editplan.sh <<EOF
@@ -141,8 +148,6 @@ qnew should fail while we're in the middle of the edit step
   (use 'hg histedit --continue' or 'hg histedit --abort')
   [255]
   $ HGEDITOR='echo foobaz > ' hg histedit --continue 2>&1 | fixbundle
-  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
   $ hg log --graph
   @  changeset:   6:b5f70786f9b0
@@ -193,8 +198,8 @@ Stripping necessary commits should not break --abort
   > pick b5f70786f9b0 g
   > EOF
   0 files updated, 0 files merged, 2 files removed, 0 files unresolved
-  Make changes as needed, you may commit or record as needed now.
-  When you are finished, run hg histedit --continue to resume.
+  Editing (1a60820cd1f6), you may commit or record as needed now.
+  (hg histedit --continue to resume)
 
   $ mv .hg/histedit-state .hg/histedit-state.bak
   $ hg strip -q -r b5f70786f9b0
@@ -235,8 +240,8 @@ check histedit_source
   > edit b5f70786f9b0 f
   > EOF
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
-  Make changes as needed, you may commit or record as needed now.
-  When you are finished, run hg histedit --continue to resume.
+  Editing (b5f70786f9b0), you may commit or record as needed now.
+  (hg histedit --continue to resume)
   $ hg status
   A f
 
@@ -262,7 +267,6 @@ check histedit_source
   HG: user: test
   HG: branch 'default'
   HG: added f
-  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   saved backup bundle to $TESTTMP/r/.hg/strip-backup/b5f70786f9b0-c28d9c86-backup.hg (glob)
 
   $ hg status
@@ -283,7 +287,6 @@ say we'll change the message, but don't.
   > EOF
   $ HGEDITOR="sh ../edit.sh" hg histedit tip 2>&1 | fixbundle
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
-  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg status
   $ hg log --limit 1
   changeset:   6:1fd3b2fe7754
@@ -364,9 +367,9 @@ check saving last-message.txt, at first
   HG: branch 'default'
   HG: added f
   ====
+  note: commit message saved in .hg/last-message.txt
   transaction abort!
   rollback completed
-  note: commit message saved in .hg/last-message.txt
   abort: pretxncommit.unexpectedabort hook exited with status 1
   [255]
   $ cat .hg/last-message.txt
@@ -388,9 +391,9 @@ action)
   HG: user: test
   HG: branch 'default'
   HG: added f
+  note: commit message saved in .hg/last-message.txt
   transaction abort!
   rollback completed
-  note: commit message saved in .hg/last-message.txt
   abort: pretxncommit.unexpectedabort hook exited with status 1
   [255]
 
@@ -406,7 +409,6 @@ then, check "modify the message" itself
   > mess 1fd3b2fe7754 f
   > EOF
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
-  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg status
   $ hg log --limit 1
   changeset:   6:62feedb1200e
@@ -430,11 +432,10 @@ rollback should not work after a histedit
   > EOF
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   adding a
-  Make changes as needed, you may commit or record as needed now.
-  When you are finished, run hg histedit --continue to resume.
+  Editing (cb9a9f314b8b), you may commit or record as needed now.
+  (hg histedit --continue to resume)
   [1]
   $ HGEDITOR=true hg histedit --continue
-  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   saved backup bundle to $TESTTMP/r0/.hg/strip-backup/cb9a9f314b8b-cc5ccb0b-backup.hg (glob)
 
   $ hg log -G
@@ -457,11 +458,22 @@ Attempting to fold a change into a public change should not work:
   > mv tmp "\$1"
   > EOF
   $ HGEDITOR="sh ../edit.sh" hg histedit 2
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  reverting a
-  1 files updated, 0 files merged, 1 files removed, 0 files unresolved
-  abort: cannot fold into public change 18aa70c8ad22
+  warning: histedit rules saved to: .hg/histedit-last-edit.txt
+  hg: parse error: cannot fold into public change 18aa70c8ad22
   [255]
-TODO: this abort shouldn't be required, but it is for now to leave the repo in
-a clean state.
-  $ hg histedit --abort
+  $ cat .hg/histedit-last-edit.txt
+  fold 0012be4a27ea 2 extend a
+  
+  # Edit history between 0012be4a27ea and 0012be4a27ea
+  #
+  # Commits are listed from least to most recent
+  #
+  # Commands:
+  #
+  #  e, edit = use commit, but stop for amending
+  #  m, mess = edit commit message without changing commit content
+  #  p, fold = use commit
+  #  d, drop = remove commit from history
+  #  f, fold = use commit, but combine it with the one above
+  #  r, roll = like fold, but discard this commit's description
+  #

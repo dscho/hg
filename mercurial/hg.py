@@ -52,7 +52,7 @@ def addbranchrevs(lrepo, other, branches, revs):
     if not hashbranch and not branches:
         x = revs or None
         if util.safehasattr(revs, 'first'):
-            y =  revs.first()
+            y = revs.first()
         elif revs:
             y = revs[0]
         else:
@@ -235,13 +235,7 @@ def share(ui, source, dest=None, update=True, bookmarks=True):
     destvfs.write('sharedpath', sharedpath)
 
     r = repository(ui, destwvfs.base)
-
-    default = srcrepo.ui.config('paths', 'default')
-    if default:
-        fp = r.vfs("hgrc", "w", text=True)
-        fp.write("[paths]\n")
-        fp.write("default = %s\n" % default)
-        fp.close()
+    postshare(srcrepo, r, bookmarks=bookmarks)
 
     if update:
         r.ui.status(_("updating working directory\n"))
@@ -257,8 +251,24 @@ def share(ui, source, dest=None, update=True, bookmarks=True):
                 continue
         _update(r, uprev)
 
+def postshare(sourcerepo, destrepo, bookmarks=True):
+    """Called after a new shared repo is created.
+
+    The new repo only has a requirements file and pointer to the source.
+    This function configures additional shared data.
+
+    Extensions can wrap this function and write additional entries to
+    destrepo/.hg/shared to indicate additional pieces of data to be shared.
+    """
+    default = sourcerepo.ui.config('paths', 'default')
+    if default:
+        fp = destrepo.vfs("hgrc", "w", text=True)
+        fp.write("[paths]\n")
+        fp.write("default = %s\n" % default)
+        fp.close()
+
     if bookmarks:
-        fp = r.vfs('shared', 'w')
+        fp = destrepo.vfs('shared', 'w')
         fp.write('bookmarks\n')
         fp.close()
 
@@ -546,13 +556,22 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
                                        "support clone by revision"))
                 revs = [srcpeer.lookup(r) for r in rev]
                 checkout = revs[0]
-            if destpeer.local():
+            local = destpeer.local()
+            if local:
                 if not stream:
                     if pull:
                         stream = False
                     else:
                         stream = None
-                destpeer.local().clone(srcpeer, heads=revs, stream=stream)
+                # internal config: ui.quietbookmarkmove
+                quiet = local.ui.backupconfig('ui', 'quietbookmarkmove')
+                try:
+                    local.ui.setconfig(
+                        'ui', 'quietbookmarkmove', True, 'clone')
+                    exchange.pull(local, srcpeer, revs,
+                                  streamclonerequested=stream)
+                finally:
+                    local.ui.restoreconfig(quiet)
             elif srcrepo:
                 exchange.push(srcrepo, destpeer, revs=revs,
                               bookmarks=srcrepo._bookmarks.keys())
@@ -618,7 +637,9 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
             srcpeer.close()
     return srcpeer, destpeer
 
-def _showstats(repo, stats):
+def _showstats(repo, stats, quietempty=False):
+    if quietempty and not any(stats):
+        return
     repo.ui.status(_("%d files updated, %d files merged, "
                      "%d files removed, %d files unresolved\n") % stats)
 
@@ -628,13 +649,13 @@ def updaterepo(repo, node, overwrite):
     When overwrite is set, changes are clobbered, merged else
 
     returns stats (see pydoc mercurial.merge.applyupdates)"""
-    return mergemod.update(repo, node, False, overwrite, None,
+    return mergemod.update(repo, node, False, overwrite,
                            labels=['working copy', 'destination'])
 
-def update(repo, node):
+def update(repo, node, quietempty=False):
     """update the working directory to node, merging linear changes"""
     stats = updaterepo(repo, node, False)
-    _showstats(repo, stats)
+    _showstats(repo, stats, quietempty)
     if stats[3]:
         repo.ui.status(_("use 'hg resolve' to retry unresolved file merges\n"))
     return stats[3] > 0
@@ -642,18 +663,18 @@ def update(repo, node):
 # naming conflict in clone()
 _update = update
 
-def clean(repo, node, show_stats=True):
+def clean(repo, node, show_stats=True, quietempty=False):
     """forcibly switch the working directory to node, clobbering changes"""
     stats = updaterepo(repo, node, True)
     util.unlinkpath(repo.join('graftstate'), ignoremissing=True)
     if show_stats:
-        _showstats(repo, stats)
+        _showstats(repo, stats, quietempty)
     return stats[3] > 0
 
 def merge(repo, node, force=None, remind=True):
     """Branch merge with node, resolving changes. Return true if any
     unresolved conflicts."""
-    stats = mergemod.update(repo, node, True, force, False)
+    stats = mergemod.update(repo, node, True, force)
     _showstats(repo, stats)
     if stats[3]:
         repo.ui.status(_("use 'hg resolve' to retry unresolved file merges "

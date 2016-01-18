@@ -13,22 +13,47 @@ This contains helper routines that are independent of the SCM core and
 hide platform-specific details from the core.
 """
 
-import i18n
-_ = i18n._
-import error, osutil, encoding, parsers
-import errno, shutil, sys, tempfile, traceback
-import re as remod
-import os, time, datetime, calendar, textwrap, signal, collections
-import stat
-import imp, socket, urllib
-import gc
+from __future__ import absolute_import
+
 import bz2
+import calendar
+import collections
+import datetime
+import errno
+import gc
+import hashlib
+import imp
+import os
+import re as remod
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import textwrap
+import time
+import traceback
+import urllib
 import zlib
 
+from . import (
+    encoding,
+    error,
+    i18n,
+    osutil,
+    parsers,
+)
+
 if os.name == 'nt':
-    import windows as platform
+    from . import windows as platform
 else:
-    import posix as platform
+    from . import posix as platform
+
+md5 = hashlib.md5
+sha1 = hashlib.sha1
+sha512 = hashlib.sha512
+_ = i18n._
 
 cachestat = platform.cachestat
 checkexec = platform.checkexec
@@ -88,58 +113,21 @@ username = platform.username
 
 _notset = object()
 
+# disable Python's problematic floating point timestamps (issue4836)
+# (Python hypocritically says you shouldn't change this behavior in
+# libraries, and sure enough Mercurial is not a library.)
+os.stat_float_times(False)
+
 def safehasattr(thing, attr):
     return getattr(thing, attr, _notset) is not _notset
-
-def sha1(s=''):
-    '''
-    Low-overhead wrapper around Python's SHA support
-
-    >>> f = _fastsha1
-    >>> a = sha1()
-    >>> a = f()
-    >>> a.hexdigest()
-    'da39a3ee5e6b4b0d3255bfef95601890afd80709'
-    '''
-
-    return _fastsha1(s)
-
-def _fastsha1(s=''):
-    # This function will import sha1 from hashlib or sha (whichever is
-    # available) and overwrite itself with it on the first call.
-    # Subsequent calls will go directly to the imported function.
-    if sys.version_info >= (2, 5):
-        from hashlib import sha1 as _sha1
-    else:
-        from sha import sha as _sha1
-    global _fastsha1, sha1
-    _fastsha1 = sha1 = _sha1
-    return _sha1(s)
-
-def md5(s=''):
-    try:
-        from hashlib import md5 as _md5
-    except ImportError:
-        from md5 import md5 as _md5
-    global md5
-    md5 = _md5
-    return _md5(s)
 
 DIGESTS = {
     'md5': md5,
     'sha1': sha1,
+    'sha512': sha512,
 }
 # List of digest types from strongest to weakest
-DIGESTS_BY_STRENGTH = ['sha1', 'md5']
-
-try:
-    import hashlib
-    DIGESTS.update({
-        'sha512': hashlib.sha512,
-    })
-    DIGESTS_BY_STRENGTH.insert(0, 'sha512')
-except ImportError:
-    pass
+DIGESTS_BY_STRENGTH = ['sha512', 'sha1', 'md5']
 
 for k in DIGESTS_BY_STRENGTH:
     assert k in DIGESTS
@@ -233,7 +221,6 @@ except NameError:
         def buffer(sliceable, offset=0):
             return memoryview(sliceable)[offset:]
 
-import subprocess
 closefds = os.name == 'posix'
 
 _chunksize = 4096
@@ -359,10 +346,63 @@ def popen4(cmd, env=None, newlines=False, bufsize=-1):
 def version():
     """Return version information if available."""
     try:
-        import __version__
+        from . import __version__
         return __version__.version
     except ImportError:
         return 'unknown'
+
+def versiontuple(v=None, n=4):
+    """Parses a Mercurial version string into an N-tuple.
+
+    The version string to be parsed is specified with the ``v`` argument.
+    If it isn't defined, the current Mercurial version string will be parsed.
+
+    ``n`` can be 2, 3, or 4. Here is how some version strings map to
+    returned values:
+
+    >>> v = '3.6.1+190-df9b73d2d444'
+    >>> versiontuple(v, 2)
+    (3, 6)
+    >>> versiontuple(v, 3)
+    (3, 6, 1)
+    >>> versiontuple(v, 4)
+    (3, 6, 1, '190-df9b73d2d444')
+
+    >>> versiontuple('3.6.1+190-df9b73d2d444+20151118')
+    (3, 6, 1, '190-df9b73d2d444+20151118')
+
+    >>> v = '3.6'
+    >>> versiontuple(v, 2)
+    (3, 6)
+    >>> versiontuple(v, 3)
+    (3, 6, None)
+    >>> versiontuple(v, 4)
+    (3, 6, None, None)
+    """
+    if not v:
+        v = version()
+    parts = v.split('+', 1)
+    if len(parts) == 1:
+        vparts, extra = parts[0], None
+    else:
+        vparts, extra = parts
+
+    vints = []
+    for i in vparts.split('.'):
+        try:
+            vints.append(int(i))
+        except ValueError:
+            break
+    # (3, 6) -> (3, 6, None)
+    while len(vints) < 3:
+        vints.append(None)
+
+    if n == 2:
+        return (vints[0], vints[1])
+    if n == 3:
+        return (vints[0], vints[1], vints[2])
+    if n == 4:
+        return (vints[0], vints[1], vints[2], extra)
 
 # used by parsedate
 defaultdateformats = (
@@ -470,34 +510,183 @@ class sortdict(dict):
         self._list.insert(index, key)
         dict.__setitem__(self, key, val)
 
+class _lrucachenode(object):
+    """A node in a doubly linked list.
+
+    Holds a reference to nodes on either side as well as a key-value
+    pair for the dictionary entry.
+    """
+    __slots__ = ('next', 'prev', 'key', 'value')
+
+    def __init__(self):
+        self.next = None
+        self.prev = None
+
+        self.key = _notset
+        self.value = None
+
+    def markempty(self):
+        """Mark the node as emptied."""
+        self.key = _notset
+
 class lrucachedict(object):
-    '''cache most recent gets from or sets to this dictionary'''
-    def __init__(self, maxsize):
+    """Dict that caches most recent accesses and sets.
+
+    The dict consists of an actual backing dict - indexed by original
+    key - and a doubly linked circular list defining the order of entries in
+    the cache.
+
+    The head node is the newest entry in the cache. If the cache is full,
+    we recycle head.prev and make it the new head. Cache accesses result in
+    the node being moved to before the existing head and being marked as the
+    new head node.
+    """
+    def __init__(self, max):
         self._cache = {}
-        self._maxsize = maxsize
-        self._order = collections.deque()
 
-    def __getitem__(self, key):
-        value = self._cache[key]
-        self._order.remove(key)
-        self._order.append(key)
-        return value
+        self._head = head = _lrucachenode()
+        head.prev = head
+        head.next = head
+        self._size = 1
+        self._capacity = max
 
-    def __setitem__(self, key, value):
-        if key not in self._cache:
-            if len(self._cache) >= self._maxsize:
-                del self._cache[self._order.popleft()]
+    def __len__(self):
+        return len(self._cache)
+
+    def __contains__(self, k):
+        return k in self._cache
+
+    def __iter__(self):
+        # We don't have to iterate in cache order, but why not.
+        n = self._head
+        for i in range(len(self._cache)):
+            yield n.key
+            n = n.next
+
+    def __getitem__(self, k):
+        node = self._cache[k]
+        self._movetohead(node)
+        return node.value
+
+    def __setitem__(self, k, v):
+        node = self._cache.get(k)
+        # Replace existing value and mark as newest.
+        if node is not None:
+            node.value = v
+            self._movetohead(node)
+            return
+
+        if self._size < self._capacity:
+            node = self._addcapacity()
         else:
-            self._order.remove(key)
-        self._cache[key] = value
-        self._order.append(key)
+            # Grab the last/oldest item.
+            node = self._head.prev
 
-    def __contains__(self, key):
-        return key in self._cache
+        # At capacity. Kill the old entry.
+        if node.key is not _notset:
+            del self._cache[node.key]
+
+        node.key = k
+        node.value = v
+        self._cache[k] = node
+        # And mark it as newest entry. No need to adjust order since it
+        # is already self._head.prev.
+        self._head = node
+
+    def __delitem__(self, k):
+        node = self._cache.pop(k)
+        node.markempty()
+
+        # Temporarily mark as newest item before re-adjusting head to make
+        # this node the oldest item.
+        self._movetohead(node)
+        self._head = node.next
+
+    # Additional dict methods.
+
+    def get(self, k, default=None):
+        try:
+            return self._cache[k]
+        except KeyError:
+            return default
 
     def clear(self):
+        n = self._head
+        while n.key is not _notset:
+            n.markempty()
+            n = n.next
+
         self._cache.clear()
-        self._order = collections.deque()
+
+    def copy(self):
+        result = lrucachedict(self._capacity)
+        n = self._head.prev
+        # Iterate in oldest-to-newest order, so the copy has the right ordering
+        for i in range(len(self._cache)):
+            result[n.key] = n.value
+            n = n.prev
+        return result
+
+    def _movetohead(self, node):
+        """Mark a node as the newest, making it the new head.
+
+        When a node is accessed, it becomes the freshest entry in the LRU
+        list, which is denoted by self._head.
+
+        Visually, let's make ``N`` the new head node (* denotes head):
+
+            previous/oldest <-> head <-> next/next newest
+
+            ----<->--- A* ---<->-----
+            |                       |
+            E <-> D <-> N <-> C <-> B
+
+        To:
+
+            ----<->--- N* ---<->-----
+            |                       |
+            E <-> D <-> C <-> B <-> A
+
+        This requires the following moves:
+
+           C.next = D  (node.prev.next = node.next)
+           D.prev = C  (node.next.prev = node.prev)
+           E.next = N  (head.prev.next = node)
+           N.prev = E  (node.prev = head.prev)
+           N.next = A  (node.next = head)
+           A.prev = N  (head.prev = node)
+        """
+        head = self._head
+        # C.next = D
+        node.prev.next = node.next
+        # D.prev = C
+        node.next.prev = node.prev
+        # N.prev = E
+        node.prev = head.prev
+        # N.next = A
+        # It is tempting to do just "head" here, however if node is
+        # adjacent to head, this will do bad things.
+        node.next = head.prev.next
+        # E.next = N
+        node.next.prev = node
+        # A.prev = N
+        node.prev.next = node
+
+        self._head = node
+
+    def _addcapacity(self):
+        """Add a node to the circular linked list.
+
+        The new node is inserted before the head node.
+        """
+        head = self._head
+        node = _lrucachenode()
+        head.prev.next = node
+        node.prev = head.prev
+        node.next = head
+        head.prev = node
+        self._size += 1
+        return node
 
 def lrucachefunc(func):
     '''cache most recent results of function calls'''
@@ -567,10 +756,7 @@ def tempfilter(s, cmd):
         if code:
             raise Abort(_("command '%s' failed: %s") %
                         (cmd, explainexit(code)))
-        fp = open(outname, 'rb')
-        r = fp.read()
-        fp.close()
-        return r
+        return readfile(outname)
     finally:
         try:
             if inname:
@@ -697,7 +883,7 @@ def mainfrozen():
             imp.is_frozen("__main__")) # tools/freeze
 
 # the location of data files matching the source code
-if mainfrozen():
+if mainfrozen() and getattr(sys, 'frozen', None) != 'macosx_app':
     # executable version (py2exe) doesn't support __file__
     datapath = os.path.dirname(sys.executable)
 else:
@@ -718,7 +904,11 @@ def hgexecutable():
         if hg:
             _sethgexecutable(hg)
         elif mainfrozen():
-            _sethgexecutable(sys.executable)
+            if getattr(sys, 'frozen', None) == 'macosx_app':
+                # Env variable set by py2app
+                _sethgexecutable(os.environ['EXECUTABLEPATH'])
+            else:
+                _sethgexecutable(sys.executable)
         elif os.path.basename(getattr(mainmod, '__file__', '')) == 'hg':
             _sethgexecutable(mainmod.__file__)
         else:
@@ -959,20 +1149,6 @@ def fstat(fp):
         return os.fstat(fp.fileno())
     except AttributeError:
         return os.stat(fp.name)
-
-def statmtimesec(st):
-    """Get mtime as integer of seconds
-
-    'int(st.st_mtime)' cannot be used because st.st_mtime is computed as
-    'sec + 1e-9 * nsec' and double-precision floating-point type is too narrow
-    to represent nanoseconds. If 'nsec' is close to 1 sec, 'int(st.st_mtime)'
-    can be 'sec + 1'. (issue4836)
-    """
-    try:
-        return st[stat.ST_MTIME]
-    except (TypeError, IndexError):
-        # osutil.stat doesn't allow index access and its st_mtime is int
-        return st.st_mtime
 
 # File system features
 
@@ -1269,25 +1445,16 @@ def ensuredirs(name, mode=None, notindexed=False):
         os.chmod(name, mode)
 
 def readfile(path):
-    fp = open(path, 'rb')
-    try:
+    with open(path, 'rb') as fp:
         return fp.read()
-    finally:
-        fp.close()
 
 def writefile(path, text):
-    fp = open(path, 'wb')
-    try:
+    with open(path, 'wb') as fp:
         fp.write(text)
-    finally:
-        fp.close()
 
 def appendfile(path, text):
-    fp = open(path, 'ab')
-    try:
+    with open(path, 'ab') as fp:
         fp.write(text)
-    finally:
-        fp.close()
 
 class chunkbuffer(object):
     """Allow arbitrary sized chunks of data to be efficiently read from an
@@ -1416,9 +1583,10 @@ def datestr(date=None, format='%a %b %d %H:%M:%S %Y %1%2'):
     if "%1" in format or "%2" in format or "%z" in format:
         sign = (tz > 0) and "-" or "+"
         minutes = abs(tz) // 60
+        q, r = divmod(minutes, 60)
         format = format.replace("%z", "%1%2")
-        format = format.replace("%1", "%c%02d" % (sign, minutes // 60))
-        format = format.replace("%2", "%02d" % (minutes % 60))
+        format = format.replace("%1", "%c%02d" % (sign, q))
+        format = format.replace("%2", "%02d" % r)
     try:
         t = time.gmtime(float(t) - tz)
     except ValueError:
@@ -1864,7 +2032,11 @@ def hgcmd():
     get either the python call or current executable.
     """
     if mainfrozen():
-        return [sys.executable]
+        if getattr(sys, 'frozen', None) == 'macosx_app':
+            # Env variable set by py2app
+            return [os.environ['EXECUTABLEPATH']]
+        else:
+            return [sys.executable]
     return gethgcmd()
 
 def rundetached(args, condfn):
@@ -2288,9 +2460,9 @@ def removeauth(u):
     u.user = u.passwd = None
     return str(u)
 
-def isatty(fd):
+def isatty(fp):
     try:
-        return fd.isatty()
+        return fp.isatty()
     except AttributeError:
         return False
 
@@ -2464,6 +2636,66 @@ def _makedecompressor(decompcls):
     def func(fh):
         return chunkbuffer(generator(fh))
     return func
+
+class ctxmanager(object):
+    '''A context manager for use in 'with' blocks to allow multiple
+    contexts to be entered at once.  This is both safer and more
+    flexible than contextlib.nested.
+
+    Once Mercurial supports Python 2.7+, this will become mostly
+    unnecessary.
+    '''
+
+    def __init__(self, *args):
+        '''Accepts a list of no-argument functions that return context
+        managers.  These will be invoked at __call__ time.'''
+        self._pending = args
+        self._atexit = []
+
+    def __enter__(self):
+        return self
+
+    def enter(self):
+        '''Create and enter context managers in the order in which they were
+        passed to the constructor.'''
+        values = []
+        for func in self._pending:
+            obj = func()
+            values.append(obj.__enter__())
+            self._atexit.append(obj.__exit__)
+        del self._pending
+        return values
+
+    def atexit(self, func, *args, **kwargs):
+        '''Add a function to call when this context manager exits.  The
+        ordering of multiple atexit calls is unspecified, save that
+        they will happen before any __exit__ functions.'''
+        def wrapper(exc_type, exc_val, exc_tb):
+            func(*args, **kwargs)
+        self._atexit.append(wrapper)
+        return func
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        '''Context managers are exited in the reverse order from which
+        they were created.'''
+        received = exc_type is not None
+        suppressed = False
+        pending = None
+        self._atexit.reverse()
+        for exitfunc in self._atexit:
+            try:
+                if exitfunc(exc_type, exc_val, exc_tb):
+                    suppressed = True
+                    exc_type = None
+                    exc_val = None
+                    exc_tb = None
+            except BaseException:
+                pending = sys.exc_info()
+                exc_type, exc_val, exc_tb = pending = sys.exc_info()
+        del self._atexit
+        if pending:
+            raise exc_val
+        return received and suppressed
 
 def _bz2():
     d = bz2.BZ2Decompressor()

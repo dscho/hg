@@ -1,3 +1,5 @@
+from __future__ import absolute_import
+
 import errno
 import os
 import re
@@ -68,7 +70,7 @@ def require(features):
         sys.exit(1)
 
 def matchoutput(cmd, regexp, ignorestatus=False):
-    """Return True if cmd executes successfully and its output
+    """Return the match object if cmd executes successfully and its output
     is matched by the supplied regular expression.
     """
     r = re.compile(regexp)
@@ -458,8 +460,20 @@ def has_py3k():
 
 @check("pure", "running with pure Python code")
 def has_pure():
-    return os.environ.get("HGTEST_RUN_TESTS_PURE") == "--pure"
+    return any([
+        os.environ.get("HGMODULEPOLICY") == "py",
+        os.environ.get("HGTEST_RUN_TESTS_PURE") == "--pure",
+    ])
 
 @check("slow", "allow slow tests")
 def has_slow():
     return os.environ.get('HGTEST_SLOW') == 'slow'
+
+@check("hypothesis", "is Hypothesis installed")
+def has_hypothesis():
+    try:
+        import hypothesis
+        hypothesis.given
+        return True
+    except ImportError:
+        return False

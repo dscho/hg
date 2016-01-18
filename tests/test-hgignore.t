@@ -55,6 +55,29 @@ Should display baz only:
   ? a.c
   ? syntax
 
+Ensure that comments work:
+
+  $ touch 'foo#bar' 'quux#'
+#if no-windows
+  $ touch 'baz\#wat'
+#endif
+  $ cat <<'EOF' >> .hgignore
+  > # full-line comment
+  >   # whitespace-only comment line
+  > syntax# pattern, no whitespace, then comment
+  > a.c  # pattern, then whitespace, then comment
+  > baz\\# # escaped comment character
+  > foo\#b # escaped comment character
+  > quux\## escaped comment character at end of name
+  > EOF
+  $ hg status
+  A dir/b.o
+  ? .hgignore
+  $ rm 'foo#bar' 'quux#'
+#if no-windows
+  $ rm 'baz\#wat'
+#endif
+
 Check it does not ignore the current directory '.':
 
   $ echo "^\." > .hgignore
@@ -143,6 +166,10 @@ Test relative ignore path (issue4473):
   $ hg debugignore
   (?:(?:|.*/)[^/]*(?:/|$))
 
+  $ hg debugignore b.o
+  b.o is ignored
+  (ignore rule in $TESTTMP/ignorerepo/.hgignore, line 1: '*') (glob)
+
   $ cd ..
 
 Check patterns that match only the directory
@@ -168,6 +195,11 @@ Check recursive glob pattern matches no directories (dir/**/c.o matches dir/c.o)
   ? a.c
   ? a.o
   ? syntax
+  $ hg debugignore a.c
+  a.c is not ignored
+  $ hg debugignore dir/c.o
+  dir/c.o is ignored
+  (ignore rule in $TESTTMP/ignorerepo/.hgignore, line 2: 'dir/**/c.o') (glob)
 
 Check using 'include:' in ignore file
 
@@ -251,3 +283,6 @@ Check include subignore at the same level
 
   $ hg status | grep file2
   [1]
+  $ hg debugignore dir1/file2
+  dir1/file2 is ignored
+  (ignore rule in dir2/.hgignore, line 1: 'file*2')

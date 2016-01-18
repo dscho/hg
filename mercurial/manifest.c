@@ -242,7 +242,7 @@ static PyObject *lmiter_iterentriesnext(PyObject *o)
 	hash = nodeof(l);
 	consumed = pl + 41;
 	flags = PyString_FromStringAndSize(l->start + consumed,
-									   l->len - consumed - 1);
+					   l->len - consumed - 1);
 	if (!path || !hash || !flags) {
 		goto done;
 	}
@@ -558,7 +558,7 @@ static PyMappingMethods lazymanifest_mapping_methods = {
 	(objobjargproc)lazymanifest_setitem,    /* mp_ass_subscript */
 };
 
-/* sequence methods (important or __contains__ builds an iterator */
+/* sequence methods (important or __contains__ builds an iterator) */
 
 static int lazymanifest_contains(lazymanifest *self, PyObject *key)
 {
@@ -694,6 +694,9 @@ static lazymanifest *lazymanifest_filtercopy(
 		goto nomem;
 	}
 	copy = PyObject_New(lazymanifest, &lazymanifestType);
+	if (!copy) {
+		goto nomem;
+	}
 	copy->dirty = true;
 	copy->lines = malloc(self->maxlines * sizeof(line));
 	if (!copy->lines) {
@@ -704,11 +707,13 @@ static lazymanifest *lazymanifest_filtercopy(
 	copy->pydata = self->pydata;
 	Py_INCREF(self->pydata);
 	for (i = 0; i < self->numlines; i++) {
-		PyObject *arg = PyString_FromString(self->lines[i].start);
-		PyObject *arglist = PyTuple_Pack(1, arg);
-		PyObject *result = PyObject_CallObject(matchfn, arglist);
+		PyObject *arglist = NULL, *result = NULL;
+		arglist = Py_BuildValue("(s)", self->lines[i].start);
+		if (!arglist) {
+			return NULL;
+		}
+		result = PyObject_CallObject(matchfn, arglist);
 		Py_DECREF(arglist);
-		Py_DECREF(arg);
 		/* if the callback raised an exception, just let it
 		 * through and give up */
 		if (!result) {

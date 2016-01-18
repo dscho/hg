@@ -24,7 +24,8 @@ from . import (
 _extensions = {}
 _aftercallbacks = {}
 _order = []
-_ignore = ['hbisect', 'bookmarks', 'parentrevspec', 'interhg', 'inotify']
+_builtin = set(['hbisect', 'bookmarks', 'parentrevspec', 'progress', 'interhg',
+                'inotify'])
 
 def extensions(ui=None):
     if ui:
@@ -44,7 +45,7 @@ def find(name):
     '''return module with given extension name'''
     mod = None
     try:
-        mod =  _extensions[name]
+        mod = _extensions[name]
     except KeyError:
         for k, v in _extensions.iteritems():
             if k.endswith('.' + name) or k.endswith('/' + name):
@@ -75,7 +76,7 @@ def load(ui, name, path):
         shortname = name[6:]
     else:
         shortname = name
-    if shortname in _ignore:
+    if shortname in _builtin:
         return None
     if shortname in _extensions:
         return _extensions[shortname]
@@ -100,6 +101,17 @@ def load(ui, name, path):
             if ui.debugflag:
                 ui.traceback()
             mod = importh(name)
+
+    # Before we do anything with the extension, check against minimum stated
+    # compatibility. This gives extension authors a mechanism to have their
+    # extensions short circuit when loaded with a known incompatible version
+    # of Mercurial.
+    minver = getattr(mod, 'minimumhgversion', None)
+    if minver and util.versiontuple(minver, 2) > util.versiontuple(n=2):
+        ui.warn(_('(third party extension %s requires version %s or newer '
+                  'of Mercurial; disabling)\n') % (shortname, minver))
+        return
+
     _extensions[shortname] = mod
     _order.append(shortname)
     for fn in _aftercallbacks.get(shortname, []):

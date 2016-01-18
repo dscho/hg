@@ -137,8 +137,7 @@ def maybeperformlegacystreamclone(pullop):
         raise error.ResponseError(
             _('unexpected response from remote server:'), l)
 
-    lock = repo.lock()
-    try:
+    with repo.lock():
         consumev1(repo, fp, filecount, bytecount)
 
         # new requirements = old non-format requirements +
@@ -153,8 +152,6 @@ def maybeperformlegacystreamclone(pullop):
             branchmap.replacecache(repo, rbranchmap)
 
         repo.invalidate()
-    finally:
-        lock.release()
 
 def allowservergeneration(ui):
     """Whether streaming clones are allowed from the server."""
@@ -186,15 +183,12 @@ def generatev1(repo):
     entries = []
     total_bytes = 0
     # Get consistent snapshot of repo, lock during scan.
-    lock = repo.lock()
-    try:
+    with repo.lock():
         repo.ui.debug('scanning\n')
         for name, ename, size in _walkstreamfiles(repo):
             if size:
                 entries.append((name, size))
                 total_bytes += size
-    finally:
-            lock.release()
 
     repo.ui.debug('%d files, %d bytes to transfer\n' %
                   (len(entries), total_bytes))
@@ -212,12 +206,7 @@ def generatev1(repo):
                 # partially encode name over the wire for backwards compat
                 yield '%s\0%d\n' % (store.encodedir(name), size)
                 if size <= 65536:
-                    fp = svfs(name)
-                    try:
-                        data = fp.read(size)
-                    finally:
-                        fp.close()
-                    yield data
+                    yield svfs.read(name)
                 else:
                     for chunk in util.filechunkiter(svfs(name), limit=size):
                         yield chunk
@@ -301,38 +290,35 @@ def consumev1(repo, fp, filecount, bytecount):
     Like "streamout," the status line added by the wire protocol is not handled
     by this function.
     """
-    lock = repo.lock()
-    try:
+    with repo.lock():
         repo.ui.status(_('%d files to transfer, %s of data\n') %
                        (filecount, util.bytecount(bytecount)))
         handled_bytes = 0
         repo.ui.progress(_('clone'), 0, total=bytecount)
         start = time.time()
 
-        tr = repo.transaction(_('clone'))
-        try:
-            for i in xrange(filecount):
-                # XXX doesn't support '\n' or '\r' in filenames
-                l = fp.readline()
-                try:
-                    name, size = l.split('\0', 1)
-                    size = int(size)
-                except (ValueError, TypeError):
-                    raise error.ResponseError(
-                        _('unexpected response from remote server:'), l)
-                if repo.ui.debugflag:
-                    repo.ui.debug('adding %s (%s)\n' %
-                                  (name, util.bytecount(size)))
-                # for backwards compat, name was partially encoded
-                ofp = repo.svfs(store.decodedir(name), 'w')
-                for chunk in util.filechunkiter(fp, limit=size):
-                    handled_bytes += len(chunk)
-                    repo.ui.progress(_('clone'), handled_bytes, total=bytecount)
-                    ofp.write(chunk)
-                ofp.close()
-            tr.close()
-        finally:
-            tr.release()
+        with repo.transaction('clone'):
+            with repo.svfs.backgroundclosing(repo.ui, expectedcount=filecount):
+                for i in xrange(filecount):
+                    # XXX doesn't support '\n' or '\r' in filenames
+                    l = fp.readline()
+                    try:
+                        name, size = l.split('\0', 1)
+                        size = int(size)
+                    except (ValueError, TypeError):
+                        raise error.ResponseError(
+                            _('unexpected response from remote server:'), l)
+                    if repo.ui.debugflag:
+                        repo.ui.debug('adding %s (%s)\n' %
+                                      (name, util.bytecount(size)))
+                    # for backwards compat, name was partially encoded
+                    path = store.decodedir(name)
+                    with repo.svfs(path, 'w', backgroundclose=True) as ofp:
+                        for chunk in util.filechunkiter(fp, limit=size):
+                            handled_bytes += len(chunk)
+                            repo.ui.progress(_('clone'), handled_bytes,
+                                             total=bytecount)
+                            ofp.write(chunk)
 
         # Writing straight to files circumvented the inmemory caches
         repo.invalidate()
@@ -344,19 +330,8 @@ def consumev1(repo, fp, filecount, bytecount):
         repo.ui.status(_('transferred %s in %.1f seconds (%s/sec)\n') %
                        (util.bytecount(bytecount), elapsed,
                         util.bytecount(bytecount / elapsed)))
-    finally:
-        lock.release()
 
-def applybundlev1(repo, fp):
-    """Apply the content from a stream clone bundle version 1.
-
-    We assume the 4 byte header has been read and validated and the file handle
-    is at the 2 byte compression identifier.
-    """
-    if len(repo):
-        raise error.Abort(_('cannot apply stream clone bundle on non-empty '
-                            'repo'))
-
+def readbundle1header(fp):
     compression = fp.read(2)
     if compression != 'UN':
         raise error.Abort(_('only uncompressed stream clone bundles are '
@@ -371,6 +346,20 @@ def applybundlev1(repo, fp):
                             'requirements not properly encoded'))
 
     requirements = set(requires.rstrip('\0').split(','))
+
+    return filecount, bytecount, requirements
+
+def applybundlev1(repo, fp):
+    """Apply the content from a stream clone bundle version 1.
+
+    We assume the 4 byte header has been read and validated and the file handle
+    is at the 2 byte compression identifier.
+    """
+    if len(repo):
+        raise error.Abort(_('cannot apply stream clone bundle on non-empty '
+                            'repo'))
+
+    filecount, bytecount, requirements = readbundle1header(fp)
     missingreqs = requirements - repo.supportedformats
     if missingreqs:
         raise error.Abort(_('unable to apply stream clone: '

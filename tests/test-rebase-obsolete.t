@@ -11,7 +11,7 @@ Enable obsolete
   > evolution=createmarkers,allowunstable
   > [phases]
   > publish=False
-  > [extensions]'
+  > [extensions]
   > rebase=
   > EOF
 
@@ -243,6 +243,30 @@ More complex case were part of the rebase set were already rebased
   files+:      D
   extra:       branch=default
   extra:       rebase_source=08483444fef91d6224f6655ee586a65d263ad34c
+  extra:       source=32af7686d403cf45b5d95f2d70cebea587ac806a
+  description:
+  D
+  
+  
+  $ hg up -qr 'desc(G)'
+  $ hg graft 4596109a6a4328c398bde3a4a3b6737cfade3003
+  grafting 11:4596109a6a43 "D"
+  $ hg up -qr 'desc(E)'
+  $ hg rebase -s tip -d .
+  rebasing 14:0f4c66d0b70f "D" (tip)
+  $ hg log --style default --debug -r tip
+  changeset:   15:884f358981b4d32069bb539e0e95d49a35eb81d0
+  tag:         tip
+  phase:       draft
+  parent:      4:9520eea781bcca16c1e15acc0ba14335a0e8e5ba
+  parent:      -1:0000000000000000000000000000000000000000
+  manifest:    15:648e8ede73ae3e497d093d3a4c8fcc2daa864f42
+  user:        Nicolas Dumazet <nicdumz.commits@gmail.com>
+  date:        Sat Apr 30 15:24:48 2011 +0200
+  files+:      D
+  extra:       branch=default
+  extra:       intermediate-source=4596109a6a4328c398bde3a4a3b6737cfade3003
+  extra:       rebase_source=0f4c66d0b70f8e1ce4aec01f8e95cf24ee923afa
   extra:       source=32af7686d403cf45b5d95f2d70cebea587ac806a
   description:
   D
@@ -635,3 +659,149 @@ Even when the chain include missing node
   $ hg rebase -d 'desc(B2)'
   note: not rebasing 1:a8b11f55fb19 "B0", already in destination as 2:261e70097290 "B2"
   rebasing 5:1a79b7535141 "D" (tip)
+  $ hg up 4
+  1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo "O" > O
+  $ hg add O
+  $ hg commit -m O
+  $ echo "P" > P
+  $ hg add P
+  $ hg commit -m P
+  $ hg log -G
+  @  8:8d47583e023f P
+  |
+  o  7:360bbaa7d3ce O
+  |
+  | o  6:9c48361117de D
+  | |
+  o |  4:ff2c4d47b71d C
+  |/
+  o  2:261e70097290 B2
+  |
+  o  0:4a2df7238c3b A
+  
+  $ hg debugobsolete `hg log -r 7 -T '{node}\n'` --config experimental.evolution=all
+  $ hg rebase -d 6 -r "4::"
+  rebasing 4:ff2c4d47b71d "C"
+  note: not rebasing 7:360bbaa7d3ce "O", it has no successor
+  rebasing 8:8d47583e023f "P" (tip)
+
+If all the changeset to be rebased are obsolete and present in the destination, we
+should display a friendly error message
+
+  $ hg log -G
+  @  10:121d9e3bc4c6 P
+  |
+  o  9:4be60e099a77 C
+  |
+  o  6:9c48361117de D
+  |
+  o  2:261e70097290 B2
+  |
+  o  0:4a2df7238c3b A
+  
+
+  $ hg up 9
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo "non-relevant change" > nonrelevant
+  $ hg add nonrelevant
+  $ hg commit -m nonrelevant
+  created new head
+  $ hg debugobsolete `hg log -r 11 -T '{node}\n'` --config experimental.evolution=all
+  $ hg rebase -r . -d 10
+  abort: all requested changesets have equivalents or were marked as obsolete
+  (to force the rebase, set the config experimental.rebaseskipobsolete to False)
+  [255]
+
+If a rebase is going to create divergence, it should abort
+
+  $ hg log -G
+  @  11:f44da1f4954c nonrelevant
+  |
+  | o  10:121d9e3bc4c6 P
+  |/
+  o  9:4be60e099a77 C
+  |
+  o  6:9c48361117de D
+  |
+  o  2:261e70097290 B2
+  |
+  o  0:4a2df7238c3b A
+  
+
+  $ hg up 9
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo "john" > doe
+  $ hg add doe
+  $ hg commit -m "john doe"
+  created new head
+  $ hg up 10
+  1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo "foo" > bar
+  $ hg add bar
+  $ hg commit --amend -m "10'"
+  $ hg up 10 --hidden
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo "bar" > foo
+  $ hg add foo
+  $ hg commit -m "bar foo"
+  $ hg log -G
+  @  15:73568ab6879d bar foo
+  |
+  | o  14:77d874d096a2 10'
+  | |
+  | | o  12:3eb461388009 john doe
+  | |/
+  x |  10:121d9e3bc4c6 P
+  |/
+  o  9:4be60e099a77 C
+  |
+  o  6:9c48361117de D
+  |
+  o  2:261e70097290 B2
+  |
+  o  0:4a2df7238c3b A
+  
+  $ hg summary
+  parent: 15:73568ab6879d tip
+   bar foo
+  branch: default
+  commit: (clean)
+  update: 2 new changesets, 3 branch heads (merge)
+  phases: 8 draft
+  unstable: 1 changesets
+  $ hg rebase -s 10 -d 12
+  abort: this rebase will cause divergence
+  (to force the rebase please set rebase.allowdivergence=True)
+  [255]
+  $ hg log -G
+  @  15:73568ab6879d bar foo
+  |
+  | o  14:77d874d096a2 10'
+  | |
+  | | o  12:3eb461388009 john doe
+  | |/
+  x |  10:121d9e3bc4c6 P
+  |/
+  o  9:4be60e099a77 C
+  |
+  o  6:9c48361117de D
+  |
+  o  2:261e70097290 B2
+  |
+  o  0:4a2df7238c3b A
+  
+With rebase.allowdivergence=True, rebase can create divergence
+
+  $ hg rebase -s 10 -d 12 --config rebase.allowdivergence=True
+  rebasing 10:121d9e3bc4c6 "P"
+  rebasing 15:73568ab6879d "bar foo" (tip)
+  $ hg summary
+  parent: 17:61bd55f69bc4 tip
+   bar foo
+  branch: default
+  commit: (clean)
+  update: 1 new changesets, 2 branch heads (merge)
+  phases: 8 draft
+  divergent: 2 changesets
+

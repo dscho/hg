@@ -95,9 +95,12 @@ class ui(object):
     def __init__(self, src=None):
         # _buffers: used for temporary capture of output
         self._buffers = []
-        # _bufferstates:
-        #   should the temporary capture include stderr and subprocess output
+        # 3-tuple describing how each buffer in the stack behaves.
+        # Values are (capture stderr, capture subprocesses, apply labels).
         self._bufferstates = []
+        # When a buffer is active, defines whether we are expanding labels.
+        # This exists to prevent an extra list lookup.
+        self._bufferapplylabels = None
         self.quiet = self.verbose = self.debugflag = self.tracebackflag = False
         self._reportuntrusted = True
         self._ocfg = config.config() # overlay
@@ -277,6 +280,39 @@ class ui(object):
                     self.debug("ignoring untrusted configuration option "
                                "%s.%s = %s\n" % (section, n, uvalue))
         return value
+
+    def configsuboptions(self, section, name, default=None, untrusted=False):
+        """Get a config option and all sub-options.
+
+        Some config options have sub-options that are declared with the
+        format "key:opt = value". This method is used to return the main
+        option and all its declared sub-options.
+
+        Returns a 2-tuple of ``(option, sub-options)``, where `sub-options``
+        is a dict of defined sub-options where keys and values are strings.
+        """
+        data = self._data(untrusted)
+        main = data.get(section, name, default)
+        if self.debugflag and not untrusted and self._reportuntrusted:
+            uvalue = self._ucfg.get(section, name)
+            if uvalue is not None and uvalue != main:
+                self.debug('ignoring untrusted configuration option '
+                           '%s.%s = %s\n' % (section, name, uvalue))
+
+        sub = {}
+        prefix = '%s:' % name
+        for k, v in data.items(section):
+            if k.startswith(prefix):
+                sub[k[len(prefix):]] = v
+
+        if self.debugflag and not untrusted and self._reportuntrusted:
+            for k, v in sub.items():
+                uvalue = self._ucfg.get(section, '%s:%s' % (name, k))
+                if uvalue is not None and uvalue != v:
+                    self.debug('ignoring untrusted configuration option '
+                               '%s:%s.%s = %s\n' % (section, name, k, uvalue))
+
+        return main, sub
 
     def configpath(self, section, name, default=None, untrusted=False):
         'get a path config item, expanded relative to repo root or config file'
@@ -471,12 +507,21 @@ class ui(object):
                 result = default or []
         return result
 
+    def hasconfig(self, section, name, untrusted=False):
+        return self._data(untrusted).hasitem(section, name)
+
     def has_section(self, section, untrusted=False):
         '''tell whether section exists in config.'''
         return section in self._data(untrusted)
 
-    def configitems(self, section, untrusted=False):
+    def configitems(self, section, untrusted=False, ignoresub=False):
         items = self._data(untrusted).items(section)
+        if ignoresub:
+            newitems = {}
+            for k, v in items:
+                if ':' not in k:
+                    newitems[k] = v
+            items = newitems.items()
         if self.debugflag and not untrusted and self._reportuntrusted:
             for k, v in self._ucfg.items(section):
                 if self._tcfg.get(section, k) != v:
@@ -573,18 +618,13 @@ class ui(object):
     def paths(self):
         return paths(self)
 
-    def pushbuffer(self, error=False, subproc=False):
+    def pushbuffer(self, error=False, subproc=False, labeled=False):
         """install a buffer to capture standard output of the ui object
 
         If error is True, the error output will be captured too.
 
         If subproc is True, output from subprocesses (typically hooks) will be
-        captured too."""
-        self._buffers.append([])
-        self._bufferstates.append((error, subproc))
-
-    def popbuffer(self, labeled=False):
-        '''pop the last buffer and return the buffered output
+        captured too.
 
         If labeled is True, any labels associated with buffered
         output will be handled. By default, this has no effect
@@ -592,8 +632,19 @@ class ui(object):
         handle this argument and returned styled output. If output
         is being buffered so it can be captured and parsed or
         processed, labeled should not be set to True.
-        '''
+        """
+        self._buffers.append([])
+        self._bufferstates.append((error, subproc, labeled))
+        self._bufferapplylabels = labeled
+
+    def popbuffer(self):
+        '''pop the last buffer and return the buffered output'''
         self._bufferstates.pop()
+        if self._bufferstates:
+            self._bufferapplylabels = self._bufferstates[-1][2]
+        else:
+            self._bufferapplylabels = None
+
         return "".join(self._buffers.pop())
 
     def write(self, *args, **opts):
@@ -613,12 +664,12 @@ class ui(object):
         "cmdname.type" is recommended. For example, status issues
         a label of "status.modified" for modified files.
         '''
-        self._progclear()
         if self._buffers:
-            self._buffers[-1].extend([str(a) for a in args])
+            self._buffers[-1].extend(a for a in args)
         else:
+            self._progclear()
             for a in args:
-                self.fout.write(str(a))
+                self.fout.write(a)
 
     def write_err(self, *args, **opts):
         self._progclear()
@@ -628,7 +679,7 @@ class ui(object):
             if not getattr(self.fout, 'closed', False):
                 self.fout.flush()
             for a in args:
-                self.ferr.write(str(a))
+                self.ferr.write(a)
             # stderr may be buffered under win32 when redirected to files,
             # including stdout.
             if not getattr(self.ferr, 'closed', False):
@@ -757,7 +808,7 @@ class ui(object):
                 self.write(r, "\n")
             return r
         except EOFError:
-            raise error.Abort(_('response expected'))
+            raise error.ResponseExpected()
 
     @staticmethod
     def extractchoices(prompt):
@@ -817,7 +868,7 @@ class ui(object):
             else:
                 return getpass.getpass('')
         except EOFError:
-            raise error.Abort(_('response expected'))
+            raise error.ResponseExpected()
     def status(self, *msg, **opts):
         '''write status message to output (if ui.quiet is False)
 
@@ -851,10 +902,12 @@ class ui(object):
             self.write(*msg, **opts)
 
     def edit(self, text, user, extra=None, editform=None, pending=None):
-        if extra is None:
-            extra = {}
-        (fd, name) = tempfile.mkstemp(prefix="hg-editor-", suffix=".txt",
-                                      text=True)
+        extra_defaults = { 'prefix': 'editor' }
+        if extra is not None:
+            extra_defaults.update(extra)
+        extra = extra_defaults
+        (fd, name) = tempfile.mkstemp(prefix='hg-' + extra['prefix'] + '-',
+                                      suffix=".txt", text=True)
         try:
             f = os.fdopen(fd, "w")
             f.write(text)
@@ -1008,15 +1061,31 @@ class ui(object):
         '''
         return msg
 
-    def develwarn(self, msg):
-        """issue a developer warning message"""
+    def develwarn(self, msg, stacklevel=1):
+        """issue a developer warning message
+
+        Use 'stacklevel' to report the offender some layers further up in the
+        stack.
+        """
         msg = 'devel-warn: ' + msg
+        stacklevel += 1 # get in develwarn
         if self.tracebackflag:
-            util.debugstacktrace(msg, 2, self.ferr, self.fout)
+            util.debugstacktrace(msg, stacklevel, self.ferr, self.fout)
         else:
             curframe = inspect.currentframe()
             calframe = inspect.getouterframes(curframe, 2)
-            self.write_err('%s at: %s:%s (%s)\n' % ((msg,) + calframe[2][1:4]))
+            self.write_err('%s at: %s:%s (%s)\n'
+                           % ((msg,) + calframe[stacklevel][1:4]))
+
+    def deprecwarn(self, msg, version):
+        """issue a deprecation warning
+
+        - msg: message explaining what is deprecated and how to upgrade,
+        - version: last version where the API will be supported,
+        """
+        msg += ("\n(compatibility will be dropped after Mercurial-%s,"
+                " update your code.)") % version
+        self.develwarn(msg, stacklevel=2)
 
 class paths(dict):
     """Represents a collection of paths and their configs.
@@ -1027,28 +1096,15 @@ class paths(dict):
     def __init__(self, ui):
         dict.__init__(self)
 
-        for name, loc in ui.configitems('paths'):
+        for name, loc in ui.configitems('paths', ignoresub=True):
             # No location is the same as not existing.
             if not loc:
                 continue
-
-            # TODO ignore default-push once all consumers stop referencing it
-            # since it is handled specifically below.
-
-            self[name] = path(name, rawloc=loc)
-
-        # Handle default-push, which is a one-off that defines the push URL for
-        # the "default" path.
-        defaultpush = ui.config('paths', 'default-push')
-        if defaultpush:
-            # "default-push" can be defined without "default" entry. This is a
-            # bit weird, but is allowed for backwards compatibility.
-            if 'default' not in self:
-                self['default'] = path('default', rawloc=defaultpush)
-            self['default']._pushloc = defaultpush
+            loc, sub = ui.configsuboptions('paths', name)
+            self[name] = path(ui, name, rawloc=loc, suboptions=sub)
 
     def getpath(self, name, default=None):
-        """Return a ``path`` from a string, falling back to a default.
+        """Return a ``path`` from a string, falling back to default.
 
         ``name`` can be a named path or locations. Locations are filesystem
         paths or URIs.
@@ -1058,13 +1114,16 @@ class paths(dict):
         """
         # Only fall back to default if no path was requested.
         if name is None:
-            if default:
+            if not default:
+                default = ()
+            elif not isinstance(default, (tuple, list)):
+                default = (default,)
+            for k in default:
                 try:
-                    return self[default]
+                    return self[k]
                 except KeyError:
-                    return None
-            else:
-                return None
+                    continue
+            return None
 
         # Most likely empty string.
         # This may need to raise in the future.
@@ -1076,19 +1135,57 @@ class paths(dict):
         except KeyError:
             # Try to resolve as a local path or URI.
             try:
-                return path(None, rawloc=name)
+                # We don't pass sub-options in, so no need to pass ui instance.
+                return path(None, None, rawloc=name)
             except ValueError:
                 raise error.RepoError(_('repository %s does not exist') %
                                         name)
 
-        assert False
+_pathsuboptions = {}
+
+def pathsuboption(option, attr):
+    """Decorator used to declare a path sub-option.
+
+    Arguments are the sub-option name and the attribute it should set on
+    ``path`` instances.
+
+    The decorated function will receive as arguments a ``ui`` instance,
+    ``path`` instance, and the string value of this option from the config.
+    The function should return the value that will be set on the ``path``
+    instance.
+
+    This decorator can be used to perform additional verification of
+    sub-options and to change the type of sub-options.
+    """
+    def register(func):
+        _pathsuboptions[option] = (attr, func)
+        return func
+    return register
+
+@pathsuboption('pushurl', 'pushloc')
+def pushurlpathoption(ui, path, value):
+    u = util.url(value)
+    # Actually require a URL.
+    if not u.scheme:
+        ui.warn(_('(paths.%s:pushurl not a URL; ignoring)\n') % path.name)
+        return None
+
+    # Don't support the #foo syntax in the push URL to declare branch to
+    # push.
+    if u.fragment:
+        ui.warn(_('("#fragment" in paths.%s:pushurl not supported; '
+                  'ignoring)\n') % path.name)
+        u.fragment = None
+
+    return str(u)
 
 class path(object):
     """Represents an individual path and its configuration."""
 
-    def __init__(self, name, rawloc=None, pushloc=None):
+    def __init__(self, ui, name, rawloc=None, suboptions=None):
         """Construct a path from its config options.
 
+        ``ui`` is the ``ui`` instance the path is coming from.
         ``name`` is the symbolic name of the path.
         ``rawloc`` is the raw location, as defined in the config.
         ``pushloc`` is the raw locations pushes should be made to.
@@ -1113,13 +1210,25 @@ class path(object):
         self.name = name
         self.rawloc = rawloc
         self.loc = str(u)
-        self._pushloc = pushloc
 
         # When given a raw location but not a symbolic name, validate the
         # location is valid.
         if not name and not u.scheme and not self._isvalidlocalpath(self.loc):
             raise ValueError('location is not a URL or path to a local '
                              'repo: %s' % rawloc)
+
+        suboptions = suboptions or {}
+
+        # Now process the sub-options. If a sub-option is registered, its
+        # attribute will always be present. The value will be None if there
+        # was no valid sub-option.
+        for suboption, (attr, func) in _pathsuboptions.iteritems():
+            if suboption not in suboptions:
+                setattr(self, attr, None)
+                continue
+
+            value = func(ui, self, suboptions[suboption])
+            setattr(self, attr, value)
 
     def _isvalidlocalpath(self, path):
         """Returns True if the given path is a potentially valid repository.
@@ -1129,8 +1238,17 @@ class path(object):
         return os.path.isdir(os.path.join(path, '.hg'))
 
     @property
-    def pushloc(self):
-        return self._pushloc or self.loc
+    def suboptions(self):
+        """Return sub-options and their values for this path.
+
+        This is intended to be used for presentation purposes.
+        """
+        d = {}
+        for subopt, (attr, _func) in _pathsuboptions.iteritems():
+            value = getattr(self, attr)
+            if value is not None:
+                d[subopt] = value
+        return d
 
 # we instantiate one globally shared progress bar to avoid
 # competing progress bars when multiple UI objects get created

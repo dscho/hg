@@ -631,11 +631,8 @@ class hgsubrepo(abstractsubrepo):
         self._initrepo(r, state[0], create)
 
     def storeclean(self, path):
-        lock = self._repo.lock()
-        try:
+        with self._repo.lock():
             return self._storeclean(path)
-        finally:
-            lock.release()
 
     def _storeclean(self, path):
         clean = True
@@ -679,13 +676,10 @@ class hgsubrepo(abstractsubrepo):
         store may be "clean" versus a given remote repo, but not versus another
         '''
         cachefile = _getstorehashcachename(remotepath)
-        lock = self._repo.lock()
-        try:
+        with self._repo.lock():
             storehash = list(self._calcstorehash(remotepath))
             vfs = self._cachestorehashvfs
             vfs.writelines(cachefile, storehash, mode='w', notindexed=True)
-        finally:
-            lock.release()
 
     def _getctx(self):
         '''fetch the context for this subrepo revision, possibly a workingctx
@@ -1910,7 +1904,7 @@ class gitsubrepo(abstractsubrepo):
             status = self.status(None)
             names = status.modified
             for name in names:
-                bakname = "%s.orig" % name
+                bakname = scmutil.origpath(self.ui, self._subparent, name)
                 self.ui.note(_('saving current version of %s as %s\n') %
                         (name, bakname))
                 self.wvfs.rename(name, bakname)

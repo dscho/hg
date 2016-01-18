@@ -1,4 +1,4 @@
-#!/bin/sh -e
+#!/bin/bash -e
 #
 # Build a Mercurial RPM from the current repo
 #
@@ -68,7 +68,7 @@ else
     RPMPYTHONVER=%{nil}
 fi
 
-mkdir -p $RPMBUILDDIR/SOURCES
+mkdir -p $RPMBUILDDIR/{SOURCES,BUILD,SRPMS,RPMS}
 $HG archive -t tgz $RPMBUILDDIR/SOURCES/mercurial-$version-$release.tar.gz
 if [ "$PYTHONVER" ]; then
 (

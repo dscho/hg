@@ -23,6 +23,7 @@
 [Setup]
 AppCopyright=Copyright 2005-2015 Matt Mackall and others
 AppName=Mercurial
+AppVersion={#VERSION}
 #if ARCH == "x64"
 AppVerName=Mercurial {#VERSION} (64-bit)
 OutputBaseFilename=Mercurial-{#VERSION}-x64
@@ -83,6 +84,7 @@ Source: dist\add_path.exe; DestDir: {app}
 Source: doc\*.html; DestDir: {app}\Docs
 Source: doc\style.css; DestDir: {app}\Docs
 Source: mercurial\help\*.txt; DestDir: {app}\help
+Source: mercurial\help\internals\*.txt; DestDir: {app}\help\internals
 Source: mercurial\default.d\*.rc; DestDir: {app}\default.d
 Source: mercurial\locale\*.*; DestDir: {app}\locale; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: mercurial\templates\*.*; DestDir: {app}\Templates; Flags: recursesubdirs createallsubdirs

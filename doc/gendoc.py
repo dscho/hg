@@ -1,13 +1,16 @@
+#!/usr/bin/env python
 """usage: %s DOC ...
 
 where DOC is the name of a document
 """
 
 import os, sys, textwrap
+
+# This script is executed during installs and may not have C extensions
+# available. Relax C module requirements.
+os.environ['HGMODULEPOLICY'] = 'allow'
 # import from the live mercurial repo
 sys.path.insert(0, "..")
-# fall back to pure modules if required C extensions are not available
-sys.path.append(os.path.join('..', 'mercurial', 'pure'))
 from mercurial import demandimport; demandimport.enable()
 from mercurial import minirst
 from mercurial.commands import table, globalopts
@@ -107,7 +110,7 @@ def showdoc(ui):
              "   :depth: 1\n\n")
 
     for extensionname in sorted(allextensionnames()):
-        mod = extensions.load(None, extensionname, None)
+        mod = extensions.load(ui, extensionname, None)
         ui.write(minirst.subsection(extensionname))
         ui.write("%s\n\n" % gettext(mod.__doc__))
         cmdtable = getattr(mod, 'cmdtable', None)

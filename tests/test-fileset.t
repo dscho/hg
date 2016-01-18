@@ -73,6 +73,8 @@ Test files status
   a2
   $ fileset 'deleted()'
   a1
+  $ fileset 'missing()'
+  a1
   $ fileset 'unknown()'
   c3
   $ fileset 'ignored()'
@@ -133,6 +135,10 @@ Test files properties
   $ fileset 'size("bar")'
   hg: parse error: couldn't parse size: bar
   [255]
+  $ fileset '(1k, 2k)'
+  hg: parse error: can't use a list in this context
+  (see hg help "filesets.x or y")
+  [255]
   $ fileset 'size(1k)'
   1k
   $ fileset '(1k or 2k) and size("< 2k")'
@@ -163,7 +169,7 @@ Test merge states
   $ hg merge
   merging b2
   warning: conflicts while merging b2! (edit, then use 'hg resolve --mark')
-  6 files updated, 0 files merged, 1 files removed, 1 files unresolved
+  * files updated, 0 files merged, 1 files removed, 1 files unresolved (glob)
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]
   $ fileset 'resolved()'
@@ -295,16 +301,68 @@ Test with a revision
   >>> open('mac', 'wb').write("mac\r")
   $ hg add dos mixed mac
 
+(remove a1, to examine safety of 'eol' on removed files)
+  $ rm a1
+
   $ fileset 'eol(dos)'
   dos
   mixed
   $ fileset 'eol(unix)'
+  mixed
   .hgsub
   .hgsubstate
-  a1
   b1
   b2
   c1
-  mixed
   $ fileset 'eol(mac)'
   mac
+
+Test safety of 'encoding' on removed files
+
+#if symlink
+  $ fileset 'encoding("ascii")'
+  dos
+  mac
+  mixed
+  .hgsub
+  .hgsubstate
+  1k
+  2k
+  b1
+  b2
+  b2link
+  bin
+  c1
+#else
+  $ fileset 'encoding("ascii")'
+  dos
+  mac
+  mixed
+  .hgsub
+  .hgsubstate
+  1k
+  2k
+  b1
+  b2
+  bin
+  c1
+#endif
+
+Test detection of unintentional 'matchctx.existing()' invocation
+
+  $ cat > $TESTTMP/existingcaller.py <<EOF
+  > from mercurial import fileset
+  > 
+  > @fileset.predicate('existingcaller()', callexisting=False)
+  > def existingcaller(mctx, x):
+  >     # this 'mctx.existing()' invocation is unintentional
+  >     return [f for f in mctx.existing()]
+  > EOF
+
+  $ cat >> .hg/hgrc <<EOF
+  > [extensions]
+  > existingcaller = $TESTTMP/existingcaller.py
+  > EOF
+
+  $ fileset 'existingcaller()' 2>&1 | tail -1
+  AssertionError: unexpected existing() invocation

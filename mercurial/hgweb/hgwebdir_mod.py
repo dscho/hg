@@ -6,15 +6,42 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import os, re, time
-from mercurial.i18n import _
-from mercurial import ui, hg, scmutil, util, templater
-from mercurial import error, encoding
-from common import ErrorResponse, get_mtime, staticfile, paritygen, ismember, \
-                   get_contact, HTTP_OK, HTTP_NOT_FOUND, HTTP_SERVER_ERROR
-from hgweb_mod import hgweb, makebreadcrumb
-from request import wsgirequest
-import webutil
+from __future__ import absolute_import
+
+import os
+import re
+import time
+
+from ..i18n import _
+
+from .common import (
+    ErrorResponse,
+    HTTP_NOT_FOUND,
+    HTTP_OK,
+    HTTP_SERVER_ERROR,
+    get_contact,
+    get_mtime,
+    ismember,
+    paritygen,
+    staticfile,
+)
+from .request import wsgirequest
+
+from .. import (
+    encoding,
+    error,
+    hg,
+    scmutil,
+    templater,
+    ui as uimod,
+    util,
+)
+
+from . import (
+    hgweb_mod,
+    webutil,
+    wsgicgi,
+)
 
 def cleannames(items):
     return [(util.pconvert(name).strip('/'), path) for name, path in items]
@@ -108,7 +135,7 @@ class hgwebdir(object):
         if self.baseui:
             u = self.baseui.copy()
         else:
-            u = ui.ui()
+            u = uimod.ui()
             u.setconfig('ui', 'report_untrusted', 'off', 'hgwebdir')
             u.setconfig('ui', 'nontty', 'true', 'hgwebdir')
             # displaying bundling progress bar while serving feels wrong and may
@@ -161,7 +188,6 @@ class hgwebdir(object):
         if not os.environ.get('GATEWAY_INTERFACE', '').startswith("CGI/1."):
             raise RuntimeError("This function is only intended to be "
                                "called while running as a CGI script.")
-        import mercurial.hgweb.wsgicgi as wsgicgi
         wsgicgi.launch(self)
 
     def __call__(self, env, respond):
@@ -231,7 +257,7 @@ class hgwebdir(object):
                     try:
                         # ensure caller gets private copy of ui
                         repo = hg.repository(self.ui.copy(), real)
-                        return hgweb(repo).run_wsgi(req)
+                        return hgweb_mod.hgweb(repo).run_wsgi(req)
                     except IOError as inst:
                         msg = inst.strerror
                         raise ErrorResponse(HTTP_SERVER_ERROR, msg)
@@ -426,7 +452,7 @@ class hgwebdir(object):
         self.updatereqenv(req.env)
 
         return tmpl("index", entries=entries, subdir=subdir,
-                    pathdef=makebreadcrumb('/' + subdir, self.prefix),
+                    pathdef=hgweb_mod.makebreadcrumb('/' + subdir, self.prefix),
                     sortcolumn=sortcolumn, descending=descending,
                     **dict(sort))
 

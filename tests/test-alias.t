@@ -173,6 +173,16 @@ no usage
   $ hg commit -Amfoo
   adding foo
 
+infer repository
+
+  $ cd ..
+
+#if no-outer-repo
+  $ hg shortlog alias/foo
+  0 e63c23eaa88a | 1970-01-01 00:00 +0000
+#endif
+
+  $ cd alias
 
 with opts
 
@@ -360,11 +370,11 @@ shell alias defined in current repo
   sub
   $ hg --cwd .. subalias > /dev/null
   hg: unknown command 'subalias'
-  (did you mean one of idalias?)
+  (did you mean idalias?)
   [255]
   $ hg -R .. subalias > /dev/null
   hg: unknown command 'subalias'
-  (did you mean one of idalias?)
+  (did you mean idalias?)
   [255]
 
 
@@ -372,7 +382,7 @@ shell alias defined in other repo
 
   $ hg mainalias > /dev/null
   hg: unknown command 'mainalias'
-  (did you mean one of idalias?)
+  (did you mean idalias?)
   [255]
   $ hg -R .. mainalias
   main

@@ -161,6 +161,9 @@ should fail
   $ hg -R test bundle --base 2 -r tip test-bundle-branch1.hg test-3
   abort: --base is incompatible with specifying a destination
   [255]
+  $ hg -R test bundle -a -r tip test-bundle-branch1.hg test-3
+  abort: --all is incompatible with specifying a destination
+  [255]
   $ hg -R test bundle -r tip test-bundle-branch1.hg
   abort: repository default-push not found!
   [255]
@@ -171,6 +174,9 @@ should fail
   4 changesets found
   $ hg -R test bundle --base 2 test-bundle-all.hg
   6 changesets found
+  $ hg -R test bundle --base 2 --all test-bundle-all-2.hg
+  ignoring --base because --all was specified
+  9 changesets found
   $ hg -R test bundle --base 3 -r tip test-bundle-should-fail.hg
   1 changesets found
 

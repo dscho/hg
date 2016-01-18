@@ -17,9 +17,10 @@ Test document extraction
   >         cmp -s gendoc-C.txt gendoc-$LOCALE.txt && echo '** NOTHING TRANSLATED **'
   >     fi
   > 
+  >     echo "checking for parse errors"
+  >     python "$TESTDIR/../doc/docchecker" gendoc-$LOCALE.txt
   >     # We call runrst without adding "--halt warning" to make it report
   >     # all errors instead of stopping on the first one.
-  >     echo "checking for parse errors"
   >     python "$TESTDIR/../doc/runrst" html gendoc-$LOCALE.txt /dev/null
   > done
   
@@ -31,6 +32,8 @@ Test document extraction
   
   % extracting documentation from de
   checking for parse errors
+  Die Dateien werden dem Projektarchiv beim n\xc3\xa4chsten \xc3\x9cbernehmen (commit) hinzugef\xc3\xbcgt. Um dies vorher r\xc3\xbcckg\xc3\xa4ngig zu machen, siehe:hg:`forget`. (esc)
+  warning: please have a space before :hg:
   
   % extracting documentation from el
   checking for parse errors

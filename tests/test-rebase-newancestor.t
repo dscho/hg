@@ -1,4 +1,6 @@
   $ cat >> $HGRCPATH <<EOF
+  > [format]
+  > usegeneraldelta=yes
   > [extensions]
   > rebase=
   > 
@@ -126,13 +128,15 @@ wrong.
 
 Full rebase all the way back from branching point:
 
-  $ hg rebase -r 'only(dev,default)' -d default
+  $ hg rebase -r 'only(dev,default)' -d default --config ui.interactive=True << EOF
+  > c
+  > EOF
   rebasing 1:1d1a643d390e "dev: create branch"
   note: rebase of 1:1d1a643d390e created no changes to commit
   rebasing 2:ec2c14fb2984 "dev: f-dev stuff"
   rebasing 4:4b019212aaf6 "dev: merge default"
   remote changed f-default which local deleted
-  use (c)hanged version or leave (d)eleted? c
+  use (c)hanged version, leave (d)eleted, or leave (u)nresolved? c
   rebasing 6:9455ee510502 "dev: merge default"
   saved backup bundle to $TESTTMP/ancestor-merge/.hg/strip-backup/1d1a643d390e-43e9e04b-backup.hg (glob)
   $ hg tglog
@@ -155,11 +159,13 @@ Grafty cherry picking rebasing:
   $ cd ../ancestor-merge-2
 
   $ hg phase -fdr0:
-  $ hg rebase -r 'children(only(dev,default))' -d default
+  $ hg rebase -r 'children(only(dev,default))' -d default --config ui.interactive=True << EOF
+  > c
+  > EOF
   rebasing 2:ec2c14fb2984 "dev: f-dev stuff"
   rebasing 4:4b019212aaf6 "dev: merge default"
   remote changed f-default which local deleted
-  use (c)hanged version or leave (d)eleted? c
+  use (c)hanged version, leave (d)eleted, or leave (u)nresolved? c
   rebasing 6:9455ee510502 "dev: merge default"
   saved backup bundle to $TESTTMP/ancestor-merge-2/.hg/strip-backup/ec2c14fb2984-62d0b222-backup.hg (glob)
   $ hg tglog
@@ -298,15 +304,15 @@ rebase of merge of ancestors
   rebase merging completed
   1 changesets found
   uncompressed size of bundle content:
-       193 (changelog)
-       196 (manifests)
-       162  other
+       213 (changelog)
+       216 (manifests)
+       182  other
   saved backup bundle to $TESTTMP/parentorder/.hg/strip-backup/4c5f12f25ebe-f46990e5-backup.hg (glob)
   1 changesets found
   uncompressed size of bundle content:
-       252 (changelog)
-       147 (manifests)
-       162  other
+       272 (changelog)
+       167 (manifests)
+       182  other
   adding branch
   adding changesets
   adding manifests

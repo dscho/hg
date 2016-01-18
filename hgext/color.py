@@ -419,16 +419,6 @@ def configstyles(ui):
             _styles[status] = ' '.join(good)
 
 class colorui(uimod.ui):
-    def popbuffer(self, labeled=False):
-        if self._colormode is None:
-            return super(colorui, self).popbuffer(labeled)
-
-        self._bufferstates.pop()
-        if labeled:
-            return ''.join(self.label(a, label) for a, label
-                           in self._buffers.pop())
-        return ''.join(a for a, label in self._buffers.pop())
-
     _colormode = 'ansi'
     def write(self, *args, **opts):
         if self._colormode is None:
@@ -436,13 +426,16 @@ class colorui(uimod.ui):
 
         label = opts.get('label', '')
         if self._buffers:
-            self._buffers[-1].extend([(str(a), label) for a in args])
+            if self._bufferapplylabels:
+                self._buffers[-1].extend(self.label(a, label) for a in args)
+            else:
+                self._buffers[-1].extend(args)
         elif self._colormode == 'win32':
             for a in args:
                 win32print(a, super(colorui, self).write, **opts)
         else:
             return super(colorui, self).write(
-                *[self.label(str(a), label) for a in args], **opts)
+                *[self.label(a, label) for a in args], **opts)
 
     def write_err(self, *args, **opts):
         if self._colormode is None:
@@ -456,7 +449,7 @@ class colorui(uimod.ui):
                 win32print(a, super(colorui, self).write_err, **opts)
         else:
             return super(colorui, self).write_err(
-                *[self.label(str(a), label) for a in args], **opts)
+                *[self.label(a, label) for a in args], **opts)
 
     def showlabel(self, msg, label):
         if label and msg:

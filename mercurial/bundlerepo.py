@@ -245,17 +245,14 @@ class bundlerepository(localrepo.localrepository):
             fdtemp, temp = self.vfs.mkstemp(prefix="hg-bundle-",
                                             suffix=".hg10un")
             self.tempfile = temp
-            fptemp = os.fdopen(fdtemp, 'wb')
 
-            try:
+            with os.fdopen(fdtemp, 'wb') as fptemp:
                 fptemp.write(header)
                 while True:
                     chunk = read(2**18)
                     if not chunk:
                         break
                     fptemp.write(chunk)
-            finally:
-                fptemp.close()
 
             return self.vfs.open(self.tempfile, mode="rb")
         self._tempparent = None
@@ -285,7 +282,7 @@ class bundlerepository(localrepo.localrepository):
                                                   "multiple changegroups")
                     cgstream = part
                     version = part.params.get('version', '01')
-                    if version not in changegroup.packermap:
+                    if version not in changegroup.supportedversions(self):
                         msg = _('Unsupported changegroup version: %s')
                         raise error.Abort(msg % version)
                     if self.bundle.compressed():
@@ -296,7 +293,7 @@ class bundlerepository(localrepo.localrepository):
                 raise error.Abort('No changegroups found')
             cgstream.seek(0)
 
-            self.bundle = changegroup.packermap[version][1](cgstream, 'UN')
+            self.bundle = changegroup.getunbundler(version, cgstream, 'UN')
 
         elif self.bundle.compressed():
             f = _writetempbundle(self.bundle.read, '.hg10un', header='HG10UN')
@@ -329,6 +326,10 @@ class bundlerepository(localrepo.localrepository):
         # consume the header if it exists
         self.bundle.manifestheader()
         m = bundlemanifest(self.svfs, self.bundle, self.changelog.rev)
+        # XXX: hack to work with changegroup3, but we still don't handle
+        # tree manifests correctly
+        if self.bundle.version == "03":
+            self.bundle.filelogheader()
         self.filestart = self.bundle.tell()
         return m
 

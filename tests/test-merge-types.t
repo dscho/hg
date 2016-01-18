@@ -36,7 +36,7 @@ Symlink is local parent, executable is other:
    ancestor: c334dc3be0da, local: 521a1e40188f+, remote: 3574f3e69b1c
    preserving a for resolve of a
    a: versions differ -> m (premerge)
-  picked tool ':merge' for a (binary False symlink True)
+  picked tool ':merge' for a (binary False symlink True changedelete False)
   merging a
   my a@521a1e40188f+ other a@3574f3e69b1c ancestor a@c334dc3be0da
   warning: internal :merge cannot merge symlinks for a
@@ -69,7 +69,7 @@ Symlink is other parent, executable is local:
    ancestor: c334dc3be0da, local: 3574f3e69b1c+, remote: 521a1e40188f
    preserving a for resolve of a
    a: versions differ -> m (premerge)
-  picked tool ':union' for a (binary False symlink True)
+  picked tool ':union' for a (binary False symlink True changedelete False)
   merging a
   my a@3574f3e69b1c+ other a@521a1e40188f ancestor a@c334dc3be0da
   warning: internal :union cannot merge symlinks for a
@@ -92,11 +92,55 @@ Symlink is other parent, executable is local:
    ancestor: c334dc3be0da, local: 3574f3e69b1c+, remote: 521a1e40188f
    preserving a for resolve of a
    a: versions differ -> m (premerge)
-  picked tool ':merge3' for a (binary False symlink True)
+  picked tool ':merge3' for a (binary False symlink True changedelete False)
   merging a
   my a@3574f3e69b1c+ other a@521a1e40188f ancestor a@c334dc3be0da
   warning: internal :merge3 cannot merge symlinks for a
   warning: conflicts while merging a! (edit, then use 'hg resolve --mark')
+  0 files updated, 0 files merged, 0 files removed, 1 files unresolved
+  use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
+  [1]
+
+  $ tellmeabout a
+  a is an executable file with content:
+  a
+
+  $ hg update -C 1
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
+  $ hg merge --debug --tool :merge-local
+    searching for copies back to rev 1
+  resolving manifests
+   branchmerge: True, force: False, partial: False
+   ancestor: c334dc3be0da, local: 3574f3e69b1c+, remote: 521a1e40188f
+   preserving a for resolve of a
+   a: versions differ -> m (premerge)
+  picked tool ':merge-local' for a (binary False symlink True changedelete False)
+  merging a
+  my a@3574f3e69b1c+ other a@521a1e40188f ancestor a@c334dc3be0da
+  warning: internal :merge-local cannot merge symlinks for a
+  0 files updated, 0 files merged, 0 files removed, 1 files unresolved
+  use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
+  [1]
+
+  $ tellmeabout a
+  a is an executable file with content:
+  a
+
+  $ hg update -C 1
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
+  $ hg merge --debug --tool :merge-other
+    searching for copies back to rev 1
+  resolving manifests
+   branchmerge: True, force: False, partial: False
+   ancestor: c334dc3be0da, local: 3574f3e69b1c+, remote: 521a1e40188f
+   preserving a for resolve of a
+   a: versions differ -> m (premerge)
+  picked tool ':merge-other' for a (binary False symlink True changedelete False)
+  merging a
+  my a@3574f3e69b1c+ other a@521a1e40188f ancestor a@c334dc3be0da
+  warning: internal :merge-other cannot merge symlinks for a
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]
@@ -126,10 +170,12 @@ Update to link with local change should cause a merge prompt (issue3200):
    preserving a for resolve of a
    a: versions differ -> m (premerge)
   (couldn't find merge tool hgmerge|tool hgmerge can't handle symlinks) (re)
-  picked tool ':prompt' for a (binary False symlink True)
-   no tool found to merge a
-  keep (l)ocal or take (o)ther? l
-  0 files updated, 1 files merged, 0 files removed, 0 files unresolved
+  picked tool ':prompt' for a (binary False symlink True changedelete False)
+  no tool found to merge a
+  keep (l)ocal, take (o)ther, or leave (u)nresolved? u
+  0 files updated, 0 files merged, 0 files removed, 1 files unresolved
+  use 'hg resolve' to retry unresolved file merges
+  [1]
   $ hg diff --git
   diff --git a/a b/a
   old mode 120000

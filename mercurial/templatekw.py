@@ -7,7 +7,7 @@
 
 from __future__ import absolute_import
 
-from .node import hex
+from .node import hex, nullid
 from . import (
     error,
     hbisect,
@@ -34,7 +34,7 @@ class _hybrid(object):
             self.joinfmt = lambda x: x.values()[0]
     def __iter__(self):
         return self.gen
-    def __call__(self):
+    def itermaps(self):
         makemap = self._makemap
         for x in self.values:
             yield makemap(x)
@@ -340,6 +340,21 @@ def showfiles(**args):
     """
     return showlist('file', args['ctx'].files(), **args)
 
+def showgraphnode(repo, ctx, **args):
+    """:graphnode: String. The character representing the changeset node in
+    an ASCII revision graph"""
+    wpnodes = repo.dirstate.parents()
+    if wpnodes[1] == nullid:
+        wpnodes = wpnodes[:1]
+    if ctx.node() in wpnodes:
+        return '@'
+    elif ctx.obsolete():
+        return 'x'
+    elif ctx.closesbranch():
+        return '_'
+    else:
+        return 'o'
+
 def showlatesttag(**args):
     """:latesttag: List of strings. The global tags on the most recent globally
     tagged ancestor of this changeset.
@@ -397,6 +412,27 @@ def showmanifest(**args):
     args = args.copy()
     args.update({'rev': repo.manifest.rev(mnode), 'node': hex(mnode)})
     return templ('manifest', **args)
+
+def shownames(namespace, **args):
+    """helper method to generate a template keyword for a namespace"""
+    ctx = args['ctx']
+    repo = ctx.repo()
+    ns = repo.names[namespace]
+    names = ns.names(repo, ctx.node())
+    return showlist(ns.templatename, names, plural=namespace, **args)
+
+def shownamespaces(**args):
+    """:namespaces: Dict of lists. Names attached to this changeset per
+    namespace."""
+    ctx = args['ctx']
+    repo = ctx.repo()
+    namespaces = util.sortdict((k, showlist('name', ns.names(repo, ctx.node()),
+                                            **args))
+                               for k, ns in repo.names.iteritems())
+    f = _showlist('namespace', list(namespaces), **args)
+    return _hybrid(f, namespaces,
+                   lambda k: {'namespace': k, 'names': namespaces[k]},
+                   lambda x: x['namespace'])
 
 def shownode(repo, ctx, templ, **args):
     """:node: String. The changeset identification hash, as a 40 hexadecimal
@@ -474,14 +510,6 @@ def showsubrepos(**args):
             subrepos.append(sub) # removed in ctx
     return showlist('subrepo', sorted(subrepos), **args)
 
-def shownames(namespace, **args):
-    """helper method to generate a template keyword for a namespace"""
-    ctx = args['ctx']
-    repo = ctx.repo()
-    ns = repo.names[namespace]
-    names = ns.names(repo, ctx.node())
-    return showlist(ns.templatename, names, plural=namespace, **args)
-
 # don't remove "showtags" definition, even though namespaces will put
 # a helper function for "tags" keyword into "keywords" map automatically,
 # because online help text is built without namespaces initialization
@@ -518,9 +546,11 @@ keywords = {
     'file_dels': showfiledels,
     'file_mods': showfilemods,
     'files': showfiles,
+    'graphnode': showgraphnode,
     'latesttag': showlatesttag,
     'latesttagdistance': showlatesttagdistance,
     'manifest': showmanifest,
+    'namespaces': shownamespaces,
     'node': shownode,
     'p1rev': showp1rev,
     'p1node': showp1node,

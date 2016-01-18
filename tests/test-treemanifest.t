@@ -1,3 +1,7 @@
+  $ cat << EOF >> $HGRCPATH
+  > [format]
+  > usegeneraldelta=yes
+  > EOF
 
 Set up repo
 
@@ -28,7 +32,7 @@ Submanifest is stored in separate revlog
   $ hg debugdata -m 1
   a\x00362fef284ce2ca02aecc8de6d5e8a1c3af0556fe (esc)
   b\x00362fef284ce2ca02aecc8de6d5e8a1c3af0556fe (esc)
-  dir1\x008b3ffd73f901e83304c83d33132c8e774ceac44ed (esc)
+  dir1\x008b3ffd73f901e83304c83d33132c8e774ceac44et (esc)
   e\x00b8e02f6433738021a065f94175c7cd23db5f05be (esc)
   $ hg debugdata --dir dir1 0
   a\x00b8e02f6433738021a065f94175c7cd23db5f05be (esc)
@@ -118,13 +122,13 @@ Merge creates 2-parent revision of directory revlog
   $ cat dir1/b
   6
   $ hg debugindex --dir dir1
-     rev    offset  length   base linkrev nodeid       p1           p2
-       0         0      54      0       1 8b3ffd73f901 000000000000 000000000000
-       1        54      68      0       2 b66d046c644f 8b3ffd73f901 000000000000
-       2       122      12      0       4 b87265673c8a b66d046c644f 000000000000
-       3       134      95      0       5 aa5d3adcec72 b66d046c644f 000000000000
-       4       229      81      0       6 e29b066b91ad b66d046c644f 000000000000
-       5       310     107      5       7 a120ce2b83f5 e29b066b91ad aa5d3adcec72
+     rev    offset  length  delta linkrev nodeid       p1           p2
+       0         0      54     -1       1 8b3ffd73f901 000000000000 000000000000
+       1        54      68      0       2 68e9d057c5a8 8b3ffd73f901 000000000000
+       2       122      12      1       4 4698198d2624 68e9d057c5a8 000000000000
+       3       134      55      1       5 44844058ccce 68e9d057c5a8 000000000000
+       4       189      55      1       6 bf3d9b744927 68e9d057c5a8 000000000000
+       5       244      55      4       7 dde7c0af2a03 bf3d9b744927 44844058ccce
 
 Merge keeping directory from parent 1 does not create revlog entry. (Note that
 dir1's manifest does change, but only because dir1/a's filelog changes.)
@@ -250,13 +254,13 @@ Merge of two trees
 Parent of tree root manifest should be flat manifest, and two for merge
 
   $ hg debugindex -m
-     rev    offset  length   base linkrev nodeid       p1           p2
-       0         0      80      0       0 40536115ed9e 000000000000 000000000000
+     rev    offset  length  delta linkrev nodeid       p1           p2
+       0         0      80     -1       0 40536115ed9e 000000000000 000000000000
        1        80      83      0       1 f3376063c255 40536115ed9e 000000000000
-       2       163     103      0       2 5d9b9da231a2 40536115ed9e 000000000000
-       3       266      83      0       3 d17d663cbd8a 5d9b9da231a2 f3376063c255
-       4       349     132      4       4 c05a51345f86 f3376063c255 000000000000
-       5       481     110      4       5 82594b1f557d 5d9b9da231a2 f3376063c255
+       2       163      89      0       2 5d9b9da231a2 40536115ed9e 000000000000
+       3       252      83      2       3 d17d663cbd8a 5d9b9da231a2 f3376063c255
+       4       335     124      1       4 51e32a8c60ee f3376063c255 000000000000
+       5       459     126      2       5 cc5baa78b230 5d9b9da231a2 f3376063c255
 
 
 Status across flat/tree boundary should work
@@ -270,16 +274,16 @@ Status across flat/tree boundary should work
 Turning off treemanifest config has no effect
 
   $ hg debugindex .hg/store/meta/dir1/00manifest.i
-     rev    offset  length   base linkrev nodeid       p1           p2
-       0         0     125      0       4 63c9c0557d24 000000000000 000000000000
-       1       125     109      0       5 23d12a1f6e0e 000000000000 000000000000
+     rev    offset  length  delta linkrev nodeid       p1           p2
+       0         0     127     -1       4 064927a0648a 000000000000 000000000000
+       1       127     111      0       5 25ecb8cb8618 000000000000 000000000000
   $ echo 2 > dir1/a
   $ hg --config experimental.treemanifest=False ci -qm 'modify dir1/a'
   $ hg debugindex .hg/store/meta/dir1/00manifest.i
-     rev    offset  length   base linkrev nodeid       p1           p2
-       0         0     125      0       4 63c9c0557d24 000000000000 000000000000
-       1       125     109      0       5 23d12a1f6e0e 000000000000 000000000000
-       2       234      55      0       6 3cb2d87b4250 23d12a1f6e0e 000000000000
+     rev    offset  length  delta linkrev nodeid       p1           p2
+       0         0     127     -1       4 064927a0648a 000000000000 000000000000
+       1       127     111      0       5 25ecb8cb8618 000000000000 000000000000
+       2       238      55      1       6 5b16163a30c6 25ecb8cb8618 000000000000
 
 Create deeper repo with tree manifests.
 
@@ -384,3 +388,57 @@ within that.
   $ mv oldmf2 .hg/store/meta/b/foo
   $ mv oldmf3 .hg/store/meta/b/bar/orange
 
+Add some more changes to the deep repo
+  $ echo narf >> b/bar/fruits.txt
+  $ hg ci -m narf
+  $ echo troz >> b/bar/orange/fly/gnat.py
+  $ hg ci -m troz
+
+Test cloning a treemanifest repo over http.
+  $ hg serve -p $HGPORT -d --pid-file=hg.pid --errorlog=errors.log
+  $ cat hg.pid >> $DAEMON_PIDS
+  $ cd ..
+We can clone even with the knob turned off and we'll get a treemanifest repo.
+  $ hg clone --config experimental.treemanifest=False \
+  >   --config experimental.changegroup3=True \
+  >   http://localhost:$HGPORT deepclone
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 3 changesets with 10 changes to 8 files
+  updating to branch default
+  8 files updated, 0 files merged, 0 files removed, 0 files unresolved
+No server errors.
+  $ cat deeprepo/errors.log
+requires got updated to include treemanifest
+  $ cat deepclone/.hg/requires | grep treemanifest
+  treemanifest
+Tree manifest revlogs exist.
+  $ find deepclone/.hg/store/meta | sort
+  deepclone/.hg/store/meta
+  deepclone/.hg/store/meta/a
+  deepclone/.hg/store/meta/a/00manifest.i
+  deepclone/.hg/store/meta/b
+  deepclone/.hg/store/meta/b/00manifest.i
+  deepclone/.hg/store/meta/b/bar
+  deepclone/.hg/store/meta/b/bar/00manifest.i
+  deepclone/.hg/store/meta/b/bar/orange
+  deepclone/.hg/store/meta/b/bar/orange/00manifest.i
+  deepclone/.hg/store/meta/b/bar/orange/fly
+  deepclone/.hg/store/meta/b/bar/orange/fly/00manifest.i
+  deepclone/.hg/store/meta/b/foo
+  deepclone/.hg/store/meta/b/foo/00manifest.i
+  deepclone/.hg/store/meta/b/foo/apple
+  deepclone/.hg/store/meta/b/foo/apple/00manifest.i
+  deepclone/.hg/store/meta/b/foo/apple/bees
+  deepclone/.hg/store/meta/b/foo/apple/bees/00manifest.i
+Verify passes.
+  $ cd deepclone
+  $ hg verify
+  checking changesets
+  checking manifests
+  crosschecking files in changesets and manifests
+  checking files
+  8 files, 3 changesets, 10 total revisions
+  $ cd ..

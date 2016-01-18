@@ -13,14 +13,16 @@ import sys
 foundopts = {}
 documented = {}
 
-configre = (r"""ui\.config(|int|bool|list)\(['"](\S+)['"], ?"""
-            r"""['"](\S+)['"](,\s(?:default=)?(\S+?))?\)""")
+configre = (r"""ui\.config(|int|bool|list)\(['"](\S+)['"],\s*"""
+            r"""['"](\S+)['"](,\s+(?:default=)?(\S+?))?\)""")
+configpartialre = (r"""ui\.config""")
 
 def main(args):
     for f in args:
         sect = ''
         prevname = ''
         confsect = ''
+        carryover = ''
         for l in open(f):
 
             # check topic-like bits
@@ -40,29 +42,35 @@ def main(args):
             if m:
                 confsect = m.group(1)
                 continue
-            m = re.match(r'^\s+(?:#\s*)?([a-z._]+) = ', l)
+            m = re.match(r'^\s+(?:#\s*)?(\S+) = ', l)
             if m:
                 name = confsect + '.' + m.group(1)
                 documented[name] = 1
 
             # like the bugzilla extension
-            m = re.match(r'^\s*([a-z]+\.[a-z]+)$', l)
+            m = re.match(r'^\s*(\S+\.\S+)$', l)
+            if m:
+                documented[m.group(1)] = 1
+
+            # like convert
+            m = re.match(r'^\s*:(\S+\.\S+):\s+', l)
             if m:
                 documented[m.group(1)] = 1
 
             # quoted in help or docstrings
-            m = re.match(r'.*?``([-a-z_]+\.[-a-z_]+)``', l)
+            m = re.match(r'.*?``(\S+\.\S+)``', l)
             if m:
                 documented[m.group(1)] = 1
 
             # look for ignore markers
             m = re.search(r'# (?:internal|experimental|deprecated|developer)'
-                          ' config: (\S+.\S+)$', l)
+                          ' config: (\S+\.\S+)$', l)
             if m:
                 documented[m.group(1)] = 1
 
             # look for code-like bits
-            m = re.search(configre, l)
+            line = carryover + l
+            m = re.search(configre, line, re.MULTILINE)
             if m:
                 ctype = m.group(1)
                 if not ctype:
@@ -78,6 +86,13 @@ def main(args):
                     print "conflict on %s: %r != %r" % (name, (ctype, default),
                                                         foundopts[name])
                 foundopts[name] = (ctype, default)
+                carryover = ''
+            else:
+                m = re.search(configpartialre, line)
+                if m:
+                    carryover = line
+                else:
+                    carryover = ''
 
     for name in sorted(foundopts):
         if name not in documented:

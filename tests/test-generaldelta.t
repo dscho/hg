@@ -3,10 +3,11 @@ regular equivalent. Test would fail if generaldelta was naive
 implementation of parentdelta: third manifest revision would be fully
 inserted due to big distance from its paren revision (zero).
 
-  $ hg init repo
+  $ hg init repo --config format.generaldelta=no --config format.usegeneraldelta=no
   $ cd repo
   $ echo foo > foo
   $ echo bar > bar
+  $ echo baz > baz
   $ hg commit -q -Am boo
   $ hg clone --pull . ../gdrepo -q --config format.generaldelta=yes
   $ for r in 1 2 3; do
@@ -62,7 +63,7 @@ commit.
   o  0 3903 a
   
   $ cd ..
-  $ hg init client
+  $ hg init client --config format.generaldelta=false --config format.usegeneraldelta=false
   $ cd client
   $ hg pull -q ../server -r 4
   $ hg debugindex x
@@ -71,10 +72,55 @@ commit.
 
   $ cd ..
 
+Test "usegeneraldelta" config
+(repo are general delta, but incoming bundle are not re-deltified)
+
+delta coming from the server base delta server are not recompressed.
+(also include the aggressive version for comparison)
+
+  $ hg clone repo --pull --config format.usegeneraldelta=1 usegd
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 4 changesets with 6 changes to 3 files (+2 heads)
+  updating to branch default
+  3 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg clone repo --pull --config format.generaldelta=1 full
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 4 changesets with 6 changes to 3 files (+2 heads)
+  updating to branch default
+  3 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg -R repo debugindex -m
+     rev    offset  length   base linkrev nodeid       p1           p2
+       0         0     104      0       0 cef96823c800 000000000000 000000000000
+       1       104      57      0       1 58ab9a8d541d cef96823c800 000000000000
+       2       161      57      0       2 134fdc6fd680 cef96823c800 000000000000
+       3       218     104      3       3 723508934dad cef96823c800 000000000000
+  $ hg -R usegd debugindex -m
+     rev    offset  length  delta linkrev nodeid       p1           p2
+       0         0     104     -1       0 cef96823c800 000000000000 000000000000
+       1       104      57      0       1 58ab9a8d541d cef96823c800 000000000000
+       2       161      57      1       2 134fdc6fd680 cef96823c800 000000000000
+       3       218      57      0       3 723508934dad cef96823c800 000000000000
+  $ hg -R full debugindex -m
+     rev    offset  length  delta linkrev nodeid       p1           p2
+       0         0     104     -1       0 cef96823c800 000000000000 000000000000
+       1       104      57      0       1 58ab9a8d541d cef96823c800 000000000000
+       2       161      57      0       2 134fdc6fd680 cef96823c800 000000000000
+       3       218      57      0       3 723508934dad cef96823c800 000000000000
+
 Test format.aggressivemergedeltas
 
   $ hg init --config format.generaldelta=1 aggressive
   $ cd aggressive
+  $ cat << EOF >> .hg/hgrc
+  > [format]
+  > generaldelta = 1
+  > EOF
   $ touch a b c d e
   $ hg commit -Aqm side1
   $ hg up -q null
@@ -87,8 +133,8 @@ Test format.aggressivemergedeltas
   $ hg debugindex -m
      rev    offset  length  delta linkrev nodeid       p1           p2
        0         0      59     -1       0 8dde941edb6e 000000000000 000000000000
-       1        59      59     -1       1 315c023f341d 000000000000 000000000000
-       2       118      65      1       2 2ab389a983eb 315c023f341d 8dde941edb6e
+       1        59      61      0       1 315c023f341d 000000000000 000000000000
+       2       120      65      1       2 2ab389a983eb 315c023f341d 8dde941edb6e
 
   $ hg strip -q -r . --config extensions.strip=
 
@@ -99,8 +145,8 @@ Test format.aggressivemergedeltas
   $ hg debugindex -m
      rev    offset  length  delta linkrev nodeid       p1           p2
        0         0      59     -1       0 8dde941edb6e 000000000000 000000000000
-       1        59      59     -1       1 315c023f341d 000000000000 000000000000
-       2       118      62      0       2 2ab389a983eb 315c023f341d 8dde941edb6e
+       1        59      61      0       1 315c023f341d 000000000000 000000000000
+       2       120      62      0       2 2ab389a983eb 315c023f341d 8dde941edb6e
 
 Test that strip bundle use bundle2
   $ hg --config extensions.strip= strip .

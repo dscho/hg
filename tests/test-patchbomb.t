@@ -23,6 +23,8 @@ Mercurial-patchbomb/.* -> Mercurial-patchbomb/* (glob)
   >     print l,
   > EOF
   $ FILTERBOUNDARY="python `pwd`/prune-blank-after-boundary.py"
+  $ echo "[format]" >> $HGRCPATH
+  $ echo "usegeneraldelta=yes" >> $HGRCPATH
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "patchbomb=" >> $HGRCPATH
 
@@ -347,21 +349,22 @@ test bundle and description:
   Content-Disposition: attachment; filename="bundle.hg"
   Content-Transfer-Encoding: base64
   
-  SEcxMEJaaDkxQVkmU1nvR7I3AAAN////lFYQWj1/4HwRkdC/AywIAk0E4pfoSIIIgQCgGEQOcLAA
-  2tA1VPyp4mkeoG0EaaPU0GTT1GjRiNPIg9CZGBqZ6UbU9J+KFU09DNUaGgAAAAAANAGgAAAAA1U8
-  oGgAADQGgAANNANAAAAAAZipFLz3XoakCEQB3PVPyHJVi1iYkAAKQAZQGpQGZESInRnCFMqLDla2
-  Bx3qfRQeA2N4lnzKkAmP8kR2asievLLXXebVU8Vg4iEBqcJNJAxIapSU6SM4888ZAciRG6MYAIEE
-  SlIBpFisgGkyRjX//TMtfcUAEsGu56+YnE1OlTZmzKm8BSu2rvo4rHAYYaadIFFuTy0LYgIkgLVD
-  sgVa2F19D1tx9+hgbAygLgQwaIqcDdgA4BjQgIiz/AEP72++llgDKhKducqodGE4B0ETqF3JFOFC
-  Q70eyNw=
-  --===*=-- (glob)
+  SEcyMAAAAA5Db21wcmVzc2lvbj1CWkJaaDkxQVkmU1lCZFwPAAAKf//7nFYSWD1/4H7R09C/I70I
+  Ak0E4peoSIYIgQCgGUQOcLABGY2hqoAAAaBMTTAAAahgTCZoAAAAAMQaqn5GmapojQ00DEGI/VGJ
+  kDAJoGTDUAAyM0QaAEqalPTUaMhoyDIDR6IxAGEGmgAehMRhDRsoyB6TYTC8JyLN+jTGqitRAgRJ
+  b3SRlhd8/+VxlAUqAilLoKPEEyxFQkaEGo+DzItFeNiFAo8NMMweVtvXJFIMhjoKC18DeYwjLKBz
+  wrMcs86qJrctDNJorwBMuLcqvTVWHh1IlsIaaaYSUIP2IZsogT1+pSSZS+bSTJrgfKsO9go/f0HF
+  uW4Yr2vXpxDreOgSIAdK/xC8Yay48SLpxIuqc/BZ6rVZCgG21rr0zhCaEgXOTqNaYEvANvg0B0Qo
+  dgtqAs1FDcZgzYitwJh6ZAG0C4mA7FPrp9b7h0h/A44Xgd+0it1gvF0mFE/CCPwymXS+OisOOCAF
+  mDUDAC1pBvsXckU4UJBCZFwP
+  --===============*==-- (glob)
 
 with a specific bundle type
 (binary part must be different)
 
   $ hg email --date '1970-1-1 0:3' -n -f quux -t foo \
   >  -c bar -s test -r tip -b --desc description \
-  > --config patchbomb.bundletype=gzip | $FILTERBOUNDARY
+  > --config patchbomb.bundletype=gzip-v1 | $FILTERBOUNDARY
   searching for changes
   1 changesets found
   
@@ -2679,13 +2682,17 @@ test outgoing:
   +d
   
 
+Don't prompt for a CC header.
+
+  $ echo "[email]" >> $HGRCPATH
+  $ echo "cc=" >> $HGRCPATH
+
 dest#branch URIs:
   $ hg email --date '1980-1-1 0:1' -n -t foo -s test -o ../t#test
   comparing with ../t
   From [test]: test
   this patch series consists of 1 patches.
   
-  Cc: 
   
   displaying [PATCH] test ...
   Content-Type: text/plain; charset="us-ascii"
@@ -2718,6 +2725,18 @@ dest#branch URIs:
   +d
   
 
+Set up a fake sendmail program
+
+  $ cat > pretendmail.sh << 'EOF'
+  > #!/bin/sh
+  > echo "$@"
+  > cat
+  > EOF
+  $ chmod +x pretendmail.sh
+
+  $ echo '[email]' >> $HGRCPATH
+  $ echo "method=`pwd`/pretendmail.sh" >> $HGRCPATH
+
 Test introduction configuration
 =================================
 
@@ -2730,18 +2749,18 @@ Test introduction configuration
 
 single rev
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' | grep "Write the introductory message for the patch series."
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '10' | grep "Write the introductory message for the patch series."
   [1]
 
 single rev + flag
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' --intro | grep "Write the introductory message for the patch series."
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '10' --intro | grep "Write the introductory message for the patch series."
   Write the introductory message for the patch series.
 
 
 Multi rev
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '9::' | grep "Write the introductory message for the patch series."
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '9::' | grep "Write the introductory message for the patch series."
   Write the introductory message for the patch series.
 
 "never" setting
@@ -2751,23 +2770,23 @@ Multi rev
 
 single rev
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' | grep "Write the introductory message for the patch series."
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '10' | grep "Write the introductory message for the patch series."
   [1]
 
 single rev + flag
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' --intro | grep "Write the introductory message for the patch series."
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '10' --intro | grep "Write the introductory message for the patch series."
   Write the introductory message for the patch series.
 
 
 Multi rev
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '9::' | grep "Write the introductory message for the patch series."
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '9::' | grep "Write the introductory message for the patch series."
   [1]
 
 Multi rev + flag
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '9::' --intro | grep "Write the introductory message for the patch series."
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '9::' --intro | grep "Write the introductory message for the patch series."
   Write the introductory message for the patch series.
 
 "always" setting
@@ -2777,23 +2796,23 @@ Multi rev + flag
 
 single rev
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' | grep "Write the introductory message for the patch series."
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '10' | grep "Write the introductory message for the patch series."
   Write the introductory message for the patch series.
 
 single rev + flag
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' --intro | grep "Write the introductory message for the patch series."
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '10' --intro | grep "Write the introductory message for the patch series."
   Write the introductory message for the patch series.
 
 
 Multi rev
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '9::' | grep "Write the introductory message for the patch series."
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '9::' | grep "Write the introductory message for the patch series."
   Write the introductory message for the patch series.
 
 Multi rev + flag
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '9::' --intro | grep "Write the introductory message for the patch series."
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '9::' --intro | grep "Write the introductory message for the patch series."
   Write the introductory message for the patch series.
 
 bad value setting
@@ -2803,15 +2822,13 @@ bad value setting
 
 single rev
 
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10'
+  $ hg email --date '1980-1-1 0:1' -v -t foo -s test -r '10'
   From [test]: test
   this patch series consists of 1 patches.
   
   warning: invalid patchbomb.intro value "mpmwearaclownnose"
   (should be one of always, never, auto)
-  Cc: 
-  
-  displaying [PATCH] test ...
+  -f test foo
   Content-Type: text/plain; charset="us-ascii"
   MIME-Version: 1.0
   Content-Transfer-Encoding: 7bit
@@ -2842,6 +2859,9 @@ single rev
    d
   +d
   
+  sending [PATCH] test ...
+  sending mail: $TESTTMP/t2/pretendmail.sh -f test foo
+
 Test pull url header
 =================================
 
@@ -2849,7 +2869,7 @@ basic version
 
   $ echo 'intro=auto' >> $HGRCPATH
   $ echo "publicurl=$TESTTMP/t2" >> $HGRCPATH
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10' | grep '^#'
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '10' | grep '^#'
   abort: public url $TESTTMP/t2 is missing 3b6f1ec9dde9
   (use "hg push $TESTTMP/t2 -r 3b6f1ec9dde9")
   [1]
@@ -2857,7 +2877,7 @@ basic version
 remote missing
 
   $ echo 'publicurl=$TESTTMP/missing' >> $HGRCPATH
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10'
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '10'
   unable to access public repo: $TESTTMP/missing
   abort: repository $TESTTMP/missing not found!
   [255]
@@ -2872,7 +2892,7 @@ node missing at remote
   updating to branch test
   3 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ echo 'publicurl=$TESTTMP/t3' >> $HGRCPATH
-  $ hg email --date '1980-1-1 0:1' -n -t foo -s test -r '10'
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '10'
   abort: public url $TESTTMP/t3 is missing 3b6f1ec9dde9
   (use "hg push $TESTTMP/t3 -r 3b6f1ec9dde9")
   [255]

@@ -70,11 +70,11 @@ def recordfilter(ui, originalhunks, operation=None):
     testfile = ui.config('experimental', 'crecordtest', None)
     oldwrite = setupwrapcolorwrite(ui)
     try:
-        newchunks = filterchunks(ui, originalhunks, usecurses, testfile,
-                                 operation)
+        newchunks, newopts = filterchunks(ui, originalhunks, usecurses,
+                                          testfile, operation)
     finally:
         ui.write = oldwrite
-    return newchunks
+    return newchunks, newopts
 
 def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
             filterfn, *pats, **opts):
@@ -116,14 +116,16 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
         diffopts = patch.difffeatureopts(ui, opts=opts, whitespace=True)
         diffopts.nodates = True
         diffopts.git = True
-        originaldiff =  patch.diff(repo, changes=status, opts=diffopts)
+        diffopts.showfunc = True
+        originaldiff = patch.diff(repo, changes=status, opts=diffopts)
         originalchunks = patch.parsepatch(originaldiff)
 
         # 1. filter patch, so we have intending-to apply subset of it
         try:
-            chunks = filterfn(ui, originalchunks)
+            chunks, newopts = filterfn(ui, originalchunks)
         except patch.PatchError as err:
             raise error.Abort(_('error parsing patch: %s') % err)
+        opts.update(newopts)
 
         # We need to keep a backup of files that have been newly added and
         # modified during the recording process because there is a previous
@@ -181,9 +183,9 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
             # 3a. apply filtered patch to clean repo  (clean)
             if backups:
                 # Equivalent to hg.revert
-                choices = lambda key: key in backups
+                m = scmutil.matchfiles(repo, backups.keys())
                 mergemod.update(repo, repo.dirstate.p1(),
-                        False, True, choices)
+                        False, True, matcher=m)
 
             # 3b. (apply)
             if dopatch:
@@ -228,11 +230,8 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
                 pass
 
     def recordinwlock(ui, repo, message, match, opts):
-        wlock = repo.wlock()
-        try:
+        with repo.wlock():
             return recordfunc(ui, repo, message, match, opts)
-        finally:
-            wlock.release()
 
     return commit(ui, repo, recordinwlock, pats, opts)
 
@@ -436,6 +435,19 @@ def makefilename(repo, pat, node, desc=None,
         raise error.Abort(_("invalid format spec '%%%s' in output filename") %
                          inst.args[0])
 
+class _unclosablefile(object):
+    def __init__(self, fp):
+        self._fp = fp
+
+    def close(self):
+        pass
+
+    def __iter__(self):
+        return iter(self._fp)
+
+    def __getattr__(self, attr):
+        return getattr(self._fp, attr)
+
 def makefileobj(repo, pat, node=None, desc=None, total=None,
                 seqno=None, revwidth=None, mode='wb', modemap=None,
                 pathname=None):
@@ -447,22 +459,7 @@ def makefileobj(repo, pat, node=None, desc=None, total=None,
             fp = repo.ui.fout
         else:
             fp = repo.ui.fin
-        if util.safehasattr(fp, 'fileno'):
-            return os.fdopen(os.dup(fp.fileno()), mode)
-        else:
-            # if this fp can't be duped properly, return
-            # a dummy object that can be closed
-            class wrappedfileobj(object):
-                noop = lambda x: None
-                def __init__(self, f):
-                    self.f = f
-                def __getattr__(self, attr):
-                    if attr == 'close':
-                        return self.noop
-                    else:
-                        return getattr(self.f, attr)
-
-            return wrappedfileobj(fp)
+        return _unclosablefile(fp)
     if util.safehasattr(pat, 'write') and writable:
         return pat
     if util.safehasattr(pat, 'read') and 'r' in mode:
@@ -870,20 +867,21 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
     extractdata = patch.extract(ui, hunk)
     tmpname = extractdata.get('filename')
     message = extractdata.get('message')
-    user = extractdata.get('user')
-    date = extractdata.get('date')
+    user = opts.get('user') or extractdata.get('user')
+    date = opts.get('date') or extractdata.get('date')
     branch = extractdata.get('branch')
     nodeid = extractdata.get('nodeid')
     p1 = extractdata.get('p1')
     p2 = extractdata.get('p2')
 
+    nocommit = opts.get('no_commit')
+    importbranch = opts.get('import_branch')
     update = not opts.get('bypass')
     strip = opts["strip"]
     prefix = opts["prefix"]
     sim = float(opts.get('similarity') or 0)
     if not tmpname:
         return (None, None, False)
-    msg = _('applied to working directory')
 
     rejects = False
 
@@ -932,7 +930,7 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
             if p2 != parents[1]:
                 repo.setparents(p1.node(), p2.node())
 
-            if opts.get('exact') or opts.get('import_branch'):
+            if opts.get('exact') or importbranch:
                 repo.dirstate.setbranch(branch or 'default')
 
             partial = opts.get('partial', False)
@@ -947,7 +945,7 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
                     rejects = True
 
             files = list(files)
-            if opts.get('no_commit'):
+            if nocommit:
                 if message:
                     msgs.append(message)
             else:
@@ -970,15 +968,15 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
                 try:
                     if partial:
                         repo.ui.setconfig('ui', 'allowemptycommit', True)
-                    n = repo.commit(message, opts.get('user') or user,
-                                    opts.get('date') or date, match=m,
+                    n = repo.commit(message, user,
+                                    date, match=m,
                                     editor=editor, extra=extra)
                     for idfunc in extrapostimport:
                         extrapostimportmap[idfunc](repo[n])
                 finally:
                     repo.ui.restoreconfig(allowemptyback)
         else:
-            if opts.get('exact') or opts.get('import_branch'):
+            if opts.get('exact') or importbranch:
                 branch = branch or 'default'
             else:
                 branch = p1.branch()
@@ -996,19 +994,20 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
                     editor = getcommiteditor(editform='import.bypass')
                 memctx = context.makememctx(repo, (p1.node(), p2.node()),
                                             message,
-                                            opts.get('user') or user,
-                                            opts.get('date') or date,
+                                            user,
+                                            date,
                                             branch, files, store,
                                             editor=editor)
                 n = memctx.commit()
             finally:
                 store.close()
-        if opts.get('exact') and opts.get('no_commit'):
+        if opts.get('exact') and nocommit:
             # --exact with --no-commit is still useful in that it does merge
             # and branch bits
             ui.warn(_("warning: can't check exact import with --no-commit\n"))
         elif opts.get('exact') and hex(n) != nodeid:
             raise error.Abort(_('patch is damaged or loses information'))
+        msg = _('applied to working directory')
         if n:
             # i18n: refers to a short changeset id
             msg = _('created %s') % short(n)
@@ -1052,9 +1051,8 @@ def export(repo, revs, template='hg-%h.patch', fp=None, switch_parent=False,
             fp = makefileobj(repo, template, node, desc=desc, total=total,
                              seqno=seqno, revwidth=revwidth, mode='wb',
                              modemap=filemode)
-            if fp != template:
-                shouldclose = True
-        if fp and fp != sys.stdout and util.safehasattr(fp, 'name'):
+            shouldclose = True
+        if fp and not getattr(fp, 'name', '<unnamed>').startswith('<'):
             repo.ui.note("%s\n" % fp.name)
 
         if not fp:
@@ -1182,9 +1180,9 @@ class changeset_printer(object):
 
     def show(self, ctx, copies=None, matchfn=None, **props):
         if self.buffered:
-            self.ui.pushbuffer()
+            self.ui.pushbuffer(labeled=True)
             self._show(ctx, copies, matchfn, props)
-            self.hunk[ctx.rev()] = self.ui.popbuffer(labeled=True)
+            self.hunk[ctx.rev()] = self.ui.popbuffer()
         else:
             self._show(ctx, copies, matchfn, props)
 
@@ -1297,16 +1295,17 @@ class changeset_printer(object):
                               label='log.summary')
         self.ui.write("\n")
 
-        self.showpatch(changenode, matchfn)
+        self.showpatch(ctx, matchfn)
 
-    def showpatch(self, node, matchfn):
+    def showpatch(self, ctx, matchfn):
         if not matchfn:
             matchfn = self.matchfn
         if matchfn:
             stat = self.diffopts.get('stat')
             diff = self.diffopts.get('patch')
             diffopts = patch.diffallopts(self.ui, self.diffopts)
-            prev = self.repo.changelog.parents(node)[0]
+            node = ctx.node()
+            prev = ctx.p1().node()
             if stat:
                 diffordiffstat(self.ui, self.repo, diffopts, prev, node,
                                match=matchfn, stat=True)
@@ -1488,7 +1487,7 @@ class changeset_templater(changeset_printer):
             # write changeset metadata, then patch if requested
             key = self._parts['changeset']
             self.ui.write(templater.stringify(self.t(key, **props)))
-            self.showpatch(ctx.node(), matchfn)
+            self.showpatch(ctx, matchfn)
 
             if self._parts['footer']:
                 if not self.footer:
@@ -2153,17 +2152,31 @@ def getlogrevs(repo, pats, opts):
 
     return revs, expr, filematcher
 
-def displaygraph(ui, dag, displayer, showparents, edgefn, getrenamed=None,
+def _graphnodeformatter(ui, displayer):
+    spec = ui.config('ui', 'graphnodetemplate')
+    if not spec:
+        return templatekw.showgraphnode  # fast path for "{graphnode}"
+
+    templ = formatter.gettemplater(ui, 'graphnode', spec)
+    cache = {}
+    if isinstance(displayer, changeset_templater):
+        cache = displayer.cache  # reuse cache of slow templates
+    props = templatekw.keywords.copy()
+    props['templ'] = templ
+    props['cache'] = cache
+    def formatnode(repo, ctx):
+        props['ctx'] = ctx
+        props['repo'] = repo
+        props['revcache'] = {}
+        return templater.stringify(templ('graphnode', **props))
+    return formatnode
+
+def displaygraph(ui, repo, dag, displayer, edgefn, getrenamed=None,
                  filematcher=None):
+    formatnode = _graphnodeformatter(ui, displayer)
     seen, state = [], graphmod.asciistate()
     for rev, type, ctx, parents in dag:
-        char = 'o'
-        if ctx.node() in showparents:
-            char = '@'
-        elif ctx.obsolete():
-            char = 'x'
-        elif ctx.closesbranch():
-            char = '_'
+        char = formatnode(repo, ctx)
         copies = None
         if getrenamed and ctx.rev():
             copies = []
@@ -2196,9 +2209,8 @@ def graphlog(ui, repo, *pats, **opts):
             endrev = scmutil.revrange(repo, opts.get('rev')).max() + 1
         getrenamed = templatekw.getrenamedfn(repo, endrev=endrev)
     displayer = show_changeset(ui, repo, opts, buffered=True)
-    showparents = [ctx.node() for ctx in repo[None].parents()]
-    displaygraph(ui, revdag, displayer, showparents,
-                 graphmod.asciiedges, getrenamed, filematcher)
+    displaygraph(ui, repo, revdag, displayer, graphmod.asciiedges, getrenamed,
+                 filematcher)
 
 def checkunsupportedgraphflags(pats, opts):
     for op in ["newest_first"]:
@@ -2409,16 +2421,13 @@ def remove(ui, repo, m, prefix, after, force, subrepos):
         if ui.verbose or not m.exact(f):
             ui.status(_('removing %s\n') % m.rel(f))
 
-    wlock = repo.wlock()
-    try:
+    with repo.wlock():
         if not after:
             for f in list:
                 if f in added:
                     continue # we never unlink added files on remove
                 util.unlinkpath(repo.wjoin(f), ignoremissing=True)
         repo[None].forget(list)
-    finally:
-        wlock.release()
 
     return ret
 
@@ -2503,8 +2512,7 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
     try:
         wlock = repo.wlock()
         lock = repo.lock()
-        tr = repo.transaction('amend')
-        try:
+        with repo.transaction('amend') as tr:
             # See if we got a message from -m or -l, if not, open the editor
             # with the message of the changeset to amend
             message = logmessage(ui, opts)
@@ -2515,13 +2523,14 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
             # First, do a regular commit to record all changes in the working
             # directory (if there are any)
             ui.callhooks = False
-            activebookmark = repo._activebookmark
+            activebookmark = repo._bookmarks.active
             try:
-                repo._activebookmark = None
+                repo._bookmarks.active = None
                 opts['message'] = 'temporary amend commit for %s' % old
                 node = commit(ui, repo, commitfunc, pats, opts)
             finally:
-                repo._activebookmark = activebookmark
+                repo._bookmarks.active = activebookmark
+                repo._bookmarks.recordchange(tr)
                 ui.callhooks = True
             ctx = repo[node]
 
@@ -2614,6 +2623,11 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
                 message = old.description()
 
             pureextra = extra.copy()
+            if 'amend_source' in pureextra:
+                del pureextra['amend_source']
+            pureoldextra = old.extra()
+            if 'amend_source' in pureoldextra:
+                del pureoldextra['amend_source']
             extra['amend_source'] = old.hex()
 
             new = context.memctx(repo,
@@ -2626,12 +2640,12 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
                                  extra=extra,
                                  editor=editor)
 
-            newdesc =  changelog.stripdesc(new.description())
+            newdesc = changelog.stripdesc(new.description())
             if ((not node)
                 and newdesc == old.description()
                 and user == old.user()
                 and date == old.date()
-                and pureextra == old.extra()):
+                and pureextra == pureoldextra):
                 # nothing changed. continuing here would create a new node
                 # anyway because of the amend_source noise.
                 #
@@ -2670,9 +2684,6 @@ def amend(ui, repo, commitfunc, old, extra, pats, opts):
                         obs.append((ctx, ()))
 
                     obsolete.createmarkers(repo, obs)
-            tr.close()
-        finally:
-            tr.release()
         if not createmarkers and newid != old.node():
             # Strip the intermediate commit (if there was one) and the amended
             # commit
@@ -2853,8 +2864,7 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
     #   <asb path in repo> -> (<path from CWD>, <exactly specified by matcher?>)
     names = {}
 
-    wlock = repo.wlock()
-    try:
+    with repo.wlock():
         ## filling of the `names` mapping
         # walk dirstate to fill `names`
 
@@ -3078,7 +3088,7 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
                     xlist.append(abs)
                     if dobackup and (backup <= dobackup
                                      or wctx[abs].cmp(ctx[abs])):
-                            bakname = "%s.orig" % rel
+                            bakname = scmutil.origpath(ui, repo, rel)
                             ui.note(_('saving current version of %s as %s\n') %
                                     (rel, bakname))
                             if not opts.get('dry_run'):
@@ -3107,8 +3117,6 @@ def revert(ui, repo, ctx, parents, *pats, **opts):
                 except KeyError:
                     raise error.Abort("subrepository '%s' does not exist in %s!"
                                       % (sub, short(ctx.node())))
-    finally:
-        wlock.release()
 
 def _revertprefetch(repo, ctx, *files):
     """Let extension changing the storage layer prefetch content"""
@@ -3160,9 +3168,9 @@ def _performrevert(repo, parents, ctx, actions, interactive=False):
         diffopts = patch.difffeatureopts(repo.ui, whitespace=True)
         diffopts.nodates = True
         diffopts.git = True
-        reversehunks =  repo.ui.configbool('experimental',
-                                           'revertalternateinteractivemode',
-                                           True)
+        reversehunks = repo.ui.configbool('experimental',
+                                          'revertalternateinteractivemode',
+                                          True)
         if reversehunks:
             diff = patch.diff(repo, ctx.node(), None, m, opts=diffopts)
         else:
@@ -3171,7 +3179,7 @@ def _performrevert(repo, parents, ctx, actions, interactive=False):
 
         try:
 
-            chunks = recordfilter(repo.ui, originalchunks)
+            chunks, opts = recordfilter(repo.ui, originalchunks)
             if reversehunks:
                 chunks = patch.reversehunks(chunks)
 
@@ -3322,6 +3330,19 @@ def clearunfinished(repo):
     for f, clearable, allowcommit, msg, hint in unfinishedstates:
         if clearable and repo.vfs.exists(f):
             util.unlink(repo.join(f))
+
+afterresolvedstates = [
+    ('graftstate',
+     _('hg graft --continue')),
+    ]
+
+def checkafterresolved(repo):
+    contmsg = _("continue: %s\n")
+    for f, msg in afterresolvedstates:
+        if repo.vfs.exists(f):
+            repo.ui.warn(contmsg % msg)
+            return
+    repo.ui.note(contmsg % _("hg commit"))
 
 class dirstateguard(object):
     '''Restore dirstate at unexpected failure.

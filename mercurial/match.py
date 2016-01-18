@@ -227,9 +227,15 @@ class match(object):
         has potential matches in it or one of its subdirectories. This is
         based on the match's primary, included, and excluded patterns.
 
+        Returns the string 'all' if the given directory and all subdirectories
+        should be visited. Otherwise returns True or False indicating whether
+        the given directory should be visited.
+
         This function's behavior is undefined if it has returned False for
         one of the dir's parent directories.
         '''
+        if self.prefix() and dir in self._fileroots:
+            return 'all'
         if dir in self._excluderoots:
             return False
         if (self._includeroots and
@@ -626,7 +632,7 @@ def _anypats(kindpats):
 
 _commentre = None
 
-def readpatternfile(filepath, warn):
+def readpatternfile(filepath, warn, sourceinfo=False):
     '''parse a pattern file, returning a list of
     patterns. These patterns should be given to compile()
     to be validated and converted into a match function.
@@ -642,7 +648,11 @@ def readpatternfile(filepath, warn):
     syntax: glob   # defaults following lines to non-rooted globs
     re:pattern     # non-rooted regular expression
     glob:pattern   # non-rooted glob
-    pattern        # pattern of the current default type'''
+    pattern        # pattern of the current default type
+
+    if sourceinfo is set, returns a list of tuples:
+    (pattern, lineno, originalline). This is useful to debug ignore patterns.
+    '''
 
     syntaxes = {'re': 'relre:', 'regexp': 'relre:', 'glob': 'relglob:',
                 'include': 'include', 'subinclude': 'subinclude'}
@@ -650,13 +660,15 @@ def readpatternfile(filepath, warn):
     patterns = []
 
     fp = open(filepath)
-    for line in fp:
+    for lineno, line in enumerate(fp, start=1):
         if "#" in line:
             global _commentre
             if not _commentre:
-                _commentre = re.compile(r'((^|[^\\])(\\\\)*)#.*')
+                _commentre = util.re.compile(r'((?:^|[^\\])(?:\\\\)*)#.*')
             # remove comments prefixed by an even number of escapes
-            line = _commentre.sub(r'\1', line)
+            m = _commentre.search(line)
+            if m:
+                line = line[:m.end(1)]
             # fixup properly escaped comments that survived the above
             line = line.replace("\\#", "#")
         line = line.rstrip()
@@ -683,6 +695,9 @@ def readpatternfile(filepath, warn):
                 linesyntax = rels
                 line = line[len(s) + 1:]
                 break
-        patterns.append(linesyntax + line)
+        if sourceinfo:
+            patterns.append((linesyntax + line, lineno, line))
+        else:
+            patterns.append(linesyntax + line)
     fp.close()
     return patterns
