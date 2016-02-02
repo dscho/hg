@@ -162,7 +162,7 @@ revset in your configuration file::
 
 By default each edited revision needs to be present in histedit commands.
 To remove revision you need to use ``drop`` operation. You can configure
-the drop to be implicit for missing commits by adding:
+the drop to be implicit for missing commits by adding::
 
   [histedit]
   dropmissing = True
@@ -873,7 +873,7 @@ def histedit(ui, repo, *freeargs, **opts):
 
     This command lets you edit a linear series of changesets (up to
     and including the working directory, which should be clean).
-    You can::
+    You can:
 
     - `pick` to [re]order a changeset
 
@@ -887,12 +887,12 @@ def histedit(ui, repo, *freeargs, **opts):
 
     - `edit` to edit this changeset
 
-    There are a number of ways to select the root changset::
+    There are a number of ways to select the root changset:
 
     - Specify ANCESTOR directly
 
     - Use --outgoing -- it will be the first linear changeset not
-      included in destination. (See :hg:"help default-push")
+      included in destination. (See :hg:`help config.default-push`)
 
     - Otherwise, the value from the "histedit.defaultrev" config option
       is used as a revset to select the base revision when ANCESTOR is not
@@ -1315,12 +1315,12 @@ def verifyactions(actions, state, ctxs):
             if _constraints.noother in constraints and ha not in expected:
                 raise error.ParseError(
                     _('%s "%s" changeset was not a candidate')
-                     % (action.verb, node.short(ha)),
+                     % (action.verb, ha[:12]),
                     hint=_('only use listed changesets'))
             if _constraints.forceother in constraints and ha in expected:
                 raise error.ParseError(
                     _('%s "%s" changeset was not an edited list candidate')
-                     % (action.verb, node.short(ha)),
+                     % (action.verb, ha[:12]),
                     hint=_('only use listed changesets'))
             if _constraints.noduplicates in constraints and ha in seen:
                 raise error.ParseError(_(

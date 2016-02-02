@@ -396,19 +396,6 @@ def newcommit(repo, phase, *args, **kwargs):
 class AbortNoCleanup(error.Abort):
     pass
 
-def makepatchname(existing, title, fallbackname):
-    """Return a suitable filename for title, adding a suffix to make
-    it unique in the existing list"""
-    namebase = re.sub('[\s\W_]+', '_', title.lower()).strip('_')
-    if not namebase:
-        namebase = fallbackname
-    name = namebase
-    i = 0
-    while name in existing:
-        i += 1
-        name = '%s__%s' % (namebase, i)
-    return name
-
 class queue(object):
     def __init__(self, ui, baseui, path, patchdir=None):
         self.basepath = path
@@ -1125,6 +1112,30 @@ class queue(object):
                                  % name)
             else:
                 raise error.Abort(_('patch "%s" already exists') % name)
+
+    def makepatchname(self, title, fallbackname):
+        """Return a suitable filename for title, adding a suffix to make
+        it unique in the existing list"""
+        namebase = re.sub('[\s\W_]+', '_', title.lower()).strip('_')
+        if namebase:
+            try:
+                self.checkreservedname(namebase)
+            except error.Abort:
+                namebase = fallbackname
+        else:
+            namebase = fallbackname
+        name = namebase
+        i = 0
+        while True:
+            if name not in self.fullseries:
+                try:
+                    self.checkpatchname(name)
+                    break
+                except error.Abort:
+                    pass
+            i += 1
+            name = '%s__%s' % (namebase, i)
+        return name
 
     def checkkeepchanges(self, keepchanges, force):
         if force and keepchanges:
@@ -2097,7 +2108,7 @@ class queue(object):
                     lastparent = p1
 
                     if not patchname:
-                        patchname = makepatchname(self.fullseries,
+                        patchname = self.makepatchname(
                             repo[r].description().split('\n', 1)[0],
                             '%d.diff' % r)
                     checkseries(patchname)

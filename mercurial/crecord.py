@@ -1010,13 +1010,16 @@ class curseschunkselector(object):
                             pairname='legend')
                 self.statuswin.refresh()
                 return
+            line1 = ("SELECT CHUNKS: (j/k/up/dn/pgup/pgdn) move cursor; "
+                   "(space/A) toggle hunk/all; (e)dit hunk;")
+            line2 = (" (f)old/unfold; (c)onfirm applied; (q)uit; (?) help "
+                   "| [X]=hunk applied **=folded, toggle [a]mend mode")
+
             printstring(self.statuswin,
-                        "SELECT CHUNKS: (j/k/up/dn/pgup/pgdn) move cursor; "
-                        "(space/A) toggle hunk/all; (e)dit hunk;",
+                        util.ellipsis(line1, self.xscreensize - 1),
                         pairname="legend")
             printstring(self.statuswin,
-                        " (f)old/unfold; (c)onfirm applied; (q)uit; (?) help "
-                        "| [X]=hunk applied **=folded, toggle [a]mend mode",
+                        util.ellipsis(line2, self.xscreensize - 1),
                         pairname="legend")
         except curses.error:
             pass
@@ -1363,7 +1366,7 @@ can use crecord multiple times to split large changes into smaller changesets.
 the following are valid keystrokes:
 
                 [space] : (un-)select item ([~]/[x] = partly/fully applied)
-                      a : (un-)select all items
+                      A : (un-)select all items
     up/down-arrow [k/j] : go to previous/next unfolded item
         pgup/pgdn [K/J] : go to previous/next item of same type
  right/left-arrow [l/h] : go to child item / parent item
@@ -1551,6 +1554,9 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
         if not isinstance(item, uihunk):
             return
 
+        # To go back to that hunk or its replacement at the end of the edit
+        itemindex = item.parentitem().hunks.index(item)
+
         beforeadded, beforeremoved = item.added, item.removed
         newpatches = editpatchwitheditor(self, item)
         if newpatches is None:
@@ -1575,6 +1581,8 @@ are you sure you want to review/edit and confirm the selected changes [yn]?
         if self.emptypatch():
             header.hunks = hunksbefore + [item] + hunksafter
         self.currentselecteditem = header
+        if len(header.hunks) > itemindex:
+            self.currentselecteditem = header.hunks[itemindex]
 
         if not test:
             updateui(self)

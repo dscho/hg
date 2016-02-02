@@ -598,6 +598,8 @@ def backout(ui, repo, node=None, rev=None, **opts):
 def _dobackout(ui, repo, node=None, rev=None, **opts):
     if opts.get('commit') and opts.get('no_commit'):
         raise error.Abort(_("cannot use --commit with --no-commit"))
+    if opts.get('merge') and opts.get('no_commit'):
+        raise error.Abort(_("cannot use --merge with --no-commit"))
 
     if rev and node:
         raise error.Abort(_("please specify just one revision"))
@@ -653,11 +655,6 @@ def _dobackout(ui, repo, node=None, rev=None, **opts):
                 repo.ui.status(_("use 'hg resolve' to retry unresolved "
                                  "file merges\n"))
                 return 1
-            elif opts.get('no_commit'):
-                msg = _("changeset %s backed out, "
-                        "don't forget to commit.\n")
-                ui.status(msg % short(node))
-                return 0
         finally:
             ui.setconfig('ui', 'forcemerge', '', '')
             lockmod.release(dsguard)
@@ -666,6 +663,11 @@ def _dobackout(ui, repo, node=None, rev=None, **opts):
         repo.dirstate.setbranch(branch)
         cmdutil.revert(ui, repo, rctx, repo.dirstate.parents())
 
+    if opts.get('no_commit'):
+        msg = _("changeset %s backed out, "
+                "don't forget to commit.\n")
+        ui.status(msg % short(node))
+        return 0
 
     def commitfunc(ui, repo, message, match, opts):
         editform = 'backout'
@@ -968,7 +970,7 @@ def bisect(ui, repo, rev=None, extra=None, command=None,
 
 @command('bookmarks|bookmark',
     [('f', 'force', False, _('force')),
-    ('r', 'rev', '', _('revision'), _('REV')),
+    ('r', 'rev', '', _('revision for bookmark action'), _('REV')),
     ('d', 'delete', False, _('delete a given bookmark')),
     ('m', 'rename', '', _('rename a given bookmark'), _('OLD')),
     ('i', 'inactive', False, _('mark a bookmark inactive')),
@@ -1328,7 +1330,10 @@ def bundle(ui, repo, fname, dest=None, **opts):
     """
     revs = None
     if 'rev' in opts:
-        revs = scmutil.revrange(repo, opts['rev'])
+        revstrings = opts['rev']
+        revs = scmutil.revrange(repo, revstrings)
+        if revstrings and not revs:
+            raise error.Abort(_('no commits to bundle'))
 
     bundletype = opts.get('type', 'bzip2').lower()
     try:
@@ -1717,7 +1722,7 @@ def _docommit(ui, repo, *pats, **opts):
         node = cmdutil.commit(ui, repo, commitfunc, pats, opts)
 
         if not node:
-            stat = repo.status(match=scmutil.match(repo[None], pats, opts))
+            stat = cmdutil.postcommitstatus(repo, pats, opts)
             if stat[3]:
                 ui.status(_("nothing changed (%d missing files, see "
                             "'hg status')\n") % len(stat[3]))
@@ -5539,8 +5544,10 @@ def postincoming(ui, repo, modheads, optupdate, checkout):
             msg = _("not updating: %s") % str(inst)
             hint = inst.hint
             raise error.UpdateAbort(msg, hint=hint)
-        if not ret and not checkout:
-            if bookmarks.update(repo, [movemarkfrom], repo['.'].node()):
+        if not ret and movemarkfrom:
+            if movemarkfrom == repo['.'].node():
+                pass # no-op update
+            elif bookmarks.update(repo, [movemarkfrom], repo['.'].node()):
                 ui.status(_("updating bookmark %s\n") % repo._activebookmark)
         return ret
     if modheads > 1:
@@ -7015,7 +7022,7 @@ def version_(ui):
              % util.version())
     ui.status(_(
         "(see https://mercurial-scm.org for more information)\n"
-        "\nCopyright (C) 2005-2015 Matt Mackall and others\n"
+        "\nCopyright (C) 2005-2016 Matt Mackall and others\n"
         "This is free software; see the source for copying conditions. "
         "There is NO\nwarranty; "
         "not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"

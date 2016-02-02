@@ -1532,7 +1532,10 @@ class TestSuite(unittest.TestSuite):
             except: # re-raises
                 done.put(('!', test, 'run-test raised an error, see traceback'))
                 raise
-            channels[channel] = ''
+            try:
+                channels[channel] = ''
+            except IndexError:
+                pass
 
         def stat():
             count = 0
@@ -1727,14 +1730,20 @@ class TextTestRunner(unittest.TextTestRunner):
                               ('skip', result.skipped)]
                     for res, testcases in groups:
                         for tc, __ in testcases:
-                            tres = {'result': res,
-                                    'time': ('%0.3f' % timesd[tc.name][2]),
-                                    'cuser': ('%0.3f' % timesd[tc.name][0]),
-                                    'csys': ('%0.3f' % timesd[tc.name][1]),
-                                    'start': ('%0.3f' % timesd[tc.name][3]),
-                                    'end': ('%0.3f' % timesd[tc.name][4]),
-                                    'diff': result.faildata.get(tc.name, ''),
-                                    }
+                            if tc.name in timesd:
+                                tres = {'result': res,
+                                        'time': ('%0.3f' % timesd[tc.name][2]),
+                                        'cuser': ('%0.3f' % timesd[tc.name][0]),
+                                        'csys': ('%0.3f' % timesd[tc.name][1]),
+                                        'start': ('%0.3f' % timesd[tc.name][3]),
+                                        'end': ('%0.3f' % timesd[tc.name][4]),
+                                        'diff': result.faildata.get(tc.name,
+                                                                    ''),
+                                        }
+                            else:
+                                # blacklisted test
+                                tres = {'result': res}
+
                             outcome[tc.name] = tres
                     jsonout = json.dumps(outcome, sort_keys=True, indent=4)
                     fp.writelines(("testreport =", jsonout))

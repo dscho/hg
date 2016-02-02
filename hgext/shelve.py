@@ -112,12 +112,12 @@ class shelvedfile(object):
         return bundlerepo.bundlerepository(self.repo.baseui, self.repo.root,
                                            self.vfs.join(self.fname))
     def writebundle(self, bases, node):
-        btype = 'HG10BZ'
-        cgversion = '01'
-        compression = None
-        if 'generaldelta' in self.repo.requirements:
+        cgversion = changegroup.safeversion(self.repo)
+        if cgversion == '01':
+            btype = 'HG10BZ'
+            compression = None
+        else:
             btype = 'HG20'
-            cgversion = '02'
             compression = 'BZ'
 
         cg = changegroup.changegroupsubset(self.repo, bases, [node], 'shelve',
@@ -766,7 +766,7 @@ def _dounshelve(ui, repo, *shelved, **opts):
          [('A', 'addremove', None,
            _('mark new/missing files as added/removed before shelving')),
           ('u', 'unknown', None,
-           _('Store unknown files in the shelve')),
+           _('store unknown files in the shelve')),
           ('', 'cleanup', None,
            _('delete all shelved changes')),
           ('', 'date', '',

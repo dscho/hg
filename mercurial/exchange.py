@@ -707,7 +707,8 @@ def _pushb2ctx(pushop, bundler):
                                                 pushop.outgoing)
     else:
         cgversions = [v for v in cgversions
-                      if v in changegroup.supportedversions(pushop.repo)]
+                      if v in changegroup.supportedoutgoingversions(
+                          pushop.repo)]
         if not cgversions:
             raise ValueError(_('no common changegroup version'))
         version = max(cgversions)
@@ -717,6 +718,8 @@ def _pushb2ctx(pushop, bundler):
     cgpart = bundler.newpart('changegroup', data=cg)
     if version is not None:
         cgpart.addparam('version', version)
+    if 'treemanifest' in pushop.repo.requirements:
+        cgpart.addparam('treemanifest', '1')
     def handlereply(op):
         """extract addchangegroup returns from server reply"""
         cgreplies = op.records.getreplies(cgpart.id)
@@ -1560,7 +1563,7 @@ def _getbundlechangegrouppart(bundler, repo, source, bundlecaps=None,
         getcgkwargs = {}
         if cgversions:  # 3.1 and 3.2 ship with an empty value
             cgversions = [v for v in cgversions
-                          if v in changegroup.supportedversions(repo)]
+                          if v in changegroup.supportedoutgoingversions(repo)]
             if not cgversions:
                 raise ValueError(_('no common changegroup version'))
             version = getcgkwargs['version'] = max(cgversions)
