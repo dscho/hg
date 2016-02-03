@@ -1682,9 +1682,6 @@ def _docommit(ui, repo, *pats, **opts):
         if not allowunstable and old.children():
             raise error.Abort(_('cannot amend changeset with children'))
 
-        newextra = extra.copy()
-        newextra['branch'] = branch
-        extra = newextra
         # commitfunc is used only for temporary amend commit by cmdutil.amend
         def commitfunc(ui, repo, message, match, opts):
             return repo.commit(message,
@@ -4013,10 +4010,10 @@ def _dograft(ui, repo, *revs, **opts):
         if opts.get('dry_run'):
             continue
 
-        extra = ctx.extra().copy()
-        del extra['branch']
-        source = extra.get('source')
+        source = ctx.extra().get('source')
+        extra = {}
         if source:
+            extra['source'] = source
             extra['intermediate-source'] = ctx.hex()
         else:
             extra['source'] = ctx.hex()

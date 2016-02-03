@@ -47,6 +47,17 @@ testedwith = 'internal'
 def _nothingtorebase():
     return 1
 
+def _savegraft(ctx, extra):
+    s = ctx.extra().get('source', None)
+    if s is not None:
+        extra['source'] = s
+    s = ctx.extra().get('intermediate-source', None)
+    if s is not None:
+        extra['intermediate-source'] = s
+
+def _savebranch(ctx, extra):
+    extra['branch'] = ctx.branch()
+
 def _makeextrafn(copiers):
     """make an extrafn out of the given copy-functions.
 
@@ -208,7 +219,7 @@ def rebase(ui, repo, **opts):
         collapsemsg = cmdutil.logmessage(ui, opts)
         date = opts.get('date', None)
         e = opts.get('extrafn') # internal, used by e.g. hgsubversion
-        extrafns = []
+        extrafns = [_savegraft]
         if e:
             extrafns = [e]
         keepf = opts.get('keep', False)
@@ -397,13 +408,18 @@ def rebase(ui, repo, **opts):
             if dest.closesbranch() and not keepbranchesf:
                 ui.status(_('reopening closed branch head %s\n') % dest)
 
-        if keepbranchesf and collapsef:
-            branches = set()
-            for rev in state:
-                branches.add(repo[rev].branch())
-                if len(branches) > 1:
-                    raise error.Abort(_('cannot collapse multiple named '
-                                        'branches'))
+        if keepbranchesf:
+            # insert _savebranch at the start of extrafns so if
+            # there's a user-provided extrafn it can clobber branch if
+            # desired
+            extrafns.insert(0, _savebranch)
+            if collapsef:
+                branches = set()
+                for rev in state:
+                    branches.add(repo[rev].branch())
+                    if len(branches) > 1:
+                        raise error.Abort(_('cannot collapse multiple named '
+                            'branches'))
 
         # Rebase
         if not targetancestors:
@@ -605,10 +621,7 @@ def concludenode(repo, rev, p1, p2, commitmsg=None, editor=None, extrafn=None,
         if commitmsg is None:
             commitmsg = ctx.description()
         keepbranch = keepbranches and repo[p1].branch() != ctx.branch()
-        extra = ctx.extra().copy()
-        if not keepbranches:
-            del extra['branch']
-        extra['rebase_source'] = ctx.hex()
+        extra = {'rebase_source': ctx.hex()}
         if extrafn:
             extrafn(ctx, extra)
 
