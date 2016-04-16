@@ -46,16 +46,13 @@
 
   $ cat a
   Small Mathematical Series.
-  <<<<<<< local: 618808747361 - test: branch2
   1
   2
   3
+  <<<<<<< local: 618808747361 - test: branch2
   6
   8
   =======
-  1
-  2
-  3
   4
   5
   >>>>>>> other: c0c68e4fe667  - test: branch1
@@ -79,16 +76,13 @@ Verify custom conflict markers
 
   $ cat a
   Small Mathematical Series.
-  <<<<<<< local: test 2
   1
   2
   3
+  <<<<<<< local: test 2
   6
   8
   =======
-  1
-  2
-  3
   4
   5
   >>>>>>> other: test 1
@@ -108,16 +102,13 @@ Verify line splitting of custom conflict marker which causes multiple lines
 
   $ cat a
   Small Mathematical Series.
-  <<<<<<< local: test 2
   1
   2
   3
+  <<<<<<< local: test 2
   6
   8
   =======
-  1
-  2
-  3
   4
   5
   >>>>>>> other: test 1
@@ -150,16 +141,13 @@ Verify line trimming of custom conflict marker using multi-byte characters
 
   $ cat a
   Small Mathematical Series.
-  <<<<<<< local: 123456789012345678901234567890123456789012345678901234567890\xe3\x81\x82... (esc)
   1
   2
   3
+  <<<<<<< local: 123456789012345678901234567890123456789012345678901234567890\xe3\x81\x82... (esc)
   6
   8
   =======
-  1
-  2
-  3
   4
   5
   >>>>>>> other: branch1
@@ -179,16 +167,13 @@ Verify basic conflict markers
 
   $ cat a
   Small Mathematical Series.
-  <<<<<<< local
   1
   2
   3
+  <<<<<<< local
   6
   8
   =======
-  1
-  2
-  3
   4
   5
   >>>>>>> other
@@ -232,6 +217,7 @@ are merging, unlike :local and :other
 
   $ hg up -C
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
   $ printf "\n\nEnd of file\n" >> a
   $ hg ci -m "Add some stuff at the end"
   $ hg up -r 1
@@ -269,6 +255,7 @@ Now test :merge-other and :merge-local
 
   $ hg up -C
   1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  1 other heads for branch "default"
   $ hg merge --tool :merge-local
   merging a
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved

@@ -8,7 +8,6 @@
 
 '''setup for largefiles repositories: reposetup'''
 import copy
-import os
 
 from mercurial import error, match as match_, error
 from mercurial.i18n import _
@@ -305,7 +304,7 @@ def reposetup(ui, repo):
                         _('file "%s" is a largefile standin') % f,
                         hint=('commit the largefile itself instead'))
                 # Scan directories
-                if os.path.isdir(self.wjoin(f)):
+                if self.wvfs.isdir(f):
                     dirs.append(f)
                 else:
                     regulars.append(f)
@@ -353,12 +352,17 @@ def reposetup(ui, repo):
     # is used to write status out.
     repo._lfstatuswriters = [ui.status]
 
-    def prepushoutgoinghook(local, remote, outgoing):
-        if outgoing.missing:
+    def prepushoutgoinghook(pushop):
+        """Push largefiles for pushop before pushing revisions."""
+        lfrevs = pushop.lfrevs
+        if lfrevs is None:
+            lfrevs = pushop.outgoing.missing
+        if lfrevs:
             toupload = set()
             addfunc = lambda fn, lfhash: toupload.add(lfhash)
-            lfutil.getlfilestoupload(local, outgoing.missing, addfunc)
-            lfcommands.uploadlfiles(ui, local, remote, toupload)
+            lfutil.getlfilestoupload(pushop.repo, lfrevs,
+                                     addfunc)
+            lfcommands.uploadlfiles(ui, pushop.repo, pushop.remote, toupload)
     repo.prepushoutgoinghooks.add("largefiles", prepushoutgoinghook)
 
     def checkrequireslfiles(ui, repo, **kwargs):

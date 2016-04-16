@@ -325,6 +325,9 @@ class manifestdict(object):
     def iteritems(self):
         return (x[:2] for x in self._lm.iterentries())
 
+    def iterentries(self):
+        return self._lm.iterentries()
+
     def text(self, usemanifestv2=False):
         if usemanifestv2:
             return _textv2(self._lm.iterentries())
@@ -517,6 +520,15 @@ class treemanifest(object):
         self._node = node
         self._dirty = False
 
+    def iterentries(self):
+        self._load()
+        for p, n in sorted(self._dirs.items() + self._files.items()):
+            if p in self._files:
+                yield self._subpath(p), n, self._flags.get(p, '')
+            else:
+                for x in n.iterentries():
+                    yield x
+
     def iteritems(self):
         self._load()
         for p, n in sorted(self._dirs.items() + self._files.items()):
@@ -627,7 +639,6 @@ class treemanifest(object):
 
     def setflag(self, f, flags):
         """Set the flags (symlink, executable) for path f."""
-        assert 't' not in flags
         self._load()
         dir, subpath = _splittopdir(f)
         if dir:
@@ -849,9 +860,7 @@ class treemanifest(object):
     def text(self, usemanifestv2=False):
         """Get the full data of this manifest as a bytestring."""
         self._load()
-        flags = self.flags
-        return _text(((f, self[f], flags(f)) for f in self.keys()),
-                     usemanifestv2)
+        return _text(self.iterentries(), usemanifestv2)
 
     def dirtext(self, usemanifestv2=False):
         """Get the full data of this directory as a bytestring. Make sure that
@@ -920,7 +929,8 @@ class manifest(revlog.revlog):
         return manifestdict(data)
 
     def dirlog(self, dir):
-        assert self._treeondisk
+        if dir:
+            assert self._treeondisk
         if dir not in self._dirlogcache:
             self._dirlogcache[dir] = manifest(self.opener, dir,
                                               self._dirlogcache)
@@ -945,6 +955,22 @@ class manifest(revlog.revlog):
         d = mdiff.patchtext(self.revdiff(self.deltaparent(r), r))
         return self._newmanifest(d)
 
+    def readshallowdelta(self, node):
+        '''For flat manifests, this is the same as readdelta(). For
+        treemanifests, this will read the delta for this revlog's directory,
+        without recursively reading subdirectory manifests. Instead, any
+        subdirectory entry will be reported as it appears in the manifests, i.e.
+        the subdirectory will be reported among files and distinguished only by
+        its 't' flag.'''
+        if not self._treeondisk:
+            return self.readdelta(node)
+        if self._usemanifestv2:
+            raise error.Abort(
+                "readshallowdelta() not implemented for manifestv2")
+        r = self.rev(node)
+        d = mdiff.patchtext(self.revdiff(self.deltaparent(r), r))
+        return manifestdict(d)
+
     def readfast(self, node):
         '''use the faster of readdelta or read
 
@@ -958,6 +984,15 @@ class manifest(revlog.revlog):
         if deltaparent != revlog.nullrev and deltaparent in self.parentrevs(r):
             return self.readdelta(node)
         return self.read(node)
+
+    def readshallowfast(self, node):
+        '''like readfast(), but calls readshallowdelta() instead of readdelta()
+        '''
+        r = self.rev(node)
+        deltaparent = self.deltaparent(r)
+        if deltaparent != revlog.nullrev and deltaparent in self.parentrevs(r):
+            return self.readshallowdelta(node)
+        return self.readshallow(node)
 
     def read(self, node):
         if node == revlog.nullid:
@@ -979,6 +1014,13 @@ class manifest(revlog.revlog):
             arraytext = array.array('c', text)
         self._mancache[node] = (m, arraytext)
         return m
+
+    def readshallow(self, node):
+        '''Reads the manifest in this directory. When using flat manifests,
+        this manifest will generally have files in subdirectories in it. Does
+        not cache the manifest as the callers generally do not read the same
+        version twice.'''
+        return manifestdict(self.revision(node))
 
     def find(self, node, f):
         '''look up entry for a single file efficiently.

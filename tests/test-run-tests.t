@@ -21,6 +21,36 @@ Define a helper to avoid the install step
   >     run-tests.py --with-hg=`which hg` "$@"
   > }
 
+error paths
+
+#if symlink
+  $ ln -s `which true` hg
+  $ run-tests.py --with-hg=./hg
+  warning: --with-hg should specify an hg script
+  
+  # Ran 0 tests, 0 skipped, 0 warned, 0 failed.
+  $ rm hg
+#endif
+
+#if execbit
+  $ touch hg
+  $ run-tests.py --with-hg=./hg
+  Usage: run-tests.py [options] [tests]
+  
+  run-tests.py: error: --with-hg must specify an executable hg script
+  [2]
+  $ rm hg
+#endif
+
+an empty test
+=======================
+
+  $ touch test-empty.t
+  $ rt
+  .
+  # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
+  $ rm test-empty.t
+
 a succesful test
 =======================
 
@@ -28,9 +58,15 @@ a succesful test
   >   $ echo babar
   >   babar
   >   $ echo xyzzy
-  >   never happens (?)
+  >   never*happens (glob) (?)
   >   xyzzy
   >   nor this (?)
+  >   $ printf 'abc\ndef\nxyz\n'
+  >   123 (?)
+  >   abc
+  >   def (?)
+  >   456 (?)
+  >   xyz
   > EOF
 
   $ rt
@@ -40,11 +76,37 @@ a succesful test
 failing test
 ==================
 
+test churn with globs
+  $ cat > test-failure.t <<EOF
+  >   $ echo "bar-baz"; echo "bar-bad"
+  >   bar*bad (glob)
+  >   bar*baz (glob)
+  > EOF
+  $ rt test-failure.t
+  
+  --- $TESTTMP/test-failure.t
+  +++ $TESTTMP/test-failure.t.err
+  @@ -1,3 +1,3 @@
+     $ echo "bar-baz"; echo "bar-bad"
+  +  bar*baz (glob)
+     bar*bad (glob)
+  -  bar*baz (glob)
+  
+  ERROR: test-failure.t output changed
+  !
+  Failed test-failure.t: output changed
+  # Ran 1 tests, 0 skipped, 0 warned, 1 failed.
+  python hash seed: * (glob)
+  [1]
+
+basic failing test
   $ cat > test-failure.t << EOF
   >   $ echo babar
   >   rataxes
   > This is a noop statement so that
   > this test is still more bytes than success.
+  > pad pad pad pad............................................................
+  > pad pad pad pad............................................................
   > EOF
 
   >>> fh = open('test-failure-unicode.t', 'wb')
@@ -55,12 +117,13 @@ failing test
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
-  @@ -1,4 +1,4 @@
+  @@ -1,5 +1,5 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+   pad pad pad pad............................................................
   
   ERROR: test-failure.t output changed
   !.
@@ -84,12 +147,13 @@ test --xunit support
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
-  @@ -1,4 +1,4 @@
+  @@ -1,5 +1,5 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+   pad pad pad pad............................................................
   
   ERROR: test-failure.t output changed
   !.
@@ -122,12 +186,13 @@ test --xunit support
     <testcase name="test-failure.t" time="*"> (glob)
   <![CDATA[--- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
-  @@ -1,4 +1,4 @@
+  @@ -1,5 +1,5 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+   pad pad pad pad............................................................
   ]]>  </testcase>
   </testsuite>
 
@@ -140,12 +205,13 @@ test for --retest
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
-  @@ -1,4 +1,4 @@
+  @@ -1,5 +1,5 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+   pad pad pad pad............................................................
   
   ERROR: test-failure.t output changed
   !
@@ -174,12 +240,13 @@ failed
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
-  @@ -1,4 +1,4 @@
+  @@ -1,5 +1,5 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+   pad pad pad pad............................................................
   
   ERROR: test-failure.t output changed
   !
@@ -193,12 +260,13 @@ failure w/ keyword
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
-  @@ -1,4 +1,4 @@
+  @@ -1,5 +1,5 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+   pad pad pad pad............................................................
   
   ERROR: test-failure.t output changed
   !
@@ -245,8 +313,8 @@ Running In Debug Mode
   *SALT* 0 0 (glob)
   + echo babar
   babar
-  + echo *SALT* 4 0 (glob)
-  *SALT* 4 0 (glob)
+  + echo *SALT* 6 0 (glob)
+  *SALT* 6 0 (glob)
   *+ echo *SALT* 0 0 (glob)
   *SALT* 0 0 (glob)
   + echo babar
@@ -257,6 +325,12 @@ Running In Debug Mode
   xyzzy
   + echo *SALT* 6 0 (glob)
   *SALT* 6 0 (glob)
+  + printf *abc\ndef\nxyz\n* (glob)
+  abc
+  def
+  xyz
+  + echo *SALT* 12 0 (glob)
+  *SALT* 12 0 (glob)
   .
   # Ran 2 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -282,12 +356,13 @@ failures in parallel with --first should only print one failure
   
   --- $TESTTMP/test-failure*.t (glob)
   +++ $TESTTMP/test-failure*.t.err (glob)
-  @@ -1,4 +1,4 @@
+  @@ -1,5 +1,5 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+   pad pad pad pad............................................................
   
   Failed test-failure*.t: output changed (glob)
   Failed test-nothing.t: output changed
@@ -312,12 +387,13 @@ Refuse the fix
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
-  @@ -1,4 +1,4 @@
+  @@ -1,5 +1,5 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+   pad pad pad pad............................................................
   Accept this change? [n] 
   ERROR: test-failure.t output changed
   !.
@@ -331,6 +407,8 @@ Refuse the fix
     rataxes
   This is a noop statement so that
   this test is still more bytes than success.
+  pad pad pad pad............................................................
+  pad pad pad pad............................................................
 
 Interactive with custom view
 
@@ -368,12 +446,14 @@ Accept the fix
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
-  @@ -1,9 +1,9 @@
+  @@ -1,11 +1,11 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+   pad pad pad pad............................................................
+   pad pad pad pad............................................................
      $ echo 'saved backup bundle to $TESTTMP/foo.hg'
   -  saved backup bundle to $TESTTMP/foo.hg
   +  saved backup bundle to $TESTTMP/foo.hg* (glob)
@@ -388,6 +468,8 @@ Accept the fix
     babar
   This is a noop statement so that
   this test is still more bytes than success.
+  pad pad pad pad............................................................
+  pad pad pad pad............................................................
     $ echo 'saved backup bundle to $TESTTMP/foo.hg'
     saved backup bundle to $TESTTMP/foo.hg (glob)<
     $ echo 'saved backup bundle to $TESTTMP/foo.hg'
@@ -509,8 +591,6 @@ Missing skips or blacklisted skips don't count as executed:
           "result": "skip"
       }
   } (no-eol)
-#if json
-
 test for --json
 ==================
 
@@ -518,12 +598,13 @@ test for --json
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
-  @@ -1,4 +1,4 @@
+  @@ -1,5 +1,5 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+   pad pad pad pad............................................................
   
   ERROR: test-failure.t output changed
   !.s
@@ -571,12 +652,13 @@ Test that failed test accepted through interactive are properly reported:
   
   --- $TESTTMP/test-failure.t
   +++ $TESTTMP/test-failure.t.err
-  @@ -1,4 +1,4 @@
+  @@ -1,5 +1,5 @@
      $ echo babar
   -  rataxes
   +  babar
    This is a noop statement so that
    this test is still more bytes than success.
+   pad pad pad pad............................................................
   Accept this change? [n] ..s
   Skipped test-skip.t: missing feature: nail clipper
   # Ran 2 tests, 1 skipped, 0 warned, 0 failed.
@@ -613,8 +695,6 @@ Test that failed test accepted through interactive are properly reported:
   } (no-eol)
   $ mv backup test-failure.t
 
-#endif
-
 backslash on end of line with glob matching is handled properly
 
   $ cat > test-glob-backslash.t << EOF
@@ -642,7 +722,7 @@ Mercurial source tree.
   >   $ echo foo
   >   foo
   > EOF
-  $ rt $HGTEST_RUN_TESTS_PURE test-hghave.t
+  $ rt test-hghave.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -665,7 +745,7 @@ running is placed.
   >   #
   >   # check-code - a style and portability checker for Mercurial
   > EOF
-  $ rt $HGTEST_RUN_TESTS_PURE test-runtestdir.t
+  $ rt test-runtestdir.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -682,7 +762,7 @@ test that TESTDIR is referred in PATH
   >   $ custom-command.sh
   >   hello world
   > EOF
-  $ rt $HGTEST_RUN_TESTS_PURE test-testdir-path.t
+  $ rt test-testdir-path.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
@@ -694,10 +774,53 @@ test support for --allow-slow-tests
   >   $ echo pass
   >   pass
   > EOF
-  $ rt $HGTEST_RUN_TESTS_PURE test-very-slow-test.t
+  $ rt test-very-slow-test.t
   s
   Skipped test-very-slow-test.t: missing feature: allow slow tests
   # Ran 0 tests, 1 skipped, 0 warned, 0 failed.
   $ rt $HGTEST_RUN_TESTS_PURE --allow-slow-tests test-very-slow-test.t
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
+
+support for running a test outside the current directory
+  $ mkdir nonlocal
+  $ cat > nonlocal/test-is-not-here.t << EOF
+  >   $ echo pass
+  >   pass
+  > EOF
+  $ rt nonlocal/test-is-not-here.t
+  .
+  # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
+
+support for bisecting failed tests automatically
+  $ hg init bisect
+  $ cd bisect
+  $ cat >> test-bisect.t <<EOF
+  >   $ echo pass
+  >   pass
+  > EOF
+  $ hg add test-bisect.t
+  $ hg ci -m 'good'
+  $ cat >> test-bisect.t <<EOF
+  >   $ echo pass
+  >   fail
+  > EOF
+  $ hg ci -m 'bad'
+  $ rt --known-good-rev=0 test-bisect.t
+  
+  --- $TESTTMP/anothertests/bisect/test-bisect.t
+  +++ $TESTTMP/anothertests/bisect/test-bisect.t.err
+  @@ -1,4 +1,4 @@
+     $ echo pass
+     pass
+     $ echo pass
+  -  fail
+  +  pass
+  
+  ERROR: test-bisect.t output changed
+  !
+  Failed test-bisect.t: output changed
+  test-bisect.t broken by 72cbf122d116 (bad)
+  # Ran 1 tests, 0 skipped, 0 warned, 1 failed.
+  python hash seed: * (glob)
+  [1]

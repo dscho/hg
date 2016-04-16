@@ -1,3 +1,5 @@
+#require killdaemons
+
   $ cat << EOF >> $HGRCPATH
   > [format]
   > usegeneraldelta=yes
@@ -361,13 +363,20 @@ Pushing to an empty repo works
   added 11 changesets with 15 changes to 10 files (+3 heads)
   $ grep treemanifest clone/.hg/requires
   treemanifest
+  $ hg -R clone verify
+  checking changesets
+  checking manifests
+  checking directory manifests
+  crosschecking files in changesets and manifests
+  checking files
+  10 files, 11 changesets, 15 total revisions
 
 Create deeper repo with tree manifests.
 
   $ hg --config experimental.treemanifest=True init deeprepo
   $ cd deeprepo
 
-  $ mkdir a
+  $ mkdir .A
   $ mkdir b
   $ mkdir b/bar
   $ mkdir b/bar/orange
@@ -376,8 +385,8 @@ Create deeper repo with tree manifests.
   $ mkdir b/foo/apple
   $ mkdir b/foo/apple/bees
 
-  $ touch a/one.txt
-  $ touch a/two.txt
+  $ touch .A/one.txt
+  $ touch .A/two.txt
   $ touch b/bar/fruits.txt
   $ touch b/bar/orange/fly/gnat.py
   $ touch b/bar/orange/fly/housefly.txt
@@ -393,8 +402,8 @@ the files command with various parameters.
 Test files from the root.
 
   $ hg files -r .
-  a/one.txt (glob)
-  a/two.txt (glob)
+  .A/one.txt (glob)
+  .A/two.txt (glob)
   b/bar/fruits.txt (glob)
   b/bar/orange/fly/gnat.py (glob)
   b/bar/orange/fly/housefly.txt (glob)
@@ -408,61 +417,56 @@ Excludes with a glob should not exclude everything from the glob's root
   b/bar/fruits.txt (glob)
   b/bar/orange/fly/gnat.py (glob)
   b/bar/orange/fly/housefly.txt (glob)
+  $ cp -r .hg/store .hg/store-copy
 
 Test files for a subdirectory.
 
-  $ mv .hg/store/meta/a oldmf
+  $ rm -r .hg/store/meta/~2e_a
   $ hg files -r . b
   b/bar/fruits.txt (glob)
   b/bar/orange/fly/gnat.py (glob)
   b/bar/orange/fly/housefly.txt (glob)
   b/foo/apple/bees/flower.py (glob)
-  $ mv oldmf .hg/store/meta/a
+  $ cp -r .hg/store-copy/. .hg/store
 
 Test files with just includes and excludes.
 
-  $ mv .hg/store/meta/a oldmf
-  $ mv .hg/store/meta/b/bar/orange/fly oldmf2
-  $ mv .hg/store/meta/b/foo/apple/bees oldmf3
+  $ rm -r .hg/store/meta/~2e_a
+  $ rm -r .hg/store/meta/b/bar/orange/fly
+  $ rm -r .hg/store/meta/b/foo/apple/bees
   $ hg files -r . -I path:b/bar -X path:b/bar/orange/fly -I path:b/foo -X path:b/foo/apple/bees
   b/bar/fruits.txt (glob)
-  $ mv oldmf .hg/store/meta/a
-  $ mv oldmf2 .hg/store/meta/b/bar/orange/fly
-  $ mv oldmf3 .hg/store/meta/b/foo/apple/bees
+  $ cp -r .hg/store-copy/. .hg/store
 
 Test files for a subdirectory, excluding a directory within it.
 
-  $ mv .hg/store/meta/a oldmf
-  $ mv .hg/store/meta/b/foo oldmf2
+  $ rm -r .hg/store/meta/~2e_a
+  $ rm -r .hg/store/meta/b/foo
   $ hg files -r . -X path:b/foo b
   b/bar/fruits.txt (glob)
   b/bar/orange/fly/gnat.py (glob)
   b/bar/orange/fly/housefly.txt (glob)
-  $ mv oldmf .hg/store/meta/a
-  $ mv oldmf2 .hg/store/meta/b/foo
+  $ cp -r .hg/store-copy/. .hg/store
 
 Test files for a sub directory, including only a directory within it, and
 including an unrelated directory.
 
-  $ mv .hg/store/meta/a oldmf
-  $ mv .hg/store/meta/b/foo oldmf2
+  $ rm -r .hg/store/meta/~2e_a
+  $ rm -r .hg/store/meta/b/foo
   $ hg files -r . -I path:b/bar/orange -I path:a b
   b/bar/orange/fly/gnat.py (glob)
   b/bar/orange/fly/housefly.txt (glob)
-  $ mv oldmf .hg/store/meta/a
-  $ mv oldmf2 .hg/store/meta/b/foo
+  $ cp -r .hg/store-copy/. .hg/store
 
 Test files for a pattern, including a directory, and excluding a directory
 within that.
 
-  $ mv .hg/store/meta/a oldmf
-  $ mv .hg/store/meta/b/foo oldmf2
-  $ mv .hg/store/meta/b/bar/orange oldmf3
+  $ rm -r .hg/store/meta/~2e_a
+  $ rm -r .hg/store/meta/b/foo
+  $ rm -r .hg/store/meta/b/bar/orange
   $ hg files -r . glob:**.txt -I path:b/bar -X path:b/bar/orange
   b/bar/fruits.txt (glob)
-  $ mv oldmf .hg/store/meta/a
-  $ mv oldmf2 .hg/store/meta/b/foo
-  $ mv oldmf3 .hg/store/meta/b/bar/orange
+  $ cp -r .hg/store-copy/. .hg/store
 
 Add some more changes to the deep repo
   $ echo narf >> b/bar/fruits.txt
@@ -470,14 +474,108 @@ Add some more changes to the deep repo
   $ echo troz >> b/bar/orange/fly/gnat.py
   $ hg ci -m troz
 
+Verify works
+  $ hg verify
+  checking changesets
+  checking manifests
+  checking directory manifests
+  crosschecking files in changesets and manifests
+  checking files
+  8 files, 3 changesets, 10 total revisions
+
+Dirlogs are included in fncache
+  $ grep meta/.A/00manifest.i .hg/store/fncache
+  meta/.A/00manifest.i
+
+Rebuilt fncache includes dirlogs
+  $ rm .hg/store/fncache
+  $ hg debugrebuildfncache
+  adding data/.A/one.txt.i
+  adding data/.A/two.txt.i
+  adding data/b/bar/fruits.txt.i
+  adding data/b/bar/orange/fly/gnat.py.i
+  adding data/b/bar/orange/fly/housefly.txt.i
+  adding data/b/foo/apple/bees/flower.py.i
+  adding data/c.txt.i
+  adding data/d.py.i
+  adding meta/.A/00manifest.i
+  adding meta/b/00manifest.i
+  adding meta/b/bar/00manifest.i
+  adding meta/b/bar/orange/00manifest.i
+  adding meta/b/bar/orange/fly/00manifest.i
+  adding meta/b/foo/00manifest.i
+  adding meta/b/foo/apple/00manifest.i
+  adding meta/b/foo/apple/bees/00manifest.i
+  16 items added, 0 removed from fncache
+
+Finish first server
+  $ killdaemons.py
+
+Back up the recently added revlogs
+  $ cp -r .hg/store .hg/store-newcopy
+
+Verify reports missing dirlog
+  $ rm .hg/store/meta/b/00manifest.*
+  $ hg verify
+  checking changesets
+  checking manifests
+  checking directory manifests
+   0: empty or missing b/
+   b/@0: parent-directory manifest refers to unknown revision 67688a370455
+   b/@1: parent-directory manifest refers to unknown revision f38e85d334c5
+   b/@2: parent-directory manifest refers to unknown revision 99c9792fd4b0
+  warning: orphan revlog 'meta/b/bar/00manifest.i'
+  warning: orphan revlog 'meta/b/bar/orange/00manifest.i'
+  warning: orphan revlog 'meta/b/bar/orange/fly/00manifest.i'
+  warning: orphan revlog 'meta/b/foo/00manifest.i'
+  warning: orphan revlog 'meta/b/foo/apple/00manifest.i'
+  warning: orphan revlog 'meta/b/foo/apple/bees/00manifest.i'
+  crosschecking files in changesets and manifests
+   b/bar/fruits.txt@0: in changeset but not in manifest
+   b/bar/orange/fly/gnat.py@0: in changeset but not in manifest
+   b/bar/orange/fly/housefly.txt@0: in changeset but not in manifest
+   b/foo/apple/bees/flower.py@0: in changeset but not in manifest
+  checking files
+  8 files, 3 changesets, 10 total revisions
+  6 warnings encountered!
+  8 integrity errors encountered!
+  (first damaged changeset appears to be 0)
+  [1]
+  $ cp -r .hg/store-newcopy/. .hg/store
+
+Verify reports missing dirlog entry
+  $ mv -f .hg/store-copy/meta/b/00manifest.* .hg/store/meta/b/
+  $ hg verify
+  checking changesets
+  checking manifests
+  checking directory manifests
+   b/@1: parent-directory manifest refers to unknown revision f38e85d334c5
+   b/@2: parent-directory manifest refers to unknown revision 99c9792fd4b0
+   b/bar/@?: rev 1 points to unexpected changeset 1
+   b/bar/@?: 5e03c4ee5e4a not in parent-directory manifest
+   b/bar/@?: rev 2 points to unexpected changeset 2
+   b/bar/@?: 1b16940d66d6 not in parent-directory manifest
+   b/bar/orange/@?: rev 1 points to unexpected changeset 2
+   (expected None)
+   b/bar/orange/fly/@?: rev 1 points to unexpected changeset 2
+   (expected None)
+  crosschecking files in changesets and manifests
+  checking files
+  8 files, 3 changesets, 10 total revisions
+  2 warnings encountered!
+  8 integrity errors encountered!
+  (first damaged changeset appears to be 1)
+  [1]
+  $ cp -r .hg/store-newcopy/. .hg/store
+
 Test cloning a treemanifest repo over http.
-  $ hg serve -p $HGPORT2 -d --pid-file=hg.pid --errorlog=errors.log
+  $ hg serve -p $HGPORT -d --pid-file=hg.pid --errorlog=errors.log
   $ cat hg.pid >> $DAEMON_PIDS
   $ cd ..
 We can clone even with the knob turned off and we'll get a treemanifest repo.
   $ hg clone --config experimental.treemanifest=False \
   >   --config experimental.changegroup3=True \
-  >   http://localhost:$HGPORT2 deepclone
+  >   http://localhost:$HGPORT deepclone
   requesting all changes
   adding changesets
   adding manifests
@@ -493,8 +591,6 @@ requires got updated to include treemanifest
 Tree manifest revlogs exist.
   $ find deepclone/.hg/store/meta | sort
   deepclone/.hg/store/meta
-  deepclone/.hg/store/meta/a
-  deepclone/.hg/store/meta/a/00manifest.i
   deepclone/.hg/store/meta/b
   deepclone/.hg/store/meta/b/00manifest.i
   deepclone/.hg/store/meta/b/bar
@@ -509,12 +605,140 @@ Tree manifest revlogs exist.
   deepclone/.hg/store/meta/b/foo/apple/00manifest.i
   deepclone/.hg/store/meta/b/foo/apple/bees
   deepclone/.hg/store/meta/b/foo/apple/bees/00manifest.i
+  deepclone/.hg/store/meta/~2e_a
+  deepclone/.hg/store/meta/~2e_a/00manifest.i
 Verify passes.
   $ cd deepclone
   $ hg verify
   checking changesets
   checking manifests
+  checking directory manifests
   crosschecking files in changesets and manifests
   checking files
   8 files, 3 changesets, 10 total revisions
   $ cd ..
+
+Create clones using old repo formats to use in later tests
+  $ hg clone --config format.usestore=False \
+  >   --config experimental.changegroup3=True \
+  >   http://localhost:$HGPORT deeprepo-basicstore
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 3 changesets with 10 changes to 8 files
+  updating to branch default
+  8 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ cd deeprepo-basicstore
+  $ grep store .hg/requires
+  [1]
+  $ hg serve -p $HGPORT1 -d --pid-file=hg.pid --errorlog=errors.log
+  $ cat hg.pid >> $DAEMON_PIDS
+  $ cd ..
+  $ hg clone --config format.usefncache=False \
+  >   --config experimental.changegroup3=True \
+  >   http://localhost:$HGPORT deeprepo-encodedstore
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 3 changesets with 10 changes to 8 files
+  updating to branch default
+  8 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ cd deeprepo-encodedstore
+  $ grep fncache .hg/requires
+  [1]
+  $ hg serve -p $HGPORT2 -d --pid-file=hg.pid --errorlog=errors.log
+  $ cat hg.pid >> $DAEMON_PIDS
+  $ cd ..
+
+Local clone with basicstore
+  $ hg clone -U deeprepo-basicstore local-clone-basicstore
+  $ hg -R local-clone-basicstore verify
+  checking changesets
+  checking manifests
+  checking directory manifests
+  crosschecking files in changesets and manifests
+  checking files
+  8 files, 3 changesets, 10 total revisions
+
+Local clone with encodedstore
+  $ hg clone -U deeprepo-encodedstore local-clone-encodedstore
+  $ hg -R local-clone-encodedstore verify
+  checking changesets
+  checking manifests
+  checking directory manifests
+  crosschecking files in changesets and manifests
+  checking files
+  8 files, 3 changesets, 10 total revisions
+
+Local clone with fncachestore
+  $ hg clone -U deeprepo local-clone-fncachestore
+  $ hg -R local-clone-fncachestore verify
+  checking changesets
+  checking manifests
+  checking directory manifests
+  crosschecking files in changesets and manifests
+  checking files
+  8 files, 3 changesets, 10 total revisions
+
+Stream clone with basicstore
+  $ hg clone --config experimental.changegroup3=True --uncompressed -U \
+  >   http://localhost:$HGPORT1 stream-clone-basicstore
+  streaming all changes
+  18 files to transfer, * of data (glob)
+  transferred * in * seconds (*) (glob)
+  searching for changes
+  no changes found
+  $ hg -R stream-clone-basicstore verify
+  checking changesets
+  checking manifests
+  checking directory manifests
+  crosschecking files in changesets and manifests
+  checking files
+  8 files, 3 changesets, 10 total revisions
+
+Stream clone with encodedstore
+  $ hg clone --config experimental.changegroup3=True --uncompressed -U \
+  >   http://localhost:$HGPORT2 stream-clone-encodedstore
+  streaming all changes
+  18 files to transfer, * of data (glob)
+  transferred * in * seconds (*) (glob)
+  searching for changes
+  no changes found
+  $ hg -R stream-clone-encodedstore verify
+  checking changesets
+  checking manifests
+  checking directory manifests
+  crosschecking files in changesets and manifests
+  checking files
+  8 files, 3 changesets, 10 total revisions
+
+Stream clone with fncachestore
+  $ hg clone --config experimental.changegroup3=True --uncompressed -U \
+  >   http://localhost:$HGPORT stream-clone-fncachestore
+  streaming all changes
+  18 files to transfer, * of data (glob)
+  transferred * in * seconds (*) (glob)
+  searching for changes
+  no changes found
+  $ hg -R stream-clone-fncachestore verify
+  checking changesets
+  checking manifests
+  checking directory manifests
+  crosschecking files in changesets and manifests
+  checking files
+  8 files, 3 changesets, 10 total revisions
+
+Packed bundle
+  $ hg -R deeprepo debugcreatestreamclonebundle repo-packed.hg
+  writing 3349 bytes for 18 files
+  bundle requirements: generaldelta, revlogv1, treemanifest
+  $ hg debugbundle --spec repo-packed.hg
+  none-packed1;requirements%3Dgeneraldelta%2Crevlogv1%2Ctreemanifest
+
+Bundle with changegroup2 is not supported
+
+  $ hg -R deeprepo bundle --all -t v2 deeprepo.bundle
+  abort: repository does not support bundle version 02
+  [255]

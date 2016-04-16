@@ -63,14 +63,27 @@ overwritten by command line flags like --intro and --desc::
 You can set patchbomb to always ask for confirmation by setting
 ``patchbomb.confirm`` to true.
 '''
+from __future__ import absolute_import
 
-import os, errno, socket, tempfile, cStringIO
 import email as emailmod
+import errno
+import os
+import socket
+import tempfile
 
-from mercurial import cmdutil, commands, hg, mail, patch, util, error
-from mercurial import scmutil
+from mercurial import (
+    cmdutil,
+    commands,
+    error,
+    hg,
+    mail,
+    node as nodemod,
+    patch,
+    scmutil,
+    util,
+)
+stringio = util.stringio
 from mercurial.i18n import _
-from mercurial.node import bin
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
@@ -167,7 +180,7 @@ def makepatch(ui, repo, patchlines, opts, _charsets, idx, total, numbered,
             msg.attach(mail.mimeencode(ui, body, _charsets, opts.get('test')))
         p = mail.mimetextpatch('\n'.join(patchlines), 'x-patch',
                                opts.get('test'))
-        binnode = bin(node)
+        binnode = nodemod.bin(node)
         # if node is mq patch, it will have the patch file's name as a tag
         if not patchname:
             patchtags = [t for t in repo.nodetags(binnode)
@@ -215,7 +228,7 @@ def _getpatches(repo, revs, **opts):
         if r == prev and (repo[None].files() or repo[None].deleted()):
             ui.warn(_('warning: working directory has '
                       'uncommitted changes\n'))
-        output = cStringIO.StringIO()
+        output = stringio()
         cmdutil.export(repo, [r], fp=output,
                      opts=patch.difffeatureopts(ui, opts, git=True))
         yield output.getvalue().split('\n')
@@ -557,7 +570,7 @@ def email(ui, repo, *revs, **opts):
                 else:
                     msg = _('public url %s is missing %s')
                     msg %= (publicurl, missing[0])
-                revhint = ''.join('-r %s' % h
+                revhint = ' '.join('-r %s' % h
                                   for h in repo.set('heads(%ld)', missing))
                 hint = _('use "hg push %s %s"') % (publicurl, revhint)
                 raise error.Abort(msg, hint=hint)
@@ -703,11 +716,12 @@ def email(ui, repo, *revs, **opts):
                 finally:
                     ui.setconfig('smtp', 'verifycert', verifycert, 'patchbomb')
             ui.status(_('sending '), subj, ' ...\n')
-            ui.progress(_('sending'), i, item=subj, total=len(msgs))
+            ui.progress(_('sending'), i, item=subj, total=len(msgs),
+                        unit=_('emails'))
             if not mbox:
                 # Exim does not remove the Bcc field
                 del m['Bcc']
-            fp = cStringIO.StringIO()
+            fp = stringio()
             generator = emailmod.Generator.Generator(fp, mangle_from_=False)
             generator.flatten(m, 0)
             sendmail(sender_addr, to + bcc + cc, fp.getvalue())

@@ -5,18 +5,47 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-from node import hex, bin, nullid, nullrev, short
-from i18n import _
-import os, sys, errno, re, tempfile, cStringIO
-import util, scmutil, templater, patch, error, templatekw, revlog, copies
-import match as matchmod
-import repair, graphmod, revset, phases, obsolete, pathutil
-import changelog
-import bookmarks
-import encoding
-import formatter
-import crecord as crecordmod
-import lock as lockmod
+from __future__ import absolute_import
+
+import errno
+import os
+import re
+import sys
+import tempfile
+
+from .i18n import _
+from .node import (
+    bin,
+    hex,
+    nullid,
+    nullrev,
+    short,
+)
+
+from . import (
+    bookmarks,
+    changelog,
+    copies,
+    crecord as crecordmod,
+    encoding,
+    error,
+    formatter,
+    graphmod,
+    lock as lockmod,
+    match as matchmod,
+    obsolete,
+    patch,
+    pathutil,
+    phases,
+    repair,
+    revlog,
+    revset,
+    scmutil,
+    templatekw,
+    templater,
+    util,
+)
+stringio = util.stringio
 
 def ishunk(x):
     hunkclasses = (crecordmod.uihunk, patch.recordhunk)
@@ -78,8 +107,7 @@ def recordfilter(ui, originalhunks, operation=None):
 
 def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
             filterfn, *pats, **opts):
-    import merge as mergemod
-
+    from . import merge as mergemod
     if not ui.interactive():
         if cmdsuggest:
             msg = _('running non-interactively, use %s instead') % cmdsuggest
@@ -107,12 +135,24 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
         """
 
         checkunfinished(repo, commit=True)
-        merge = len(repo[None].parents()) > 1
+        wctx = repo[None]
+        merge = len(wctx.parents()) > 1
         if merge:
             raise error.Abort(_('cannot partially commit a merge '
                                '(use "hg commit" instead)'))
 
+        def fail(f, msg):
+            raise error.Abort('%s: %s' % (f, msg))
+
+        force = opts.get('force')
+        if not force:
+            vdirs = []
+            match.explicitdir = vdirs.append
+            match.bad = fail
+
         status = repo.status(match=match)
+        if not force:
+            repo.checkcommitpatterns(wctx, vdirs, match, status, fail)
         diffopts = patch.difffeatureopts(ui, opts=opts, whitespace=True)
         diffopts.nodates = True
         diffopts.git = True
@@ -120,7 +160,7 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
         originaldiff = patch.diff(repo, changes=status, opts=diffopts)
         originalchunks = patch.parsepatch(originaldiff)
 
-        # 1. filter patch, so we have intending-to apply subset of it
+        # 1. filter patch, since we are intending to apply subset of it
         try:
             chunks, newopts = filterfn(ui, originalchunks)
         except patch.PatchError as err:
@@ -171,13 +211,24 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall,
                 util.copyfile(repo.wjoin(f), tmpname, copystat=True)
                 backups[f] = tmpname
 
-            fp = cStringIO.StringIO()
+            fp = stringio()
             for c in chunks:
                 fname = c.filename()
                 if fname in backups:
                     c.write(fp)
             dopatch = fp.tell()
             fp.seek(0)
+
+            # 2.5 optionally review / modify patch in text editor
+            if opts.get('review', False):
+                patchtext = (crecordmod.diffhelptext
+                             + crecordmod.patchhelptext
+                             + fp.read())
+                reviewedpatch = ui.edit(patchtext, "",
+                                        extra={"suffix": ".diff"})
+                fp.truncate(0)
+                fp.write(reviewedpatch)
+                fp.seek(0)
 
             [os.unlink(repo.wjoin(c)) for c in newlyaddedandmodifiedfiles]
             # 3a. apply filtered patch to clean repo  (clean)
@@ -758,14 +809,14 @@ def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
             fp.write(str(pid) + '\n')
             fp.close()
 
-    if opts['daemon'] and not opts['daemon_pipefds']:
+    if opts['daemon'] and not opts['daemon_postexec']:
         # Signal child process startup with file removal
         lockfd, lockpath = tempfile.mkstemp(prefix='hg-service-')
         os.close(lockfd)
         try:
             if not runargs:
                 runargs = util.hgcmd() + sys.argv[1:]
-            runargs.append('--daemon-pipefds=%s' % lockpath)
+            runargs.append('--daemon-postexec=unlink:%s' % lockpath)
             # Don't pass --cwd to the child process, because we've already
             # changed directory.
             for i in xrange(1, len(runargs)):
@@ -796,15 +847,22 @@ def service(opts, parentfn=None, initfn=None, runfn=None, logfile=None,
         initfn()
 
     if not opts['daemon']:
-        writepid(os.getpid())
+        writepid(util.getpid())
 
-    if opts['daemon_pipefds']:
-        lockpath = opts['daemon_pipefds']
+    if opts['daemon_postexec']:
         try:
             os.setsid()
         except AttributeError:
             pass
-        os.unlink(lockpath)
+        for inst in opts['daemon_postexec']:
+            if inst.startswith('unlink:'):
+                lockpath = inst[7:]
+                os.unlink(lockpath)
+            elif inst.startswith('chdir:'):
+                os.chdir(inst[6:])
+            elif inst != 'none':
+                raise error.Abort(_('invalid value for --daemon-postexec: %s')
+                                  % inst)
         util.hidewindow()
         sys.stdout.flush()
         sys.stderr.flush()
@@ -863,7 +921,7 @@ def tryimportone(ui, repo, hunk, parents, opts, msgs, updatefunc):
                  updatefunc(<repo>, <node>)
     """
     # avoid cycle context -> subrepo -> cmdutil
-    import context
+    from . import context
     extractdata = patch.extract(ui, hunk)
     tmpname = extractdata.get('filename')
     message = extractdata.get('message')
@@ -1142,7 +1200,7 @@ def diffordiffstat(ui, repo, diffopts, node1, node2, match,
                 # node2 (inclusive). Thus, ctx2's substate won't contain that
                 # subpath. The best we can do is to ignore it.
                 tempnode2 = None
-            submatch = matchmod.narrowmatcher(subpath, match)
+            submatch = matchmod.subdirmatcher(subpath, match)
             sub.diff(ui, diffopts, tempnode2, submatch, changes=changes,
                      stat=stat, fp=fp, prefix=prefix)
 
@@ -1217,10 +1275,10 @@ class changeset_printer(object):
             self.ui.write(_("branch:      %s\n") % branch,
                           label='log.branch')
 
-        for name, ns in self.repo.names.iteritems():
+        for nsname, ns in self.repo.names.iteritems():
             # branches has special logic already handled above, so here we just
             # skip it
-            if name == 'branches':
+            if nsname == 'branches':
                 continue
             # we will use the templatename as the color name since those two
             # should be the same
@@ -1420,6 +1478,7 @@ class changeset_templater(changeset_printer):
     def __init__(self, ui, repo, matchfn, diffopts, tmpl, mapfile, buffered):
         changeset_printer.__init__(self, ui, repo, matchfn, diffopts, buffered)
         formatnode = ui.debugflag and (lambda x: x) or (lambda x: x[:12])
+        filters = {'formatnode': formatnode}
         defaulttempl = {
             'parent': '{rev}:{node|formatnode} ',
             'manifest': '{rev}:{node|formatnode}',
@@ -1428,10 +1487,14 @@ class changeset_templater(changeset_printer):
             }
         # filecopy is preserved for compatibility reasons
         defaulttempl['filecopy'] = defaulttempl['file_copy']
-        self.t = templater.templater(mapfile, {'formatnode': formatnode},
-                                     cache=defaulttempl)
-        if tmpl:
-            self.t.cache['changeset'] = tmpl
+        assert not (tmpl and mapfile)
+        if mapfile:
+            self.t = templater.templater.frommapfile(mapfile, filters=filters,
+                                                     cache=defaulttempl)
+        else:
+            self.t = formatter.maketemplater(ui, 'changeset', tmpl,
+                                             filters=filters,
+                                             cache=defaulttempl)
 
         self.cache = {}
 
@@ -1470,34 +1533,29 @@ class changeset_templater(changeset_printer):
         props['templ'] = self.t
         props['ctx'] = ctx
         props['repo'] = self.repo
+        props['ui'] = self.repo.ui
         props['revcache'] = {'copies': copies}
         props['cache'] = self.cache
 
-        try:
-            # write header
-            if self._parts['header']:
-                h = templater.stringify(self.t(self._parts['header'], **props))
-                if self.buffered:
-                    self.header[ctx.rev()] = h
-                else:
-                    if self.lastheader != h:
-                        self.lastheader = h
-                        self.ui.write(h)
+        # write header
+        if self._parts['header']:
+            h = templater.stringify(self.t(self._parts['header'], **props))
+            if self.buffered:
+                self.header[ctx.rev()] = h
+            else:
+                if self.lastheader != h:
+                    self.lastheader = h
+                    self.ui.write(h)
 
-            # write changeset metadata, then patch if requested
-            key = self._parts['changeset']
-            self.ui.write(templater.stringify(self.t(key, **props)))
-            self.showpatch(ctx, matchfn)
+        # write changeset metadata, then patch if requested
+        key = self._parts['changeset']
+        self.ui.write(templater.stringify(self.t(key, **props)))
+        self.showpatch(ctx, matchfn)
 
-            if self._parts['footer']:
-                if not self.footer:
-                    self.footer = templater.stringify(
-                        self.t(self._parts['footer'], **props))
-        except KeyError as inst:
-            msg = _("%s: no key named '%s'")
-            raise error.Abort(msg % (self.t.mapfile, inst.args[0]))
-        except SyntaxError as inst:
-            raise error.Abort('%s: %s' % (self.t.mapfile, inst.args[0]))
+        if self._parts['footer']:
+            if not self.footer:
+                self.footer = templater.stringify(
+                    self.t(self._parts['footer'], **props))
 
 def gettemplate(ui, tmpl, style):
     """
@@ -1508,11 +1566,7 @@ def gettemplate(ui, tmpl, style):
     if not tmpl and not style: # template are stronger than style
         tmpl = ui.config('ui', 'logtemplate')
         if tmpl:
-            try:
-                tmpl = templater.unquotestring(tmpl)
-            except SyntaxError:
-                pass
-            return tmpl, None
+            return templater.unquotestring(tmpl), None
         else:
             style = util.expandpath(ui.config('ui', 'style', ''))
 
@@ -1554,17 +1608,14 @@ def show_changeset(ui, repo, opts, buffered=False):
     if not tmpl and not mapfile:
         return changeset_printer(ui, repo, matchfn, opts, buffered)
 
-    try:
-        t = changeset_templater(ui, repo, matchfn, opts, tmpl, mapfile,
-                                buffered)
-    except SyntaxError as inst:
-        raise error.Abort(inst.args[0])
-    return t
+    return changeset_templater(ui, repo, matchfn, opts, tmpl, mapfile, buffered)
 
-def showmarker(ui, marker):
+def showmarker(ui, marker, index=None):
     """utility function to display obsolescence marker in a readable way
 
     To be used by debug function."""
+    if index is not None:
+        ui.write("%i " % index)
     ui.write(hex(marker.precnode()))
     for repl in marker.succnodes():
         ui.write(' ')
@@ -2173,6 +2224,7 @@ def _graphnodeformatter(ui, displayer):
     def formatnode(repo, ctx):
         props['ctx'] = ctx
         props['repo'] = repo
+        props['ui'] = repo.ui
         props['revcache'] = {}
         return templater.stringify(templ('graphnode', **props))
     return formatnode
@@ -2180,7 +2232,23 @@ def _graphnodeformatter(ui, displayer):
 def displaygraph(ui, repo, dag, displayer, edgefn, getrenamed=None,
                  filematcher=None):
     formatnode = _graphnodeformatter(ui, displayer)
-    seen, state = [], graphmod.asciistate()
+    state = graphmod.asciistate()
+    styles = state['styles']
+    edgetypes = {
+        'parent': graphmod.PARENT,
+        'grandparent': graphmod.GRANDPARENT,
+        'missing': graphmod.MISSINGPARENT
+    }
+    for name, key in edgetypes.items():
+        # experimental config: experimental.graphstyle.*
+        styles[key] = ui.config('experimental', 'graphstyle.%s' % name,
+                                styles[key])
+        if not styles[key]:
+            styles[key] = None
+
+    # experimental config: experimental.graphshorten
+    state['graphshorten'] = ui.configbool('experimental', 'graphshorten')
+
     for rev, type, ctx, parents in dag:
         char = formatnode(repo, ctx)
         copies = None
@@ -2198,7 +2266,7 @@ def displaygraph(ui, repo, dag, displayer, edgefn, getrenamed=None,
         if not lines[-1]:
             del lines[-1]
         displayer.flush(ctx)
-        edges = edgefn(type, char, lines, seen, rev, parents)
+        edges = edgefn(type, char, lines, state, rev, parents)
         for type, char, lines, coldata in edges:
             graphmod.ascii(ui, state, type, char, lines, coldata)
     displayer.close()
@@ -2260,7 +2328,7 @@ def add(ui, repo, match, prefix, explicitonly, **opts):
     for subpath in sorted(wctx.substate):
         sub = wctx.sub(subpath)
         try:
-            submatch = matchmod.narrowmatcher(subpath, match)
+            submatch = matchmod.subdirmatcher(subpath, match)
             if opts.get('subrepos'):
                 bad.extend(sub.add(ui, submatch, prefix, False, **opts))
             else:
@@ -2289,7 +2357,7 @@ def forget(ui, repo, match, prefix, explicitonly):
     for subpath in sorted(wctx.substate):
         sub = wctx.sub(subpath)
         try:
-            submatch = matchmod.narrowmatcher(subpath, match)
+            submatch = matchmod.subdirmatcher(subpath, match)
             subbad, subforgot = sub.forget(submatch, prefix)
             bad.extend([subpath + '/' + f for f in subbad])
             forgot.extend([subpath + '/' + f for f in subforgot])
@@ -2346,7 +2414,7 @@ def files(ui, ctx, m, fm, fmt, subrepos):
         if subrepos or matchessubrepo(subpath):
             sub = ctx.sub(subpath)
             try:
-                submatch = matchmod.narrowmatcher(subpath, m)
+                submatch = matchmod.subdirmatcher(subpath, m)
                 recurse = m.exact(subpath) or subrepos
                 if sub.printfiles(ui, submatch, fm, fmt, recurse) == 0:
                     ret = 0
@@ -2356,7 +2424,7 @@ def files(ui, ctx, m, fm, fmt, subrepos):
 
     return ret
 
-def remove(ui, repo, m, prefix, after, force, subrepos):
+def remove(ui, repo, m, prefix, after, force, subrepos, warnings=None):
     join = lambda f: os.path.join(prefix, f)
     ret = 0
     s = repo.status(match=m, clean=True)
@@ -2364,7 +2432,16 @@ def remove(ui, repo, m, prefix, after, force, subrepos):
 
     wctx = repo[None]
 
-    for subpath in sorted(wctx.substate):
+    if warnings is None:
+        warnings = []
+        warn = True
+    else:
+        warn = False
+
+    subs = sorted(wctx.substate)
+    total = len(subs)
+    count = 0
+    for subpath in subs:
         def matchessubrepo(matcher, subpath):
             if matcher.exact(subpath):
                 return True
@@ -2373,60 +2450,91 @@ def remove(ui, repo, m, prefix, after, force, subrepos):
                     return True
             return False
 
+        count += 1
         if subrepos or matchessubrepo(m, subpath):
+            ui.progress(_('searching'), count, total=total, unit=_('subrepos'))
+
             sub = wctx.sub(subpath)
             try:
-                submatch = matchmod.narrowmatcher(subpath, m)
-                if sub.removefiles(submatch, prefix, after, force, subrepos):
+                submatch = matchmod.subdirmatcher(subpath, m)
+                if sub.removefiles(submatch, prefix, after, force, subrepos,
+                                   warnings):
                     ret = 1
             except error.LookupError:
-                ui.status(_("skipping missing subrepository: %s\n")
+                warnings.append(_("skipping missing subrepository: %s\n")
                                % join(subpath))
+    ui.progress(_('searching'), None)
 
     # warn about failure to delete explicit files/dirs
     deleteddirs = util.dirs(deleted)
-    for f in m.files():
+    files = m.files()
+    total = len(files)
+    count = 0
+    for f in files:
         def insubrepo():
             for subpath in wctx.substate:
                 if f.startswith(subpath):
                     return True
             return False
 
+        count += 1
+        ui.progress(_('deleting'), count, total=total, unit=_('files'))
         isdir = f in deleteddirs or wctx.hasdir(f)
         if f in repo.dirstate or isdir or f == '.' or insubrepo():
             continue
 
         if repo.wvfs.exists(f):
             if repo.wvfs.isdir(f):
-                ui.warn(_('not removing %s: no tracked files\n')
+                warnings.append(_('not removing %s: no tracked files\n')
                         % m.rel(f))
             else:
-                ui.warn(_('not removing %s: file is untracked\n')
+                warnings.append(_('not removing %s: file is untracked\n')
                         % m.rel(f))
         # missing files will generate a warning elsewhere
         ret = 1
+    ui.progress(_('deleting'), None)
 
     if force:
         list = modified + deleted + clean + added
     elif after:
         list = deleted
-        for f in modified + added + clean:
-            ui.warn(_('not removing %s: file still exists\n') % m.rel(f))
+        remaining = modified + added + clean
+        total = len(remaining)
+        count = 0
+        for f in remaining:
+            count += 1
+            ui.progress(_('skipping'), count, total=total, unit=_('files'))
+            warnings.append(_('not removing %s: file still exists\n')
+                    % m.rel(f))
             ret = 1
+        ui.progress(_('skipping'), None)
     else:
         list = deleted + clean
+        total = len(modified) + len(added)
+        count = 0
         for f in modified:
-            ui.warn(_('not removing %s: file is modified (use -f'
+            count += 1
+            ui.progress(_('skipping'), count, total=total, unit=_('files'))
+            warnings.append(_('not removing %s: file is modified (use -f'
                       ' to force removal)\n') % m.rel(f))
             ret = 1
         for f in added:
-            ui.warn(_('not removing %s: file has been marked for add'
+            count += 1
+            ui.progress(_('skipping'), count, total=total, unit=_('files'))
+            warnings.append(_('not removing %s: file has been marked for add'
                       ' (use forget to undo)\n') % m.rel(f))
             ret = 1
+        ui.progress(_('skipping'), None)
 
-    for f in sorted(list):
+    list = sorted(list)
+    total = len(list)
+    count = 0
+    for f in list:
+        count += 1
         if ui.verbose or not m.exact(f):
+            ui.progress(_('deleting'), count, total=total, unit=_('files'))
             ui.status(_('removing %s\n') % m.rel(f))
+    ui.progress(_('deleting'), None)
 
     with repo.wlock():
         if not after:
@@ -2435,6 +2543,10 @@ def remove(ui, repo, m, prefix, after, force, subrepos):
                     continue # we never unlink added files on remove
                 util.unlinkpath(repo.wjoin(f), ignoremissing=True)
         repo[None].forget(list)
+
+    if warn:
+        for warning in warnings:
+            ui.warn(warning)
 
     return ret
 
@@ -2474,7 +2586,7 @@ def cat(ui, repo, ctx, matcher, prefix, **opts):
     for subpath in sorted(ctx.substate):
         sub = ctx.sub(subpath)
         try:
-            submatch = matchmod.narrowmatcher(subpath, matcher)
+            submatch = matchmod.subdirmatcher(subpath, matcher)
 
             if not sub.cat(submatch, os.path.join(prefix, sub._path),
                            **opts):
@@ -2504,7 +2616,7 @@ def commit(ui, repo, commitfunc, pats, opts):
 
 def amend(ui, repo, commitfunc, old, extra, pats, opts):
     # avoid cycle context -> subrepo -> cmdutil
-    import context
+    from . import context
 
     # amend will reuse the existing user if not specified, but the obsolete
     # marker creation requires that the current user's name is specified.
@@ -2748,10 +2860,7 @@ def buildcommittemplate(repo, ctx, subs, extramsg, tmpl):
     ui = repo.ui
     tmpl, mapfile = gettemplate(ui, tmpl, None)
 
-    try:
-        t = changeset_templater(ui, repo, None, {}, tmpl, mapfile, False)
-    except SyntaxError as inst:
-        raise error.Abort(inst.args[0])
+    t = changeset_templater(ui, repo, None, {}, tmpl, mapfile, False)
 
     for k, v in repo.ui.configitems('committemplate'):
         if k != 'changeset':
@@ -3129,13 +3238,26 @@ def _performrevert(repo, parents, ctx, actions, interactive=False):
     """
     parent, p2 = parents
     node = ctx.node()
+    excluded_files = []
+    matcher_opts = {"exclude": excluded_files}
+
     def checkout(f):
         fc = ctx[f]
         repo.wwrite(f, fc.data(), fc.flags())
 
     audit_path = pathutil.pathauditor(repo.root)
     for f in actions['forget'][0]:
-        repo.dirstate.drop(f)
+        if interactive:
+            choice = \
+                repo.ui.promptchoice(
+                    _("forget added file %s (yn)?$$ &Yes $$ &No")
+                    % f)
+            if choice == 0:
+                repo.dirstate.drop(f)
+            else:
+                excluded_files.append(repo.wjoin(f))
+        else:
+            repo.dirstate.drop(f)
     for f in actions['remove'][0]:
         audit_path(f)
         try:
@@ -3161,7 +3283,7 @@ def _performrevert(repo, parents, ctx, actions, interactive=False):
     if interactive:
         # Prompt the user for changes to revert
         torevert = [repo.wjoin(f) for f in actions['revert'][0]]
-        m = scmutil.match(ctx, torevert, {})
+        m = scmutil.match(ctx, torevert, matcher_opts)
         diffopts = patch.difffeatureopts(repo.ui, whitespace=True)
         diffopts.nodates = True
         diffopts.git = True
@@ -3185,7 +3307,7 @@ def _performrevert(repo, parents, ctx, actions, interactive=False):
 
         newlyaddedandmodifiedfiles = newandmodified(chunks, originalchunks)
         # Apply changes
-        fp = cStringIO.StringIO()
+        fp = stringio()
         for c in chunks:
             c.write(fp)
         dopatch = fp.tell()
@@ -3254,24 +3376,13 @@ def command(table):
     def cmd(name, options=(), synopsis=None, norepo=False, optionalrepo=False,
             inferrepo=False):
         def decorator(func):
+            func.norepo = norepo
+            func.optionalrepo = optionalrepo
+            func.inferrepo = inferrepo
             if synopsis:
                 table[name] = func, list(options), synopsis
             else:
                 table[name] = func, list(options)
-
-            if norepo:
-                # Avoid import cycle.
-                import commands
-                commands.norepo += ' %s' % ' '.join(parsealiases(name))
-
-            if optionalrepo:
-                import commands
-                commands.optionalrepo += ' %s' % ' '.join(parsealiases(name))
-
-            if inferrepo:
-                import commands
-                commands.inferrepo += ' %s' % ' '.join(parsealiases(name))
-
             return func
         return decorator
 
@@ -3333,13 +3444,56 @@ afterresolvedstates = [
      _('hg graft --continue')),
     ]
 
-def checkafterresolved(repo):
-    contmsg = _("continue: %s\n")
+def howtocontinue(repo):
+    '''Check for an unfinished operation and return the command to finish
+    it.
+
+    afterresolvedstates tupples define a .hg/{file} and the corresponding
+    command needed to finish it.
+
+    Returns a (msg, warning) tuple. 'msg' is a string and 'warning' is
+    a boolean.
+    '''
+    contmsg = _("continue: %s")
     for f, msg in afterresolvedstates:
         if repo.vfs.exists(f):
-            repo.ui.warn(contmsg % msg)
-            return
-    repo.ui.note(contmsg % _("hg commit"))
+            return contmsg % msg, True
+    workingctx = repo[None]
+    dirty = any(repo.status()) or any(workingctx.sub(s).dirty()
+                                         for s in workingctx.substate)
+    if dirty:
+        return contmsg % _("hg commit"), False
+    return None, None
+
+def checkafterresolved(repo):
+    '''Inform the user about the next action after completing hg resolve
+
+    If there's a matching afterresolvedstates, howtocontinue will yield
+    repo.ui.warn as the reporter.
+
+    Otherwise, it will yield repo.ui.note.
+    '''
+    msg, warning = howtocontinue(repo)
+    if msg is not None:
+        if warning:
+            repo.ui.warn("%s\n" % msg)
+        else:
+            repo.ui.note("%s\n" % msg)
+
+def wrongtooltocontinue(repo, task):
+    '''Raise an abort suggesting how to properly continue if there is an
+    active task.
+
+    Uses howtocontinue() to find the active task.
+
+    If there's no task (repo.ui.note for 'hg commit'), it does not offer
+    a hint.
+    '''
+    after = howtocontinue(repo)
+    hint = None
+    if after[1]:
+        hint = after[0]
+    raise error.Abort(_('no %s in progress') % task, hint=hint)
 
 class dirstateguard(object):
     '''Restore dirstate at unexpected failure.

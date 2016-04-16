@@ -12,7 +12,6 @@ import inspect
 import os
 import random
 import time
-import urllib
 import weakref
 
 from .i18n import _
@@ -59,6 +58,8 @@ from . import (
 
 release = lockmod.release
 propertycache = util.propertycache
+urlerr = util.urlerr
+urlreq = util.urlreq
 filecache = scmutil.filecache
 
 class repofilecache(filecache):
@@ -242,9 +243,6 @@ class localrepository(object):
     # only functions defined in module of enabled extensions are invoked
     featuresetupfuncs = set()
 
-    def _baserequirements(self, create):
-        return ['revlogv1']
-
     def __init__(self, baseui, path=None, create=False):
         self.requirements = set()
         self.wvfs = scmutil.vfs(path, expandpath=True, realpath=True)
@@ -282,29 +280,21 @@ class localrepository(object):
 
         if not self.vfs.isdir():
             if create:
+                self.requirements = newreporequirements(self)
+
                 if not self.wvfs.exists():
                     self.wvfs.makedirs()
                 self.vfs.makedir(notindexed=True)
-                self.requirements.update(self._baserequirements(create))
-                if self.ui.configbool('format', 'usestore', True):
+
+                if 'store' in self.requirements:
                     self.vfs.mkdir("store")
-                    self.requirements.add("store")
-                    if self.ui.configbool('format', 'usefncache', True):
-                        self.requirements.add("fncache")
-                        if self.ui.configbool('format', 'dotencode', True):
-                            self.requirements.add('dotencode')
+
                     # create an invalid changelog
                     self.vfs.append(
                         "00changelog.i",
                         '\0\0\0\2' # represents revlogv2
                         ' dummy changelog to prevent using the old repo layout'
                     )
-                if scmutil.gdinitconfig(self.ui):
-                    self.requirements.add("generaldelta")
-                if self.ui.configbool('experimental', 'treemanifest', False):
-                    self.requirements.add("treemanifest")
-                if self.ui.configbool('experimental', 'manifestv2', False):
-                    self.requirements.add("manifestv2")
             else:
                 raise error.RepoError(_("repository %s not found") % path)
         elif create:
@@ -377,7 +367,7 @@ class localrepository(object):
         if self.ui.configbool('experimental', 'bundle2-advertise', True):
             caps = set(caps)
             capsblob = bundle2.encodecaps(bundle2.getrepocaps(self))
-            caps.add('bundle2=' + urllib.quote(capsblob))
+            caps.add('bundle2=' + urlreq.quote(capsblob))
         return caps
 
     def _applyopenerreqs(self):
@@ -985,7 +975,7 @@ class localrepository(object):
             data = self.wvfs.read(filename)
         return self._filter(self._encodefilterpats, filename, data)
 
-    def wwrite(self, filename, data, flags):
+    def wwrite(self, filename, data, flags, backgroundclose=False):
         """write ``data`` into ``filename`` in the working directory
 
         This returns length of written (maybe decoded) data.
@@ -994,7 +984,7 @@ class localrepository(object):
         if 'l' in flags:
             self.wvfs.symlink(data, filename)
         else:
-            self.wvfs.write(filename, data)
+            self.wvfs.write(filename, data, backgroundclose=backgroundclose)
             if 'x' in flags:
                 self.wvfs.setflags(filename, False, True)
         return len(data)
@@ -1488,6 +1478,27 @@ class localrepository(object):
 
         return fparent1
 
+    def checkcommitpatterns(self, wctx, vdirs, match, status, fail):
+        """check for commit arguments that aren't commitable"""
+        if match.isexact() or match.prefix():
+            matched = set(status.modified + status.added + status.removed)
+
+            for f in match.files():
+                f = self.dirstate.normalize(f)
+                if f == '.' or f in matched or f in wctx.substate:
+                    continue
+                if f in status.deleted:
+                    fail(f, _('file not found!'))
+                if f in vdirs: # visited directory
+                    d = f + '/'
+                    for mf in matched:
+                        if mf.startswith(d):
+                            break
+                    else:
+                        fail(f, _("no match under directory!"))
+                elif f not in self.dirstate:
+                    fail(f, _("file not tracked!"))
+
     @unfilteredmethod
     def commit(self, text="", user=None, date=None, match=None, force=False,
                editor=False, extra=None):
@@ -1582,24 +1593,8 @@ class localrepository(object):
                     status.removed.insert(0, '.hgsubstate')
 
             # make sure all explicit patterns are matched
-            if not force and (match.isexact() or match.prefix()):
-                matched = set(status.modified + status.added + status.removed)
-
-                for f in match.files():
-                    f = self.dirstate.normalize(f)
-                    if f == '.' or f in matched or f in wctx.substate:
-                        continue
-                    if f in status.deleted:
-                        fail(f, _('file not found!'))
-                    if f in vdirs: # visited directory
-                        d = f + '/'
-                        for mf in matched:
-                            if mf.startswith(d):
-                                break
-                        else:
-                            fail(f, _("no match under directory!"))
-                    elif f not in self.dirstate:
-                        fail(f, _("file not tracked!"))
+            if not force:
+                self.checkcommitpatterns(wctx, vdirs, match, status, fail)
 
             cctx = context.workingcommitctx(self, status,
                                             text, user, date, extra)
@@ -1893,8 +1888,8 @@ class localrepository(object):
 
     @unfilteredpropertycache
     def prepushoutgoinghooks(self):
-        """Return util.hooks consists of "(repo, remote, outgoing)"
-        functions, which are called before pushing changesets.
+        """Return util.hooks consists of a pushop with repo, remote, outgoing
+        methods, which are called before pushing changesets.
         """
         return util.hooks()
 
@@ -1962,3 +1957,27 @@ def instance(ui, path, create):
 
 def islocal(path):
     return True
+
+def newreporequirements(repo):
+    """Determine the set of requirements for a new local repository.
+
+    Extensions can wrap this function to specify custom requirements for
+    new repositories.
+    """
+    ui = repo.ui
+    requirements = set(['revlogv1'])
+    if ui.configbool('format', 'usestore', True):
+        requirements.add('store')
+        if ui.configbool('format', 'usefncache', True):
+            requirements.add('fncache')
+            if ui.configbool('format', 'dotencode', True):
+                requirements.add('dotencode')
+
+    if scmutil.gdinitconfig(ui):
+        requirements.add('generaldelta')
+    if ui.configbool('experimental', 'treemanifest', False):
+        requirements.add('treemanifest')
+    if ui.configbool('experimental', 'manifestv2', False):
+        requirements.add('manifestv2')
+
+    return requirements

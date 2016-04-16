@@ -108,6 +108,7 @@ Show debug commands if there are no other candidates
   debugsetparents
   debugsub
   debugsuccessorssets
+  debugtemplate
   debugwalk
   debugwireargs
 
@@ -158,7 +159,7 @@ Show the options for the "serve" command
   --config
   --cwd
   --daemon
-  --daemon-pipefds
+  --daemon-postexec
   --debug
   --debugger
   --encoding
@@ -218,7 +219,7 @@ Show all commands + options
   pull: update, force, rev, bookmark, branch, ssh, remotecmd, insecure
   push: force, rev, bookmark, branch, new-branch, ssh, remotecmd, insecure
   remove: after, force, subrepos, include, exclude
-  serve: accesslog, daemon, daemon-pipefds, errorlog, port, address, prefix, name, web-conf, webdir-conf, pid-file, stdio, cmdserver, templates, style, ipv6, certificate
+  serve: accesslog, daemon, daemon-postexec, errorlog, port, address, prefix, name, web-conf, webdir-conf, pid-file, stdio, cmdserver, templates, style, ipv6, certificate
   status: all, modified, added, removed, deleted, clean, unknown, ignored, no-status, copies, print0, rev, change, include, exclude, subrepos, template
   summary: remote
   update: clean, check, date, rev, tool
@@ -254,13 +255,13 @@ Show all commands + options
   debugignore: 
   debugindex: changelog, manifest, dir, format
   debugindexdot: changelog, manifest, dir
-  debuginstall: 
+  debuginstall: template
   debugknown: 
   debuglabelcomplete: 
   debuglocks: force-lock, force-wlock
   debugmergestate: 
   debugnamecomplete: 
-  debugobsolete: flags, record-parents, rev, date, user
+  debugobsolete: flags, record-parents, rev, index, delete, date, user
   debugpathcomplete: full, normal, added, removed
   debugpushkey: 
   debugpvec: 
@@ -272,6 +273,7 @@ Show all commands + options
   debugsetparents: 
   debugsub: rev
   debugsuccessorssets: 
+  debugtemplate: rev, define
   debugwalk: include, exclude
   debugwireargs: three, four, five, ssh, remotecmd, insecure
   files: rev, print0, include, exclude, template, subrepos

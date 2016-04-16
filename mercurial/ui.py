@@ -42,7 +42,6 @@ username =
 # (see "hg help extensions" for more info)
 #
 # pager =
-# progress =
 # color =""",
 
     'cloned':
@@ -86,7 +85,6 @@ default = %s
 # (see "hg help extensions" for more info)
 #
 # blackbox =
-# progress =
 # color =
 # pager =""",
 }
@@ -194,6 +192,9 @@ class ui(object):
         if self.plain('revsetalias'):
             for k, v in cfg.items('revsetalias'):
                 del cfg['revsetalias'][k]
+        if self.plain('templatealias'):
+            for k, v in cfg.items('templatealias'):
+                del cfg['templatealias'][k]
 
         if trusted:
             self._tcfg.update(cfg)
@@ -582,7 +583,7 @@ class ui(object):
                 pass
         if not user:
             raise error.Abort(_('no username supplied'),
-                             hint=_('use "hg config --edit" '
+                             hint=_("use 'hg config --edit' "
                                     'to set your username'))
         if "\n" in user:
             raise error.Abort(_("username %s contains a newline\n")
@@ -664,7 +665,7 @@ class ui(object):
         "cmdname.type" is recommended. For example, status issues
         a label of "status.modified" for modified files.
         '''
-        if self._buffers:
+        if self._buffers and not opts.get('prompt', False):
             self._buffers[-1].extend(a for a in args)
         else:
             self._progclear()
@@ -698,6 +699,77 @@ class ui(object):
         if self.configbool('ui', 'nontty', False):
             return False
         return util.isatty(fh)
+
+    def interface(self, feature):
+        """what interface to use for interactive console features?
+
+        The interface is controlled by the value of `ui.interface` but also by
+        the value of feature-specific configuration. For example:
+
+        ui.interface.histedit = text
+        ui.interface.chunkselector = curses
+
+        Here the features are "histedit" and "chunkselector".
+
+        The configuration above means that the default interfaces for commands
+        is curses, the interface for histedit is text and the interface for
+        selecting chunk is crecord (the best curses interface available).
+
+        Consider the following exemple:
+        ui.interface = curses
+        ui.interface.histedit = text
+
+        Then histedit will use the text interface and chunkselector will use
+        the default curses interface (crecord at the moment).
+        """
+        alldefaults = frozenset(["text", "curses"])
+
+        featureinterfaces = {
+            "chunkselector": [
+                "text",
+                "curses",
+            ]
+        }
+
+        # Feature-specific interface
+        if feature not in featureinterfaces.keys():
+            # Programming error, not user error
+            raise ValueError("Unknown feature requested %s" % feature)
+
+        availableinterfaces = frozenset(featureinterfaces[feature])
+        if alldefaults > availableinterfaces:
+            # Programming error, not user error. We need a use case to
+            # define the right thing to do here.
+            raise ValueError(
+                "Feature %s does not handle all default interfaces" %
+                feature)
+
+        if self.plain():
+            return "text"
+
+        # Default interface for all the features
+        defaultinterface = "text"
+        i = self.config("ui", "interface", None)
+        if i in alldefaults:
+            defaultinterface = i
+
+        choseninterface = defaultinterface
+        f = self.config("ui", "interface.%s" % feature, None)
+        if f in availableinterfaces:
+            choseninterface = f
+
+        if i is not None and defaultinterface != i:
+            if f is not None:
+                self.warn(_("invalid value for ui.interface: %s\n") %
+                          (i,))
+            else:
+                self.warn(_("invalid value for ui.interface: %s (using %s)\n") %
+                         (i, choseninterface))
+        if f is not None and choseninterface != f:
+            self.warn(_("invalid value for ui.interface.%s: %s (using %s)\n") %
+                      (feature, f, choseninterface))
+
+        return choseninterface
 
     def interactive(self):
         '''is interactive input allowed?
@@ -773,7 +845,7 @@ class ui(object):
 
         # call write() so output goes through subclassed implementation
         # e.g. color extension on Windows
-        self.write(prompt)
+        self.write(prompt, prompt=True)
 
         # instead of trying to emulate raw_input, swap (self.fin,
         # self.fout) with (sys.stdin, sys.stdout)
@@ -902,12 +974,15 @@ class ui(object):
             self.write(*msg, **opts)
 
     def edit(self, text, user, extra=None, editform=None, pending=None):
-        extra_defaults = { 'prefix': 'editor' }
+        extra_defaults = {
+            'prefix': 'editor',
+            'suffix': '.txt',
+        }
         if extra is not None:
             extra_defaults.update(extra)
         extra = extra_defaults
         (fd, name) = tempfile.mkstemp(prefix='hg-' + extra['prefix'] + '-',
-                                      suffix=".txt", text=True)
+                                      suffix=extra['suffix'], text=True)
         try:
             f = os.fdopen(fd, "w")
             f.write(text)
@@ -1006,9 +1081,8 @@ class ui(object):
     def progress(self, topic, pos, item="", unit="", total=None):
         '''show a progress message
 
-        With stock hg, this is simply a debug message that is hidden
-        by default, but with extensions or GUI tools it may be
-        visible. 'topic' is the current operation, 'item' is a
+        By default a textual progress bar will be displayed if an operation
+        takes too long. 'topic' is the current operation, 'item' is a
         non-numeric marker of the current position (i.e. the currently
         in-process file), 'pos' is the current numeric position (i.e.
         revision, bytes, etc.), unit is a corresponding unit label,
@@ -1071,11 +1145,15 @@ class ui(object):
         stacklevel += 1 # get in develwarn
         if self.tracebackflag:
             util.debugstacktrace(msg, stacklevel, self.ferr, self.fout)
+            self.log('develwarn', '%s at:\n%s' %
+                     (msg, ''.join(util.getstackframes(stacklevel))))
         else:
             curframe = inspect.currentframe()
             calframe = inspect.getouterframes(curframe, 2)
             self.write_err('%s at: %s:%s (%s)\n'
                            % ((msg,) + calframe[stacklevel][1:4]))
+            self.log('develwarn', '%s at: %s:%s (%s)\n',
+                     msg, *calframe[stacklevel][1:4])
 
     def deprecwarn(self, msg, version):
         """issue a deprecation warning

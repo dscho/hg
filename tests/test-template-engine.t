@@ -4,7 +4,7 @@
   > from mercurial import templater
   > 
   > class mytemplater(object):
-  >     def __init__(self, loader, filters, defaults):
+  >     def __init__(self, loader, filters, defaults, aliases):
   >         self.loader = loader
   > 
   >     def process(self, t, map):
@@ -44,17 +44,11 @@
   0 97e5f848f0936960273bbf75be6388cd0350a32b -1 0000000000000000000000000000000000000000
   -1 0000000000000000000000000000000000000000 -1 0000000000000000000000000000000000000000
 
-Fuzzing the unicode escaper to ensure it produces valid data
+invalid engine type:
 
-#if hypothesis
-
-  >>> from hypothesishelpers import *
-  >>> import mercurial.templatefilters as tf
-  >>> import json
-  >>> @check(st.text().map(lambda s: s.encode('utf-8')))
-  ... def testtfescapeproducesvalidjson(text):
-  ...     json.loads('"' + tf.jsonescape(text) + '"')
-
-#endif
+  $ echo 'changeset = unknown:changeset.txt' > unknownenginemap
+  $ hg log --style=./unknownenginemap
+  abort: invalid template engine: unknown
+  [255]
 
   $ cd ..

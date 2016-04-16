@@ -71,6 +71,8 @@ Quoting for ui.logtemplate
   8
   $ hg tip --config 'ui.logtemplate="{rev}\n"'
   8
+  $ hg tip --config 'ui.logtemplate=n{rev}\n'
+  n8
 
 Make sure user/global hgrc does not affect tests
 
@@ -1008,7 +1010,7 @@ Error if style missing value:
 
   $ echo 'changeset =' > t
   $ hg log --style t
-  abort: t:1: missing value
+  hg: parse error at t:1: missing value
   [255]
 
 Error if include fails:
@@ -1018,7 +1020,7 @@ Error if include fails:
   $ hg log --style ./t
   abort: template file ./q: Permission denied
   [255]
-  $ rm q
+  $ rm -f q
 #endif
 
 Include works:
@@ -2508,7 +2510,7 @@ Error on syntax:
 
   $ echo 'x = "f' >> t
   $ hg log
-  abort: t:3: unmatched quotes
+  hg: parse error at t:3: unmatched quotes
   [255]
 
   $ hg log -T '{date'
@@ -2790,6 +2792,14 @@ Test new-style inline templating:
   $ hg log -R latesttag -r tip --template 'modified files: {file_mods % " {file}\n"}\n'
   modified files:  .hgtags
   
+
+  $ hg log -R latesttag -r tip -T '{rev % "a"}\n'
+  hg: parse error: keyword 'rev' is not iterable
+  [255]
+  $ hg log -R latesttag -r tip -T '{get(extras, "unknown") % "a"}\n'
+  hg: parse error: None is not iterable
+  [255]
+
 Test the sub function of templating for expansion:
 
   $ hg log -R latesttag -r 10 --template '{sub("[0-9]", "x", "{rev}")}\n'
@@ -2853,27 +2863,55 @@ Test invalid date:
 
 Test integer literal:
 
-  $ hg log -Ra -r0 -T '{(0)}\n'
+  $ hg debugtemplate -v '{(0)}\n'
+  (template
+    (group
+      ('integer', '0'))
+    ('string', '\n'))
   0
-  $ hg log -Ra -r0 -T '{(123)}\n'
+  $ hg debugtemplate -v '{(123)}\n'
+  (template
+    (group
+      ('integer', '123'))
+    ('string', '\n'))
   123
-  $ hg log -Ra -r0 -T '{(-4)}\n'
+  $ hg debugtemplate -v '{(-4)}\n'
+  (template
+    (group
+      ('integer', '-4'))
+    ('string', '\n'))
   -4
-  $ hg log -Ra -r0 -T '{(-)}\n'
+  $ hg debugtemplate '{(-)}\n'
   hg: parse error at 2: integer literal without digits
   [255]
-  $ hg log -Ra -r0 -T '{(-a)}\n'
+  $ hg debugtemplate '{(-a)}\n'
   hg: parse error at 2: integer literal without digits
   [255]
 
 top-level integer literal is interpreted as symbol (i.e. variable name):
 
-  $ hg log -Ra -r0 -T '{1}\n'
-  
-  $ hg log -Ra -r0 -T '{if("t", "{1}")}\n'
-  
-  $ hg log -Ra -r0 -T '{1|stringify}\n'
-  
+  $ hg debugtemplate -D 1=one -v '{1}\n'
+  (template
+    ('integer', '1')
+    ('string', '\n'))
+  one
+  $ hg debugtemplate -D 1=one -v '{if("t", "{1}")}\n'
+  (template
+    (func
+      ('symbol', 'if')
+      (list
+        ('string', 't')
+        (template
+          ('integer', '1'))))
+    ('string', '\n'))
+  one
+  $ hg debugtemplate -D 1=one -v '{1|stringify}\n'
+  (template
+    (|
+      ('integer', '1')
+      ('symbol', 'stringify'))
+    ('string', '\n'))
+  one
 
 unless explicit symbol is expected:
 
@@ -2886,18 +2924,30 @@ unless explicit symbol is expected:
 
 Test string literal:
 
-  $ hg log -Ra -r0 -T '{"string with no template fragment"}\n'
+  $ hg debugtemplate -Ra -r0 -v '{"string with no template fragment"}\n'
+  (template
+    ('string', 'string with no template fragment')
+    ('string', '\n'))
   string with no template fragment
-  $ hg log -Ra -r0 -T '{"template: {rev}"}\n'
+  $ hg debugtemplate -Ra -r0 -v '{"template: {rev}"}\n'
+  (template
+    (template
+      ('string', 'template: ')
+      ('symbol', 'rev'))
+    ('string', '\n'))
   template: 0
-  $ hg log -Ra -r0 -T '{r"rawstring: {rev}"}\n'
+  $ hg debugtemplate -Ra -r0 -v '{r"rawstring: {rev}"}\n'
+  (template
+    ('string', 'rawstring: {rev}')
+    ('string', '\n'))
   rawstring: {rev}
-
-because map operation requires template, raw string can't be used
-
-  $ hg log -Ra -r0 -T '{files % r"rawstring"}\n'
-  hg: parse error: expected template specifier
-  [255]
+  $ hg debugtemplate -Ra -r0 -v '{files % r"rawstring: {file}"}\n'
+  (template
+    (%
+      ('symbol', 'files')
+      ('string', 'rawstring: {file}'))
+    ('string', '\n'))
+  rawstring: {file}
 
 Test string escaping:
 
@@ -3148,6 +3198,9 @@ Test recursive evaluation:
   text.1:be wrapped
   text.1:desc to be
   text.1:wrapped (no-eol)
+  $ hg log -l1 -T '{fill(desc, date, "", "")}\n'
+  hg: parse error: fill expects an integer width
+  [255]
 
   $ hg log -l 1 --template '{sub(r"[0-9]", "-", author)}'
   {node|short} (no-eol)
@@ -3167,6 +3220,18 @@ Test recursive evaluation:
   $ hg log --color=always -l 1 --template '{label("text.{rev}", "text\n")}'
   \x1b[0;32mtext\x1b[0m (esc)
 
+color effect can be specified without quoting:
+
+  $ hg log --color=always -l 1 --template '{label(red, "text\n")}'
+  \x1b[0;31mtext\x1b[0m (esc)
+
+label should be no-op if color is disabled:
+
+  $ hg log --color=never -l 1 --template '{label(red, "text\n")}'
+  text
+  $ hg log --config extensions.color=! -l 1 --template '{label(red, "text\n")}'
+  text
+
 Test branches inside if statement:
 
   $ hg log -r 0 --template '{if(branches, "yes", "no")}\n'
@@ -3175,6 +3240,8 @@ Test branches inside if statement:
 Test get function:
 
   $ hg log -r 0 --template '{get(extras, "branch")}\n'
+  default
+  $ hg log -r 0 --template '{get(extras, "br{"anch"}")}\n'
   default
   $ hg log -r 0 --template '{get(files, "should_fail")}\n'
   hg: parse error: get() expects a dict as first argument
@@ -3214,6 +3281,12 @@ Test shortest(node) function:
   $ hg log --template '{node|shortest}\n' -l1
   e777
 
+  $ hg log -r 0 -T '{shortest(node, "1{"0"}")}\n'
+  f7769ec2ab
+  $ hg log -r 0 -T '{shortest(node, "not an int")}\n'
+  hg: parse error: shortest() expects an integer minlength
+  [255]
+
 Test pad function
 
   $ hg log --template '{pad(rev, 20)} {author|user}\n'
@@ -3239,9 +3312,22 @@ Test template string in pad function
   $ hg log -r 0 -T '{pad(r"\{rev}", 10)} {author|user}\n'
   \{rev}     test
 
+Test width argument passed to pad function
+
+  $ hg log -r 0 -T '{pad(rev, "1{"0"}")} {author|user}\n'
+  0          test
+  $ hg log -r 0 -T '{pad(rev, "not an int")}\n'
+  hg: parse error: pad() expects an integer width
+  [255]
+
 Test ifcontains function
 
   $ hg log --template '{rev} {ifcontains(rev, "2 two 0", "is in the string", "is not")}\n'
+  2 is in the string
+  1 is not
+  0 is in the string
+
+  $ hg log -T '{rev} {ifcontains(rev, "2 two{" 0"}", "is in the string", "is not")}\n'
   2 is in the string
   1 is not
   0 is in the string
@@ -3250,6 +3336,11 @@ Test ifcontains function
   2 did not add a
   1 did not add a
   0 added a
+
+  $ hg log --debug -T '{rev}{ifcontains(1, parents, " is parent of 1")}\n'
+  2 is parent of 1
+  1
+  0
 
 Test revset function
 
@@ -3293,12 +3384,20 @@ Test revset function
   $ hg log --template '{revset("TIP"|lower)}\n' -l1
   2
 
- a list template is evaluated for each item of revset
+  $ hg log -T '{revset("%s", "t{"ip"}")}\n' -l1
+  2
+
+ a list template is evaluated for each item of revset/parents
 
   $ hg log -T '{rev} p: {revset("p1(%s)", rev) % "{rev}:{node|short}"}\n'
   2 p: 1:bcc7ff960b8e
   1 p: 0:f7769ec2ab97
   0 p: 
+
+  $ hg log --debug -T '{rev} p:{parents % " {rev}:{node|short}"}\n'
+  2 p: 1:bcc7ff960b8e -1:000000000000
+  1 p: 0:f7769ec2ab97 -1:000000000000
+  0 p: -1:000000000000 -1:000000000000
 
  therefore, 'revcache' should be recreated for each rev
 
@@ -3309,6 +3408,21 @@ Test revset function
   p a
   0 a
   p 
+
+  $ hg log --debug -T '{rev} {file_adds}\np {parents % "{file_adds}"}\n'
+  2 aa b
+  p 
+  1 
+  p a
+  0 a
+  p 
+
+a revset item must be evaluated as an integer revision, not an offset from tip
+
+  $ hg log -l 1 -T '{revset("null") % "{rev}:{node|short}"}\n'
+  -1:000000000000
+  $ hg log -l 1 -T '{revset("%s", "null") % "{rev}:{node|short}"}\n'
+  -1:000000000000
 
 Test active bookmark templating
 
@@ -3535,25 +3649,192 @@ Test broken string escapes:
   hg: parse error: invalid \x escape
   [255]
 
+json filter should escape HTML tags so that the output can be embedded in hgweb:
+
+  $ hg log -T "{'<foo@example.org>'|json}\n" -R a -l1
+  "\u003cfoo@example.org\u003e"
+
+Templater supports aliases of symbol and func() styles:
+
+  $ hg clone -q a aliases
+  $ cd aliases
+  $ cat <<EOF >> .hg/hgrc
+  > [templatealias]
+  > r = rev
+  > rn = "{r}:{node|short}"
+  > status(c, files) = files % "{c} {file}\n"
+  > utcdate(d) = localdate(d, "UTC")
+  > EOF
+
+  $ hg debugtemplate -vr0 '{rn} {utcdate(date)|isodate}\n'
+  (template
+    ('symbol', 'rn')
+    ('string', ' ')
+    (|
+      (func
+        ('symbol', 'utcdate')
+        ('symbol', 'date'))
+      ('symbol', 'isodate'))
+    ('string', '\n'))
+  * expanded:
+  (template
+    (template
+      ('symbol', 'rev')
+      ('string', ':')
+      (|
+        ('symbol', 'node')
+        ('symbol', 'short')))
+    ('string', ' ')
+    (|
+      (func
+        ('symbol', 'localdate')
+        (list
+          ('symbol', 'date')
+          ('string', 'UTC')))
+      ('symbol', 'isodate'))
+    ('string', '\n'))
+  0:1e4e1b8f71e0 1970-01-12 13:46 +0000
+
+  $ hg debugtemplate -vr0 '{status("A", file_adds)}'
+  (template
+    (func
+      ('symbol', 'status')
+      (list
+        ('string', 'A')
+        ('symbol', 'file_adds'))))
+  * expanded:
+  (template
+    (%
+      ('symbol', 'file_adds')
+      (template
+        ('string', 'A')
+        ('string', ' ')
+        ('symbol', 'file')
+        ('string', '\n'))))
+  A a
+
+A unary function alias can be called as a filter:
+
+  $ hg debugtemplate -vr0 '{date|utcdate|isodate}\n'
+  (template
+    (|
+      (|
+        ('symbol', 'date')
+        ('symbol', 'utcdate'))
+      ('symbol', 'isodate'))
+    ('string', '\n'))
+  * expanded:
+  (template
+    (|
+      (func
+        ('symbol', 'localdate')
+        (list
+          ('symbol', 'date')
+          ('string', 'UTC')))
+      ('symbol', 'isodate'))
+    ('string', '\n'))
+  1970-01-12 13:46 +0000
+
+Aliases should be applied only to command arguments and templates in hgrc.
+Otherwise, our stock styles and web templates could be corrupted:
+
+  $ hg log -r0 -T '{rn} {utcdate(date)|isodate}\n'
+  0:1e4e1b8f71e0 1970-01-12 13:46 +0000
+
+  $ hg log -r0 --config ui.logtemplate='"{rn} {utcdate(date)|isodate}\n"'
+  0:1e4e1b8f71e0 1970-01-12 13:46 +0000
+
+  $ cat <<EOF > tmpl
+  > changeset = 'nothing expanded:{rn}\n'
+  > EOF
+  $ hg log -r0 --style ./tmpl
+  nothing expanded:
+
+Aliases in formatter:
+
+  $ hg branches -T '{pad(branch, 7)} {rn}\n'
+  default 6:d41e714fe50d
+  foo     4:bbe44766e73d
+
+Aliases should honor HGPLAIN:
+
+  $ HGPLAIN= hg log -r0 -T 'nothing expanded:{rn}\n'
+  nothing expanded:
+  $ HGPLAINEXCEPT=templatealias hg log -r0 -T '{rn}\n'
+  0:1e4e1b8f71e0
+
+Unparsable alias:
+
+  $ hg debugtemplate --config templatealias.bad='x(' -v '{bad}'
+  (template
+    ('symbol', 'bad'))
+  abort: failed to parse the definition of template alias "bad": at 2: not a prefix: end
+  [255]
+  $ hg log --config templatealias.bad='x(' -T '{bad}'
+  abort: failed to parse the definition of template alias "bad": at 2: not a prefix: end
+  [255]
+
+  $ cd ..
+
 Set up repository for non-ascii encoding tests:
 
   $ hg init nonascii
   $ cd nonascii
   $ python <<EOF
+  > open('latin1', 'w').write('\xe9')
   > open('utf-8', 'w').write('\xc3\xa9')
   > EOF
   $ HGENCODING=utf-8 hg branch -q `cat utf-8`
-  $ HGENCODING=utf-8 hg ci -qAm 'non-ascii branch' utf-8
+  $ HGENCODING=utf-8 hg ci -qAm "non-ascii branch: `cat utf-8`" utf-8
 
 json filter should try round-trip conversion to utf-8:
 
   $ HGENCODING=ascii hg log -T "{branch|json}\n" -r0
   "\u00e9"
+  $ HGENCODING=ascii hg log -T "{desc|json}\n" -r0
+  "non-ascii branch: \u00e9"
 
-json filter should not abort if it can't decode bytes:
-(not sure the current behavior is right; we might want to use utf-8b encoding?)
+json filter takes input as utf-8b:
 
   $ HGENCODING=ascii hg log -T "{'`cat utf-8`'|json}\n" -l1
-  "\ufffd\ufffd"
+  "\u00e9"
+  $ HGENCODING=ascii hg log -T "{'`cat latin1`'|json}\n" -l1
+  "\udce9"
+
+utf8 filter:
+
+  $ HGENCODING=ascii hg log -T "round-trip: {branch|utf8|hex}\n" -r0
+  round-trip: c3a9
+  $ HGENCODING=latin1 hg log -T "decoded: {'`cat latin1`'|utf8|hex}\n" -l1
+  decoded: c3a9
+  $ HGENCODING=ascii hg log -T "replaced: {'`cat latin1`'|utf8|hex}\n" -l1
+  abort: decoding near * (glob)
+  [255]
+  $ hg log -T "invalid type: {rev|utf8}\n" -r0
+  abort: template filter 'utf8' is not compatible with keyword 'rev'
+  [255]
+
+  $ cd ..
+
+Test that template function in extension is registered as expected
+
+  $ cd a
+
+  $ cat <<EOF > $TESTTMP/customfunc.py
+  > from mercurial import registrar
+  > 
+  > templatefunc = registrar.templatefunc()
+  > 
+  > @templatefunc('custom()')
+  > def custom(context, mapping, args):
+  >     return 'custom'
+  > EOF
+  $ cat <<EOF > .hg/hgrc
+  > [extensions]
+  > customfunc = $TESTTMP/customfunc.py
+  > EOF
+
+  $ hg log -r . -T "{custom()}\n" --config customfunc.enabled=true
+  custom
 
   $ cd ..

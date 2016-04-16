@@ -606,21 +606,28 @@ def bookmarks(web, req, tmpl):
     The ``bookmarks`` template is rendered.
     """
     i = [b for b in web.repo._bookmarks.items() if b[1] in web.repo]
+    sortkey = lambda b: (web.repo[b[1]].rev(), b[0])
+    i = sorted(i, key=sortkey, reverse=True)
     parity = paritygen(web.stripecount)
 
     def entries(latestonly, **map):
+        t = i
         if latestonly:
-            t = [min(i)]
-        else:
-            t = sorted(i)
+            t = i[:1]
         for k, n in t:
             yield {"parity": parity.next(),
                    "bookmark": k,
                    "date": web.repo[n].date(),
                    "node": hex(n)}
 
+    if i:
+        latestrev = i[0][1]
+    else:
+        latestrev = -1
+
     return tmpl("bookmarks",
                 node=hex(web.repo.changelog.tip()),
+                lastchange=[{"date": web.repo[latestrev].date()}],
                 entries=lambda **x: entries(latestonly=False, **x),
                 latestentry=lambda **x: entries(latestonly=True, **x))
 
@@ -678,7 +685,9 @@ def summary(web, req, tmpl):
     def bookmarks(**map):
         parity = paritygen(web.stripecount)
         marks = [b for b in web.repo._bookmarks.items() if b[1] in web.repo]
-        for k, n in sorted(marks)[:10]:  # limit to 10 bookmarks
+        sortkey = lambda b: (web.repo[b[1]].rev(), b[0])
+        marks = sorted(marks, key=sortkey, reverse=True)
+        for k, n in marks[:10]:  # limit to 10 bookmarks
             yield {'parity': parity.next(),
                    'bookmark': k,
                    'date': web.repo[n].date(),
@@ -1135,7 +1144,7 @@ def graph(web, req, tmpl):
                              max([edge[1] for edge in edges] or [0]))
         return cols
 
-    def graphdata(usetuples, **map):
+    def graphdata(usetuples, encodestr):
         data = []
 
         row = 0
@@ -1143,11 +1152,11 @@ def graph(web, req, tmpl):
             if type != graphmod.CHANGESET:
                 continue
             node = str(ctx)
-            age = templatefilters.age(ctx.date())
-            desc = templatefilters.firstline(ctx.description())
+            age = encodestr(templatefilters.age(ctx.date()))
+            desc = templatefilters.firstline(encodestr(ctx.description()))
             desc = cgi.escape(templatefilters.nonempty(desc))
-            user = cgi.escape(templatefilters.person(ctx.user()))
-            branch = cgi.escape(ctx.branch())
+            user = cgi.escape(templatefilters.person(encodestr(ctx.user())))
+            branch = cgi.escape(encodestr(ctx.branch()))
             try:
                 branchnode = web.repo.branchtip(branch)
             except error.RepoLookupError:
@@ -1156,8 +1165,9 @@ def graph(web, req, tmpl):
 
             if usetuples:
                 data.append((node, vtx, edges, desc, user, age, branch,
-                             [cgi.escape(x) for x in ctx.tags()],
-                             [cgi.escape(x) for x in ctx.bookmarks()]))
+                             [cgi.escape(encodestr(x)) for x in ctx.tags()],
+                             [cgi.escape(encodestr(x))
+                              for x in ctx.bookmarks()]))
             else:
                 edgedata = [{'col': edge[0], 'nextcol': edge[1],
                              'color': (edge[2] - 1) % 6 + 1,
@@ -1195,8 +1205,9 @@ def graph(web, req, tmpl):
                 canvaswidth=(cols + 1) * bg_height,
                 truecanvasheight=rows * bg_height,
                 canvasheight=canvasheight, bg_height=bg_height,
-                jsdata=lambda **x: graphdata(True, **x),
-                nodes=lambda **x: graphdata(False, **x),
+                # {jsdata} will be passed to |json, so it must be in utf-8
+                jsdata=lambda **x: graphdata(True, encoding.fromlocal),
+                nodes=lambda **x: graphdata(False, str),
                 node=ctx.hex(), changenav=changenav)
 
 def _getdoc(e):

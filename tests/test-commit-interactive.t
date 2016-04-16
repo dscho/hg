@@ -59,6 +59,14 @@ Select files but no hunks
   
   
 
+Abort for untracked
+
+  $ touch untracked
+  $ hg commit -i -m should-fail empty-rw untracked
+  abort: untracked: file not tracked!
+  [255]
+  $ rm untracked
+
 Record empty file
 
   $ hg commit -i -d '0 0' -m empty empty-rw<<EOF
@@ -283,7 +291,7 @@ Modify end of plain file with username unset
   $ unset HGUSER
   $ hg commit -i --config ui.username= -d '8 0' -m end plain
   abort: no username supplied
-  (use "hg config --edit" to set your username)
+  (use 'hg config --edit' to set your username)
   [255]
 
 

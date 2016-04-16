@@ -25,7 +25,8 @@
 
 Rebasing
 D onto H - simple rebase:
-(this also tests that editor is invoked if '--edit' is specified)
+(this also tests that editor is invoked if '--edit' is specified, and that we
+can abort or warn for colliding untracked files)
 
   $ hg clone -q -u . a a1
   $ cd a1
@@ -50,8 +51,10 @@ D onto H - simple rebase:
 
   $ hg status --rev "3^1" --rev 3
   A D
-  $ HGEDITOR=cat hg rebase -s 3 -d 7 --edit
+  $ echo collide > D
+  $ HGEDITOR=cat hg rebase -s 3 -d 7 --edit --config merge.checkunknown=warn
   rebasing 3:32af7686d403 "D"
+  D: replacing untracked file
   D
   
   
@@ -62,6 +65,9 @@ D onto H - simple rebase:
   HG: branch 'default'
   HG: added D
   saved backup bundle to $TESTTMP/a1/.hg/strip-backup/32af7686d403-6f7dface-backup.hg (glob)
+  $ cat D.orig
+  collide
+  $ rm D.orig
 
   $ hg tglog
   o  7: 'D'
@@ -84,14 +90,19 @@ D onto H - simple rebase:
 
 
 D onto F - intermediate point:
-(this also tests that editor is not invoked if '--edit' is not specified)
+(this also tests that editor is not invoked if '--edit' is not specified, and
+that we can ignore for colliding untracked files)
 
   $ hg clone -q -u . a a2
   $ cd a2
+  $ echo collide > D
 
-  $ HGEDITOR=cat hg rebase -s 3 -d 5
+  $ HGEDITOR=cat hg rebase -s 3 -d 5 --config merge.checkunknown=ignore
   rebasing 3:32af7686d403 "D"
   saved backup bundle to $TESTTMP/a2/.hg/strip-backup/32af7686d403-6f7dface-backup.hg (glob)
+  $ cat D.orig
+  collide
+  $ rm D.orig
 
   $ hg tglog
   o  7: 'D'
@@ -114,15 +125,21 @@ D onto F - intermediate point:
 
 
 E onto H - skip of G:
+(this also tests that we can overwrite untracked files and don't create backups
+if they have the same contents)
 
   $ hg clone -q -u . a a3
   $ cd a3
+  $ hg cat -r 4 E | tee E
+  E
 
   $ hg rebase -s 4 -d 7
   rebasing 4:9520eea781bc "E"
   rebasing 6:eea13746799a "G"
   note: rebase of 6:eea13746799a created no changes to commit
   saved backup bundle to $TESTTMP/a3/.hg/strip-backup/9520eea781bc-fcd8edd4-backup.hg (glob)
+  $ f E.orig
+  E.orig: file not found
 
   $ hg tglog
   o  6: 'E'
@@ -745,11 +762,72 @@ Test that rebase is not confused by $CWD disappearing during rebase (issue4121)
   saved backup bundle to $TESTTMP/cwd-vanish/.hg/strip-backup/779a07b1b7a0-853e0073-backup.hg (glob)
 
 Test experimental revset
+========================
 
   $ cd ..
+
+Make the repo a bit more interresting
+
+  $ hg up 1
+  0 files updated, 0 files merged, 2 files removed, 0 files unresolved
+  $ echo aaa > aaa
+  $ hg add aaa
+  $ hg commit -m aaa
+  created new head
+  $ hg log -G
+  @  changeset:   4:5f7bc9025ed2
+  |  tag:         tip
+  |  parent:      1:58d79cc1cf43
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     aaa
+  |
+  | o  changeset:   3:1910d5ff34ea
+  | |  user:        test
+  | |  date:        Thu Jan 01 00:00:00 1970 +0000
+  | |  summary:     second source with subdir
+  | |
+  | o  changeset:   2:82901330b6ef
+  |/   user:        test
+  |    date:        Thu Jan 01 00:00:00 1970 +0000
+  |    summary:     first source commit
+  |
+  o  changeset:   1:58d79cc1cf43
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     dest commit
+  |
+  o  changeset:   0:e94b687f7da3
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     initial commit
+  
+
+Testing from lower head
+
+  $ hg up 3
+  2 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg log -r '_destrebase()'
+  changeset:   4:5f7bc9025ed2
+  tag:         tip
+  parent:      1:58d79cc1cf43
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     aaa
+  
+
+Testing from upper head
+
+  $ hg log -r '_destrebase(4)'
+  changeset:   3:1910d5ff34ea
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     second source with subdir
+  
+  $ hg up 4
+  1 files updated, 0 files merged, 2 files removed, 0 files unresolved
   $ hg log -r '_destrebase()'
   changeset:   3:1910d5ff34ea
-  tag:         tip
   user:        test
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     second source with subdir

@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 
+from __future__ import absolute_import, print_function
+
 import ast
 import collections
 import os
+import re
 import sys
 
 # Import a minimal set of stdlib modules needed for list_stdlib_modules()
@@ -182,6 +185,8 @@ def list_stdlib_modules():
     yield 'builtins' # python3 only
     for m in 'fcntl', 'grp', 'pwd', 'termios':  # Unix only
         yield m
+    for m in 'cPickle', 'datetime': # in Python (not C) on PyPy
+        yield m
     stdlib_prefixes = set([sys.prefix, sys.exec_prefix])
     # We need to supplement the list of prefixes for the search to work
     # when run from within a virtualenv.
@@ -200,10 +205,8 @@ def list_stdlib_modules():
             stdlib_prefixes.add(dirname)
     for libpath in sys.path:
         # We want to walk everything in sys.path that starts with
-        # something in stdlib_prefixes. check-code suppressed because
-        # the ast module used by this script implies the availability
-        # of any().
-        if not any(libpath.startswith(p) for p in stdlib_prefixes): # no-py24
+        # something in stdlib_prefixes.
+        if not any(libpath.startswith(p) for p in stdlib_prefixes):
             continue
         for top, dirs, files in os.walk(libpath):
             for i, d in reversed(list(enumerate(dirs))):
@@ -223,7 +226,7 @@ def list_stdlib_modules():
 
 stdlib_modules = set(list_stdlib_modules())
 
-def imported_modules(source, modulename, localmods, ignore_nested=False):
+def imported_modules(source, modulename, f, localmods, ignore_nested=False):
     """Given the source of a file as a string, yield the names
     imported by that file.
 
@@ -237,6 +240,7 @@ def imported_modules(source, modulename, localmods, ignore_nested=False):
     Returns:
       A list of absolute module names imported by the given source.
 
+    >>> f = 'foo/xxx.py'
     >>> modulename = 'foo.xxx'
     >>> localmods = {'foo.__init__': True,
     ...              'foo.foo1': True, 'foo.foo2': True,
@@ -245,43 +249,43 @@ def imported_modules(source, modulename, localmods, ignore_nested=False):
     >>> # standard library (= not locally defined ones)
     >>> sorted(imported_modules(
     ...        'from stdlib1 import foo, bar; import stdlib2',
-    ...        modulename, localmods))
+    ...        modulename, f, localmods))
     []
     >>> # relative importing
     >>> sorted(imported_modules(
     ...        'import foo1; from bar import bar1',
-    ...        modulename, localmods))
+    ...        modulename, f, localmods))
     ['foo.bar.bar1', 'foo.foo1']
     >>> sorted(imported_modules(
     ...        'from bar.bar1 import name1, name2, name3',
-    ...        modulename, localmods))
+    ...        modulename, f, localmods))
     ['foo.bar.bar1']
     >>> # absolute importing
     >>> sorted(imported_modules(
     ...        'from baz import baz1, name1',
-    ...        modulename, localmods))
+    ...        modulename, f, localmods))
     ['baz.__init__', 'baz.baz1']
     >>> # mixed importing, even though it shouldn't be recommended
     >>> sorted(imported_modules(
     ...        'import stdlib, foo1, baz',
-    ...        modulename, localmods))
+    ...        modulename, f, localmods))
     ['baz.__init__', 'foo.foo1']
     >>> # ignore_nested
     >>> sorted(imported_modules(
     ... '''import foo
     ... def wat():
     ...     import bar
-    ... ''', modulename, localmods))
+    ... ''', modulename, f, localmods))
     ['foo.__init__', 'foo.bar.__init__']
     >>> sorted(imported_modules(
     ... '''import foo
     ... def wat():
     ...     import bar
-    ... ''', modulename, localmods, ignore_nested=True))
+    ... ''', modulename, f, localmods, ignore_nested=True))
     ['foo.__init__']
     """
     fromlocal = fromlocalfunc(modulename, localmods)
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(ast.parse(source, f)):
         if ignore_nested and getattr(node, 'col_offset', 0) > 0:
             continue
         if isinstance(node, ast.Import):
@@ -366,7 +370,7 @@ def verify_modern_convention(module, root, localmods, root_col_offset=0):
     fromlocal = fromlocalfunc(module, localmods)
 
     # Whether a local/non-stdlib import has been performed.
-    seenlocal = False
+    seenlocal = None
     # Whether a relative, non-symbol import has been seen.
     seennonsymbolrelative = False
     # The last name to be imported (for sorting).
@@ -403,10 +407,11 @@ def verify_modern_convention(module, root, localmods, root_col_offset=0):
             # stdlib imports should be before local imports.
             stdlib = name in stdlib_modules
             if stdlib and seenlocal and node.col_offset == root_col_offset:
-                yield msg('stdlib import follows local import: %s', name)
+                yield msg('stdlib import "%s" follows local import: %s',
+                          name, seenlocal)
 
             if not stdlib:
-                seenlocal = True
+                seenlocal = name
 
             # Import of sibling modules should use relative imports.
             topname = name.split('.')[0]
@@ -437,7 +442,7 @@ def verify_modern_convention(module, root, localmods, root_col_offset=0):
                 if not fullname or fullname in stdlib_modules:
                     yield msg('relative import of stdlib module')
                 else:
-                    seenlocal = True
+                    seenlocal = fullname
 
             # Direct symbol import is only allowed from certain modules and
             # must occur before non-symbol imports.
@@ -494,10 +499,6 @@ def verify_stdlib_on_own_line(root):
     """Given some python source, verify that stdlib imports are done
     in separate statements from relative local module imports.
 
-    Observing this limitation is important as it works around an
-    annoying lib2to3 bug in relative import rewrites:
-    http://bugs.python.org/issue19510.
-
     >>> list(verify_stdlib_on_own_line(ast.parse('import sys, foo')))
     [('mixed imports\\n   stdlib:    sys\\n   relative:  foo', 1)]
     >>> list(verify_stdlib_on_own_line(ast.parse('import sys, os')))
@@ -547,16 +548,17 @@ def find_cycles(imports):
 
     All module names recorded in `imports` should be absolute one.
 
+    >>> from __future__ import print_function
     >>> imports = {'top.foo': ['top.bar', 'os.path', 'top.qux'],
     ...            'top.bar': ['top.baz', 'sys'],
     ...            'top.baz': ['top.foo'],
     ...            'top.qux': ['top.foo']}
-    >>> print '\\n'.join(sorted(find_cycles(imports)))
+    >>> print('\\n'.join(sorted(find_cycles(imports))))
     top.bar -> top.baz -> top.foo -> top.bar
     top.foo -> top.qux -> top.foo
     """
     cycles = set()
-    for mod in sorted(imports.iterkeys()):
+    for mod in sorted(imports.keys()):
         try:
             checkmod(mod, imports)
         except CircularImport as e:
@@ -567,9 +569,101 @@ def find_cycles(imports):
 def _cycle_sortkey(c):
     return len(c), c
 
+def embedded(f, modname, src):
+    """Extract embedded python code
+
+    >>> def test(fn, lines):
+    ...     for s, m, f, l in embedded(fn, "example", lines):
+    ...         print("%s %s %s" % (m, f, l))
+    ...         print(repr(s))
+    >>> lines = [
+    ...   'comment',
+    ...   '  >>> from __future__ import print_function',
+    ...   "  >>> ' multiline",
+    ...   "  ... string'",
+    ...   '  ',
+    ...   'comment',
+    ...   '  $ cat > foo.py <<EOF',
+    ...   '  > from __future__ import print_function',
+    ...   '  > EOF',
+    ... ]
+    >>> test("example.t", lines)
+    example[2] doctest.py 2
+    "from __future__ import print_function\\n' multiline\\nstring'\\n"
+    example[7] foo.py 7
+    'from __future__ import print_function\\n'
+    """
+    inlinepython = 0
+    shpython = 0
+    script = []
+    prefix = 6
+    t = ''
+    n = 0
+    for l in src:
+        n += 1
+        if not l.endswith(b'\n'):
+            l += b'\n'
+        if l.startswith(b'  >>> '): # python inlines
+            if shpython:
+                print("%s:%d: Parse Error" % (f, n))
+            if not inlinepython:
+                # We've just entered a Python block.
+                inlinepython = n
+                t = 'doctest.py'
+            script.append(l[prefix:])
+            continue
+        if l.startswith(b'  ... '): # python inlines
+            script.append(l[prefix:])
+            continue
+        cat = re.search(r"\$ \s*cat\s*>\s*(\S+\.py)\s*<<\s*EOF", l)
+        if cat:
+            if inlinepython:
+                yield ''.join(script), ("%s[%d]" %
+                       (modname, inlinepython)), t, inlinepython
+                script = []
+                inlinepython = 0
+            shpython = n
+            t = cat.group(1)
+            continue
+        if shpython and l.startswith(b'  > '): # sh continuation
+            if l == b'  > EOF\n':
+                yield ''.join(script), ("%s[%d]" %
+                       (modname, shpython)), t, shpython
+                script = []
+                shpython = 0
+            else:
+                script.append(l[4:])
+            continue
+        if inlinepython and l == b'  \n':
+            yield ''.join(script), ("%s[%d]" %
+                   (modname, inlinepython)), t, inlinepython
+            script = []
+            inlinepython = 0
+            continue
+
+def sources(f, modname):
+    """Yields possibly multiple sources from a filepath
+
+    input: filepath, modulename
+    yields:  script(string), modulename, filepath, linenumber
+
+    For embedded scripts, the modulename and filepath will be different
+    from the function arguments. linenumber is an offset relative to
+    the input file.
+    """
+    py = False
+    if f.endswith('.py'):
+        with open(f) as src:
+            yield src.read(), modname, f, 0
+            py = True
+    if py or f.endswith('.t'):
+        with open(f) as src:
+            for script, modname, t, line in embedded(f, modname, src):
+                yield script, modname, t, line
+
 def main(argv):
     if len(argv) < 2 or (argv[1] == '-' and len(argv) > 2):
-        print 'Usage: %s {-|file [file] [file] ...}'
+        print('Usage: %s {-|file [file] [file] ...}')
         return 1
     if argv[1] == '-':
         argv = argv[:1]
@@ -580,15 +674,19 @@ def main(argv):
     for source_path in argv[1:]:
         modname = dotted_name_of_path(source_path, trimpure=True)
         localmods[modname] = source_path
-    for modname, source_path in sorted(localmods.iteritems()):
-        f = open(source_path)
-        src = f.read()
-        used_imports[modname] = sorted(
-            imported_modules(src, modname, localmods, ignore_nested=True))
-        for error, lineno in verify_import_convention(modname, src, localmods):
-            any_errors = True
-            print '%s:%d: %s' % (source_path, lineno, error)
-        f.close()
+    for localmodname, source_path in sorted(localmods.items()):
+        for src, modname, name, line in sources(source_path, localmodname):
+            try:
+                used_imports[modname] = sorted(
+                    imported_modules(src, modname, name, localmods,
+                                     ignore_nested=True))
+                for error, lineno in verify_import_convention(modname, src,
+                                                              localmods):
+                    any_errors = True
+                    print('%s:%d: %s' % (source_path, lineno + line, error))
+            except SyntaxError as e:
+                print('%s:%d: SyntaxError: %s' %
+                      (source_path, e.lineno + line, e))
     cycles = find_cycles(used_imports)
     if cycles:
         firstmods = set()
@@ -599,7 +697,7 @@ def main(argv):
             # of cycles that are effectively duplicates.
             if first in firstmods:
                 continue
-            print 'Import cycle:', c
+            print('Import cycle:', c)
             firstmods.add(first)
         any_errors = True
     return any_errors != 0

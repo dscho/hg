@@ -800,7 +800,7 @@ variables it is passed are listed with names of the form ``$HG_foo``.
 ``outgoing``
   Run after sending changes from local repository to another. ID of
   first changeset sent is in ``$HG_NODE``. Source of operation is in
-  ``$HG_SOURCE``; Also see :hg:`help config.preoutgoing` hook.
+  ``$HG_SOURCE``; Also see :hg:`help config.hooks.preoutgoing` hook.
 
 ``post-<command>``
   Run after successful invocations of the associated command. The
@@ -881,11 +881,11 @@ variables it is passed are listed with names of the form ``$HG_foo``.
 ``txnclose``
   Run after any repository transaction has been committed. At this
   point, the transaction can no longer be rolled back. The hook will run
-  after the lock is released. See :hg:`help config.pretxnclose` docs for
+  after the lock is released. See :hg:`help config.hooks.pretxnclose` docs for
   details about available variables.
 
 ``txnabort``
-  Run when a transaction is aborted. See :hg:`help config.pretxnclose`
+  Run when a transaction is aborted. See :hg:`help config.hooks.pretxnclose`
   docs for details about available variables.
 
 ``pretxnchangegroup``
@@ -968,10 +968,16 @@ is treated as a failure.
 --------------------
 
 Fingerprints of the certificates of known HTTPS servers.
+
 A HTTPS connection to a server with a fingerprint configured here will
 only succeed if the servers certificate matches the fingerprint.
 This is very similar to how ssh known hosts works.
+
 The fingerprint is the SHA-1 hash value of the DER encoded certificate.
+Multiple values can be specified (separated by spaces or commas). This can
+be used to define both old and new fingerprints while a host transitions
+to a new certificate.
+
 The CA chain and web.cacerts is not used for servers with a fingerprint.
 
 For example::
@@ -979,9 +985,6 @@ For example::
     [hostfingerprints]
     hg.intevation.de = fc:e2:8d:d9:51:cd:cb:c1:4d:18:6b:b7:44:8d:49:72:57:e6:cd:33
     hg.intevation.org = fc:e2:8d:d9:51:cd:cb:c1:4d:18:6b:b7:44:8d:49:72:57:e6:cd:33
-
-This feature is only supported when using Python 2.6 or later.
-
 
 ``http_proxy``
 --------------
@@ -1006,6 +1009,25 @@ proxy.
 ``always``
     Optional. Always use the proxy, even for localhost and any entries
     in ``http_proxy.no``. (default: False)
+
+``merge``
+---------
+
+This section specifies behavior during merges and updates.
+
+``checkignored``
+   Controls behavior when an ignored file on disk has the same name as a tracked
+   file in the changeset being merged or updated to, and has different
+   contents. Options are ``abort``, ``warn`` and ``ignore``. With ``abort``,
+   abort on such files. With ``warn``, warn on such files and back them up as
+   .orig. With ``ignore``, don't print a warning and back them up as
+   .orig. (default: ``abort``)
+
+``checkunknown``
+   Controls behavior when an unknown file that isn't ignored has the same name
+   as a tracked file in the changeset being merged or updated to, and has
+   different contents. Similar to ``merge.checkignored``, except for files that
+   are not ignored. (default: ``abort``)
 
 ``merge-patterns``
 ------------------
@@ -1466,6 +1488,11 @@ Relative subrepository paths are first made absolute, and the
 rewrite rules are then applied on the full (absolute) path. The rules
 are applied in definition order.
 
+``templatealias``
+-----------------
+
+Alias definitions for templates. See :hg:`help templates` for details.
+
 ``trusted``
 -----------
 
@@ -1587,6 +1614,15 @@ User interface controls.
 
 ``interactive``
     Allow to prompt the user. (default: True)
+
+``interface``
+    Select the default interface for interactive features (default: text).
+    Possible values are 'text' and 'curses'.
+
+``interface.chunkselector``
+    Select the interface for change recording (e.g. :hg:`commit` -i).
+    Possible values are 'text' and 'curses'.
+    This config overrides the interface specified by ui.interface.
 
 ``logtemplate``
     Template string for commands that print changesets.
@@ -1814,11 +1850,6 @@ The full set of options is:
     constructs are expanded in the filename. If specified on the
     client, then it will verify the identity of remote HTTPS servers
     with these certificates.
-
-    This feature is only supported when using Python 2.6 or later. If you wish
-    to use it with earlier versions of Python, install the backported
-    version of the ssl library that is available from
-    ``http://pypi.python.org``.
 
     To disable SSL verification temporarily, specify ``--insecure`` from
     command line.

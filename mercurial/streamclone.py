@@ -271,11 +271,12 @@ def generatebundlev1(repo, compression='UN'):
         assert compression == 'UN'
 
         seen = 0
-        repo.ui.progress(_('bundle'), 0, total=bytecount)
+        repo.ui.progress(_('bundle'), 0, total=bytecount, unit=_('bytes'))
 
         for chunk in it:
             seen += len(chunk)
-            repo.ui.progress(_('bundle'), seen, total=bytecount)
+            repo.ui.progress(_('bundle'), seen, total=bytecount,
+                             unit=_('bytes'))
             yield chunk
 
         repo.ui.progress(_('bundle'), None)
@@ -295,7 +296,7 @@ def consumev1(repo, fp, filecount, bytecount):
         repo.ui.status(_('%d files to transfer, %s of data\n') %
                        (filecount, util.bytecount(bytecount)))
         handled_bytes = 0
-        repo.ui.progress(_('clone'), 0, total=bytecount)
+        repo.ui.progress(_('clone'), 0, total=bytecount, unit=_('bytes'))
         start = time.time()
 
         with repo.transaction('clone'):
@@ -318,7 +319,7 @@ def consumev1(repo, fp, filecount, bytecount):
                         for chunk in util.filechunkiter(fp, limit=size):
                             handled_bytes += len(chunk)
                             repo.ui.progress(_('clone'), handled_bytes,
-                                             total=bytecount)
+                                             total=bytecount, unit=_('bytes'))
                             ofp.write(chunk)
 
         # Writing straight to files circumvented the inmemory caches

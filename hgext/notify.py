@@ -132,11 +132,21 @@ web.baseurl
   references. See also ``notify.strip``.
 
 '''
+from __future__ import absolute_import
 
-import email, socket, time
-from mercurial.i18n import _
-from mercurial import patch, cmdutil, util, mail, error
+import email
 import fnmatch
+import socket
+import time
+
+from mercurial import (
+    cmdutil,
+    error,
+    mail,
+    patch,
+    util,
+)
+from mercurial.i18n import _
 
 # Note for extension authors: ONLY specify testedwith = 'internal' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
@@ -186,9 +196,11 @@ class notifier(object):
         self.subs = self.subscribers()
         self.merge = self.ui.configbool('notify', 'merge', True)
 
-        mapfile = self.ui.config('notify', 'style')
+        mapfile = None
         template = (self.ui.config('notify', hooktype) or
                     self.ui.config('notify', 'template'))
+        if not template:
+            mapfile = self.ui.config('notify', 'style')
         if not mapfile and not template:
             template = deftemplates.get(hooktype) or single_template
         self.t = cmdutil.changeset_templater(self.ui, self.repo, False, None,

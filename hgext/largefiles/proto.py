@@ -4,11 +4,13 @@
 # GNU General Public License version 2 or any later version.
 
 import os
-import urllib2
 import re
 
 from mercurial import error, httppeer, util, wireproto
 from mercurial.i18n import _
+
+urlerr = util.urlerr
+urlreq = util.urlreq
 
 import lfutil
 
@@ -22,8 +24,8 @@ ssholdcallstream = None
 httpoldcallstream = None
 
 def putlfile(repo, proto, sha):
-    '''Put a largefile into a repository's local store and into the
-    user cache.'''
+    '''Server command for putting a largefile into a repository's local store
+    and into the user cache.'''
     proto.redirect()
 
     path = lfutil.storepath(repo, sha)
@@ -47,8 +49,8 @@ def putlfile(repo, proto, sha):
     return wireproto.pushres(0)
 
 def getlfile(repo, proto, sha):
-    '''Retrieve a largefile from the repository-local cache or system
-    cache.'''
+    '''Server command for retrieving a largefile from the repository-local
+    cache or user cache.'''
     filename = lfutil.findfile(repo, sha)
     if not filename:
         raise error.Abort(_('requested largefile %s not present in cache')
@@ -68,8 +70,8 @@ def getlfile(repo, proto, sha):
     return wireproto.streamres(generator())
 
 def statlfile(repo, proto, sha):
-    '''Return '2\n' if the largefile is missing, '0\n' if it seems to be in
-    good condition.
+    '''Server command for checking if a largefile is present - returns '2\n' if
+    the largefile is missing, '0\n' if it seems to be in good condition.
 
     The value 1 is reserved for mismatched checksum, but that is too expensive
     to be verified on every stat and must be caught be running 'hg verify'
@@ -140,7 +142,7 @@ def wirereposetup(ui, repo):
             yield result, f
             try:
                 yield int(f.value)
-            except (ValueError, urllib2.HTTPError):
+            except (ValueError, urlerr.httperror):
                 # If the server returns anything but an integer followed by a
                 # newline, newline, it's not speaking our language; if we get
                 # an HTTP error, we can't be sure the largefile is present;
@@ -151,9 +153,12 @@ def wirereposetup(ui, repo):
 
 # advertise the largefiles=serve capability
 def capabilities(repo, proto):
+    '''Wrap server command to announce largefile server capability'''
     return capabilitiesorig(repo, proto) + ' largefiles=serve'
 
 def heads(repo, proto):
+    '''Wrap server command - largefile capable clients will know to call
+    lheads instead'''
     if lfutil.islfilesrepo(repo):
         return wireproto.ooberror(LARGEFILES_REQUIRED_MSG)
     return wireproto.heads(repo, proto)

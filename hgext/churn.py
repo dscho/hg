@@ -8,11 +8,21 @@
 
 '''command to display statistics about repository history'''
 
-from mercurial.i18n import _
-from mercurial import patch, cmdutil, scmutil, util, commands, error
-from mercurial import encoding
+from __future__ import absolute_import
+
+import datetime
 import os
-import time, datetime
+import time
+
+from mercurial.i18n import _
+from mercurial import (
+    cmdutil,
+    commands,
+    encoding,
+    patch,
+    scmutil,
+    util,
+)
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
@@ -23,12 +33,7 @@ command = cmdutil.command(cmdtable)
 testedwith = 'internal'
 
 def maketemplater(ui, repo, tmpl):
-    try:
-        t = cmdutil.changeset_templater(ui, repo, False, None, tmpl,
-                                        None, False)
-    except SyntaxError as inst:
-        raise error.Abort(inst.args[0])
-    return t
+    return cmdutil.changeset_templater(ui, repo, False, None, tmpl, None, False)
 
 def changedlines(ui, repo, ctx1, ctx2, fns):
     added, removed = 0, 0
@@ -83,7 +88,8 @@ def countrate(ui, repo, amap, *pats, **opts):
             rate[key] = [r + l for r, l in zip(rate.get(key, (0, 0)), lines)]
 
         state['count'] += 1
-        ui.progress(_('analyzing'), state['count'], total=len(repo))
+        ui.progress(_('analyzing'), state['count'], total=len(repo),
+                    unit=_('revisions'))
 
     for ctx in cmdutil.walkchangerevs(repo, m, opts, prep):
         continue

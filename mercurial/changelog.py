@@ -7,6 +7,8 @@
 
 from __future__ import absolute_import
 
+import collections
+
 from .i18n import _
 from .node import (
     bin,
@@ -135,6 +137,122 @@ def _delayopener(opener, target, buf):
             return opener(name, mode)
         return appender(opener, name, mode, buf)
     return _delay
+
+_changelogrevision = collections.namedtuple('changelogrevision',
+                                            ('manifest', 'user', 'date',
+                                             'files', 'description', 'extra'))
+
+class changelogrevision(object):
+    """Holds results of a parsed changelog revision.
+
+    Changelog revisions consist of multiple pieces of data, including
+    the manifest node, user, and date. This object exposes a view into
+    the parsed object.
+    """
+
+    __slots__ = (
+        '_offsets',
+        '_text',
+    )
+
+    def __new__(cls, text):
+        if not text:
+            return _changelogrevision(
+                manifest=nullid,
+                user='',
+                date=(0, 0),
+                files=[],
+                description='',
+                extra=_defaultextra,
+            )
+
+        self = super(changelogrevision, cls).__new__(cls)
+        # We could return here and implement the following as an __init__.
+        # But doing it here is equivalent and saves an extra function call.
+
+        # format used:
+        # nodeid\n        : manifest node in ascii
+        # user\n          : user, no \n or \r allowed
+        # time tz extra\n : date (time is int or float, timezone is int)
+        #                 : extra is metadata, encoded and separated by '\0'
+        #                 : older versions ignore it
+        # files\n\n       : files modified by the cset, no \n or \r allowed
+        # (.*)            : comment (free text, ideally utf-8)
+        #
+        # changelog v0 doesn't use extra
+
+        nl1 = text.index('\n')
+        nl2 = text.index('\n', nl1 + 1)
+        nl3 = text.index('\n', nl2 + 1)
+
+        # The list of files may be empty. Which means nl3 is the first of the
+        # double newline that precedes the description.
+        if text[nl3 + 1] == '\n':
+            doublenl = nl3
+        else:
+            doublenl = text.index('\n\n', nl3 + 1)
+
+        self._offsets = (nl1, nl2, nl3, doublenl)
+        self._text = text
+
+        return self
+
+    @property
+    def manifest(self):
+        return bin(self._text[0:self._offsets[0]])
+
+    @property
+    def user(self):
+        off = self._offsets
+        return encoding.tolocal(self._text[off[0] + 1:off[1]])
+
+    @property
+    def _rawdate(self):
+        off = self._offsets
+        dateextra = self._text[off[1] + 1:off[2]]
+        return dateextra.split(' ', 2)[0:2]
+
+    @property
+    def _rawextra(self):
+        off = self._offsets
+        dateextra = self._text[off[1] + 1:off[2]]
+        fields = dateextra.split(' ', 2)
+        if len(fields) != 3:
+            return None
+
+        return fields[2]
+
+    @property
+    def date(self):
+        raw = self._rawdate
+        time = float(raw[0])
+        # Various tools did silly things with the timezone.
+        try:
+            timezone = int(raw[1])
+        except ValueError:
+            timezone = 0
+
+        return time, timezone
+
+    @property
+    def extra(self):
+        raw = self._rawextra
+        if raw is None:
+            return _defaultextra
+
+        return decodeextra(raw)
+
+    @property
+    def files(self):
+        off = self._offsets
+        if off[2] == off[3]:
+            return []
+
+        return self._text[off[2] + 1:off[3]].split('\n')
+
+    @property
+    def description(self):
+        return encoding.tolocal(self._text[self._offsets[3] + 2:])
 
 class changelog(revlog.revlog):
     def __init__(self, opener):
@@ -323,42 +441,34 @@ class changelog(revlog.revlog):
             revlog.revlog.checkinlinesize(self, tr, fp)
 
     def read(self, node):
+        """Obtain data from a parsed changelog revision.
+
+        Returns a 6-tuple of:
+
+           - manifest node in binary
+           - author/user as a localstr
+           - date as a 2-tuple of (time, timezone)
+           - list of files
+           - commit message as a localstr
+           - dict of extra metadata
+
+        Unless you need to access all fields, consider calling
+        ``changelogrevision`` instead, as it is faster for partial object
+        access.
         """
-        format used:
-        nodeid\n        : manifest node in ascii
-        user\n          : user, no \n or \r allowed
-        time tz extra\n : date (time is int or float, timezone is int)
-                        : extra is metadata, encoded and separated by '\0'
-                        : older versions ignore it
-        files\n\n       : files modified by the cset, no \n or \r allowed
-        (.*)            : comment (free text, ideally utf-8)
+        c = changelogrevision(self.revision(node))
+        return (
+            c.manifest,
+            c.user,
+            c.date,
+            c.files,
+            c.description,
+            c.extra
+        )
 
-        changelog v0 doesn't use extra
-        """
-        text = self.revision(node)
-        if not text:
-            return (nullid, "", (0, 0), [], "", _defaultextra)
-        last = text.index("\n\n")
-        desc = encoding.tolocal(text[last + 2:])
-        l = text[:last].split('\n')
-        manifest = bin(l[0])
-        user = encoding.tolocal(l[1])
-
-        tdata = l[2].split(' ', 2)
-        if len(tdata) != 3:
-            time = float(tdata[0])
-            try:
-                # various tools did silly things with the time zone field.
-                timezone = int(tdata[1])
-            except ValueError:
-                timezone = 0
-            extra = _defaultextra
-        else:
-            time, timezone = float(tdata[0]), int(tdata[1])
-            extra = decodeextra(tdata[2])
-
-        files = l[3:]
-        return (manifest, user, (time, timezone), files, desc, extra)
+    def changelogrevision(self, nodeorrev):
+        """Obtain a ``changelogrevision`` for a node or revision."""
+        return changelogrevision(self.revision(nodeorrev))
 
     def readfiles(self, node):
         """

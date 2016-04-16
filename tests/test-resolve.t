@@ -53,6 +53,34 @@ resolving an unknown path should emit a warning, but not for -l
   arguments do not match paths that need resolving
   $ hg resolve -l does-not-exist
 
+tell users how they could have used resolve
+
+  $ mkdir nested
+  $ cd nested
+  $ hg resolve -m file1
+  arguments do not match paths that need resolving
+  (try: hg resolve -m path:file1)
+  $ hg resolve -m file1 filez
+  arguments do not match paths that need resolving
+  (try: hg resolve -m path:file1 path:filez)
+  $ hg resolve -m path:file1 path:filez
+  $ hg resolve -l
+  R file1
+  U file2
+  $ hg resolve -m filez file2
+  arguments do not match paths that need resolving
+  (try: hg resolve -m path:filez path:file2)
+  $ hg resolve -m path:filez path:file2
+  (no more unresolved files)
+  $ hg resolve -l
+  R file1
+  R file2
+
+cleanup
+  $ hg resolve -u
+  $ cd ..
+  $ rmdir nested
+
 don't allow marking or unmarking driver-resolved files
 
   $ cat > $TESTTMP/markdriver.py << EOF
@@ -263,10 +291,12 @@ insert unsupported advisory merge record
   local: 57653b9f834a4493f7240b0681efcb9ae7cab745
   other: dc77451844e37f03f5c559e3b8529b2b48d381d1
   unrecognized entry: x	advisory record
+  file extras: file1 (ancestorlinknode = 99726c03216e233810a2564cbc0adfe395007eac)
   file: file1 (record type "F", state "r", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node 2ed2a3912a0b24502043eae84ee4b279c18b90dd)
     other path: file1 (node 6f4310b00b9a147241b071a60c28a650827fb03d)
+  file extras: file2 (ancestorlinknode = 99726c03216e233810a2564cbc0adfe395007eac)
   file: file2 (record type "F", state "u", hash cb99b709a1978bd205ab9dfd4c5aaa1fc91c7523)
     local path: file2 (flags "")
     ancestor path: file2 (node 2ed2a3912a0b24502043eae84ee4b279c18b90dd)
@@ -282,10 +312,12 @@ insert unsupported mandatory merge record
   * version 2 records
   local: 57653b9f834a4493f7240b0681efcb9ae7cab745
   other: dc77451844e37f03f5c559e3b8529b2b48d381d1
+  file extras: file1 (ancestorlinknode = 99726c03216e233810a2564cbc0adfe395007eac)
   file: file1 (record type "F", state "r", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node 2ed2a3912a0b24502043eae84ee4b279c18b90dd)
     other path: file1 (node 6f4310b00b9a147241b071a60c28a650827fb03d)
+  file extras: file2 (ancestorlinknode = 99726c03216e233810a2564cbc0adfe395007eac)
   file: file2 (record type "F", state "u", hash cb99b709a1978bd205ab9dfd4c5aaa1fc91c7523)
     local path: file2 (flags "")
     ancestor path: file2 (node 2ed2a3912a0b24502043eae84ee4b279c18b90dd)
@@ -300,12 +332,12 @@ insert unsupported mandatory merge record
   (see https://mercurial-scm.org/wiki/MergeStateRecords for more information)
   [255]
   $ hg summary
+  warning: merge state has unsupported record types: X
   parent: 2:57653b9f834a 
    append baz to files
   parent: 1:dc77451844e3 
    append bar to files
   branch: default
-  warning: merge state has unsupported record types: X
   commit: 2 modified, 2 unknown (merge)
   update: 2 new changesets (update)
   phases: 5 draft

@@ -220,19 +220,22 @@ secondaryactions = set()
 tertiaryactions = set()
 internalactions = set()
 
-def geteditcomment(first, last):
+def geteditcomment(ui, first, last):
     """ construct the editor comment
     The comment includes::
      - an intro
      - sorted primary commands
      - sorted short commands
      - sorted long commands
+     - additional hints
 
     Commands are only included once.
     """
     intro = _("""Edit history between %s and %s
 
 Commits are listed from least to most recent
+
+You can reorder changesets by reordering the lines
 
 Commands:
 """)
@@ -253,8 +256,14 @@ Commands:
         addverb(v)
     actions.append('')
 
-    return ''.join(['# %s\n' % l if l else '#\n'
-                    for l in ((intro % (first, last)).split('\n')) + actions])
+    hints = []
+    if ui.configbool('histedit', 'dropmissing'):
+        hints.append("Deleting a changeset from the list "
+                     "will DISCARD it from the edited history!")
+
+    lines = (intro % (first, last)).split('\n') + actions + hints
+
+    return ''.join(['# %s\n' % l if l else '#\n' for l in lines])
 
 class histeditstate(object):
     def __init__(self, repo, parentctxnode=None, actions=None, keep=None,
@@ -279,7 +288,7 @@ class histeditstate(object):
         except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
-            raise error.Abort(_('no histedit in progress'))
+            cmdutil.wrongtooltocontinue(self.repo, _('histedit'))
 
         if state.startswith('v1\n'):
             data = self._load()
@@ -447,13 +456,18 @@ class histeditaction(object):
         parentctx, but does not commit them."""
         repo = self.repo
         rulectx = repo[self.node]
+        repo.ui.pushbuffer(error=True, labeled=True)
         hg.update(repo, self.state.parentctxnode, quietempty=True)
         stats = applychanges(repo.ui, repo, rulectx, {})
         if stats and stats[3] > 0:
+            buf = repo.ui.popbuffer()
+            repo.ui.write(*buf)
             raise error.InterventionRequired(
                 _('Fix up the change (%s %s)') %
                 (self.verb, node.short(self.node)),
                 hint=_('hg histedit --continue to resume'))
+        else:
+            repo.ui.popbuffer()
 
     def continuedirty(self):
         """Continues the action when changes have been applied to the working
@@ -477,7 +491,7 @@ class histeditaction(object):
         rulectx."""
         ctx = self.repo['.']
         if ctx.node() == self.state.parentctxnode:
-            self.repo.ui.warn(_('%s: empty changeset\n') %
+            self.repo.ui.warn(_('%s: skipping changeset (no changes)\n') %
                               node.short(self.node))
             return ctx, [(self.node, tuple())]
         if ctx.node() == self.node:
@@ -733,7 +747,9 @@ class fold(histeditaction):
 
     def finishfold(self, ui, repo, ctx, oldctx, newnode, internalchanges):
         parent = ctx.parents()[0].node()
+        repo.ui.pushbuffer()
         hg.update(repo, parent)
+        repo.ui.popbuffer()
         ### prepare new commit data
         commitopts = {}
         commitopts['user'] = ctx.user()
@@ -764,7 +780,9 @@ class fold(histeditaction):
             repo.ui.restoreconfig(phasebackup)
         if n is None:
             return ctx, []
+        repo.ui.pushbuffer()
         hg.update(repo, n)
+        repo.ui.popbuffer()
         replacements = [(oldctx.node(), (newnode,)),
                         (ctx.node(), (n,)),
                         (newnode, (n,)),
@@ -892,7 +910,7 @@ def histedit(ui, repo, *freeargs, **opts):
     - Specify ANCESTOR directly
 
     - Use --outgoing -- it will be the first linear changeset not
-      included in destination. (See :hg:`help config.default-push`)
+      included in destination. (See :hg:`help config.paths.default-push`)
 
     - Otherwise, the value from the "histedit.defaultrev" config option
       is used as a revset to select the base revision when ANCESTOR is not
@@ -973,7 +991,28 @@ def histedit(ui, repo, *freeargs, **opts):
     finally:
         release(state.lock, state.wlock)
 
-def _histedit(ui, repo, state, *freeargs, **opts):
+goalcontinue = 'continue'
+goalabort = 'abort'
+goaleditplan = 'edit-plan'
+goalnew = 'new'
+
+def _getgoal(opts):
+    if opts.get('continue'):
+        return goalcontinue
+    if opts.get('abort'):
+        return goalabort
+    if opts.get('edit_plan'):
+        return goaleditplan
+    return goalnew
+
+def _readfile(path):
+    if path == '-':
+        return sys.stdin.read()
+    else:
+        with open(path, 'rb') as f:
+            return f.read()
+
+def _validateargs(ui, repo, state, freeargs, opts, goal, rules, revs):
     # TODO only abort if we try to histedit mq patches, not just
     # blanket if mq patches are applied somewhere
     mq = getattr(repo, 'mq', None)
@@ -982,28 +1021,21 @@ def _histedit(ui, repo, state, *freeargs, **opts):
 
     # basic argument incompatibility processing
     outg = opts.get('outgoing')
-    cont = opts.get('continue')
     editplan = opts.get('edit_plan')
     abort = opts.get('abort')
     force = opts.get('force')
-    rules = opts.get('commands', '')
-    revs = opts.get('rev', [])
-    goal = 'new' # This invocation goal, in new, continue, abort
     if force and not outg:
         raise error.Abort(_('--force only allowed with --outgoing'))
-    if cont:
+    if goal == 'continue':
         if any((outg, abort, revs, freeargs, rules, editplan)):
             raise error.Abort(_('no arguments allowed with --continue'))
-        goal = 'continue'
-    elif abort:
+    elif goal == 'abort':
         if any((outg, revs, freeargs, rules, editplan)):
             raise error.Abort(_('no arguments allowed with --abort'))
-        goal = 'abort'
-    elif editplan:
+    elif goal == 'edit-plan':
         if any((outg, revs, freeargs)):
             raise error.Abort(_('only --commands argument allowed with '
                                '--edit-plan'))
-        goal = 'edit-plan'
     else:
         if os.path.exists(os.path.join(repo.path, 'histedit-state')):
             raise error.Abort(_('history edit already in progress, try '
@@ -1025,124 +1057,36 @@ def _histedit(ui, repo, state, *freeargs, **opts):
                 raise error.Abort(
                     _('histedit requires exactly one ancestor revision'))
 
-
-    replacements = []
+def _histedit(ui, repo, state, *freeargs, **opts):
+    goal = _getgoal(opts)
+    revs = opts.get('rev', [])
+    rules = opts.get('commands', '')
     state.keep = opts.get('keep', False)
-    supportsmarkers = obsolete.isenabled(repo, obsolete.createmarkersopt)
+
+    _validateargs(ui, repo, state, freeargs, opts, goal, rules, revs)
 
     # rebuild state
-    if goal == 'continue':
+    if goal == goalcontinue:
         state.read()
         state = bootstrapcontinue(ui, state, opts)
-    elif goal == 'edit-plan':
-        state.read()
-        if not rules:
-            comment = geteditcomment(node.short(state.parentctxnode),
-                                     node.short(state.topmost))
-            rules = ruleeditor(repo, ui, state.actions, comment)
-        else:
-            if rules == '-':
-                f = sys.stdin
-            else:
-                f = open(rules)
-            rules = f.read()
-            f.close()
-        actions = parserules(rules, state)
-        ctxs = [repo[act.nodetoverify()] \
-                for act in state.actions if act.nodetoverify()]
-        warnverifyactions(ui, repo, actions, state, ctxs)
-        state.actions = actions
-        state.write()
+    elif goal == goaleditplan:
+        _edithisteditplan(ui, repo, state, rules)
         return
-    elif goal == 'abort':
-        try:
-            state.read()
-            tmpnodes, leafs = newnodestoabort(state)
-            ui.debug('restore wc to old parent %s\n'
-                    % node.short(state.topmost))
-
-            # Recover our old commits if necessary
-            if not state.topmost in repo and state.backupfile:
-                backupfile = repo.join(state.backupfile)
-                f = hg.openpath(ui, backupfile)
-                gen = exchange.readbundle(ui, f, backupfile)
-                with repo.transaction('histedit.abort') as tr:
-                    if not isinstance(gen, bundle2.unbundle20):
-                        gen.apply(repo, 'histedit', 'bundle:' + backupfile)
-                    if isinstance(gen, bundle2.unbundle20):
-                        bundle2.applybundle(repo, gen, tr,
-                                            source='histedit',
-                                            url='bundle:' + backupfile)
-
-                os.remove(backupfile)
-
-            # check whether we should update away
-            if repo.unfiltered().revs('parents() and (%n  or %ln::)',
-                                    state.parentctxnode, leafs | tmpnodes):
-                hg.clean(repo, state.topmost, show_stats=True, quietempty=True)
-            cleanupnode(ui, repo, 'created', tmpnodes)
-            cleanupnode(ui, repo, 'temp', leafs)
-        except Exception:
-            if state.inprogress():
-                ui.warn(_('warning: encountered an exception during histedit '
-                    '--abort; the repository may not have been completely '
-                    'cleaned up\n'))
-            raise
-        finally:
-                state.clear()
+    elif goal == goalabort:
+        _aborthistedit(ui, repo, state)
         return
     else:
-        cmdutil.checkunfinished(repo)
-        cmdutil.bailifchanged(repo)
+        # goal == goalnew
+        _newhistedit(ui, repo, state, revs, freeargs, opts)
 
-        topmost, empty = repo.dirstate.parents()
-        if outg:
-            if freeargs:
-                remote = freeargs[0]
-            else:
-                remote = None
-            root = findoutgoing(ui, repo, remote, force, opts)
-        else:
-            rr = list(repo.set('roots(%ld)', scmutil.revrange(repo, revs)))
-            if len(rr) != 1:
-                raise error.Abort(_('The specified revisions must have '
-                    'exactly one common root'))
-            root = rr[0].node()
+    _continuehistedit(ui, repo, state)
+    _finishhistedit(ui, repo, state)
 
-        revs = between(repo, root, topmost, state.keep)
-        if not revs:
-            raise error.Abort(_('%s is not an ancestor of working directory') %
-                             node.short(root))
-
-        ctxs = [repo[r] for r in revs]
-        if not rules:
-            comment = geteditcomment(node.short(root), node.short(topmost))
-            actions = [pick(state, r) for r in revs]
-            rules = ruleeditor(repo, ui, actions, comment)
-        else:
-            if rules == '-':
-                f = sys.stdin
-            else:
-                f = open(rules)
-            rules = f.read()
-            f.close()
-        actions = parserules(rules, state)
-        warnverifyactions(ui, repo, actions, state, ctxs)
-
-        parentctxnode = repo[root].parents()[0].node()
-
-        state.parentctxnode = parentctxnode
-        state.actions = actions
-        state.topmost = topmost
-        state.replacements = replacements
-
-        # Create a backup so we can always abort completely.
-        backupfile = None
-        if not obsolete.isenabled(repo, obsolete.createmarkersopt):
-            backupfile = repair._bundle(repo, [parentctxnode], [topmost], root,
-                                        'histedit')
-        state.backupfile = backupfile
-
+def _continuehistedit(ui, repo, state):
+    """This function runs after either:
+    - bootstrapcontinue (if the goal is 'continue')
+    - _newhistedit (if the goal is 'new')
+    """
     # preprocess rules so that we can hide inner folds from the user
     # and only show one editor
     actions = state.actions[:]
@@ -1167,7 +1111,11 @@ def _histedit(ui, repo, state, *freeargs, **opts):
     state.write()
     ui.progress(_("editing"), None)
 
+def _finishhistedit(ui, repo, state):
+    """This action runs when histedit is finishing its session"""
+    repo.ui.pushbuffer()
     hg.update(repo, state.parentctxnode, quietempty=True)
+    repo.ui.popbuffer()
 
     mapping, tmpnodes, created, ntm = processreplacement(state)
     if mapping:
@@ -1182,6 +1130,7 @@ def _histedit(ui, repo, state, *freeargs, **opts):
                     for n in succs[1:]:
                         ui.debug(m % node.short(n))
 
+    supportsmarkers = obsolete.isenabled(repo, obsolete.createmarkersopt)
     if supportsmarkers:
         # Only create markers if the temp nodes weren't already removed.
         obsolete.createmarkers(repo, ((repo[t],()) for t in sorted(tmpnodes)
@@ -1211,6 +1160,110 @@ def _histedit(ui, repo, state, *freeargs, **opts):
     if repo.vfs.exists('histedit-last-edit.txt'):
         repo.vfs.unlink('histedit-last-edit.txt')
 
+def _aborthistedit(ui, repo, state):
+    try:
+        state.read()
+        __, leafs, tmpnodes, __ = processreplacement(state)
+        ui.debug('restore wc to old parent %s\n'
+                % node.short(state.topmost))
+
+        # Recover our old commits if necessary
+        if not state.topmost in repo and state.backupfile:
+            backupfile = repo.join(state.backupfile)
+            f = hg.openpath(ui, backupfile)
+            gen = exchange.readbundle(ui, f, backupfile)
+            with repo.transaction('histedit.abort') as tr:
+                if not isinstance(gen, bundle2.unbundle20):
+                    gen.apply(repo, 'histedit', 'bundle:' + backupfile)
+                if isinstance(gen, bundle2.unbundle20):
+                    bundle2.applybundle(repo, gen, tr,
+                                        source='histedit',
+                                        url='bundle:' + backupfile)
+
+            os.remove(backupfile)
+
+        # check whether we should update away
+        if repo.unfiltered().revs('parents() and (%n  or %ln::)',
+                                state.parentctxnode, leafs | tmpnodes):
+            hg.clean(repo, state.topmost, show_stats=True, quietempty=True)
+        cleanupnode(ui, repo, 'created', tmpnodes)
+        cleanupnode(ui, repo, 'temp', leafs)
+    except Exception:
+        if state.inprogress():
+            ui.warn(_('warning: encountered an exception during histedit '
+                '--abort; the repository may not have been completely '
+                'cleaned up\n'))
+        raise
+    finally:
+            state.clear()
+
+def _edithisteditplan(ui, repo, state, rules):
+    state.read()
+    if not rules:
+        comment = geteditcomment(ui,
+                                 node.short(state.parentctxnode),
+                                 node.short(state.topmost))
+        rules = ruleeditor(repo, ui, state.actions, comment)
+    else:
+        rules = _readfile(rules)
+    actions = parserules(rules, state)
+    ctxs = [repo[act.nodetoverify()] \
+            for act in state.actions if act.nodetoverify()]
+    warnverifyactions(ui, repo, actions, state, ctxs)
+    state.actions = actions
+    state.write()
+
+def _newhistedit(ui, repo, state, revs, freeargs, opts):
+    outg = opts.get('outgoing')
+    rules = opts.get('commands', '')
+    force = opts.get('force')
+
+    cmdutil.checkunfinished(repo)
+    cmdutil.bailifchanged(repo)
+
+    topmost, empty = repo.dirstate.parents()
+    if outg:
+        if freeargs:
+            remote = freeargs[0]
+        else:
+            remote = None
+        root = findoutgoing(ui, repo, remote, force, opts)
+    else:
+        rr = list(repo.set('roots(%ld)', scmutil.revrange(repo, revs)))
+        if len(rr) != 1:
+            raise error.Abort(_('The specified revisions must have '
+                'exactly one common root'))
+        root = rr[0].node()
+
+    revs = between(repo, root, topmost, state.keep)
+    if not revs:
+        raise error.Abort(_('%s is not an ancestor of working directory') %
+                         node.short(root))
+
+    ctxs = [repo[r] for r in revs]
+    if not rules:
+        comment = geteditcomment(ui, node.short(root), node.short(topmost))
+        actions = [pick(state, r) for r in revs]
+        rules = ruleeditor(repo, ui, actions, comment)
+    else:
+        rules = _readfile(rules)
+    actions = parserules(rules, state)
+    warnverifyactions(ui, repo, actions, state, ctxs)
+
+    parentctxnode = repo[root].parents()[0].node()
+
+    state.parentctxnode = parentctxnode
+    state.actions = actions
+    state.topmost = topmost
+    state.replacements = []
+
+    # Create a backup so we can always abort completely.
+    backupfile = None
+    if not obsolete.isenabled(repo, obsolete.createmarkersopt):
+        backupfile = repair._bundle(repo, [parentctxnode], [topmost], root,
+                                    'histedit')
+    state.backupfile = backupfile
+
 def bootstrapcontinue(ui, state, opts):
     repo = state.repo
     if state.actions:
@@ -1236,7 +1289,8 @@ def between(repo, old, new, keep):
     if ctxs and not keep:
         if (not obsolete.isenabled(repo, obsolete.allowunstableopt) and
             repo.revs('(%ld::) - (%ld)', ctxs, ctxs)):
-            raise error.Abort(_('cannot edit history that would orphan nodes'))
+            raise error.Abort(_('can only histedit a changeset together '
+                                'with all its descendants'))
         if repo.revs('(%ld) and merge()', ctxs):
             raise error.Abort(_('cannot edit history that contains merges'))
         root = ctxs[0] # list is already sorted by repo.set
@@ -1330,6 +1384,10 @@ def verifyactions(actions, state, ctxs):
     missing = sorted(expected - seen)  # sort to stabilize output
 
     if state.repo.ui.configbool('histedit', 'dropmissing'):
+        if len(actions) == 0:
+            raise error.ParseError(_('no rules provided'),
+                    hint=_('use strip extension to remove commits'))
+
         drops = [drop(state, node.bin(n)) for n in missing]
         # put the in the beginning so they execute immediately and
         # don't show in the edit-plan in the future
@@ -1340,24 +1398,40 @@ def verifyactions(actions, state, ctxs):
                 hint=_('use "drop %s" to discard, see also: '
                        '"hg help -e histedit.config"') % missing[0][:12])
 
-def newnodestoabort(state):
-    """process the list of replacements to return
+def adjustreplacementsfrommarkers(repo, oldreplacements):
+    """Adjust replacements from obsolescense markers
 
-    1) the list of final node
-    2) the list of temporary node
+    Replacements structure is originally generated based on
+    histedit's state and does not account for changes that are
+    not recorded there. This function fixes that by adding
+    data read from obsolescense markers"""
+    if not obsolete.isenabled(repo, obsolete.createmarkersopt):
+        return oldreplacements
 
-    This is meant to be used on abort as less data are required in this case.
-    """
-    replacements = state.replacements
-    allsuccs = set()
-    replaced = set()
-    for rep in replacements:
-        allsuccs.update(rep[1])
-        replaced.add(rep[0])
-    newnodes = allsuccs - replaced
-    tmpnodes = allsuccs & replaced
-    return newnodes, tmpnodes
+    unfi = repo.unfiltered()
+    nm = unfi.changelog.nodemap
+    obsstore = repo.obsstore
+    newreplacements = list(oldreplacements)
+    oldsuccs = [r[1] for r in oldreplacements]
+    # successors that have already been added to succstocheck once
+    seensuccs = set().union(*oldsuccs) # create a set from an iterable of tuples
+    succstocheck = list(seensuccs)
+    while succstocheck:
+        n = succstocheck.pop()
+        missing = nm.get(n) is None
+        markers = obsstore.successors.get(n, ())
+        if missing and not markers:
+            # dead end, mark it as such
+            newreplacements.append((n, ()))
+        for marker in markers:
+            nsuccs = marker[1]
+            newreplacements.append((n, nsuccs))
+            for nsucc in nsuccs:
+                if nsucc not in seensuccs:
+                    seensuccs.add(nsucc)
+                    succstocheck.append(nsucc)
 
+    return newreplacements
 
 def processreplacement(state):
     """process the list of replacements to return
@@ -1365,7 +1439,7 @@ def processreplacement(state):
     1) the final mapping between original and created nodes
     2) the list of temporary node created by histedit
     3) the list of new commit created by histedit"""
-    replacements = state.replacements
+    replacements = adjustreplacementsfrommarkers(state.repo, state.replacements)
     allsuccs = set()
     replaced = set()
     fullmapping = {}

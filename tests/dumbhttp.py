@@ -6,10 +6,10 @@ from __future__ import absolute_import
 Small and dumb HTTP server for use in tests.
 """
 
-import optparse
 import BaseHTTPServer
-import signal
 import SimpleHTTPServer
+import optparse
+import signal
 import sys
 
 from mercurial import (
@@ -38,7 +38,7 @@ if __name__ == '__main__':
     parser.add_option('-f', '--foreground', dest='foreground',
         action='store_true',
         help='do not start the HTTP server in the background')
-    parser.add_option('--daemon-pipefds')
+    parser.add_option('--daemon-postexec', action='append')
 
     (options, args) = parser.parse_args()
 
@@ -49,7 +49,7 @@ if __name__ == '__main__':
 
     opts = {'pid_file': options.pid,
             'daemon': not options.foreground,
-            'daemon_pipefds': options.daemon_pipefds}
+            'daemon_postexec': options.daemon_postexec}
     service = simplehttpservice(options.host, options.port)
     cmdutil.service(opts, initfn=service.init, runfn=service.run,
                     runargs=[sys.executable, __file__] + sys.argv[1:])

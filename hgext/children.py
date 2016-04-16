@@ -14,9 +14,15 @@ This extension is deprecated. You should use :hg:`log -r
 "children(REV)"` instead.
 '''
 
-from mercurial import cmdutil
-from mercurial.commands import templateopts
+from __future__ import absolute_import
+
 from mercurial.i18n import _
+from mercurial import (
+    cmdutil,
+    commands,
+)
+
+templateopts = commands.templateopts
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
@@ -43,8 +49,8 @@ def children(ui, repo, file_=None, **opts):
 
     Please use :hg:`log` instead::
 
-        hg children => hg log -r 'children()'
-        hg children -r REV => hg log -r 'children(REV)'
+        hg children => hg log -r "children()"
+        hg children -r REV => hg log -r "children(REV)"
 
     See :hg:`help log` and :hg:`help revsets.children`.
 

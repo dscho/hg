@@ -17,8 +17,25 @@ checks = {
 }
 
 def check(name, desc):
+    """Registers a check function for a feature."""
     def decorator(func):
         checks[name] = (func, desc)
+        return func
+    return decorator
+
+def checkvers(name, desc, vers):
+    """Registers a check function for each of a series of versions.
+
+    vers can be a list or an iterator"""
+    def decorator(func):
+        def funcv(v):
+            def f():
+                return func(v)
+            return f
+        for v in vers:
+            v = str(v)
+            f = funcv(v)
+            checks['%s%s' % (name, v.replace('.', ''))] = (f, desc % v)
         return func
     return decorator
 
@@ -97,24 +114,34 @@ def has_bzr():
     except ImportError:
         return False
 
-@check("bzr114", "Canonical's Bazaar client >= 1.14")
-def has_bzr114():
+@checkvers("bzr", "Canonical's Bazaar client >= %s", (1.14,))
+def has_bzr_range(v):
+    major, minor = v.split('.')[0:2]
     try:
         import bzrlib
         return (bzrlib.__doc__ is not None
-                and bzrlib.version_info[:2] >= (1, 14))
+                and bzrlib.version_info[:2] >= (int(major), int(minor)))
     except ImportError:
         return False
+
+@check("chg", "running with chg")
+def has_chg():
+    return 'CHGHG' in os.environ
 
 @check("cvs", "cvs client/server")
 def has_cvs():
     re = r'Concurrent Versions System.*?server'
     return matchoutput('cvs --version 2>&1', re) and not has_msys()
 
-@check("cvs112", "cvs client/server >= 1.12")
+@check("cvs112", "cvs client/server 1.12.* (not cvsnt)")
 def has_cvs112():
     re = r'Concurrent Versions System \(CVS\) 1.12.*?server'
     return matchoutput('cvs --version 2>&1', re) and not has_msys()
+
+@check("cvsnt", "cvsnt client/server")
+def has_cvsnt():
+    re = r'Concurrent Versions System \(CVSNT\) (\d+).(\d+).*\(client/server\)'
+    return matchoutput('cvsnt --version 2>&1', re)
 
 @check("darcs", "darcs client")
 def has_darcs():
@@ -208,6 +235,36 @@ def has_lsprof():
     except ImportError:
         return False
 
+def gethgversion():
+    m = matchoutput('hg --version --quiet 2>&1', r'(\d+)\.(\d+)')
+    if not m:
+        return (0, 0)
+    return (int(m.group(1)), int(m.group(2)))
+
+@checkvers("hg", "Mercurial >= %s",
+            list([(1.0 * x) / 10 for x in range(9, 40)]))
+def has_hg_range(v):
+    major, minor = v.split('.')[0:2]
+    return gethgversion() >= (int(major), int(minor))
+
+@check("hg08", "Mercurial >= 0.8")
+def has_hg08():
+    if checks["hg09"][0]():
+        return True
+    return matchoutput('hg help annotate 2>&1', '--date')
+
+@check("hg07", "Mercurial >= 0.7")
+def has_hg07():
+    if checks["hg08"][0]():
+        return True
+    return matchoutput('hg --version --quiet 2>&1', 'Mercurial Distributed SCM')
+
+@check("hg06", "Mercurial >= 0.6")
+def has_hg06():
+    if checks["hg07"][0]():
+        return True
+    return matchoutput('hg --version --quiet 2>&1', 'Mercurial version')
+
 @check("gettext", "GNU Gettext (msgfmt)")
 def has_gettext():
     return matchoutput('msgfmt --version', 'GNU gettext-tools')
@@ -219,8 +276,8 @@ def has_git():
 @check("docutils", "Docutils text processing library")
 def has_docutils():
     try:
-        from docutils.core import publish_cmdline
-        publish_cmdline # silence unused import
+        import docutils.core
+        docutils.core.publish_cmdline # silence unused import
         return True
     except ImportError:
         return False
@@ -231,13 +288,10 @@ def getsvnversion():
         return (0, 0)
     return (int(m.group(1)), int(m.group(2)))
 
-@check("svn15", "subversion client and admin tools >= 1.5")
-def has_svn15():
-    return getsvnversion() >= (1, 5)
-
-@check("svn13", "subversion client and admin tools >= 1.3")
-def has_svn13():
-    return getsvnversion() >= (1, 3)
+@checkvers("svn", "subversion client and admin tools >= %s", (1.3, 1.5))
+def has_svn_range(v):
+    major, minor = v.split('.')[0:2]
+    return getsvnversion() >= (int(major), int(minor))
 
 @check("svn", "subversion client and admin tools")
 def has_svn():
@@ -335,36 +389,17 @@ def has_pygments():
     except ImportError:
         return False
 
-@check("json", "some json module available")
-def has_json():
-    try:
-        import json
-        json.dumps
-        return True
-    except ImportError:
-        try:
-            import simplejson as json
-            json.dumps
-            return True
-        except ImportError:
-            pass
-    return False
-
 @check("outer-repo", "outer repo")
 def has_outer_repo():
     # failing for other reasons than 'no repo' imply that there is a repo
     return not matchoutput('hg root 2>&1',
                            r'abort: no repository found', True)
 
-@check("ssl", ("(python >= 2.6 ssl module and python OpenSSL) "
-               "OR python >= 2.7.9 ssl"))
+@check("ssl", "ssl module available")
 def has_ssl():
     try:
         import ssl
-        if getattr(ssl, 'create_default_context', False):
-            return True
-        import OpenSSL
-        OpenSSL.SSL.Context
+        ssl.CERT_NONE
         return True
     except ImportError:
         return False
@@ -423,7 +458,7 @@ def has_osx():
 
 @check("docker", "docker support")
 def has_docker():
-    pat = r'A self-sufficient runtime for linux containers\.'
+    pat = r'A self-sufficient runtime for'
     if matchoutput('docker --help', pat):
         if 'linux' not in sys.platform:
             # TODO: in theory we should be able to test docker-based
@@ -458,6 +493,10 @@ def has_absimport():
 def has_py3k():
     return 3 == sys.version_info[0]
 
+@check("py3exe", "a Python 3.x interpreter is available")
+def has_python3exe():
+    return 'PYTHON3' in os.environ
+
 @check("pure", "running with pure Python code")
 def has_pure():
     return any([
@@ -469,7 +508,7 @@ def has_pure():
 def has_slow():
     return os.environ.get('HGTEST_SLOW') == 'slow'
 
-@check("hypothesis", "is Hypothesis installed")
+@check("hypothesis", "Hypothesis automated test generation")
 def has_hypothesis():
     try:
         import hypothesis

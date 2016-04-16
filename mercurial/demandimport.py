@@ -174,7 +174,12 @@ def _demandimport(name, globals=None, locals=None, fromlist=None, level=level):
             """
             symbol = getattr(mod, attr, nothing)
             if symbol is nothing:
-                symbol = _demandmod(attr, mod.__dict__, locals, level=1)
+                mn = '%s.%s' % (mod.__name__, attr)
+                if mn in ignore:
+                    importfunc = _origimport
+                else:
+                    importfunc = _demandmod
+                symbol = importfunc(attr, mod.__dict__, locals, level=1)
                 setattr(mod, attr, symbol)
 
             # Record the importing module references this symbol so we can
@@ -252,6 +257,7 @@ ignore = [
     '_sre', # issue4920
     'rfc822',
     'mimetools',
+    'sqlalchemy.events', # has import-time side effects (issue5085)
     # setuptools 8 expects this module to explode early when not on windows
     'distutils.msvc9compiler'
     ]

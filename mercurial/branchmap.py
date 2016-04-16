@@ -55,6 +55,7 @@ def read(repo):
         if not partial.validfor(repo):
             # invalidate the cache
             raise ValueError('tip differs')
+        cl = repo.changelog
         for l in lines:
             if not l:
                 continue
@@ -62,9 +63,9 @@ def read(repo):
             if state not in 'oc':
                 raise ValueError('invalid branch state')
             label = encoding.tolocal(label.strip())
-            if not node in repo:
-                raise ValueError('node %s does not exist' % node)
             node = bin(node)
+            if not cl.hasnode(node):
+                raise ValueError('node %s does not exist' % hex(node))
             partial.setdefault(label, []).append(node)
             if state == 'c':
                 partial._closednodes.add(node)
@@ -382,6 +383,15 @@ class revbranchcache(object):
         self._rbcnamescount = len(self._names) # number of good names on disk
         self._namesreverse = dict((b, r) for r, b in enumerate(self._names))
 
+    def _clear(self):
+        self._rbcsnameslen = 0
+        del self._names[:]
+        self._rbcnamescount = 0
+        self._namesreverse.clear()
+        self._rbcrevslen = len(self._repo.changelog)
+        self._rbcrevs = array('c')
+        self._rbcrevs.fromstring('\0' * (self._rbcrevslen * _rbcrecsize))
+
     def branchinfo(self, rev):
         """Return branch name and close flag for rev, using and updating
         persistent cache."""
@@ -407,7 +417,11 @@ class revbranchcache(object):
         if cachenode == '\0\0\0\0':
             pass
         elif cachenode == reponode:
-            return self._names[branchidx], close
+            if branchidx < self._rbcnamescount:
+                return self._names[branchidx], close
+            # referenced branch doesn't exist - rebuild is expensive but needed
+            self._repo.ui.debug("rebuilding corrupted revision branch cache\n")
+            self._clear()
         else:
             # rev/node map has changed, invalidate the cache from here up
             truncate = rbcrevidx + _rbcrecsize
@@ -460,6 +474,8 @@ class revbranchcache(object):
                         self._rbcnamescount = 0
                         self._rbcrevslen = 0
                 if self._rbcnamescount == 0:
+                    # before rewriting names, make sure references are removed
+                    repo.vfs.unlinkpath(_rbcrevs, ignoremissing=True)
                     f = repo.vfs.open(_rbcnames, 'wb')
                 f.write('\0'.join(encoding.fromlocal(b)
                                   for b in self._names[self._rbcnamescount:]))
@@ -479,6 +495,9 @@ class revbranchcache(object):
                 if f.tell() != start:
                     repo.ui.debug("truncating %s to %s\n" % (_rbcrevs, start))
                     f.seek(start)
+                    if f.tell() != start:
+                        start = 0
+                        f.seek(start)
                     f.truncate()
                 end = revs * _rbcrecsize
                 f.write(self._rbcrevs[start:end])

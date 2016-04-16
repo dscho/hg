@@ -30,6 +30,15 @@ hg status in repo root:
   [status.unknown|? ][status.unknown|b/in_b]
   [status.unknown|? ][status.unknown|in_root]
 
+hg status with template
+  $ hg status -T "{label('red', path)}\n" --color=debug
+  [red|a/1/in_a_1]
+  [red|a/in_a]
+  [red|b/1/in_b_1]
+  [red|b/2/in_b_2]
+  [red|b/in_b]
+  [red|in_root]
+
 hg status . in repo root:
 
   $ hg status --color=always .
@@ -153,6 +162,10 @@ Make sure ui.formatted=False works
   [log.user|user:        test]
   [log.date|date:        Thu Jan 01 00:00:00 1970 +0000]
   [log.summary|summary:     initial checkin]
+  
+  $ hg log -Tcompact --color=debug
+  [log.changeset changeset.draft|0][tip]   [log.node|389aef86a55e]   [log.date|1970-01-01 00:00 +0000]   [log.user|test]
+    [ui.note log.description|initial checkin]
   
 Labels on empty strings should not be displayed, labels on custom
 templates should be.

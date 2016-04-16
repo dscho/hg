@@ -69,7 +69,6 @@ edit the history
   > pick e860deea161a e
   > pick 652413bf663e f
   > EOF
-  0 files updated, 0 files merged, 2 files removed, 0 files unresolved
   merging e
   warning: conflicts while merging e! (edit, then use 'hg resolve --mark')
   Fix up the change (pick e860deea161a)
@@ -81,7 +80,11 @@ insert unsupported advisory merge record
   * version 2 records
   local: 8f7551c7e4a2f2efe0bc8c741baf7f227d65d758
   other: e860deea161a2f77de56603b340ebbb4536308ae
+  labels:
+    local: local
+    other: histedit
   unrecognized entry: x	advisory record
+  file extras: e (ancestorlinknode = 0000000000000000000000000000000000000000)
   file: e (record type "F", state "u", hash 58e6b3a414a1e090dfc6029add0f3555ccba127f)
     local path: e (flags "")
     ancestor path: e (node null)
@@ -95,6 +98,10 @@ insert unsupported mandatory merge record
   * version 2 records
   local: 8f7551c7e4a2f2efe0bc8c741baf7f227d65d758
   other: e860deea161a2f77de56603b340ebbb4536308ae
+  labels:
+    local: local
+    other: histedit
+  file extras: e (ancestorlinknode = 0000000000000000000000000000000000000000)
   file: e (record type "F", state "u", hash 58e6b3a414a1e090dfc6029add0f3555ccba127f)
     local path: e (flags "")
     ancestor path: e (node null)

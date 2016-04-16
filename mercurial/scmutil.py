@@ -7,7 +7,6 @@
 
 from __future__ import absolute_import
 
-import Queue
 import contextlib
 import errno
 import glob
@@ -276,8 +275,8 @@ class abstractvfs(object):
         with self(path, mode=mode) as fp:
             return fp.readlines()
 
-    def write(self, path, data):
-        with self(path, 'wb') as fp:
+    def write(self, path, data, backgroundclose=False):
+        with self(path, 'wb', backgroundclose=backgroundclose) as fp:
             return fp.write(data)
 
     def writelines(self, path, data, mode='wb', notindexed=False):
@@ -913,7 +912,7 @@ def addremove(repo, matcher, prefix, opts=None, dry_run=None, similarity=None):
         if opts.get('subrepos') or matchessubrepo(m, subpath):
             sub = wctx.sub(subpath)
             try:
-                submatch = matchmod.narrowmatcher(subpath, m)
+                submatch = matchmod.subdirmatcher(subpath, m)
                 if sub.addremove(submatch, prefix, opts, dry_run, similarity):
                     ret = 1
             except error.LookupError:
@@ -1320,7 +1319,7 @@ class backgroundfilecloser(object):
         ui.debug('starting %d threads for background file closing\n' %
                  threadcount)
 
-        self._queue = Queue.Queue(maxsize=maxqueue)
+        self._queue = util.queue(maxsize=maxqueue)
         self._running = True
 
         for i in range(threadcount):
@@ -1352,7 +1351,7 @@ class backgroundfilecloser(object):
                 except Exception as e:
                     # Stash so can re-raise from main thread later.
                     self._threadexception = e
-            except Queue.Empty:
+            except util.empty:
                 if not self._running:
                     break
 

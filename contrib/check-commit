@@ -23,7 +23,8 @@ beforepatch = afterheader + r"(?!\n(?!@@))"
 
 errors = [
     (beforepatch + r".*[(]bc[)]", "(BC) needs to be uppercase"),
-    (beforepatch + r".*[(]issue \d\d\d", "no space allowed between issue and number"),
+    (beforepatch + r".*[(]issue \d\d\d",
+     "no space allowed between issue and number"),
     (beforepatch + r".*[(]bug(\d|\s)", "use (issueDDDD) instead of bug"),
     (commitheader + r"# User [^@\n]+\n", "username is not an email address"),
     (commitheader + r"(?!merge with )[^#]\S+[^:] ",
@@ -34,7 +35,7 @@ errors = [
      "summary keyword should be most user-relevant one-word command or topic"),
     (afterheader + r".*\.\s*\n", "don't add trailing period on summary line"),
     (afterheader + r".{79,}", "summary line too long (limit is 78)"),
-    (r"\n\+\n \n", "adds double empty line"),
+    (r"\n\+\n( |\+)\n", "adds double empty line"),
     (r"\n \n\+\n", "adds double empty line"),
     (r"\n\+[ \t]+def [a-z]+_[a-z]", "adds a function with foo_bar naming"),
 ]
@@ -45,13 +46,12 @@ def nonempty(first, second):
         return first
     return second
 
-def checkcommit(commit, node = None):
+def checkcommit(commit, node=None):
     exitcode = 0
     printed = node is None
     hits = []
     for exp, msg in errors:
-        m = re.search(exp, commit)
-        if m:
+        for m in re.finditer(exp, commit):
             end = m.end()
             trailing = re.search(r'(\\n)+$', exp)
             if trailing:

@@ -259,7 +259,7 @@ class basectx(object):
             if path in self._manifestdelta:
                 return (self._manifestdelta[path],
                         self._manifestdelta.flags(path))
-        node, flag = self._repo.manifest.find(self._changeset[0], path)
+        node, flag = self._repo.manifest.find(self._changeset.manifest, path)
         if not node:
             raise error.ManifestLookupError(self._node, path,
                                             _('not found in manifest'))
@@ -365,7 +365,7 @@ class basectx(object):
                     # node1 and node2 (inclusive). Thus, ctx2's substate
                     # won't contain that subpath. The best we can do ignore it.
                     rev2 = None
-                submatch = matchmod.narrowmatcher(subpath, match)
+                submatch = matchmod.subdirmatcher(subpath, match)
                 s = sub.status(rev2, match=submatch, ignored=listignored,
                                clean=listclean, unknown=listunknown,
                                listsubrepos=True)
@@ -524,15 +524,15 @@ class changectx(basectx):
 
     @propertycache
     def _changeset(self):
-        return self._repo.changelog.read(self.rev())
+        return self._repo.changelog.changelogrevision(self.rev())
 
     @propertycache
     def _manifest(self):
-        return self._repo.manifest.read(self._changeset[0])
+        return self._repo.manifest.read(self._changeset.manifest)
 
     @propertycache
     def _manifestdelta(self):
-        return self._repo.manifest.readdelta(self._changeset[0])
+        return self._repo.manifest.readdelta(self._changeset.manifest)
 
     @propertycache
     def _parents(self):
@@ -543,24 +543,32 @@ class changectx(basectx):
         return [changectx(repo, p1), changectx(repo, p2)]
 
     def changeset(self):
-        return self._changeset
+        c = self._changeset
+        return (
+            c.manifest,
+            c.user,
+            c.date,
+            c.files,
+            c.description,
+            c.extra,
+        )
     def manifestnode(self):
-        return self._changeset[0]
+        return self._changeset.manifest
 
     def user(self):
-        return self._changeset[1]
+        return self._changeset.user
     def date(self):
-        return self._changeset[2]
+        return self._changeset.date
     def files(self):
-        return self._changeset[3]
+        return self._changeset.files
     def description(self):
-        return self._changeset[4]
+        return self._changeset.description
     def branch(self):
-        return encoding.tolocal(self._changeset[5].get("branch"))
+        return encoding.tolocal(self._changeset.extra.get("branch"))
     def closesbranch(self):
-        return 'close' in self._changeset[5]
+        return 'close' in self._changeset.extra
     def extra(self):
-        return self._changeset[5]
+        return self._changeset.extra
     def tags(self):
         return self._repo.nodetags(self._node)
     def bookmarks(self):
@@ -789,7 +797,7 @@ class basefilectx(object):
         if fctx._customcmp:
             return fctx.cmp(self)
 
-        if (fctx._filerev is None
+        if (fctx._filenode is None
             and (self._repo._encodefilterpats
                  # if file data starts with '\1\n', empty metadata block is
                  # prepended, which adds 4 bytes to filelog.size().
@@ -1892,9 +1900,9 @@ class memctx(committablectx):
             p2node = nullid
             p = pctx[f].parents() # if file isn't in pctx, check p2?
             if len(p) > 0:
-                p1node = p[0].node()
+                p1node = p[0].filenode()
                 if len(p) > 1:
-                    p2node = p[1].node()
+                    p2node = p[1].filenode()
             man[f] = revlog.hash(self[f].data(), p1node, p2node)
 
         for f in self._status.added:

@@ -66,10 +66,12 @@ from mercurial.i18n import _
 from mercurial.node import bin, hex, short, nullid, nullrev
 from mercurial.lock import release
 from mercurial import commands, cmdutil, hg, scmutil, util, revset
+from mercurial import dispatch
 from mercurial import extensions, error, phases
 from mercurial import patch as patchmod
 from mercurial import lock as lockmod
 from mercurial import localrepo
+from mercurial import registrar
 from mercurial import subrepo
 import os, re, errno, shutil
 
@@ -3537,7 +3539,7 @@ def summaryhook(ui, repo):
         # i18n: column positioning for "hg summary"
         ui.note(_("mq:     (empty queue)\n"))
 
-revsetpredicate = revset.extpredicate()
+revsetpredicate = registrar.revsetpredicate()
 
 @revsetpredicate('mq()')
 def revsetmq(repo, subset, x):
@@ -3561,12 +3563,11 @@ def extsetup(ui):
     entry = extensions.wrapcommand(commands.table, 'init', mqinit)
     entry[1].extend(mqopt)
 
-    nowrap = set(commands.norepo.split(" "))
-
     def dotable(cmdtable):
-        for cmd in cmdtable.keys():
+        for cmd, entry in cmdtable.iteritems():
             cmd = cmdutil.parsealiases(cmd)[0]
-            if cmd in nowrap:
+            func = entry[0]
+            if dispatch._cmdattr(ui, cmd, func, 'norepo'):
                 continue
             entry = extensions.wrapcommand(cmdtable, cmd, mqcommand)
             entry[1].extend(mqopt)
@@ -3576,8 +3577,6 @@ def extsetup(ui):
     for extname, extmodule in extensions.extensions():
         if extmodule.__file__ != __file__:
             dotable(getattr(extmodule, 'cmdtable', {}))
-
-    revsetpredicate.setup()
 
 colortable = {'qguard.negative': 'red',
               'qguard.positive': 'yellow',

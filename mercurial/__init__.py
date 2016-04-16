@@ -19,17 +19,25 @@ __all__ = []
 #    c - require C extensions
 #    allow - allow pure Python implementation when C loading fails
 #    py - only load pure Python modules
-modulepolicy = '@MODULELOADPOLICY@'
-
+#
 # By default, require the C extensions for performance reasons.
-if modulepolicy == '@' 'MODULELOADPOLICY' '@':
-    modulepolicy = 'c'
+modulepolicy = 'c'
+try:
+    from . import __modulepolicy__
+    modulepolicy = __modulepolicy__.modulepolicy
+except ImportError:
+    pass
 
 # PyPy doesn't load C extensions.
 #
 # The canonical way to do this is to test platform.python_implementation().
 # But we don't import platform and don't bloat for it here.
 if '__pypy__' in sys.builtin_module_names:
+    modulepolicy = 'py'
+
+# Our C extensions aren't yet compatible with Python 3. So use pure Python
+# on Python 3 for now.
+if sys.version_info[0] >= 3:
     modulepolicy = 'py'
 
 # Environment variable can always force settings.

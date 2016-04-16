@@ -211,8 +211,7 @@ Update with no arguments: tipmost revision of the current branch:
   marked working directory as branch foobar
 
   $ hg up
-  abort: branch foobar not found
-  [255]
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
 Fast-forward merge:
 
@@ -343,5 +342,124 @@ Implicit merge with default branch as parent:
   $ hg merge
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
+
+  $ cd ..
+
+We expect that bare update on new branch, updates to parent
+
+  $ hg init bareupdateonnewbranch
+  $ cd bareupdateonnewbranch
+  $ hg update
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ touch a
+  $ hg commit -A -m "a"
+  adding a
+  $ touch b
+  $ hg commit -A -m "b"
+  adding b
+  $ touch c
+  $ hg commit -A -m "c"
+  adding c
+  $ hg update -r 1
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg log -G
+  o  changeset:   2:991a3460af53
+  |  tag:         tip
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     c
+  |
+  @  changeset:   1:0e067c57feba
+  |  user:        test
+  |  date:        Thu Jan 01 00:00:00 1970 +0000
+  |  summary:     b
+  |
+  o  changeset:   0:3903775176ed
+     user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     a
+  
+  $ hg branch dev
+  marked working directory as branch dev
+  (branches are permanent and global, did you want a bookmark?)
+  $ hg update
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg summary
+  parent: 1:0e067c57feba 
+   b
+  branch: dev
+  commit: (new branch)
+  update: (current)
+  phases: 3 draft
+
+  $ cd ..
+
+We need special handling for repositories with no "default" branch because
+"null" revision belongs to non-existent "default" branch.
+
+  $ hg init nodefault
+  $ cd nodefault
+  $ hg branch -q foo
+  $ touch 0
+  $ hg ci -Aqm0
+  $ touch 1
+  $ hg ci -Aqm1
+  $ hg update -qr0
+  $ hg branch -q bar
+  $ touch 2
+  $ hg ci -Aqm2
+  $ hg update -qr0
+  $ hg branch -q baz
+  $ touch 3
+  $ hg ci -Aqm3
+  $ hg ci --close-branch -m 'close baz'
+  $ hg update -q null
+  $ hg log -GT'{rev} {branch}\n'
+  _  4 baz
+  |
+  o  3 baz
+  |
+  | o  2 bar
+  |/
+  | o  1 foo
+  |/
+  o  0 foo
+  
+
+ a) updating from "null" should bring us to the tip-most branch head as
+ there is no "default" branch:
+
+  $ hg update -q null
+  $ hg id -bn
+  -1 default
+  $ hg update
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg id -bn
+  2 bar
+
+ b) but if we are at uncommitted "default" branch, we should stick to the
+ current revision:
+
+  $ hg update -q 0
+  $ hg branch default
+  marked working directory as branch default
+  $ hg id -bn
+  0 default
+  $ hg update
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg id -bn
+  0 default
+
+ c) also, if we have uncommitted branch at "null", we should stick to it:
+
+  $ hg update -q null
+  $ hg branch new
+  marked working directory as branch new
+  $ hg id -bn
+  -1 new
+  $ hg update
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg id -bn
+  -1 new
 
   $ cd ..

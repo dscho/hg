@@ -79,6 +79,12 @@ test with delay=0, refresh=0
 no progress with --quiet
   $ hg -y loop 3 --quiet
 
+test plain mode exception
+  $ HGPLAINEXCEPT=progress hg -y loop 1
+  \r (no-eol) (esc)
+  loop [                                                ] 0/1\r (no-eol) (esc)
+                                                              \r (no-eol) (esc)
+
 test nested short-lived topics (which shouldn't display with nestdelay):
 
   $ hg -y loop 3 --nested
@@ -176,6 +182,8 @@ test immediate progress completion
 
 test delay time estimates
 
+#if no-chg
+
   $ cat > mocktime.py <<EOF
   > import os
   > import time
@@ -243,6 +251,8 @@ Time estimates should not fail when there's no end point:
   loop [ <=>                                              ] 2\r (no-eol) (esc)
   loop [  <=>                                             ] 3\r (no-eol) (esc)
                                                               \r (no-eol) (esc)
+
+#endif
 
 test line trimming by '[progress] width', when progress topic contains
 multi-byte characters, of which length of byte sequence and columns in

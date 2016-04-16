@@ -23,6 +23,19 @@ from . import (
 
 version = 2
 
+# These are the file generators that should only be executed after the
+# finalizers are done, since they rely on the output of the finalizers (like
+# the changelog having been written).
+postfinalizegenerators = set([
+    'bookmarks',
+    'dirstate'
+])
+
+class GenerationGroup(object):
+    ALL='all'
+    PREFINALIZE='prefinalize'
+    POSTFINALIZE='postfinalize'
+
 def active(func):
     def _active(self, *args, **kwds):
         if self.count == 0:
@@ -276,12 +289,19 @@ class transaction(object):
         # but for bookmarks that are handled outside this mechanism.
         self._filegenerators[genid] = (order, filenames, genfunc, location)
 
-    def _generatefiles(self, suffix=''):
+    def _generatefiles(self, suffix='', group=GenerationGroup.ALL):
         # write files registered for generation
         any = False
-        for entry in sorted(self._filegenerators.values()):
+        for id, entry in sorted(self._filegenerators.iteritems()):
             any = True
             order, filenames, genfunc, location = entry
+
+            # for generation at closing, check if it's before or after finalize
+            postfinalize = group == GenerationGroup.POSTFINALIZE
+            if (group != GenerationGroup.ALL and
+                (id in postfinalizegenerators) != (postfinalize)):
+                continue
+
             vfs = self._vfsmap[location]
             files = []
             try:
@@ -407,10 +427,13 @@ class transaction(object):
         '''commit the transaction'''
         if self.count == 1:
             self.validator(self)  # will raise exception if needed
-            self._generatefiles()
+            self._generatefiles(group=GenerationGroup.PREFINALIZE)
             categories = sorted(self._finalizecallback)
             for cat in categories:
                 self._finalizecallback[cat](self)
+            # Prevent double usage and help clear cycles.
+            self._finalizecallback = None
+            self._generatefiles(group=GenerationGroup.POSTFINALIZE)
 
         self.count -= 1
         if self.count != 0:
@@ -465,6 +488,8 @@ class transaction(object):
         categories = sorted(self._postclosecallback)
         for cat in categories:
             self._postclosecallback[cat](self)
+        # Prevent double usage and help clear cycles.
+        self._postclosecallback = None
 
     @active
     def abort(self):
@@ -518,6 +543,8 @@ class transaction(object):
             try:
                 for cat in sorted(self._abortcallback):
                     self._abortcallback[cat](self)
+                # Prevent double usage and help clear cycles.
+                self._abortcallback = None
                 _playback(self.journal, self.report, self.opener, self._vfsmap,
                           self.entries, self._backupentries, False)
                 self.report(_("rollback completed\n"))

@@ -436,6 +436,10 @@ preoutgoing hook can prevent outgoing changes for local clones
   >     unreachable = 1
   > EOF
 
+  $ cat > syntaxerror.py << EOF
+  > (foo
+  > EOF
+
 test python hooks
 
 #if windows
@@ -480,7 +484,7 @@ test python hooks
   $ hg pull ../a
   pulling from ../a
   searching for changes
-  abort: preoutgoing.uncallable hook is invalid ("hooktests.uncallable" is not callable)
+  abort: preoutgoing.uncallable hook is invalid: "hooktests.uncallable" is not callable
   [255]
 
   $ echo '[hooks]' > ../a/.hg/hgrc
@@ -488,7 +492,7 @@ test python hooks
   $ hg pull ../a
   pulling from ../a
   searching for changes
-  abort: preoutgoing.nohook hook is invalid ("hooktests.nohook" is not defined)
+  abort: preoutgoing.nohook hook is invalid: "hooktests.nohook" is not defined
   [255]
 
   $ echo '[hooks]' > ../a/.hg/hgrc
@@ -496,7 +500,7 @@ test python hooks
   $ hg pull ../a
   pulling from ../a
   searching for changes
-  abort: preoutgoing.nomodule hook is invalid ("nomodule" not in a module)
+  abort: preoutgoing.nomodule hook is invalid: "nomodule" not in a module
   [255]
 
   $ echo '[hooks]' > ../a/.hg/hgrc
@@ -504,7 +508,8 @@ test python hooks
   $ hg pull ../a
   pulling from ../a
   searching for changes
-  abort: preoutgoing.badmodule hook is invalid (import of "nomodule" failed)
+  abort: preoutgoing.badmodule hook is invalid: import of "nomodule" failed
+  (run with --traceback for stack trace)
   [255]
 
   $ echo '[hooks]' > ../a/.hg/hgrc
@@ -512,8 +517,33 @@ test python hooks
   $ hg pull ../a
   pulling from ../a
   searching for changes
-  abort: preoutgoing.unreachable hook is invalid (import of "hooktests.container" failed)
+  abort: preoutgoing.unreachable hook is invalid: import of "hooktests.container" failed
+  (run with --traceback for stack trace)
   [255]
+
+  $ echo '[hooks]' > ../a/.hg/hgrc
+  $ echo 'preoutgoing.syntaxerror = python:syntaxerror.syntaxerror' >> ../a/.hg/hgrc
+  $ hg pull ../a
+  pulling from ../a
+  searching for changes
+  abort: preoutgoing.syntaxerror hook is invalid: import of "syntaxerror" failed
+  (run with --traceback for stack trace)
+  [255]
+
+The second egrep is to filter out lines like '    ^', which are slightly
+different between Python 2.6 and Python 2.7.
+  $ hg pull ../a --traceback 2>&1 | egrep -v '^( +File|    [_a-zA-Z*(])' | egrep -v '^( )+(\^)?$'
+  pulling from ../a
+  searching for changes
+  exception from first failed import attempt:
+  Traceback (most recent call last):
+  SyntaxError: * (glob)
+  exception from second failed import attempt:
+  Traceback (most recent call last):
+  ImportError: No module named hgext_syntaxerror
+  Traceback (most recent call last):
+  HookLoadError: preoutgoing.syntaxerror hook is invalid: import of "syntaxerror" failed
+  abort: preoutgoing.syntaxerror hook is invalid: import of "syntaxerror" failed
 
   $ echo '[hooks]' > ../a/.hg/hgrc
   $ echo 'preoutgoing.pass = python:hooktests.passhook' >> ../a/.hg/hgrc
@@ -529,6 +559,46 @@ test python hooks
   added 1 changesets with 1 changes to 1 files
   adding remote bookmark quux
   (run 'hg update' to get a working copy)
+
+post- python hooks that fail to *run* don't cause an abort
+  $ rm ../a/.hg/hgrc
+  $ echo '[hooks]' > .hg/hgrc
+  $ echo 'post-pull.broken = python:hooktests.brokenhook' >> .hg/hgrc
+  $ hg pull ../a
+  pulling from ../a
+  searching for changes
+  no changes found
+  error: post-pull.broken hook raised an exception: unsupported operand type(s) for +: 'int' and 'dict'
+  (run with --traceback for stack trace)
+
+but post- python hooks that fail to *load* do
+  $ echo '[hooks]' > .hg/hgrc
+  $ echo 'post-pull.nomodule = python:nomodule' >> .hg/hgrc
+  $ hg pull ../a
+  pulling from ../a
+  searching for changes
+  no changes found
+  abort: post-pull.nomodule hook is invalid: "nomodule" not in a module
+  [255]
+
+  $ echo '[hooks]' > .hg/hgrc
+  $ echo 'post-pull.badmodule = python:nomodule.nowhere' >> .hg/hgrc
+  $ hg pull ../a
+  pulling from ../a
+  searching for changes
+  no changes found
+  abort: post-pull.badmodule hook is invalid: import of "nomodule" failed
+  (run with --traceback for stack trace)
+  [255]
+
+  $ echo '[hooks]' > .hg/hgrc
+  $ echo 'post-pull.nohook = python:hooktests.nohook' >> .hg/hgrc
+  $ hg pull ../a
+  pulling from ../a
+  searching for changes
+  no changes found
+  abort: post-pull.nohook hook is invalid: "hooktests.nohook" is not defined
+  [255]
 
 make sure --traceback works
 
@@ -628,8 +698,8 @@ make sure --traceback works on hook import failure
   Traceback (most recent call last):
   ImportError: No module named hgext_importfail
   Traceback (most recent call last):
-  HookLoadError: precommit.importfail hook is invalid (import of "importfail" failed)
-  abort: precommit.importfail hook is invalid (import of "importfail" failed)
+  HookLoadError: precommit.importfail hook is invalid: import of "importfail" failed
+  abort: precommit.importfail hook is invalid: import of "importfail" failed
 
 Issue1827: Hooks Update & Commit not completely post operation
 
@@ -724,7 +794,6 @@ new commits must be visible in pretxnchangegroup (issue3428)
   date:        Thu Jan 01 00:00:00 1970 +0000
   summary:     b
   
-  $ cd ..
 
 pretxnclose hook failure should abort the transaction
 
@@ -746,3 +815,62 @@ pretxnclose hook failure should abort the transaction
   $ hg recover
   no interrupted transaction available
   [1]
+  $ cd ..
+
+Hook from untrusted hgrc are reported as failure
+================================================
+
+  $ cat << EOF > $TESTTMP/untrusted.py
+  > from mercurial import scmutil, util
+  > def uisetup(ui):
+  >     class untrustedui(ui.__class__):
+  >         def _trusted(self, fp, f):
+  >             if util.normpath(fp.name).endswith('untrusted/.hg/hgrc'):
+  >                 return False
+  >             return super(untrustedui, self)._trusted(fp, f)
+  >     ui.__class__ = untrustedui
+  > EOF
+  $ cat << EOF >> $HGRCPATH
+  > [extensions]
+  > untrusted=$TESTTMP/untrusted.py
+  > EOF
+  $ hg init untrusted
+  $ cd untrusted
+
+Non-blocking hook
+-----------------
+
+  $ cat << EOF >> .hg/hgrc
+  > [hooks]
+  > txnclose.testing=echo txnclose hook called
+  > EOF
+  $ touch a && hg commit -Aqm a
+  warning: untrusted hook txnclose not executed
+  $ hg log
+  changeset:   0:3903775176ed
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     a
+  
+
+Non-blocking hook
+-----------------
+
+  $ cat << EOF >> .hg/hgrc
+  > [hooks]
+  > pretxnclose.testing=echo pre-txnclose hook called
+  > EOF
+  $ touch b && hg commit -Aqm a
+  transaction abort!
+  rollback completed
+  abort: untrusted hook pretxnclose not executed
+  (see 'hg help config.trusted')
+  [255]
+  $ hg log
+  changeset:   0:3903775176ed
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     a
+  

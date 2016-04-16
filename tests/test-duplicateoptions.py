@@ -1,5 +1,10 @@
+from __future__ import absolute_import, print_function
 import os
-from mercurial import ui, commands, extensions
+from mercurial import (
+    commands,
+    extensions,
+    ui as uimod,
+)
 
 ignore = set(['highlight', 'win32text', 'factotum'])
 
@@ -16,7 +21,7 @@ for ext in disabled:
 
 hgrc.close()
 
-u = ui.ui()
+u = uimod.ui()
 extensions.loadall(u)
 
 globalshort = set()
@@ -31,6 +36,6 @@ for cmd, entry in commands.table.iteritems():
     for option in entry[1]:
         if (option[0] and option[0] in seenshort) or \
            (option[1] and option[1] in seenlong):
-            print "command '" + cmd + "' has duplicate option " + str(option)
+            print("command '" + cmd + "' has duplicate option " + str(option))
         seenshort.add(option[0])
         seenlong.add(option[1])

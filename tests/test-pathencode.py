@@ -5,9 +5,19 @@
 # that have proven likely to expose bugs and divergent behavior in
 # different encoding implementations.
 
-from mercurial import store
-import binascii, itertools, math, os, random, sys, time
+from __future__ import absolute_import, print_function
+
+import binascii
 import collections
+import itertools
+import math
+import os
+import random
+import sys
+import time
+from mercurial import (
+    store,
+)
 
 validchars = set(map(chr, range(0, 256)))
 alphanum = range(ord('A'), ord('Z'))
@@ -154,10 +164,10 @@ def runtests(rng, seed, count):
         r = store._hybridencode(p, True) # reference implementation in Python
         if h != r:
             if nerrs == 0:
-                print >> sys.stderr, 'seed:', hex(seed)[:-1]
-            print >> sys.stderr, "\np: '%s'" % p.encode("string_escape")
-            print >> sys.stderr, "h: '%s'" % h.encode("string_escape")
-            print >> sys.stderr, "r: '%s'" % r.encode("string_escape")
+                print('seed:', hex(seed)[:-1], file=sys.stderr)
+            print("\np: '%s'" % p.encode("string_escape"), file=sys.stderr)
+            print("h: '%s'" % h.encode("string_escape"), file=sys.stderr)
+            print("r: '%s'" % r.encode("string_escape"), file=sys.stderr)
             nerrs += 1
     return nerrs
 

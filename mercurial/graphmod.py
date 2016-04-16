@@ -28,6 +28,12 @@ from . import (
 )
 
 CHANGESET = 'C'
+PARENT = 'P'
+GRANDPARENT = 'G'
+MISSINGPARENT = 'M'
+# Style of line to draw. None signals a line that ends and is removed at this
+# point.
+EDGES = {PARENT: '|', GRANDPARENT: ':', MISSINGPARENT: None}
 
 def groupbranchiter(revs, parentsfunc, firstbranch=()):
     """Yield revisions from heads to roots one (topo) branch at a time.
@@ -228,12 +234,16 @@ def groupbranchiter(revs, parentsfunc, firstbranch=()):
             yield r
 
 def dagwalker(repo, revs):
-    """cset DAG generator yielding (id, CHANGESET, ctx, [parentids]) tuples
+    """cset DAG generator yielding (id, CHANGESET, ctx, [parentinfo]) tuples
 
     This generator function walks through revisions (which should be ordered
-    from bigger to lower). It returns a tuple for each node. The node and parent
-    ids are arbitrary integers which identify a node in the context of the graph
+    from bigger to lower). It returns a tuple for each node.
+
+    Each parentinfo entry is a tuple with (edgetype, parentid), where edgetype
+    is one of PARENT, GRANDPARENT or MISSINGPARENT. The node and parent ids
+    are arbitrary integers which identify a node in the context of the graph
     returned.
+
     """
     if not revs:
         return
@@ -252,10 +262,13 @@ def dagwalker(repo, revs):
 
     for rev in revs:
         ctx = repo[rev]
-        parents = sorted(set([p.rev() for p in ctx.parents()
-                              if p.rev() in revs]))
-        mpars = [p.rev() for p in ctx.parents() if
-                 p.rev() != nullrev and p.rev() not in parents]
+        # partition into parents in the rev set and missing parents, then
+        # augment the lists with markers, to inform graph drawing code about
+        # what kind of edge to draw between nodes.
+        pset = set(p.rev() for p in ctx.parents() if p.rev() in revs)
+        mpars = [p.rev() for p in ctx.parents()
+                 if p.rev() != nullrev and p.rev() not in pset]
+        parents = [(PARENT, p) for p in sorted(pset)]
 
         for mpar in mpars:
             gp = gpcache.get(mpar)
@@ -264,11 +277,14 @@ def dagwalker(repo, revs):
                 # through all revs (issue4782)
                 if not isinstance(revs, revset.baseset):
                     revs = revset.baseset(revs)
-                gp = gpcache[mpar] = revset.reachableroots(repo, revs, [mpar])
+                gp = gpcache[mpar] = sorted(set(revset.reachableroots(
+                    repo, revs, [mpar])))
             if not gp:
-                parents.append(mpar)
+                parents.append((MISSINGPARENT, mpar))
+                pset.add(mpar)
             else:
-                parents.extend(g for g in gp if g not in parents)
+                parents.extend((GRANDPARENT, g) for g in gp if g not in pset)
+                pset.update(gp)
 
         yield (ctx.rev(), CHANGESET, ctx, parents)
 
@@ -281,7 +297,8 @@ def nodes(repo, nodes):
     include = set(nodes)
     for node in nodes:
         ctx = repo[node]
-        parents = set([p.rev() for p in ctx.parents() if p.node() in include])
+        parents = set((PARENT, p.rev()) for p in ctx.parents()
+                      if p.node() in include)
         yield (ctx.rev(), CHANGESET, ctx, sorted(parents))
 
 def colored(dag, repo):
@@ -330,7 +347,7 @@ def colored(dag, repo):
         next = seen[:]
 
         # Add parents to next
-        addparents = [p for p in parents if p not in next]
+        addparents = [p for pt, p in parents if p not in next]
         next[col:col + 1] = addparents
 
         # Set colors for the parents
@@ -351,7 +368,7 @@ def colored(dag, repo):
                     bconf.get('width', -1),
                     bconf.get('color', '')))
             elif eid == cur:
-                for p in parents:
+                for ptype, p in parents:
                     bconf = getconf(p)
                     edges.append((
                         ecol, next.index(p), color,
@@ -362,24 +379,27 @@ def colored(dag, repo):
         yield (cur, type, data, (col, color), edges)
         seen = next
 
-def asciiedges(type, char, lines, seen, rev, parents):
+def asciiedges(type, char, lines, state, rev, parents):
     """adds edge info to changelog DAG walk suitable for ascii()"""
+    seen = state['seen']
     if rev not in seen:
         seen.append(rev)
     nodeidx = seen.index(rev)
 
     knownparents = []
     newparents = []
-    for parent in parents:
+    for ptype, parent in parents:
         if parent in seen:
             knownparents.append(parent)
         else:
             newparents.append(parent)
+            state['edges'][parent] = state['styles'].get(ptype, '|')
 
     ncols = len(seen)
     nextseen = seen[:]
     nextseen[nodeidx:nodeidx + 1] = newparents
-    edges = [(nodeidx, nextseen.index(p)) for p in knownparents if p != nullrev]
+    edges = [(nodeidx, nextseen.index(p))
+             for p in knownparents if p != nullrev]
 
     while len(newparents) > 2:
         # ascii() only knows how to add or remove a single column between two
@@ -403,6 +423,8 @@ def asciiedges(type, char, lines, seen, rev, parents):
         edges.append((nodeidx, nodeidx + 1))
     nmorecols = len(nextseen) - ncols
     seen[:] = nextseen
+    # remove current node from edge characters, no longer needed
+    state['edges'].pop(rev, None)
     yield (type, char, lines, (nodeidx, edges, ncols, nmorecols))
 
 def _fixlongrightedges(edges):
@@ -411,27 +433,28 @@ def _fixlongrightedges(edges):
             edges[i] = (start, end + 1)
 
 def _getnodelineedgestail(
-        node_index, p_node_index, n_columns, n_columns_diff, p_diff, fix_tail):
-    if fix_tail and n_columns_diff == p_diff and n_columns_diff != 0:
+        echars, idx, pidx, ncols, coldiff, pdiff, fix_tail):
+    if fix_tail and coldiff == pdiff and coldiff != 0:
         # Still going in the same non-vertical direction.
-        if n_columns_diff == -1:
-            start = max(node_index + 1, p_node_index)
-            tail = ["|", " "] * (start - node_index - 1)
-            tail.extend(["/", " "] * (n_columns - start))
+        if coldiff == -1:
+            start = max(idx + 1, pidx)
+            tail = echars[idx * 2:(start - 1) * 2]
+            tail.extend(["/", " "] * (ncols - start))
             return tail
         else:
-            return ["\\", " "] * (n_columns - node_index - 1)
+            return ["\\", " "] * (ncols - idx - 1)
     else:
-        return ["|", " "] * (n_columns - node_index - 1)
+        remainder = (ncols - idx - 1)
+        return echars[-(remainder * 2):] if remainder > 0 else []
 
-def _drawedges(edges, nodeline, interline):
+def _drawedges(echars, edges, nodeline, interline):
     for (start, end) in edges:
         if start == end + 1:
             interline[2 * end + 1] = "/"
         elif start == end - 1:
             interline[2 * start + 1] = "\\"
         elif start == end:
-            interline[2 * start] = "|"
+            interline[2 * start] = echars[2 * start]
         else:
             if 2 * end >= len(nodeline):
                 continue
@@ -442,26 +465,86 @@ def _drawedges(edges, nodeline, interline):
                 if nodeline[i] != "+":
                     nodeline[i] = "-"
 
-def _getpaddingline(ni, n_columns, edges):
-    line = []
-    line.extend(["|", " "] * ni)
-    if (ni, ni - 1) in edges or (ni, ni) in edges:
-        # (ni, ni - 1)      (ni, ni)
+def _getpaddingline(echars, idx, ncols, edges):
+    # all edges up to the current node
+    line = echars[:idx * 2]
+    # an edge for the current node, if there is one
+    if (idx, idx - 1) in edges or (idx, idx) in edges:
+        # (idx, idx - 1)      (idx, idx)
         # | | | |           | | | |
         # +---o |           | o---+
-        # | | c |           | c | |
+        # | | X |           | X | |
         # | |/ /            | |/ /
         # | | |             | | |
-        c = "|"
+        line.extend(echars[idx * 2:(idx + 1) * 2])
     else:
-        c = " "
-    line.extend([c, " "])
-    line.extend(["|", " "] * (n_columns - ni - 1))
+        line.extend('  ')
+    # all edges to the right of the current node
+    remainder = ncols - idx - 1
+    if remainder > 0:
+        line.extend(echars[-(remainder * 2):])
     return line
+
+def _drawendinglines(lines, extra, edgemap, seen):
+    """Draw ending lines for missing parent edges
+
+    None indicates an edge that ends at between this node and the next
+    Replace with a short line ending in ~ and add / lines to any edges to
+    the right.
+
+    """
+    if None not in edgemap.values():
+        return
+
+    # Check for more edges to the right of our ending edges.
+    # We need enough space to draw adjustment lines for these.
+    edgechars = extra[::2]
+    while edgechars and edgechars[-1] is None:
+        edgechars.pop()
+    shift_size = max((edgechars.count(None) * 2) - 1, 0)
+    while len(lines) < 3 + shift_size:
+        lines.append(extra[:])
+
+    if shift_size:
+        empties = []
+        toshift = []
+        first_empty = extra.index(None)
+        for i, c in enumerate(extra[first_empty::2], first_empty // 2):
+            if c is None:
+                empties.append(i * 2)
+            else:
+                toshift.append(i * 2)
+        targets = list(range(first_empty, first_empty + len(toshift) * 2, 2))
+        positions = toshift[:]
+        for line in lines[-shift_size:]:
+            line[first_empty:] = [' '] * (len(line) - first_empty)
+            for i in range(len(positions)):
+                pos = positions[i] - 1
+                positions[i] = max(pos, targets[i])
+                line[pos] = '/' if pos > targets[i] else extra[toshift[i]]
+
+    map = {1: '|', 2: '~'}
+    for i, line in enumerate(lines):
+        if None not in line:
+            continue
+        line[:] = [c or map.get(i, ' ') for c in line]
+
+    # remove edges that ended
+    remove = [p for p, c in edgemap.items() if c is None]
+    for parent in remove:
+        del edgemap[parent]
+        seen.remove(parent)
 
 def asciistate():
     """returns the initial value for the "state" argument to ascii()"""
-    return [0, 0]
+    return {
+        'seen': [],
+        'edges': {},
+        'lastcoldiff': 0,
+        'lastindex': 0,
+        'styles': EDGES.copy(),
+        'graphshorten': False,
+    }
 
 def ascii(ui, state, type, char, text, coldata):
     """prints an ASCII graph of the DAG
@@ -483,9 +566,15 @@ def ascii(ui, state, type, char, text, coldata):
         in the current revision. That is: -1 means one column removed;
         0 means no columns added or removed; 1 means one column added.
     """
-
     idx, edges, ncols, coldiff = coldata
     assert -2 < coldiff < 2
+
+    edgemap, seen = state['edges'], state['seen']
+    # Be tolerant of history issues; make sure we have at least ncols + coldiff
+    # elements to work with. See test-glog.t for broken history test cases.
+    echars = [c for p in seen for c in (edgemap.get(p, '|'), ' ')]
+    echars.extend(('|', ' ') * max(ncols + coldiff - len(seen), 0))
+
     if coldiff == -1:
         # Transform
         #
@@ -515,45 +604,54 @@ def ascii(ui, state, type, char, text, coldata):
     fix_nodeline_tail = len(text) <= 2 and not add_padding_line
 
     # nodeline is the line containing the node character (typically o)
-    nodeline = ["|", " "] * idx
+    nodeline = echars[:idx * 2]
     nodeline.extend([char, " "])
 
     nodeline.extend(
-        _getnodelineedgestail(idx, state[1], ncols, coldiff,
-                              state[0], fix_nodeline_tail))
+        _getnodelineedgestail(
+            echars, idx, state['lastindex'], ncols, coldiff,
+            state['lastcoldiff'], fix_nodeline_tail))
 
     # shift_interline is the line containing the non-vertical
     # edges between this entry and the next
-    shift_interline = ["|", " "] * idx
+    shift_interline = echars[:idx * 2]
+    shift_interline.extend(' ' * (2 + coldiff))
+    count = ncols - idx - 1
     if coldiff == -1:
-        n_spaces = 1
-        edge_ch = "/"
+        shift_interline.extend('/ ' * count)
     elif coldiff == 0:
-        n_spaces = 2
-        edge_ch = "|"
+        shift_interline.extend(echars[(idx + 1) * 2:ncols * 2])
     else:
-        n_spaces = 3
-        edge_ch = "\\"
-    shift_interline.extend(n_spaces * [" "])
-    shift_interline.extend([edge_ch, " "] * (ncols - idx - 1))
+        shift_interline.extend(r'\ ' * count)
 
     # draw edges from the current node to its parents
-    _drawedges(edges, nodeline, shift_interline)
+    _drawedges(echars, edges, nodeline, shift_interline)
 
     # lines is the list of all graph lines to print
     lines = [nodeline]
     if add_padding_line:
-        lines.append(_getpaddingline(idx, ncols, edges))
-    lines.append(shift_interline)
+        lines.append(_getpaddingline(echars, idx, ncols, edges))
+
+    # If 'graphshorten' config, only draw shift_interline
+    # when there is any non vertical flow in graph.
+    if state['graphshorten']:
+        if any(c in '\/' for c in shift_interline if c):
+            lines.append(shift_interline)
+    # Else, no 'graphshorten' config so draw shift_interline.
+    else:
+        lines.append(shift_interline)
 
     # make sure that there are as many graph lines as there are
     # log strings
+    extra_interline = echars[:(ncols + coldiff) * 2]
+    if len(lines) < len(text):
+        while len(lines) < len(text):
+            lines.append(extra_interline[:])
+
+    _drawendinglines(lines, extra_interline, edgemap, seen)
+
     while len(text) < len(lines):
         text.append("")
-    if len(lines) < len(text):
-        extra_interline = ["|", " "] * (ncols + coldiff)
-        while len(lines) < len(text):
-            lines.append(extra_interline)
 
     # print lines
     indentation_level = max(ncols, ncols + coldiff)
@@ -562,5 +660,5 @@ def ascii(ui, state, type, char, text, coldata):
         ui.write(ln.rstrip() + '\n')
 
     # ... and start over
-    state[0] = coldiff
-    state[1] = idx
+    state['lastcoldiff'] = coldiff
+    state['lastindex'] = idx

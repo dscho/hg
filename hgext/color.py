@@ -153,11 +153,18 @@ the pager is active::
 If ``pagermode`` is not defined, the ``mode`` will be used.
 '''
 
-import os
+from __future__ import absolute_import
 
-from mercurial import cmdutil, commands, dispatch, extensions, subrepo, util
-from mercurial import ui as uimod
-from mercurial import templater, error
+import os
+from mercurial import (
+    cmdutil,
+    commands,
+    dispatch,
+    extensions,
+    subrepo,
+    ui as uimod,
+    util,
+)
 from mercurial.i18n import _
 
 cmdtable = {}
@@ -425,7 +432,7 @@ class colorui(uimod.ui):
             return super(colorui, self).write(*args, **opts)
 
         label = opts.get('label', '')
-        if self._buffers:
+        if self._buffers and not opts.get('prompt', False):
             if self._bufferapplylabels:
                 self._buffers[-1].extend(self.label(a, label) for a in args)
             else:
@@ -480,29 +487,6 @@ class colorui(uimod.ui):
                               for s in msg.split('\n')])
         return msg
 
-def templatelabel(context, mapping, args):
-    if len(args) != 2:
-        # i18n: "label" is a keyword
-        raise error.ParseError(_("label expects two arguments"))
-
-    # add known effects to the mapping so symbols like 'red', 'bold',
-    # etc. don't need to be quoted
-    mapping.update(dict([(k, k) for k in _effects]))
-
-    thing = args[1][0](context, mapping, args[1][1])
-
-    # apparently, repo could be a string that is the favicon?
-    repo = mapping.get('repo', '')
-    if isinstance(repo, str):
-        return thing
-
-    label = args[0][0](context, mapping, args[0][1])
-
-    thing = templater.stringify(thing)
-    label = templater.stringify(label)
-
-    return repo.ui.label(thing, label)
-
 def uisetup(ui):
     if ui.plain():
         return
@@ -524,8 +508,6 @@ def uisetup(ui):
         return orig(gitsub, commands, env, stream, cwd)
     extensions.wrapfunction(dispatch, '_runcommand', colorcmd)
     extensions.wrapfunction(subrepo.gitsubrepo, '_gitnodir', colorgit)
-    templatelabel.__doc__ = templater.funcs['label'].__doc__
-    templater.funcs['label'] = templatelabel
 
 def extsetup(ui):
     commands.globalopts.append(
@@ -549,7 +531,8 @@ def debugcolor(ui, repo, **opts):
 if os.name != 'nt':
     w32effects = None
 else:
-    import re, ctypes
+    import ctypes
+    import re
 
     _kernel32 = ctypes.windll.kernel32
 

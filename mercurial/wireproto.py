@@ -7,10 +7,10 @@
 
 from __future__ import absolute_import
 
+import itertools
 import os
 import sys
 import tempfile
-import urllib
 
 from .i18n import _
 from .node import (
@@ -29,6 +29,9 @@ from . import (
     streamclone,
     util,
 )
+
+urlerr = util.urlerr
+urlreq = util.urlreq
 
 bundle2required = _(
     'incompatible Mercurial client; bundle2 required\n'
@@ -114,6 +117,41 @@ class remotebatch(peer.batcher):
             encresref.set(encres)
             resref.set(batchable.next())
 
+class remoteiterbatcher(peer.iterbatcher):
+    def __init__(self, remote):
+        super(remoteiterbatcher, self).__init__()
+        self._remote = remote
+
+    def __getattr__(self, name):
+        if not getattr(self._remote, name, False):
+            raise AttributeError(
+                'Attempted to iterbatch non-batchable call to %r' % name)
+        return super(remoteiterbatcher, self).__getattr__(name)
+
+    def submit(self):
+        """Break the batch request into many patch calls and pipeline them.
+
+        This is mostly valuable over http where request sizes can be
+        limited, but can be used in other places as well.
+        """
+        req, rsp = [], []
+        for name, args, opts, resref in self.calls:
+            mtd = getattr(self._remote, name)
+            batchable = mtd.batchable(mtd.im_self, *args, **opts)
+            encargsorres, encresref = batchable.next()
+            assert encresref
+            req.append((name, encargsorres))
+            rsp.append((batchable, encresref))
+        if req:
+            self._resultiter = self._remote._submitbatch(req)
+        self._rsp = rsp
+
+    def results(self):
+        for (batchable, encresref), encres in itertools.izip(
+                self._rsp, self._resultiter):
+            encresref.set(encres)
+            yield batchable.next()
+
 # Forward a couple of names from peer to make wireproto interactions
 # slightly more sensible.
 batchable = peer.batchable
@@ -183,15 +221,33 @@ class wirepeer(peer.peerrepository):
         else:
             return peer.localbatch(self)
     def _submitbatch(self, req):
+        """run batch request <req> on the server
+
+        Returns an iterator of the raw responses from the server.
+        """
         cmds = []
         for op, argsdict in req:
             args = ','.join('%s=%s' % (escapearg(k), escapearg(v))
                             for k, v in argsdict.iteritems())
             cmds.append('%s %s' % (op, args))
-        rsp = self._call("batch", cmds=';'.join(cmds))
-        return [unescapearg(r) for r in rsp.split(';')]
+        rsp = self._callstream("batch", cmds=';'.join(cmds))
+        # TODO this response parsing is probably suboptimal for large
+        # batches with large responses.
+        work = rsp.read(1024)
+        chunk = work
+        while chunk:
+            while ';' in work:
+                one, work = work.split(';', 1)
+                yield unescapearg(one)
+            chunk = rsp.read(1024)
+            work += chunk
+        yield unescapearg(work)
+
     def _submitone(self, op, args):
         return self._call(op, **args)
+
+    def iterbatch(self):
+        return remoteiterbatcher(self)
 
     @batchable
     def lookup(self, key):
@@ -233,7 +289,7 @@ class wirepeer(peer.peerrepository):
             branchmap = {}
             for branchpart in d.splitlines():
                 branchname, branchheads = branchpart.split(' ', 1)
-                branchname = encoding.tolocal(urllib.unquote(branchname))
+                branchname = encoding.tolocal(urlreq.unquote(branchname))
                 branchheads = decodelist(branchheads)
                 branchmap[branchname] = branchheads
             yield branchmap
@@ -396,9 +452,12 @@ class wirepeer(peer.peerrepository):
     def _callstream(self, cmd, **args):
         """execute <cmd> on the server
 
-        The command is expected to return a stream.
+        The command is expected to return a stream. Note that if the
+        command doesn't return a stream, _callstream behaves
+        differently for ssh and http peers.
 
-        returns the server reply as a file like object."""
+        returns the server reply as a file like object.
+        """
         raise NotImplementedError()
 
     def _callcompressable(self, cmd, **args):
@@ -575,7 +634,7 @@ def branchmap(repo, proto):
     branchmap = repo.branchmap()
     heads = []
     for branch, nodes in branchmap.iteritems():
-        branchname = urllib.quote(encoding.fromlocal(branch))
+        branchname = urlreq.quote(encoding.fromlocal(branch))
         branchnodes = encodelist(nodes)
         heads.append('%s %s' % (branchname, branchnodes))
     return '\n'.join(heads)
@@ -627,10 +686,12 @@ def _capabilities(repo, proto):
             caps.append('streamreqs=%s' % ','.join(sorted(requiredformats)))
     if repo.ui.configbool('experimental', 'bundle2-advertise', True):
         capsblob = bundle2.encodecaps(bundle2.getrepocaps(repo))
-        caps.append('bundle2=' + urllib.quote(capsblob))
-    caps.append('unbundle=%s' % ','.join(changegroupmod.bundlepriority))
+        caps.append('bundle2=' + urlreq.quote(capsblob))
+    caps.append('unbundle=%s' % ','.join(bundle2.bundlepriority))
     caps.append(
         'httpheader=%d' % repo.ui.configint('server', 'maxhttpheaderlen', 1024))
+    if repo.ui.configbool('experimental', 'httppostargs', False):
+        caps.append('httppostargs')
     return caps
 
 # If you are writing an extension and consider wrapping this function. Wrap

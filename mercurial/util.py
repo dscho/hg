@@ -34,7 +34,6 @@ import tempfile
 import textwrap
 import time
 import traceback
-import urllib
 import zlib
 
 from . import (
@@ -43,7 +42,21 @@ from . import (
     i18n,
     osutil,
     parsers,
+    pycompat,
 )
+
+for attr in (
+    'empty',
+    'queue',
+    'urlerr',
+    # we do import urlreq, but we do it outside the loop
+    #'urlreq',
+    'stringio',
+):
+    globals()[attr] = getattr(pycompat, attr)
+
+# This line is to make pyflakes happy:
+urlreq = pycompat.urlreq
 
 if os.name == 'nt':
     from . import windows as platform
@@ -65,6 +78,7 @@ explainexit = platform.explainexit
 findexe = platform.findexe
 gethgcmd = platform.gethgcmd
 getuser = platform.getuser
+getpid = os.getpid
 groupmembers = platform.groupmembers
 groupname = platform.groupname
 hidewindow = platform.hidewindow
@@ -442,7 +456,7 @@ extendeddateformats = defaultdateformats + (
 def cachefunc(func):
     '''cache the result of function calls'''
     # XXX doesn't handle keywords args
-    if func.func_code.co_argcount == 0:
+    if func.__code__.co_argcount == 0:
         cache = []
         def f():
             if len(cache) == 0:
@@ -450,7 +464,7 @@ def cachefunc(func):
             return cache[0]
         return f
     cache = {}
-    if func.func_code.co_argcount == 1:
+    if func.__code__.co_argcount == 1:
         # we gain a small amount of time because
         # we don't need to pack/unpack the list
         def f(arg):
@@ -692,7 +706,7 @@ def lrucachefunc(func):
     '''cache most recent results of function calls'''
     cache = {}
     order = collections.deque()
-    if func.func_code.co_argcount == 1:
+    if func.__code__.co_argcount == 1:
         def f(arg):
             if arg not in cache:
                 if len(cache) > 20:
@@ -1574,12 +1588,20 @@ def makedate(timestamp=None):
 def datestr(date=None, format='%a %b %d %H:%M:%S %Y %1%2'):
     """represent a (unixtime, offset) tuple as a localized time.
     unixtime is seconds since the epoch, and offset is the time zone's
-    number of seconds away from UTC. if timezone is false, do not
-    append time zone to string."""
+    number of seconds away from UTC.
+
+    >>> datestr((0, 0))
+    'Thu Jan 01 00:00:00 1970 +0000'
+    >>> datestr((42, 0))
+    'Thu Jan 01 00:00:42 1970 +0000'
+    >>> datestr((-42, 0))
+    'Wed Dec 31 23:59:18 1969 +0000'
+    >>> datestr((0x7fffffff, 0))
+    'Tue Jan 19 03:14:07 2038 +0000'
+    >>> datestr((-0x80000000, 0))
+    'Fri Dec 13 20:45:52 1901 +0000'
+    """
     t, tz = date or makedate()
-    if t < 0:
-        t = 0   # time.gmtime(lt) fails on Windows for lt < -43200
-        tz = 0
     if "%1" in format or "%2" in format or "%z" in format:
         sign = (tz > 0) and "-" or "+"
         minutes = abs(tz) // 60
@@ -1587,12 +1609,16 @@ def datestr(date=None, format='%a %b %d %H:%M:%S %Y %1%2'):
         format = format.replace("%z", "%1%2")
         format = format.replace("%1", "%c%02d" % (sign, q))
         format = format.replace("%2", "%02d" % r)
-    try:
-        t = time.gmtime(float(t) - tz)
-    except ValueError:
-        # time was out of range
-        t = time.gmtime(sys.maxint)
-    s = time.strftime(format, t)
+    d = t - tz
+    if d > 0x7fffffff:
+        d = 0x7fffffff
+    elif d < -0x80000000:
+        d = -0x80000000
+    # Never use time.gmtime() and datetime.datetime.fromtimestamp()
+    # because they use the gmtime() system call which is buggy on Windows
+    # for negative values.
+    t = datetime.datetime(1970, 1, 1) + datetime.timedelta(seconds=d)
+    s = t.strftime(format)
     return s
 
 def shortdate(date=None):
@@ -1711,10 +1737,8 @@ def parsedate(date, formats=None, bias=None):
     # time zone offset. values must fit in signed 32 bits for
     # current 32-bit linux runtimes. timezones go from UTC-12
     # to UTC+14
-    if abs(when) > 0x7fffffff:
+    if when < -0x80000000 or when > 0x7fffffff:
         raise Abort(_('date exceeds 32 bits: %d') % when)
-    if when < 0:
-        raise Abort(_('negative date value: %d') % when)
     if offset < -50400 or offset > 43200:
         raise Abort(_('impossible time zone offset: %d') % offset)
     return when, offset
@@ -2367,30 +2391,30 @@ class url(object):
             if hasdriveletter(self.path):
                 s += '/'
         if self.user:
-            s += urllib.quote(self.user, safe=self._safechars)
+            s += urlreq.quote(self.user, safe=self._safechars)
         if self.passwd:
-            s += ':' + urllib.quote(self.passwd, safe=self._safechars)
+            s += ':' + urlreq.quote(self.passwd, safe=self._safechars)
         if self.user or self.passwd:
             s += '@'
         if self.host:
             if not (self.host.startswith('[') and self.host.endswith(']')):
-                s += urllib.quote(self.host)
+                s += urlreq.quote(self.host)
             else:
                 s += self.host
         if self.port:
-            s += ':' + urllib.quote(self.port)
+            s += ':' + urlreq.quote(self.port)
         if self.host:
             s += '/'
         if self.path:
             # TODO: similar to the query string, we should not unescape the
             # path when we store it, the path might contain '%2f' = '/',
             # which we should *not* escape.
-            s += urllib.quote(self.path, safe=self._safepchars)
+            s += urlreq.quote(self.path, safe=self._safepchars)
         if self.query:
             # we store the query in escaped form.
             s += '?' + self.query
         if self.fragment is not None:
-            s += '#' + urllib.quote(self.fragment, safe=self._safepchars)
+            s += '#' + urlreq.quote(self.fragment, safe=self._safepchars)
         return s
 
     def authinfo(self):
@@ -2549,21 +2573,39 @@ class hooks(object):
             results.append(hook(*args))
         return results
 
+def getstackframes(skip=0, line=' %-*s in %s\n', fileline='%s:%s'):
+    '''Yields lines for a nicely formatted stacktrace.
+    Skips the 'skip' last entries.
+    Each file+linenumber is formatted according to fileline.
+    Each line is formatted according to line.
+    If line is None, it yields:
+      length of longest filepath+line number,
+      filepath+linenumber,
+      function
+
+    Not be used in production code but very convenient while developing.
+    '''
+    entries = [(fileline % (fn, ln), func)
+        for fn, ln, func, _text in traceback.extract_stack()[:-skip - 1]]
+    if entries:
+        fnmax = max(len(entry[0]) for entry in entries)
+        for fnln, func in entries:
+            if line is None:
+                yield (fnmax, fnln, func)
+            else:
+                yield line % (fnmax, fnln, func)
+
 def debugstacktrace(msg='stacktrace', skip=0, f=sys.stderr, otherf=sys.stdout):
     '''Writes a message to f (stderr) with a nicely formatted stacktrace.
     Skips the 'skip' last entries. By default it will flush stdout first.
-    It can be used everywhere and do intentionally not require an ui object.
+    It can be used everywhere and intentionally does not require an ui object.
     Not be used in production code but very convenient while developing.
     '''
     if otherf:
         otherf.flush()
     f.write('%s at:\n' % msg)
-    entries = [('%s:%s' % (fn, ln), func)
-        for fn, ln, func, _text in traceback.extract_stack()[:-skip - 1]]
-    if entries:
-        fnmax = max(len(entry[0]) for entry in entries)
-        for fnln, func in entries:
-            f.write(' %-*s in %s\n' % (fnmax, fnln, func))
+    for line in getstackframes(skip + 1):
+        f.write(line)
     f.flush()
 
 class dirs(object):

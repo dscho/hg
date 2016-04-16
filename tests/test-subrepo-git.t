@@ -785,7 +785,7 @@ add new changes, including whitespace
   index 0000000..257cc56
   --- /dev/null
   +++ b/s/barfoo
-  @@ -0,0 +1 @@
+  @@ -0,0 +1* @@ (glob)
   +foo
   $ hg diff --subrepos s/foobar
   diff --git a/s/foobar b/s/foobar
@@ -827,7 +827,7 @@ adding an exclude should ignore this element
   index 0000000..257cc56
   --- /dev/null
   +++ b/s/barfoo
-  @@ -0,0 +1 @@
+  @@ -0,0 +1* @@ (glob)
   +foo
 
 moving a file should show a removal and an add
@@ -1146,7 +1146,7 @@ test for Git CVE-2016-3068
   $ hg commit -m "add subrepo"
   $ cd ..
   $ env -u GIT_ALLOW_PROTOCOL hg clone malicious-subrepository malicious-subrepository-protected
-  Cloning into '$TESTTMP/tc/malicious-subrepository-protected/s'...
+  Cloning into '$TESTTMP/tc/malicious-subrepository-protected/s'... (glob)
   fatal: transport 'ext' not allowed
   updating to branch default
   cloning subrepo s from ext::sh -c echo% pwned% >&2
@@ -1155,7 +1155,7 @@ test for Git CVE-2016-3068
 
 whitelisting of ext should be respected (that's the git submodule behaviour)
   $ env GIT_ALLOW_PROTOCOL=ext hg clone malicious-subrepository malicious-subrepository-clone-allowed
-  Cloning into '$TESTTMP/tc/malicious-subrepository-clone-allowed/s'...
+  Cloning into '$TESTTMP/tc/malicious-subrepository-clone-allowed/s'... (glob)
   pwned
   fatal: Could not read from remote repository.
   

@@ -85,10 +85,10 @@ Criss cross merging
    f2: versions differ -> m (premerge)
   picked tool ':dump' for f2 (binary False symlink False changedelete False)
   merging f2
-  my f2@3b08d01b0ab5+ other f2@adfe50279922 ancestor f2@40494bf2444c
+  my f2@3b08d01b0ab5+ other f2@adfe50279922 ancestor f2@0f6b37dbe527
    f2: versions differ -> m (merge)
   picked tool ':dump' for f2 (binary False symlink False changedelete False)
-  my f2@3b08d01b0ab5+ other f2@adfe50279922 ancestor f2@40494bf2444c
+  my f2@3b08d01b0ab5+ other f2@adfe50279922 ancestor f2@0f6b37dbe527
   1 files updated, 0 files merged, 0 files removed, 1 files unresolved
   use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
   [1]
@@ -212,7 +212,7 @@ Verify how the output looks and and how verbose it is:
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   (branch merge, don't forget to commit)
 
-  $ hg up -qC
+  $ hg up -qC tip
   $ hg merge -v
   note: merging 3b08d01b0ab5+ and adfe50279922 using bids from ancestors 0f6b37dbe527 and 40663881a6dd
   

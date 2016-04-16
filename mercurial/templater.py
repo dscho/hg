@@ -17,6 +17,7 @@ from . import (
     error,
     minirst,
     parser,
+    registrar,
     revset as revsetmod,
     templatefilters,
     templatekw,
@@ -39,7 +40,9 @@ elements = {
     "end": (0, None, None, None, None),
 }
 
-def tokenize(program, start, end):
+def tokenize(program, start, end, term=None):
+    """Parse a template expression into a stream of tokens, which must end
+    with term if specified"""
     pos = start
     while pos < end:
         c = program[pos]
@@ -126,13 +129,15 @@ def tokenize(program, start, end):
             sym = program[s:pos]
             yield ('symbol', sym, s)
             pos -= 1
-        elif c == '}':
+        elif c == term:
             yield ('end', None, pos + 1)
             return
         else:
             raise error.ParseError(_("syntax error"), pos)
         pos += 1
-    raise error.ParseError(_("unterminated template expansion"), start)
+    if term:
+        raise error.ParseError(_("unterminated template expansion"), start)
+    yield ('end', None, pos)
 
 def _parsetemplate(tmpl, start, stop, quote=''):
     r"""
@@ -170,18 +175,80 @@ def _parsetemplate(tmpl, start, stop, quote=''):
         if c == quote:
             return parsed, n + 1
 
-        parseres, pos = p.parse(tokenize(tmpl, n + 1, stop))
+        parseres, pos = p.parse(tokenize(tmpl, n + 1, stop, '}'))
         parsed.append(parseres)
 
     if quote:
         raise error.ParseError(_("unterminated string"), start)
     return parsed, pos
 
-def compiletemplate(tmpl, context):
+def _unnesttemplatelist(tree):
+    """Expand list of templates to node tuple
+
+    >>> def f(tree):
+    ...     print prettyformat(_unnesttemplatelist(tree))
+    >>> f(('template', []))
+    ('string', '')
+    >>> f(('template', [('string', 'foo')]))
+    ('string', 'foo')
+    >>> f(('template', [('string', 'foo'), ('symbol', 'rev')]))
+    (template
+      ('string', 'foo')
+      ('symbol', 'rev'))
+    >>> f(('template', [('symbol', 'rev')]))  # template(rev) -> str
+    (template
+      ('symbol', 'rev'))
+    >>> f(('template', [('template', [('string', 'foo')])]))
+    ('string', 'foo')
+    """
+    if not isinstance(tree, tuple):
+        return tree
+    op = tree[0]
+    if op != 'template':
+        return (op,) + tuple(_unnesttemplatelist(x) for x in tree[1:])
+
+    assert len(tree) == 2
+    xs = tuple(_unnesttemplatelist(x) for x in tree[1])
+    if not xs:
+        return ('string', '')  # empty template ""
+    elif len(xs) == 1 and xs[0][0] == 'string':
+        return xs[0]  # fast path for string with no template fragment "x"
+    else:
+        return (op,) + xs
+
+def parse(tmpl):
+    """Parse template string into tree"""
     parsed, pos = _parsetemplate(tmpl, 0, len(tmpl))
-    return [compileexp(e, context, methods) for e in parsed]
+    assert pos == len(tmpl), 'unquoted template should be consumed'
+    return _unnesttemplatelist(('template', parsed))
+
+def _parseexpr(expr):
+    """Parse a template expression into tree
+
+    >>> _parseexpr('"foo"')
+    ('string', 'foo')
+    >>> _parseexpr('foo(bar)')
+    ('func', ('symbol', 'foo'), ('symbol', 'bar'))
+    >>> _parseexpr('foo(')
+    Traceback (most recent call last):
+      ...
+    ParseError: ('not a prefix: end', 4)
+    >>> _parseexpr('"foo" "bar"')
+    Traceback (most recent call last):
+      ...
+    ParseError: ('invalid token', 7)
+    """
+    p = parser.parser(elements)
+    tree, pos = p.parse(tokenize(expr, 0, len(expr)))
+    if pos != len(expr):
+        raise error.ParseError(_('invalid token'), pos)
+    return _unnesttemplatelist(tree)
+
+def prettyformat(tree):
+    return parser.prettyformat(tree, ('integer', 'string', 'symbol'))
 
 def compileexp(exp, context, curmethods):
+    """Compile parsed template tree to (func, data) pair"""
     t = exp[0]
     if t in curmethods:
         return curmethods[t](exp, context)
@@ -202,8 +269,10 @@ def getlist(x):
     return [x]
 
 def gettemplate(exp, context):
-    if exp[0] == 'template':
-        return [compileexp(e, context, methods) for e in exp[1]]
+    """Compile given template tree or load named template from map file;
+    returns (func, data) pair"""
+    if exp[0] in ('template', 'string'):
+        return compileexp(exp, context, methods)
     if exp[0] == 'symbol':
         # unlike runsymbol(), here 'symbol' is always taken as template name
         # even if it exists in mapping. this allows us to override mapping
@@ -220,6 +289,27 @@ def evalfuncarg(context, mapping, arg):
         thing = stringify(thing)
     return thing
 
+def evalinteger(context, mapping, arg, err):
+    v = evalfuncarg(context, mapping, arg)
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise error.ParseError(err)
+
+def evalstring(context, mapping, arg):
+    func, data = arg
+    return stringify(func(context, mapping, data))
+
+def evalstringliteral(context, mapping, arg):
+    """Evaluate given argument as string template, but returns symbol name
+    if it is unknown"""
+    func, data = arg
+    if func is runsymbol:
+        thing = func(context, mapping, data, default=data)
+    else:
+        thing = func(context, mapping, data)
+    return stringify(thing)
+
 def runinteger(context, mapping, data):
     return int(data)
 
@@ -234,7 +324,7 @@ def _recursivesymbolblocker(key):
 def _runrecursivesymbol(context, mapping, key):
     raise error.Abort(_("recursive reference '%s' in template") % key)
 
-def runsymbol(context, mapping, key):
+def runsymbol(context, mapping, key, default=''):
     v = mapping.get(key)
     if v is None:
         v = context._defaults.get(key)
@@ -246,15 +336,13 @@ def runsymbol(context, mapping, key):
         try:
             v = context.process(key, safemapping)
         except TemplateNotFound:
-            v = ''
+            v = default
     if callable(v):
         return v(**mapping)
     return v
 
 def buildtemplate(exp, context):
-    ctmpl = [compileexp(e, context, methods) for e in exp[1]]
-    if len(ctmpl) == 1:
-        return ctmpl[0]  # fast path for string with no template fragment
+    ctmpl = [compileexp(e, context, methods) for e in exp[1:]]
     return (runtemplate, ctmpl)
 
 def runtemplate(context, mapping, template):
@@ -287,22 +375,29 @@ def runfilter(context, mapping, data):
 
 def buildmap(exp, context):
     func, data = compileexp(exp[1], context, methods)
-    ctmpl = gettemplate(exp[2], context)
-    return (runmap, (func, data, ctmpl))
+    tfunc, tdata = gettemplate(exp[2], context)
+    return (runmap, (func, data, tfunc, tdata))
 
 def runmap(context, mapping, data):
-    func, data, ctmpl = data
+    func, data, tfunc, tdata = data
     d = func(context, mapping, data)
     if util.safehasattr(d, 'itermaps'):
-        d = d.itermaps()
+        diter = d.itermaps()
+    else:
+        try:
+            diter = iter(d)
+        except TypeError:
+            if func is runsymbol:
+                raise error.ParseError(_("keyword '%s' is not iterable") % data)
+            else:
+                raise error.ParseError(_("%r is not iterable") % d)
 
-    lm = mapping.copy()
-
-    for i in d:
+    for i in diter:
+        lm = mapping.copy()
         if isinstance(i, dict):
             lm.update(i)
             lm['originalnode'] = mapping.get('node')
-            yield runtemplate(context, lm, ctmpl)
+            yield tfunc(context, lm, tdata)
         else:
             # v is not an iterable of dicts, this happen when 'key'
             # has been fully expanded already and format is useless.
@@ -322,18 +417,24 @@ def buildfunc(exp, context):
         return (runfilter, (args[0], f))
     raise error.ParseError(_("unknown function '%s'") % n)
 
+# dict of template built-in functions
+funcs = {}
+
+templatefunc = registrar.templatefunc(funcs)
+
+@templatefunc('date(date[, fmt])')
 def date(context, mapping, args):
-    """:date(date[, fmt]): Format a date. See :hg:`help dates` for formatting
+    """Format a date. See :hg:`help dates` for formatting
     strings. The default is a Unix date format, including the timezone:
     "Mon Sep 04 15:13:13 2006 0700"."""
     if not (1 <= len(args) <= 2):
         # i18n: "date" is a keyword
         raise error.ParseError(_("date expects one or two arguments"))
 
-    date = args[0][0](context, mapping, args[0][1])
+    date = evalfuncarg(context, mapping, args[0])
     fmt = None
     if len(args) == 2:
-        fmt = stringify(args[1][0](context, mapping, args[1][1]))
+        fmt = evalstring(context, mapping, args[1])
     try:
         if fmt is None:
             return util.datestr(date)
@@ -343,8 +444,9 @@ def date(context, mapping, args):
         # i18n: "date" is a keyword
         raise error.ParseError(_("date expects a date information"))
 
+@templatefunc('diff([includepattern [, excludepattern]])')
 def diff(context, mapping, args):
-    """:diff([includepattern [, excludepattern]]): Show a diff, optionally
+    """Show a diff, optionally
     specifying files to include or exclude."""
     if len(args) > 2:
         # i18n: "diff" is a keyword
@@ -352,7 +454,7 @@ def diff(context, mapping, args):
 
     def getpatterns(i):
         if i < len(args):
-            s = stringify(args[i][0](context, mapping, args[i][1])).strip()
+            s = evalstring(context, mapping, args[i]).strip()
             if s:
                 return [s]
         return []
@@ -362,46 +464,48 @@ def diff(context, mapping, args):
 
     return ''.join(chunks)
 
+@templatefunc('fill(text[, width[, initialident[, hangindent]]])')
 def fill(context, mapping, args):
-    """:fill(text[, width[, initialident[, hangindent]]]): Fill many
+    """Fill many
     paragraphs with optional indentation. See the "fill" filter."""
     if not (1 <= len(args) <= 4):
         # i18n: "fill" is a keyword
         raise error.ParseError(_("fill expects one to four arguments"))
 
-    text = stringify(args[0][0](context, mapping, args[0][1]))
+    text = evalstring(context, mapping, args[0])
     width = 76
     initindent = ''
     hangindent = ''
     if 2 <= len(args) <= 4:
+        width = evalinteger(context, mapping, args[1],
+                            # i18n: "fill" is a keyword
+                            _("fill expects an integer width"))
         try:
-            width = int(stringify(args[1][0](context, mapping, args[1][1])))
-        except ValueError:
-            # i18n: "fill" is a keyword
-            raise error.ParseError(_("fill expects an integer width"))
-        try:
-            initindent = stringify(args[2][0](context, mapping, args[2][1]))
-            hangindent = stringify(args[3][0](context, mapping, args[3][1]))
+            initindent = evalstring(context, mapping, args[2])
+            hangindent = evalstring(context, mapping, args[3])
         except IndexError:
             pass
 
     return templatefilters.fill(text, width, initindent, hangindent)
 
+@templatefunc('pad(text, width[, fillchar=\' \'[, right=False]])')
 def pad(context, mapping, args):
-    """:pad(text, width[, fillchar=' '[, right=False]]): Pad text with a
+    """Pad text with a
     fill character."""
     if not (2 <= len(args) <= 4):
         # i18n: "pad" is a keyword
         raise error.ParseError(_("pad() expects two to four arguments"))
 
-    width = int(args[1][1])
+    width = evalinteger(context, mapping, args[1],
+                        # i18n: "pad" is a keyword
+                        _("pad() expects an integer width"))
 
-    text = stringify(args[0][0](context, mapping, args[0][1]))
+    text = evalstring(context, mapping, args[0])
 
     right = False
     fillchar = ' '
     if len(args) > 2:
-        fillchar = stringify(args[2][0](context, mapping, args[2][1]))
+        fillchar = evalstring(context, mapping, args[2])
     if len(args) > 3:
         right = util.parsebool(args[3][1])
 
@@ -410,8 +514,9 @@ def pad(context, mapping, args):
     else:
         return text.ljust(width, fillchar)
 
+@templatefunc('indent(text, indentchars[, firstline])')
 def indent(context, mapping, args):
-    """:indent(text, indentchars[, firstline]): Indents all non-empty lines
+    """Indents all non-empty lines
     with the characters given in the indentchars string. An optional
     third parameter will override the indent for the first line only
     if present."""
@@ -419,77 +524,82 @@ def indent(context, mapping, args):
         # i18n: "indent" is a keyword
         raise error.ParseError(_("indent() expects two or three arguments"))
 
-    text = stringify(args[0][0](context, mapping, args[0][1]))
-    indent = stringify(args[1][0](context, mapping, args[1][1]))
+    text = evalstring(context, mapping, args[0])
+    indent = evalstring(context, mapping, args[1])
 
     if len(args) == 3:
-        firstline = stringify(args[2][0](context, mapping, args[2][1]))
+        firstline = evalstring(context, mapping, args[2])
     else:
         firstline = indent
 
     # the indent function doesn't indent the first line, so we do it here
     return templatefilters.indent(firstline + text, indent)
 
+@templatefunc('get(dict, key)')
 def get(context, mapping, args):
-    """:get(dict, key): Get an attribute/key from an object. Some keywords
+    """Get an attribute/key from an object. Some keywords
     are complex types. This function allows you to obtain the value of an
     attribute on these types."""
     if len(args) != 2:
         # i18n: "get" is a keyword
         raise error.ParseError(_("get() expects two arguments"))
 
-    dictarg = args[0][0](context, mapping, args[0][1])
+    dictarg = evalfuncarg(context, mapping, args[0])
     if not util.safehasattr(dictarg, 'get'):
         # i18n: "get" is a keyword
         raise error.ParseError(_("get() expects a dict as first argument"))
 
-    key = args[1][0](context, mapping, args[1][1])
+    key = evalfuncarg(context, mapping, args[1])
     return dictarg.get(key)
 
+@templatefunc('if(expr, then[, else])')
 def if_(context, mapping, args):
-    """:if(expr, then[, else]): Conditionally execute based on the result of
+    """Conditionally execute based on the result of
     an expression."""
     if not (2 <= len(args) <= 3):
         # i18n: "if" is a keyword
         raise error.ParseError(_("if expects two or three arguments"))
 
-    test = stringify(args[0][0](context, mapping, args[0][1]))
+    test = evalstring(context, mapping, args[0])
     if test:
         yield args[1][0](context, mapping, args[1][1])
     elif len(args) == 3:
         yield args[2][0](context, mapping, args[2][1])
 
+@templatefunc('ifcontains(search, thing, then[, else])')
 def ifcontains(context, mapping, args):
-    """:ifcontains(search, thing, then[, else]): Conditionally execute based
+    """Conditionally execute based
     on whether the item "search" is in "thing"."""
     if not (3 <= len(args) <= 4):
         # i18n: "ifcontains" is a keyword
         raise error.ParseError(_("ifcontains expects three or four arguments"))
 
-    item = stringify(args[0][0](context, mapping, args[0][1]))
-    items = args[1][0](context, mapping, args[1][1])
+    item = evalstring(context, mapping, args[0])
+    items = evalfuncarg(context, mapping, args[1])
 
     if item in items:
         yield args[2][0](context, mapping, args[2][1])
     elif len(args) == 4:
         yield args[3][0](context, mapping, args[3][1])
 
+@templatefunc('ifeq(expr1, expr2, then[, else])')
 def ifeq(context, mapping, args):
-    """:ifeq(expr1, expr2, then[, else]): Conditionally execute based on
+    """Conditionally execute based on
     whether 2 items are equivalent."""
     if not (3 <= len(args) <= 4):
         # i18n: "ifeq" is a keyword
         raise error.ParseError(_("ifeq expects three or four arguments"))
 
-    test = stringify(args[0][0](context, mapping, args[0][1]))
-    match = stringify(args[1][0](context, mapping, args[1][1]))
+    test = evalstring(context, mapping, args[0])
+    match = evalstring(context, mapping, args[1])
     if test == match:
         yield args[2][0](context, mapping, args[2][1])
     elif len(args) == 4:
         yield args[3][0](context, mapping, args[3][1])
 
+@templatefunc('join(list, sep)')
 def join(context, mapping, args):
-    """:join(list, sep): Join items in a list with a delimiter."""
+    """Join items in a list with a delimiter."""
     if not (1 <= len(args) <= 2):
         # i18n: "join" is a keyword
         raise error.ParseError(_("join expects one or two arguments"))
@@ -501,7 +611,7 @@ def join(context, mapping, args):
 
     joiner = " "
     if len(args) > 1:
-        joiner = stringify(args[1][0](context, mapping, args[1][1]))
+        joiner = evalstring(context, mapping, args[1])
 
     first = True
     for x in joinset:
@@ -511,19 +621,26 @@ def join(context, mapping, args):
             yield joiner
         yield x
 
+@templatefunc('label(label, expr)')
 def label(context, mapping, args):
-    """:label(label, expr): Apply a label to generated content. Content with
+    """Apply a label to generated content. Content with
     a label applied can result in additional post-processing, such as
     automatic colorization."""
     if len(args) != 2:
         # i18n: "label" is a keyword
         raise error.ParseError(_("label expects two arguments"))
 
-    # ignore args[0] (the label string) since this is supposed to be a a no-op
-    yield args[1][0](context, mapping, args[1][1])
+    ui = mapping['ui']
+    thing = evalstring(context, mapping, args[1])
+    # preserve unknown symbol as literal so effects like 'red', 'bold',
+    # etc. don't need to be quoted
+    label = evalstringliteral(context, mapping, args[0])
 
+    return ui.label(thing, label)
+
+@templatefunc('latesttag([pattern])')
 def latesttag(context, mapping, args):
-    """:latesttag([pattern]): The global tags matching the given pattern on the
+    """The global tags matching the given pattern on the
     most recent globally tagged ancestor of this changeset."""
     if len(args) > 1:
         # i18n: "latesttag" is a keyword
@@ -531,12 +648,13 @@ def latesttag(context, mapping, args):
 
     pattern = None
     if len(args) == 1:
-        pattern = stringify(args[0][0](context, mapping, args[0][1]))
+        pattern = evalstring(context, mapping, args[0])
 
     return templatekw.showlatesttags(pattern, **mapping)
 
+@templatefunc('localdate(date[, tz])')
 def localdate(context, mapping, args):
-    """:localdate(date[, tz]): Converts a date to the specified timezone.
+    """Converts a date to the specified timezone.
     The default is local date."""
     if not (1 <= len(args) <= 2):
         # i18n: "localdate" is a keyword
@@ -563,14 +681,15 @@ def localdate(context, mapping, args):
         tzoffset = util.makedate()[1]
     return (date[0], tzoffset)
 
+@templatefunc('revset(query[, formatargs...])')
 def revset(context, mapping, args):
-    """:revset(query[, formatargs...]): Execute a revision set query. See
+    """Execute a revision set query. See
     :hg:`help revset`."""
     if not len(args) > 0:
         # i18n: "revset" is a keyword
         raise error.ParseError(_("revset expects one or more arguments"))
 
-    raw = stringify(args[0][0](context, mapping, args[0][1]))
+    raw = evalstring(context, mapping, args[0])
     ctx = mapping['ctx']
     repo = ctx.repo()
 
@@ -579,43 +698,47 @@ def revset(context, mapping, args):
         return m(repo)
 
     if len(args) > 1:
-        formatargs = list([a[0](context, mapping, a[1]) for a in args[1:]])
+        formatargs = [evalfuncarg(context, mapping, a) for a in args[1:]]
         revs = query(revsetmod.formatspec(raw, *formatargs))
-        revs = list([str(r) for r in revs])
+        revs = list(revs)
     else:
         revsetcache = mapping['cache'].setdefault("revsetcache", {})
         if raw in revsetcache:
             revs = revsetcache[raw]
         else:
             revs = query(raw)
-            revs = list([str(r) for r in revs])
+            revs = list(revs)
             revsetcache[raw] = revs
 
     return templatekw.showrevslist("revision", revs, **mapping)
 
+@templatefunc('rstdoc(text, style)')
 def rstdoc(context, mapping, args):
-    """:rstdoc(text, style): Format ReStructuredText."""
+    """Format ReStructuredText."""
     if len(args) != 2:
         # i18n: "rstdoc" is a keyword
         raise error.ParseError(_("rstdoc expects two arguments"))
 
-    text = stringify(args[0][0](context, mapping, args[0][1]))
-    style = stringify(args[1][0](context, mapping, args[1][1]))
+    text = evalstring(context, mapping, args[0])
+    style = evalstring(context, mapping, args[1])
 
     return minirst.format(text, style=style, keep=['verbose'])
 
+@templatefunc('shortest(node, minlength=4)')
 def shortest(context, mapping, args):
-    """:shortest(node, minlength=4): Obtain the shortest representation of
+    """Obtain the shortest representation of
     a node."""
     if not (1 <= len(args) <= 2):
         # i18n: "shortest" is a keyword
         raise error.ParseError(_("shortest() expects one or two arguments"))
 
-    node = stringify(args[0][0](context, mapping, args[0][1]))
+    node = evalstring(context, mapping, args[0])
 
     minlength = 4
     if len(args) > 1:
-        minlength = int(args[1][1])
+        minlength = evalinteger(context, mapping, args[1],
+                                # i18n: "shortest" is a keyword
+                                _("shortest() expects an integer minlength"))
 
     cl = mapping['ctx']._repo.changelog
     def isvalid(test):
@@ -656,29 +779,31 @@ def shortest(context, mapping, args):
             if len(shortest) <= length:
                 return shortest
 
+@templatefunc('strip(text[, chars])')
 def strip(context, mapping, args):
-    """:strip(text[, chars]): Strip characters from a string. By default,
+    """Strip characters from a string. By default,
     strips all leading and trailing whitespace."""
     if not (1 <= len(args) <= 2):
         # i18n: "strip" is a keyword
         raise error.ParseError(_("strip expects one or two arguments"))
 
-    text = stringify(args[0][0](context, mapping, args[0][1]))
+    text = evalstring(context, mapping, args[0])
     if len(args) == 2:
-        chars = stringify(args[1][0](context, mapping, args[1][1]))
+        chars = evalstring(context, mapping, args[1])
         return text.strip(chars)
     return text.strip()
 
+@templatefunc('sub(pattern, replacement, expression)')
 def sub(context, mapping, args):
-    """:sub(pattern, replacement, expression): Perform text substitution
+    """Perform text substitution
     using regular expressions."""
     if len(args) != 3:
         # i18n: "sub" is a keyword
         raise error.ParseError(_("sub expects three arguments"))
 
-    pat = stringify(args[0][0](context, mapping, args[0][1]))
-    rpl = stringify(args[1][0](context, mapping, args[1][1]))
-    src = stringify(args[2][0](context, mapping, args[2][1]))
+    pat = evalstring(context, mapping, args[0])
+    rpl = evalstring(context, mapping, args[1])
+    src = evalstring(context, mapping, args[2])
     try:
         patre = re.compile(pat)
     except re.error:
@@ -690,35 +815,34 @@ def sub(context, mapping, args):
         # i18n: "sub" is a keyword
         raise error.ParseError(_("sub got an invalid replacement: %s") % rpl)
 
+@templatefunc('startswith(pattern, text)')
 def startswith(context, mapping, args):
-    """:startswith(pattern, text): Returns the value from the "text" argument
+    """Returns the value from the "text" argument
     if it begins with the content from the "pattern" argument."""
     if len(args) != 2:
         # i18n: "startswith" is a keyword
         raise error.ParseError(_("startswith expects two arguments"))
 
-    patn = stringify(args[0][0](context, mapping, args[0][1]))
-    text = stringify(args[1][0](context, mapping, args[1][1]))
+    patn = evalstring(context, mapping, args[0])
+    text = evalstring(context, mapping, args[1])
     if text.startswith(patn):
         return text
     return ''
 
-
+@templatefunc('word(number, text[, separator])')
 def word(context, mapping, args):
-    """:word(number, text[, separator]): Return the nth word from a string."""
+    """Return the nth word from a string."""
     if not (2 <= len(args) <= 3):
         # i18n: "word" is a keyword
         raise error.ParseError(_("word expects two or three arguments, got %d")
                                % len(args))
 
-    try:
-        num = int(stringify(args[0][0](context, mapping, args[0][1])))
-    except ValueError:
-        # i18n: "word" is a keyword
-        raise error.ParseError(_("word expects an integer index"))
-    text = stringify(args[1][0](context, mapping, args[1][1]))
+    num = evalinteger(context, mapping, args[0],
+                      # i18n: "word" is a keyword
+                      _("word expects an integer index"))
+    text = evalstring(context, mapping, args[1])
     if len(args) == 3:
-        splitter = stringify(args[2][0](context, mapping, args[2][1]))
+        splitter = evalstring(context, mapping, args[2])
     else:
         splitter = None
 
@@ -745,28 +869,24 @@ exprmethods = {
 methods = exprmethods.copy()
 methods["integer"] = exprmethods["symbol"]  # '{1}' as variable
 
-funcs = {
-    "date": date,
-    "diff": diff,
-    "fill": fill,
-    "get": get,
-    "if": if_,
-    "ifcontains": ifcontains,
-    "ifeq": ifeq,
-    "indent": indent,
-    "join": join,
-    "label": label,
-    "latesttag": latesttag,
-    "localdate": localdate,
-    "pad": pad,
-    "revset": revset,
-    "rstdoc": rstdoc,
-    "shortest": shortest,
-    "startswith": startswith,
-    "strip": strip,
-    "sub": sub,
-    "word": word,
-}
+class _aliasrules(parser.basealiasrules):
+    """Parsing and expansion rule set of template aliases"""
+    _section = _('template alias')
+    _parse = staticmethod(_parseexpr)
+
+    @staticmethod
+    def _trygetfunc(tree):
+        """Return (name, args) if tree is func(...) or ...|filter; otherwise
+        None"""
+        if tree[0] == 'func' and tree[1][0] == 'symbol':
+            return tree[1][1], getlist(tree[2])
+        if tree[0] == '|' and tree[2][0] == 'symbol':
+            return tree[2][1], [tree[1]]
+
+def expandaliases(tree, aliases):
+    """Return new tree of aliases are expanded"""
+    aliasmap = _aliasrules.buildmap(aliases)
+    return _aliasrules.expand(aliasmap, tree)
 
 # template engine
 
@@ -791,9 +911,9 @@ def _flatten(thing):
                     yield j
 
 def unquotestring(s):
-    '''unwrap quotes'''
-    if len(s) < 2 or s[0] != s[-1]:
-        raise SyntaxError(_('unmatched quotes'))
+    '''unwrap quotes if any; otherwise returns unmodified string'''
+    if len(s) < 2 or s[0] not in "'\"" or s[0] != s[-1]:
+        return s
     return s[1:-1]
 
 class engine(object):
@@ -816,7 +936,7 @@ class engine(object):
     filter uses function to transform value. syntax is
     {key|filter1|filter2|...}.'''
 
-    def __init__(self, loader, filters=None, defaults=None):
+    def __init__(self, loader, filters=None, defaults=None, aliases=()):
         self._loader = loader
         if filters is None:
             filters = {}
@@ -824,15 +944,19 @@ class engine(object):
         if defaults is None:
             defaults = {}
         self._defaults = defaults
-        self._cache = {}
+        self._aliasmap = _aliasrules.buildmap(aliases)
+        self._cache = {}  # key: (func, data)
 
     def _load(self, t):
         '''load, parse, and cache a template'''
         if t not in self._cache:
             # put poison to cut recursion while compiling 't'
-            self._cache[t] = [(_runrecursivesymbol, t)]
+            self._cache[t] = (_runrecursivesymbol, t)
             try:
-                self._cache[t] = compiletemplate(self._loader(t), self)
+                x = parse(self._loader(t))
+                if self._aliasmap:
+                    x = _aliasrules.expand(self._aliasmap, x)
+                self._cache[t] = compileexp(x, self, methods)
             except: # re-raises
                 del self._cache[t]
                 raise
@@ -842,7 +966,8 @@ class engine(object):
         '''Perform expansion. t is name of map element to expand.
         mapping contains added elements for use during expansion. Is a
         generator.'''
-        return _flatten(runtemplate(self, mapping, self._load(t)))
+        func, data = self._load(t)
+        return _flatten(func(self, mapping, data))
 
 engines = {'default': engine}
 
@@ -854,63 +979,75 @@ def stylelist():
     stylelist = []
     for file in dirlist:
         split = file.split(".")
+        if split[-1] in ('orig', 'rej'):
+            continue
         if split[0] == "map-cmdline":
             stylelist.append(split[1])
     return ", ".join(sorted(stylelist))
+
+def _readmapfile(mapfile):
+    """Load template elements from the given map file"""
+    if not os.path.exists(mapfile):
+        raise error.Abort(_("style '%s' not found") % mapfile,
+                          hint=_("available styles: %s") % stylelist())
+
+    base = os.path.dirname(mapfile)
+    conf = config.config(includepaths=templatepaths())
+    conf.read(mapfile)
+
+    cache = {}
+    tmap = {}
+    for key, val in conf[''].items():
+        if not val:
+            raise error.ParseError(_('missing value'), conf.source('', key))
+        if val[0] in "'\"":
+            if val[0] != val[-1]:
+                raise error.ParseError(_('unmatched quotes'),
+                                       conf.source('', key))
+            cache[key] = unquotestring(val)
+        else:
+            val = 'default', val
+            if ':' in val[1]:
+                val = val[1].split(':', 1)
+            tmap[key] = val[0], os.path.join(base, val[1])
+    return cache, tmap
 
 class TemplateNotFound(error.Abort):
     pass
 
 class templater(object):
 
-    def __init__(self, mapfile, filters=None, defaults=None, cache=None,
+    def __init__(self, filters=None, defaults=None, cache=None, aliases=(),
                  minchunk=1024, maxchunk=65536):
         '''set up template engine.
-        mapfile is name of file to read map definitions from.
         filters is dict of functions. each transforms a value into another.
-        defaults is dict of default map definitions.'''
+        defaults is dict of default map definitions.
+        aliases is list of alias (name, replacement) pairs.
+        '''
         if filters is None:
             filters = {}
         if defaults is None:
             defaults = {}
         if cache is None:
             cache = {}
-        self.mapfile = mapfile or 'template'
         self.cache = cache.copy()
         self.map = {}
-        if mapfile:
-            self.base = os.path.dirname(mapfile)
-        else:
-            self.base = ''
         self.filters = templatefilters.filters.copy()
         self.filters.update(filters)
         self.defaults = defaults
+        self._aliases = aliases
         self.minchunk, self.maxchunk = minchunk, maxchunk
         self.ecache = {}
 
-        if not mapfile:
-            return
-        if not os.path.exists(mapfile):
-            raise error.Abort(_("style '%s' not found") % mapfile,
-                             hint=_("available styles: %s") % stylelist())
-
-        conf = config.config(includepaths=templatepaths())
-        conf.read(mapfile)
-
-        for key, val in conf[''].items():
-            if not val:
-                raise SyntaxError(_('%s: missing value') % conf.source('', key))
-            if val[0] in "'\"":
-                try:
-                    self.cache[key] = unquotestring(val)
-                except SyntaxError as inst:
-                    raise SyntaxError('%s: %s' %
-                                      (conf.source('', key), inst.args[0]))
-            else:
-                val = 'default', val
-                if ':' in val[1]:
-                    val = val[1].split(':', 1)
-                self.map[key] = val[0], os.path.join(self.base, val[1])
+    @classmethod
+    def frommapfile(cls, mapfile, filters=None, defaults=None, cache=None,
+                    minchunk=1024, maxchunk=65536):
+        """Create templater from the specified map file"""
+        t = cls(filters, defaults, cache, [], minchunk, maxchunk)
+        cache, tmap = _readmapfile(mapfile)
+        t.cache.update(cache)
+        t.map = tmap
+        return t
 
     def __contains__(self, key):
         return key in self.cache or key in self.map
@@ -931,8 +1068,12 @@ class templater(object):
     def __call__(self, t, **mapping):
         ttype = t in self.map and self.map[t][0] or 'default'
         if ttype not in self.ecache:
-            self.ecache[ttype] = engines[ttype](self.load,
-                                                 self.filters, self.defaults)
+            try:
+                ecls = engines[ttype]
+            except KeyError:
+                raise error.Abort(_('invalid template engine: %s') % ttype)
+            self.ecache[ttype] = ecls(self.load, self.filters, self.defaults,
+                                      self._aliases)
         proc = self.ecache[ttype]
 
         stream = proc.process(t, mapping)
@@ -990,6 +1131,12 @@ def stylemap(styles, paths=None):
                     return style, mapfile
 
     raise RuntimeError("No hgweb templates found in %r" % paths)
+
+def loadfunction(ui, extname, registrarobj):
+    """Load template function from specified registrarobj
+    """
+    for name, func in registrarobj._table.iteritems():
+        funcs[name] = func
 
 # tell hggettext to extract docstrings from these functions:
 i18nfunctions = funcs.values()

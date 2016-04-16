@@ -92,7 +92,8 @@ class Merge3Text(object):
                     mid_marker='=======',
                     end_marker='>>>>>>>',
                     base_marker=None,
-                    localorother=None):
+                    localorother=None,
+                    minimize=False):
         """Return merge in cvs-like form.
         """
         self.conflicts = False
@@ -109,6 +110,8 @@ class Merge3Text(object):
         if name_base and base_marker:
             base_marker = base_marker + ' ' + name_base
         merge_regions = self.merge_regions()
+        if minimize:
+            merge_regions = self.minimize(merge_regions)
         for t in merge_regions:
             what = t[0]
             if what == 'unchanged':
@@ -195,6 +198,9 @@ class Merge3Text(object):
         'a', start, end
              Non-clashing insertion from a[start:end]
 
+        'conflict', zstart, zend, astart, aend, bstart, bend
+            Conflict between a and b, with z as common ancestor
+
         Method is as follows:
 
         The two sequences align only on regions which match the base
@@ -265,6 +271,45 @@ class Merge3Text(object):
                 iz = zend
                 ia = aend
                 ib = bend
+
+    def minimize(self, merge_regions):
+        """Trim conflict regions of lines where A and B sides match.
+
+        Lines where both A and B have made the same changes at the begining
+        or the end of each merge region are eliminated from the conflict
+        region and are instead considered the same.
+        """
+        for region in merge_regions:
+            if region[0] != "conflict":
+                yield region
+                continue
+            issue, z1, z2, a1, a2, b1, b2 = region
+            alen = a2 - a1
+            blen = b2 - b1
+
+            # find matches at the front
+            ii = 0
+            while ii < alen and ii < blen and \
+                  self.a[a1 + ii] == self.b[b1 + ii]:
+                ii += 1
+            startmatches = ii
+
+            # find matches at the end
+            ii = 0
+            while ii < alen and ii < blen and \
+                  self.a[a2 - ii - 1] == self.b[b2 - ii - 1]:
+                ii += 1
+            endmatches = ii
+
+            if startmatches > 0:
+                yield 'same', a1, a1 + startmatches
+
+            yield ('conflict', z1, z2,
+                    a1 + startmatches, a2 - endmatches,
+                    b1 + startmatches, b2 - endmatches)
+
+            if endmatches > 0:
+                yield 'same', a2 - endmatches, a2
 
     def find_sync_regions(self):
         """Return a list of sync regions, where both descendants match the base.
@@ -399,7 +444,10 @@ def simplemerge(ui, local, base, other, **opts):
         out = sys.stdout
 
     m3 = Merge3Text(basetext, localtext, othertext)
-    extrakwargs = {"localorother": opts.get("localorother", None)}
+    extrakwargs = {
+            "localorother": opts.get("localorother", None),
+            'minimize': True,
+        }
     if mode == 'union':
         extrakwargs['start_marker'] = None
         extrakwargs['mid_marker'] = None
@@ -407,6 +455,7 @@ def simplemerge(ui, local, base, other, **opts):
     elif name_base is not None:
         extrakwargs['base_marker'] = '|||||||'
         extrakwargs['name_base'] = name_base
+        extrakwargs['minimize'] = False
     for line in m3.merge_lines(name_a=name_a, name_b=name_b, **extrakwargs):
         out.write(line)
 

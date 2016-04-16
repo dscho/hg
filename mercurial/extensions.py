@@ -71,6 +71,20 @@ def loadpath(path, module_name):
                 exc.filename = path # python does not fill this
             raise
 
+def _importh(name):
+    """import and return the <name> module"""
+    mod = __import__(name)
+    components = name.split('.')
+    for comp in components[1:]:
+        mod = getattr(mod, comp)
+    return mod
+
+def _reportimporterror(ui, err, failed, next):
+    ui.debug('could not import %s (%s): trying %s\n'
+             % (failed, err, next))
+    if ui.debugflag:
+        ui.traceback()
+
 def load(ui, name, path):
     if name.startswith('hgext.') or name.startswith('hgext/'):
         shortname = name[6:]
@@ -87,20 +101,15 @@ def load(ui, name, path):
         # conflicts with other modules
         mod = loadpath(path, 'hgext.%s' % name)
     else:
-        def importh(name):
-            mod = __import__(name)
-            components = name.split('.')
-            for comp in components[1:]:
-                mod = getattr(mod, comp)
-            return mod
         try:
-            mod = importh("hgext.%s" % name)
+            mod = _importh("hgext.%s" % name)
         except ImportError as err:
-            ui.debug('could not import hgext.%s (%s): trying %s\n'
-                     % (name, err, name))
-            if ui.debugflag:
-                ui.traceback()
-            mod = importh(name)
+            _reportimporterror(ui, err, "hgext.%s" % name, name)
+            try:
+                mod = _importh("hgext3rd.%s" % name)
+            except ImportError as err:
+                _reportimporterror(ui, err, "hgext3rd.%s" % name, name)
+                mod = _importh(name)
 
     # Before we do anything with the extension, check against minimum stated
     # compatibility. This gives extension authors a mechanism to have their
@@ -195,6 +204,12 @@ def bind(func, *args):
         return func(*(args + a), **kw)
     return closure
 
+def _updatewrapper(wrap, origfn):
+    '''Copy attributes to wrapper function'''
+    wrap.__module__ = getattr(origfn, '__module__')
+    wrap.__doc__ = getattr(origfn, '__doc__')
+    wrap.__dict__.update(getattr(origfn, '__dict__', {}))
+
 def wrapcommand(table, command, wrapper, synopsis=None, docstring=None):
     '''Wrap the command named `command' in table
 
@@ -233,13 +248,9 @@ def wrapcommand(table, command, wrapper, synopsis=None, docstring=None):
 
     origfn = entry[0]
     wrap = bind(util.checksignature(wrapper), util.checksignature(origfn))
-
-    wrap.__module__ = getattr(origfn, '__module__')
-
-    doc = getattr(origfn, '__doc__')
+    _updatewrapper(wrap, origfn)
     if docstring is not None:
-        doc += docstring
-    wrap.__doc__ = doc
+        wrap.__doc__ += docstring
 
     newentry = list(entry)
     newentry[0] = wrap
@@ -285,7 +296,9 @@ def wrapfunction(container, funcname, wrapper):
 
     origfn = getattr(container, funcname)
     assert callable(origfn)
-    setattr(container, funcname, bind(wrapper, origfn))
+    wrap = bind(wrapper, origfn)
+    _updatewrapper(wrap, origfn)
+    setattr(container, funcname, wrap)
     return origfn
 
 def _disabledpaths(strip_init=False):
@@ -456,6 +469,10 @@ def enabled(shortname=True):
 
     return exts
 
+def notloaded():
+    '''return short names of extensions that failed to load'''
+    return [name for name, mod in _extensions.iteritems() if mod is None]
+
 def moduleversion(module):
     '''return version information from given module as a string'''
     if (util.safehasattr(module, 'getversion')
@@ -468,3 +485,7 @@ def moduleversion(module):
     if isinstance(version, (list, tuple)):
         version = '.'.join(str(o) for o in version)
     return version
+
+def ismoduleinternal(module):
+    exttestedwith = getattr(module, 'testedwith', None)
+    return exttestedwith == "internal"

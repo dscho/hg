@@ -11,16 +11,20 @@ from . import (
     util,
 )
 
-class funcregistrar(object):
+class _funcregistrarbase(object):
     """Base of decorator to register a fuction for specific purpose
 
-    The least derived class can be defined by overriding 'table' and
-    'formatdoc', for example::
+    This decorator stores decorated functions into own dict 'table'.
 
-        symbols = {}
-        class keyword(funcregistrar):
-            table = symbols
-            formatdoc = ":%s: %s"
+    The least derived class can be defined by overriding 'formatdoc',
+    for example::
+
+        class keyword(_funcregistrarbase):
+            _docformat = ":%s: %s"
+
+    This should be used as below:
+
+        keyword = registrar.keyword()
 
         @keyword('bar')
         def barfunc(*args, **kwargs):
@@ -30,99 +34,211 @@ class funcregistrar(object):
 
     In this case:
 
-    - 'barfunc' is registered as 'bar' in 'symbols'
-    - online help uses ":bar: Explanation of bar keyword"
+    - 'barfunc' is stored as 'bar' in '_table' of an instance 'keyword' above
+    - 'barfunc.__doc__' becomes ":bar: Explanation of bar keyword"
     """
+    def __init__(self, table=None):
+        if table is None:
+            self._table = {}
+        else:
+            self._table = table
 
-    def __init__(self, decl):
-        """'decl' is a name or more descriptive string of a function
+    def __call__(self, decl, *args, **kwargs):
+        return lambda func: self._doregister(func, decl, *args, **kwargs)
 
-        Specification of 'decl' depends on registration purpose.
-        """
-        self.decl = decl
-
-    table = None
-
-    def __call__(self, func):
-        """Execute actual registration for specified function
-        """
-        name = self.getname()
+    def _doregister(self, func, decl, *args, **kwargs):
+        name = self._getname(decl)
 
         if func.__doc__ and not util.safehasattr(func, '_origdoc'):
             doc = func.__doc__.strip()
             func._origdoc = doc
-            if callable(self.formatdoc):
-                func.__doc__ = self.formatdoc(doc)
-            else:
-                # convenient shortcut for simple format
-                func.__doc__ = self.formatdoc % (self.decl, doc)
+            func.__doc__ = self._formatdoc(decl, doc)
 
-        self.table[name] = func
-        self.extraaction(name, func)
+        self._table[name] = func
+        self._extrasetup(name, func, *args, **kwargs)
 
         return func
 
-    def getname(self):
-        """Return the name of the registered function from self.decl
+    def _parsefuncdecl(self, decl):
+        """Parse function declaration and return the name of function in it
+        """
+        i = decl.find('(')
+        if i >= 0:
+            return decl[:i]
+        else:
+            return decl
+
+    def _getname(self, decl):
+        """Return the name of the registered function from decl
 
         Derived class should override this, if it allows more
         descriptive 'decl' string than just a name.
         """
-        return self.decl
+        return decl
 
-    def parsefuncdecl(self):
-        """Parse function declaration and return the name of function in it
-        """
-        i = self.decl.find('(')
-        if i > 0:
-            return self.decl[:i]
-        else:
-            return self.decl
+    _docformat = None
 
-    def formatdoc(self, doc):
+    def _formatdoc(self, decl, doc):
         """Return formatted document of the registered function for help
 
         'doc' is '__doc__.strip()' of the registered function.
-
-        If this is overridden by non-callable object in derived class,
-        such value is treated as "format string" and used to format
-        document by 'self.formatdoc % (self.decl, doc)' for convenience.
         """
-        raise NotImplementedError()
+        return self._docformat % (decl, doc)
 
-    def extraaction(self, name, func):
-        """Execute exra action for registered function, if needed
+    def _extrasetup(self, name, func):
+        """Execute exra setup for registered function, if needed
         """
         pass
 
-class delayregistrar(object):
-    """Decorator to delay actual registration until uisetup or so
+class revsetpredicate(_funcregistrarbase):
+    """Decorator to register revset predicate
 
-    For example, the decorator class to delay registration by
-    'keyword' funcregistrar can be defined as below::
+    Usage::
 
-        class extkeyword(delayregistrar):
-            registrar = keyword
+        revsetpredicate = registrar.revsetpredicate()
+
+        @revsetpredicate('mypredicate(arg1, arg2[, arg3])')
+        def mypredicatefunc(repo, subset, x):
+            '''Explanation of this revset predicate ....
+            '''
+            pass
+
+    The first string argument is used also in online help.
+
+    Optional argument 'safe' indicates whether a predicate is safe for
+    DoS attack (False by default).
+
+    'revsetpredicate' instance in example above can be used to
+    decorate multiple functions.
+
+    Decorated functions are registered automatically at loading
+    extension, if an instance named as 'revsetpredicate' is used for
+    decorating in extension.
+
+    Otherwise, explicit 'revset.loadpredicate()' is needed.
     """
-    def __init__(self):
-        self._list = []
+    _getname = _funcregistrarbase._parsefuncdecl
+    _docformat = "``%s``\n    %s"
 
-    registrar = None
+    def _extrasetup(self, name, func, safe=False):
+        func._safe = safe
 
-    def __call__(self, *args, **kwargs):
-        """Return the decorator to delay actual registration until setup
-        """
-        assert self.registrar is not None
-        def decorator(func):
-            # invocation of self.registrar() here can detect argument
-            # mismatching immediately
-            self._list.append((func, self.registrar(*args, **kwargs)))
-            return func
-        return decorator
+class filesetpredicate(_funcregistrarbase):
+    """Decorator to register fileset predicate
 
-    def setup(self):
-        """Execute actual registration
-        """
-        while self._list:
-            func, decorator = self._list.pop(0)
-            decorator(func)
+    Usage::
+
+        filesetpredicate = registrar.filesetpredicate()
+
+        @filesetpredicate('mypredicate()')
+        def mypredicatefunc(mctx, x):
+            '''Explanation of this fileset predicate ....
+            '''
+            pass
+
+    The first string argument is used also in online help.
+
+    Optional argument 'callstatus' indicates whether a predicate
+     implies 'matchctx.status()' at runtime or not (False, by
+     default).
+
+    Optional argument 'callexisting' indicates whether a predicate
+    implies 'matchctx.existing()' at runtime or not (False, by
+    default).
+
+    'filesetpredicate' instance in example above can be used to
+    decorate multiple functions.
+
+    Decorated functions are registered automatically at loading
+    extension, if an instance named as 'filesetpredicate' is used for
+    decorating in extension.
+
+    Otherwise, explicit 'fileset.loadpredicate()' is needed.
+    """
+    _getname = _funcregistrarbase._parsefuncdecl
+    _docformat = "``%s``\n    %s"
+
+    def _extrasetup(self, name, func, callstatus=False, callexisting=False):
+        func._callstatus = callstatus
+        func._callexisting = callexisting
+
+class _templateregistrarbase(_funcregistrarbase):
+    """Base of decorator to register functions as template specific one
+    """
+    _docformat = ":%s: %s"
+
+class templatekeyword(_templateregistrarbase):
+    """Decorator to register template keyword
+
+    Usage::
+
+        templaetkeyword = registrar.templatekeyword()
+
+        @templatekeyword('mykeyword')
+        def mykeywordfunc(repo, ctx, templ, cache, revcache, **args):
+            '''Explanation of this template keyword ....
+            '''
+            pass
+
+    The first string argument is used also in online help.
+
+    'templatekeyword' instance in example above can be used to
+    decorate multiple functions.
+
+    Decorated functions are registered automatically at loading
+    extension, if an instance named as 'templatekeyword' is used for
+    decorating in extension.
+
+    Otherwise, explicit 'templatekw.loadkeyword()' is needed.
+    """
+
+class templatefilter(_templateregistrarbase):
+    """Decorator to register template filer
+
+    Usage::
+
+        templatefilter = registrar.templatefilter()
+
+        @templatefilter('myfilter')
+        def myfilterfunc(text):
+            '''Explanation of this template filter ....
+            '''
+            pass
+
+    The first string argument is used also in online help.
+
+    'templatefilter' instance in example above can be used to
+    decorate multiple functions.
+
+    Decorated functions are registered automatically at loading
+    extension, if an instance named as 'templatefilter' is used for
+    decorating in extension.
+
+    Otherwise, explicit 'templatefilters.loadkeyword()' is needed.
+    """
+
+class templatefunc(_templateregistrarbase):
+    """Decorator to register template function
+
+    Usage::
+
+        templatefunc = registrar.templatefunc()
+
+        @templatefunc('myfunc(arg1, arg2[, arg3])')
+        def myfuncfunc(context, mapping, args):
+            '''Explanation of this template function ....
+            '''
+            pass
+
+    The first string argument is used also in online help.
+
+    'templatefunc' instance in example above can be used to
+    decorate multiple functions.
+
+    Decorated functions are registered automatically at loading
+    extension, if an instance named as 'templatefunc' is used for
+    decorating in extension.
+
+    Otherwise, explicit 'templater.loadfunction()' is needed.
+    """
+    _getname = _funcregistrarbase._parsefuncdecl

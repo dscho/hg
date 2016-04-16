@@ -125,7 +125,7 @@ Run additional tests for the import checker
   testpackage/relativestdlib.py:2: relative import of stdlib module
   testpackage/requirerelative.py:2: import should be relative: testpackage.unsorted
   testpackage/sortedentries.py:2: imports from testpackage not lexically sorted: bar < foo
-  testpackage/stdafterlocal.py:3: stdlib import follows local import: os
+  testpackage/stdafterlocal.py:3: stdlib import "os" follows local import: testpackage
   testpackage/subpackage/levelpriority.py:3: higher-level import should come first: testpackage
   testpackage/subpackage/localimport.py:7: multiple "from .. import" statements
   testpackage/subpackage/localimport.py:8: import should be relative: testpackage.subpackage.levelpriority
@@ -141,6 +141,26 @@ here that we should still endeavor to fix, and some cycles will be
 hidden by deduplication algorithm in the cycle detector, so fixing
 these may expose other cycles.
 
-  $ hg locate 'mercurial/**.py' 'hgext/**.py' | sed 's-\\-/-g' | python "$import_checker" -
+Known-bad files are excluded by -X as some of them would produce unstable
+outputs, which should be fixed later.
+
+  $ hg locate 'mercurial/**.py' 'hgext/**.py' 'tests/**.py' \
+  > 'tests/**.t' \
+  > -X tests/test-hgweb-auth.py \
+  > -X tests/hypothesishelpers.py \
+  > -X tests/test-ctxmanager.py \
+  > -X tests/test-lock.py \
+  > -X tests/test-verify-repo-operations.py \
+  > -X tests/test-hook.t \
+  > -X tests/test-import.t \
+  > -X tests/test-check-module-imports.t \
+  > -X tests/test-commit-interactive.t \
+  > -X tests/test-contrib-check-code.t \
+  > -X tests/test-extension.t \
+  > -X tests/test-hghave.t \
+  > -X tests/test-hgweb-no-path-info.t \
+  > -X tests/test-hgweb-no-request-uri.t \
+  > -X tests/test-hgweb-non-interactive.t \
+  > | sed 's-\\-/-g' | python "$import_checker" -
   Import cycle: hgext.largefiles.basestore -> hgext.largefiles.localstore -> hgext.largefiles.basestore
   [1]

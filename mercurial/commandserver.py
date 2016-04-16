@@ -190,16 +190,31 @@ class server(object):
 
         return data
 
+    def _readstr(self):
+        """read a string from the channel
+
+        format:
+        data length (uint32), data
+        """
+        length = struct.unpack('>I', self._read(4))[0]
+        if not length:
+            return ''
+        return self._read(length)
+
+    def _readlist(self):
+        """read a list of NULL separated strings from the channel"""
+        s = self._readstr()
+        if s:
+            return s.split('\0')
+        else:
+            return []
+
     def runcommand(self):
         """ reads a list of \0 terminated arguments, executes
         and writes the return code to the result channel """
         from . import dispatch  # avoid cycle
 
-        length = struct.unpack('>I', self._read(4))[0]
-        if not length:
-            args = []
-        else:
-            args = self._read(length).split('\0')
+        args = self._readlist()
 
         # copy the uis so changes (e.g. --config or --verbose) don't
         # persist between requests
@@ -262,7 +277,7 @@ class server(object):
         hellomsg += '\n'
         hellomsg += 'encoding: ' + encoding.encoding
         hellomsg += '\n'
-        hellomsg += 'pid: %d' % os.getpid()
+        hellomsg += 'pid: %d' % util.getpid()
 
         # write the hello msg in -one- chunk
         self.cout.write(hellomsg)
@@ -323,8 +338,9 @@ class _requesthandler(SocketServer.StreamRequestHandler):
     def handle(self):
         ui = self.server.ui
         repo = self.server.repo
-        sv = server(ui, repo, self.rfile, self.wfile)
+        sv = None
         try:
+            sv = server(ui, repo, self.rfile, self.wfile)
             try:
                 sv.serve()
             # handle exceptions that may be raised by command server. most of
@@ -339,7 +355,11 @@ class _requesthandler(SocketServer.StreamRequestHandler):
         except: # re-raises
             # also write traceback to error channel. otherwise client cannot
             # see it because it is written to server's stderr by default.
-            traceback.print_exc(file=sv.cerr)
+            if sv:
+                cerr = sv.cerr
+            else:
+                cerr = channeledoutput(self.wfile, 'e')
+            traceback.print_exc(file=cerr)
             raise
 
 class unixservice(object):

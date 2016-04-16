@@ -46,11 +46,14 @@
   
   $ cd ..
 
+Version with only two heads (to allow default destination to work)
+
+  $ hg clone -q -u . a a2heads -r 3 -r 8
 
 These fail:
 
-  $ hg clone -q -u . a a1
-  $ cd a1
+  $ hg clone -q -u . a a0
+  $ cd a0
 
   $ hg rebase -s 8 -d 7
   nothing to rebase
@@ -79,33 +82,38 @@ These fail:
   abort: cannot specify both a revision and a base
   [255]
 
-  $ hg rebase --rev '1 & !1'
+  $ hg rebase --base 6
+  abort: branch 'default' has 3 heads - please rebase to an explicit rev
+  (run 'hg heads .' to see heads)
+  [255]
+
+  $ hg rebase --rev '1 & !1' --dest 8
   empty "rev" revision set - nothing to rebase
   [1]
 
-  $ hg rebase --source '1 & !1'
+  $ hg rebase --source '1 & !1' --dest 8
   empty "source" revision set - nothing to rebase
   [1]
 
-  $ hg rebase --base '1 & !1'
+  $ hg rebase --base '1 & !1' --dest 8
   empty "base" revision set - can't compute rebase set
   [1]
 
-  $ hg rebase
+  $ hg rebase --dest 8
   nothing to rebase - working directory parent is also destination
   [1]
 
-  $ hg rebase -b.
+  $ hg rebase -b . --dest 8
   nothing to rebase - e7ec4e813ba6 is both "base" and destination
   [1]
 
   $ hg up -q 7
 
-  $ hg rebase --traceback
+  $ hg rebase --dest 8 --traceback
   nothing to rebase - working directory parent is already an ancestor of destination e7ec4e813ba6
   [1]
 
-  $ hg rebase -b.
+  $ hg rebase --dest 8 -b.
   nothing to rebase - "base" 02de42196ebe is already an ancestor of destination e7ec4e813ba6
   [1]
 
@@ -117,6 +125,9 @@ These work:
 
 Rebase with no arguments (from 3 onto 8):
 
+  $ cd ..
+  $ hg clone -q -u . a2heads a1
+  $ cd a1
   $ hg up -q -C 3
 
   $ hg rebase
@@ -126,22 +137,18 @@ Rebase with no arguments (from 3 onto 8):
   saved backup bundle to $TESTTMP/a1/.hg/strip-backup/42ccdea3bb16-3cb021d3-backup.hg (glob)
 
   $ hg tglog
-  @  8: 'D'
+  @  6: 'D'
   |
-  o  7: 'C'
+  o  5: 'C'
   |
-  o  6: 'B'
+  o  4: 'B'
   |
-  o  5: 'I'
+  o  3: 'I'
   |
-  o  4: 'H'
+  o  2: 'H'
   |
-  | o  3: 'G'
-  |/|
-  o |  2: 'F'
-  | |
-  | o  1: 'E'
-  |/
+  o  1: 'F'
+  |
   o  0: 'A'
   
 Try to rollback after a rebase (fail):
@@ -154,7 +161,7 @@ Try to rollback after a rebase (fail):
 
 Rebase with base == '.' => same as no arguments (from 3 onto 8):
 
-  $ hg clone -q -u 3 a a2
+  $ hg clone -q -u 3 a2heads a2
   $ cd a2
 
   $ hg rebase --base .
@@ -164,22 +171,18 @@ Rebase with base == '.' => same as no arguments (from 3 onto 8):
   saved backup bundle to $TESTTMP/a2/.hg/strip-backup/42ccdea3bb16-3cb021d3-backup.hg (glob)
 
   $ hg tglog
-  @  8: 'D'
+  @  6: 'D'
   |
-  o  7: 'C'
+  o  5: 'C'
   |
-  o  6: 'B'
+  o  4: 'B'
   |
-  o  5: 'I'
+  o  3: 'I'
   |
-  o  4: 'H'
+  o  2: 'H'
   |
-  | o  3: 'G'
-  |/|
-  o |  2: 'F'
-  | |
-  | o  1: 'E'
-  |/
+  o  1: 'F'
+  |
   o  0: 'A'
   
   $ cd ..
@@ -220,7 +223,7 @@ Rebase with dest == branch(.) => same as no arguments (from 3 onto 8):
 
 Specify only source (from 2 onto 8):
 
-  $ hg clone -q -u . a a4
+  $ hg clone -q -u . a2heads a4
   $ cd a4
 
   $ hg rebase --source 'desc("C")'
@@ -229,20 +232,16 @@ Specify only source (from 2 onto 8):
   saved backup bundle to $TESTTMP/a4/.hg/strip-backup/5fddd98957c8-f9244fa1-backup.hg (glob)
 
   $ hg tglog
-  o  8: 'D'
+  o  6: 'D'
   |
-  o  7: 'C'
+  o  5: 'C'
   |
-  @  6: 'I'
+  @  4: 'I'
   |
-  o  5: 'H'
+  o  3: 'H'
   |
-  | o  4: 'G'
-  |/|
-  o |  3: 'F'
-  | |
-  | o  2: 'E'
-  |/
+  o  2: 'F'
+  |
   | o  1: 'B'
   |/
   o  0: 'A'
@@ -285,7 +284,7 @@ Specify only dest (from 3 onto 6):
 
 Specify only base (from 1 onto 8):
 
-  $ hg clone -q -u . a a6
+  $ hg clone -q -u . a2heads a6
   $ cd a6
 
   $ hg rebase --base 'desc("D")'
@@ -295,22 +294,18 @@ Specify only base (from 1 onto 8):
   saved backup bundle to $TESTTMP/a6/.hg/strip-backup/42ccdea3bb16-3cb021d3-backup.hg (glob)
 
   $ hg tglog
-  o  8: 'D'
+  o  6: 'D'
   |
-  o  7: 'C'
+  o  5: 'C'
   |
-  o  6: 'B'
+  o  4: 'B'
   |
-  @  5: 'I'
+  @  3: 'I'
   |
-  o  4: 'H'
+  o  2: 'H'
   |
-  | o  3: 'G'
-  |/|
-  o |  2: 'F'
-  | |
-  | o  1: 'E'
-  |/
+  o  1: 'F'
+  |
   o  0: 'A'
   
   $ cd ..
@@ -383,7 +378,7 @@ Specify base and dest (from 1 onto 7):
 
 Specify only revs (from 2 onto 8)
 
-  $ hg clone -q -u . a a9
+  $ hg clone -q -u . a2heads a9
   $ cd a9
 
   $ hg rebase --rev 'desc("C")::'
@@ -392,20 +387,16 @@ Specify only revs (from 2 onto 8)
   saved backup bundle to $TESTTMP/a9/.hg/strip-backup/5fddd98957c8-f9244fa1-backup.hg (glob)
 
   $ hg tglog
-  o  8: 'D'
+  o  6: 'D'
   |
-  o  7: 'C'
+  o  5: 'C'
   |
-  @  6: 'I'
+  @  4: 'I'
   |
-  o  5: 'H'
+  o  3: 'H'
   |
-  | o  4: 'G'
-  |/|
-  o |  3: 'F'
-  | |
-  | o  2: 'E'
-  |/
+  o  2: 'F'
+  |
   | o  1: 'B'
   |/
   o  0: 'A'
@@ -416,7 +407,7 @@ Rebasing both a single revision and a merge in one command
 
   $ hg clone -q -u . a aX
   $ cd aX
-  $ hg rebase -r 3 -r 6
+  $ hg rebase -r 3 -r 6 --dest 8
   rebasing 3:32af7686d403 "D"
   rebasing 6:eea13746799a "G"
   saved backup bundle to $TESTTMP/aX/.hg/strip-backup/eea13746799a-ad273fd6-backup.hg (glob)
@@ -495,6 +486,10 @@ Test --tool parameter:
   $ hg resolve -m c2
   (no more unresolved files)
   continue: hg rebase --continue
+  $ hg graft --continue
+  abort: no graft in progress
+  (continue: hg rebase --continue)
+  [255]
   $ hg rebase -c --tool internal:fail
   rebasing 2:e4e3f3546619 "c2b" (tip)
   note: rebase of 2:e4e3f3546619 created no changes to commit

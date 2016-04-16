@@ -1,6 +1,10 @@
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
-from mercurial import wireproto
+from mercurial import (
+    util,
+    wireproto,
+)
+stringio = util.stringio
 
 class proto(object):
     def __init__(self, args):
@@ -20,6 +24,9 @@ class clientpeer(wireproto.wirepeer):
 
     def _call(self, cmd, **args):
         return wireproto.dispatch(self.serverrepo, proto(args), cmd)
+
+    def _callstream(self, cmd, **args):
+        return stringio(self._call(cmd, **args))
 
     @wireproto.batchable
     def greet(self, name):
@@ -47,8 +54,8 @@ wireproto.commands['greet'] = (greet, 'name',)
 srv = serverrepo()
 clt = clientpeer(srv)
 
-print clt.greet("Foobar")
+print(clt.greet("Foobar"))
 b = clt.batch()
 fs = [b.greet(s) for s in ["Fo, =;:<o", "Bar"]]
 b.submit()
-print [f.value for f in fs]
+print([f.value for f in fs])

@@ -6,6 +6,9 @@ directory (and ".hg/largefiles/dirstate")
   > merge = internal:fail
   > [extensions]
   > largefiles =
+  > [extdiff]
+  > # for portability:
+  > pdiff = sh "$RUNTESTDIR/pdiff"
   > EOF
 
   $ hg init repo
@@ -20,17 +23,17 @@ directory (and ".hg/largefiles/dirstate")
   $ echo 'large1 in #1' > large1
   $ echo 'normal1 in #1' > normal1
   $ hg commit -m '#1'
-  $ hg extdiff -r '.^' --config extensions.extdiff=
-  diff -Npru repo.0d9d9b8dc9a3/.hglf/large1 repo/.hglf/large1
+  $ hg pdiff -r '.^' --config extensions.extdiff=
+  diff -Nru repo.0d9d9b8dc9a3/.hglf/large1 repo/.hglf/large1
   --- repo.0d9d9b8dc9a3/.hglf/large1	* (glob)
   +++ repo/.hglf/large1	* (glob)
-  @@ -1 +1 @@
+  @@ -1* +1* @@ (glob)
   -4669e532d5b2c093a78eca010077e708a071bb64
   +58e24f733a964da346e2407a2bee99d9001184f5
-  diff -Npru repo.0d9d9b8dc9a3/normal1 repo/normal1
+  diff -Nru repo.0d9d9b8dc9a3/normal1 repo/normal1
   --- repo.0d9d9b8dc9a3/normal1	* (glob)
   +++ repo/normal1	* (glob)
-  @@ -1 +1 @@
+  @@ -1* +1* @@ (glob)
   -normal1
   +normal1 in #1
   [1]
@@ -68,6 +71,7 @@ we don't have to hash them again next time we update.
 
   $ hg up
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
   $ hg debugdirstate --large --nodate
   n 644          7 set                 large1
   n 644         13 set                 large2
@@ -82,6 +86,7 @@ prevents unnecessary hashing of content - also after linear/noop update
   n 644         13 set                 large2
   $ hg up
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
   $ hg debugdirstate --large --nodate
   n 644          7 set                 large1
   n 644         13 set                 large2
@@ -463,6 +468,7 @@ Test that the internal linear merging works correctly
   keep (l)ocal ba94c2efe5b7c5e0af8d189295ce00553b0612b7 or
   take (o)ther e5bb990443d6a92aaf7223813720f7566c9dd05b? l
   2 files updated, 1 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
   $ hg status -A large1
   M large1
@@ -496,6 +502,7 @@ Test that the internal linear merging works correctly
   keep (l)ocal ba94c2efe5b7c5e0af8d189295ce00553b0612b7 or
   take (o)ther e5bb990443d6a92aaf7223813720f7566c9dd05b? l
   2 files updated, 1 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
   $ hg status -A large1
   M large1

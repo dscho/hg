@@ -4,15 +4,31 @@
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
+from __future__ import absolute_import
 
-import os, re, socket, errno
-from cStringIO import StringIO
-from mercurial import encoding, util, error
+import errno
+import os
+import re
+import socket
+
+from mercurial import (
+    encoding,
+    error,
+    util,
+)
 from mercurial.i18n import _
 
-from common import NoRepo, commit, converter_source, checktool
-from common import makedatetimestamp
-import cvsps
+from . import (
+    common,
+    cvsps,
+)
+
+stringio = util.stringio
+checktool = common.checktool
+commit = common.commit
+converter_source = common.converter_source
+makedatetimestamp = common.makedatetimestamp
+NoRepo = common.NoRepo
 
 class convert_cvs(converter_source):
     def __init__(self, ui, path, revs=None):
@@ -211,7 +227,7 @@ class convert_cvs(converter_source):
             # file-objects returned by socket.makefile() do not handle
             # large read() requests very well.
             chunksize = 65536
-            output = StringIO()
+            output = stringio()
             while count > 0:
                 data = fp.read(min(count, chunksize))
                 if not data:

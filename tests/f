@@ -64,7 +64,7 @@ def visit(opts, filenames, outfile):
             if opts.size and not isdir:
                 facts.append('size=%s' % stat.st_size)
             if opts.mode and not islink:
-                facts.append('mode=%o' % (stat.st_mode & 0777))
+                facts.append('mode=%o' % (stat.st_mode & 0o777))
             if opts.links:
                 facts.append('links=%s' % stat.st_nlink)
             if opts.newer:
@@ -106,7 +106,7 @@ def visit(opts, filenames, outfile):
                         chunk = chunk[opts.bytes:]
             if opts.hexdump:
                 for i in range(0, len(chunk), 16):
-                    s = chunk[i:i+16]
+                    s = chunk[i:i + 16]
                     outfile.write('%04x: %-47s |%s|\n' %
                                   (i, ' '.join('%02x' % ord(c) for c in s),
                                    re.sub('[^ -~]', '.', s)))

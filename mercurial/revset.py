@@ -300,14 +300,6 @@ def tokenize(program, lookup=None, syminitletters=None, symletters=None):
         pos += 1
     yield ('end', None, pos)
 
-def parseerrordetail(inst):
-    """Compose error message from specified ParseError object
-    """
-    if len(inst.args) > 1:
-        return _('at %s: %s') % (inst.args[1], inst.args[0])
-    else:
-        return inst.args[0]
-
 # helpers
 
 def getstring(x, err):
@@ -331,40 +323,6 @@ def getargs(x, min, max, err):
 def getargsdict(x, funcname, keys):
     return parser.buildargsdict(getlist(x), funcname, keys.split(),
                                 keyvaluenode='keyvalue', keynode='symbol')
-
-def isvalidsymbol(tree):
-    """Examine whether specified ``tree`` is valid ``symbol`` or not
-    """
-    return tree[0] == 'symbol' and len(tree) > 1
-
-def getsymbol(tree):
-    """Get symbol name from valid ``symbol`` in ``tree``
-
-    This assumes that ``tree`` is already examined by ``isvalidsymbol``.
-    """
-    return tree[1]
-
-def isvalidfunc(tree):
-    """Examine whether specified ``tree`` is valid ``func`` or not
-    """
-    return tree[0] == 'func' and len(tree) > 1 and isvalidsymbol(tree[1])
-
-def getfuncname(tree):
-    """Get function name from valid ``func`` in ``tree``
-
-    This assumes that ``tree`` is already examined by ``isvalidfunc``.
-    """
-    return getsymbol(tree[1])
-
-def getfuncargs(tree):
-    """Get list of function arguments from valid ``func`` in ``tree``
-
-    This assumes that ``tree`` is already examined by ``isvalidfunc``.
-    """
-    if len(tree) > 2:
-        return getlist(tree[2])
-    else:
-        return []
 
 def getset(repo, subset, x):
     if not x:
@@ -436,6 +394,9 @@ def dagrange(repo, subset, x, y):
 def andset(repo, subset, x, y):
     return getset(repo, getset(repo, subset, x), y)
 
+def differenceset(repo, subset, x, y):
+    return getset(repo, subset, x) - getset(repo, subset, y)
+
 def orset(repo, subset, *xs):
     assert xs
     if len(xs) == 1:
@@ -479,58 +440,7 @@ symbols = {}
 # functions that just return a lot of changesets (like all) don't count here
 safesymbols = set()
 
-class predicate(registrar.funcregistrar):
-    """Decorator to register revset predicate
-
-    Usage::
-
-        @predicate('mypredicate(arg1, arg2[, arg3])')
-        def mypredicatefunc(repo, subset, x):
-            '''Explanation of this revset predicate ....
-            '''
-            pass
-
-    The first string argument of the constructor is used also in
-    online help.
-
-    Use 'extpredicate' instead of this to register revset predicate in
-    extensions.
-    """
-    table = symbols
-    formatdoc = "``%s``\n    %s"
-    getname = registrar.funcregistrar.parsefuncdecl
-
-    def __init__(self, decl, safe=False):
-        """'safe' indicates whether a predicate is safe for DoS attack
-        """
-        super(predicate, self).__init__(decl)
-        self.safe = safe
-
-    def extraaction(self, name, func):
-        if self.safe:
-            safesymbols.add(name)
-
-class extpredicate(registrar.delayregistrar):
-    """Decorator to register revset predicate in extensions
-
-    Usage::
-
-        revsetpredicate = revset.extpredicate()
-
-        @revsetpredicate('mypredicate(arg1, arg2[, arg3])')
-        def mypredicatefunc(repo, subset, x):
-            '''Explanation of this revset predicate ....
-            '''
-            pass
-
-        def uisetup(ui):
-            revsetpredicate.setup()
-
-    'revsetpredicate' instance above can be used to decorate multiple
-    functions, and 'setup()' on it registers all such functions at
-    once.
-    """
-    registrar = predicate
+predicate = registrar.revsetpredicate()
 
 @predicate('_destupdate')
 def _destupdate(repo, subset, x):
@@ -541,8 +451,10 @@ def _destupdate(repo, subset, x):
 @predicate('_destmerge')
 def _destmerge(repo, subset, x):
     # experimental revset for merge destination
-    getargs(x, 0, 0, _("_mergedefaultdest takes no arguments"))
-    return subset & baseset([destutil.destmerge(repo)])
+    sourceset = None
+    if x is not None:
+        sourceset = getset(repo, fullreposet(repo), x)
+    return subset & baseset([destutil.destmerge(repo, sourceset=sourceset)])
 
 @predicate('adds(pattern)', safe=True)
 def adds(repo, subset, x):
@@ -624,7 +536,8 @@ def author(repo, subset, x):
     # i18n: "author" is a keyword
     n = encoding.lower(getstring(x, _("author requires a string")))
     kind, pattern, matcher = _substringmatcher(n)
-    return subset.filter(lambda x: matcher(encoding.lower(repo[x].user())))
+    return subset.filter(lambda x: matcher(encoding.lower(repo[x].user())),
+                         condrepr=('<user %r>', n))
 
 @predicate('bisect(string)', safe=True)
 def bisect(repo, subset, x):
@@ -710,19 +623,22 @@ def branch(repo, subset, x):
             # note: falls through to the revspec case if no branch with
             # this name exists and pattern kind is not specified explicitly
             if pattern in repo.branchmap():
-                return subset.filter(lambda r: matcher(getbi(r)[0]))
+                return subset.filter(lambda r: matcher(getbi(r)[0]),
+                                     condrepr=('<branch %r>', b))
             if b.startswith('literal:'):
                 raise error.RepoLookupError(_("branch '%s' does not exist")
                                             % pattern)
         else:
-            return subset.filter(lambda r: matcher(getbi(r)[0]))
+            return subset.filter(lambda r: matcher(getbi(r)[0]),
+                                 condrepr=('<branch %r>', b))
 
     s = getset(repo, fullreposet(repo), x)
     b = set()
     for r in s:
         b.add(getbi(r)[0])
     c = s.__contains__
-    return subset.filter(lambda r: c(r) or getbi(r)[0] in b)
+    return subset.filter(lambda r: c(r) or getbi(r)[0] in b,
+                         condrepr=lambda: '<branch %r>' % sorted(b))
 
 @predicate('bumped()', safe=True)
 def bumped(repo, subset, x):
@@ -777,7 +693,7 @@ def checkstatus(repo, subset, pat, field):
                 if m(f):
                     return True
 
-    return subset.filter(matches)
+    return subset.filter(matches, condrepr=('<status[%r] %r>', field, pat))
 
 def _children(repo, narrow, parentset):
     if not parentset:
@@ -809,7 +725,8 @@ def closed(repo, subset, x):
     """
     # i18n: "closed" is a keyword
     getargs(x, 0, 0, _("closed takes no arguments"))
-    return subset.filter(lambda r: repo[r].closesbranch())
+    return subset.filter(lambda r: repo[r].closesbranch(),
+                         condrepr='<branch closed>')
 
 @predicate('contains(pattern)')
 def contains(repo, subset, x):
@@ -836,7 +753,7 @@ def contains(repo, subset, x):
                     return True
         return False
 
-    return subset.filter(matches)
+    return subset.filter(matches, condrepr=('<contains %r>', pat))
 
 @predicate('converted([id])', safe=True)
 def converted(repo, subset, x):
@@ -858,7 +775,8 @@ def converted(repo, subset, x):
         source = repo[r].extra().get('convert_revision', None)
         return source is not None and (rev is None or source.startswith(rev))
 
-    return subset.filter(lambda r: _matchvalue(r))
+    return subset.filter(lambda r: _matchvalue(r),
+                         condrepr=('<converted %r>', rev))
 
 @predicate('date(interval)', safe=True)
 def date(repo, subset, x):
@@ -867,7 +785,8 @@ def date(repo, subset, x):
     # i18n: "date" is a keyword
     ds = getstring(x, _("date requires a string"))
     dm = util.matchdate(ds)
-    return subset.filter(lambda x: dm(repo[x].date()[0]))
+    return subset.filter(lambda x: dm(repo[x].date()[0]),
+                         condrepr=('<date %r>', ds))
 
 @predicate('desc(string)', safe=True)
 def desc(repo, subset, x):
@@ -880,7 +799,7 @@ def desc(repo, subset, x):
         c = repo[x]
         return ds in encoding.lower(c.description())
 
-    return subset.filter(matches)
+    return subset.filter(matches, condrepr=('<desc %r>', ds))
 
 def _descendants(repo, subset, x, followfirst=False):
     roots = getset(repo, fullreposet(repo), x)
@@ -955,7 +874,8 @@ def destination(repo, subset, x):
             r = src
             src = _getrevsource(repo, r)
 
-    return subset.filter(dests.__contains__)
+    return subset.filter(dests.__contains__,
+                         condrepr=lambda: '<destination %r>' % sorted(dests))
 
 @predicate('divergent()', safe=True)
 def divergent(repo, subset, x):
@@ -1004,7 +924,8 @@ def extra(repo, subset, x):
         extra = repo[r].extra()
         return label in extra and (value is None or matcher(extra[label]))
 
-    return subset.filter(lambda r: _matchvalue(r))
+    return subset.filter(lambda r: _matchvalue(r),
+                         condrepr=('<extra[%r] %r>', label, value))
 
 @predicate('filelog(pattern)', safe=True)
 def filelog(repo, subset, x):
@@ -1086,13 +1007,14 @@ def _follow(repo, subset, x, name, followfirst=False):
         matcher = matchmod.match(repo.root, repo.getcwd(), [x],
                                  ctx=repo[None], default='path')
 
+        files = c.manifest().walk(matcher)
+
         s = set()
-        for fname in c:
-            if matcher(fname):
-                fctx = c[fname]
-                s = s.union(set(c.rev() for c in fctx.ancestors(followfirst)))
-                # include the revision responsible for the most recent version
-                s.add(fctx.introrev())
+        for fname in files:
+            fctx = c[fname]
+            s = s.union(set(c.rev() for c in fctx.ancestors(followfirst)))
+            # include the revision responsible for the most recent version
+            s.add(fctx.introrev())
     else:
         s = _revancestors(repo, baseset([c.rev()]), followfirst)
 
@@ -1141,7 +1063,7 @@ def grep(repo, subset, x):
                 return True
         return False
 
-    return subset.filter(matches)
+    return subset.filter(matches, condrepr=('<grep %r>', gr.pattern))
 
 @predicate('_matchfiles', safe=True)
 def _matchfiles(repo, subset, x):
@@ -1157,13 +1079,11 @@ def _matchfiles(repo, subset, x):
     # initialized. Use 'd:' to set the default matching mode, default
     # to 'glob'. At most one 'r:' and 'd:' argument can be passed.
 
-    # i18n: "_matchfiles" is a keyword
-    l = getargs(x, 1, -1, _("_matchfiles requires at least one argument"))
+    l = getargs(x, 1, -1, "_matchfiles requires at least one argument")
     pats, inc, exc = [], [], []
     rev, default = None, None
     for arg in l:
-        # i18n: "_matchfiles" is a keyword
-        s = getstring(arg, _("_matchfiles requires string arguments"))
+        s = getstring(arg, "_matchfiles requires string arguments")
         prefix, value = s[:2], s[2:]
         if prefix == 'p:':
             pats.append(value)
@@ -1173,20 +1093,17 @@ def _matchfiles(repo, subset, x):
             exc.append(value)
         elif prefix == 'r:':
             if rev is not None:
-                # i18n: "_matchfiles" is a keyword
-                raise error.ParseError(_('_matchfiles expected at most one '
-                                         'revision'))
+                raise error.ParseError('_matchfiles expected at most one '
+                                       'revision')
             if value != '': # empty means working directory; leave rev as None
                 rev = value
         elif prefix == 'd:':
             if default is not None:
-                # i18n: "_matchfiles" is a keyword
-                raise error.ParseError(_('_matchfiles expected at most one '
-                                         'default mode'))
+                raise error.ParseError('_matchfiles expected at most one '
+                                       'default mode')
             default = value
         else:
-            # i18n: "_matchfiles" is a keyword
-            raise error.ParseError(_('invalid _matchfiles prefix: %s') % prefix)
+            raise error.ParseError('invalid _matchfiles prefix: %s' % prefix)
     if not default:
         default = 'glob'
 
@@ -1207,7 +1124,10 @@ def _matchfiles(repo, subset, x):
                 return True
         return False
 
-    return subset.filter(matches)
+    return subset.filter(matches,
+                         condrepr=('<matchfiles patterns=%r, include=%r '
+                                   'exclude=%r, default=%r, rev=%r>',
+                                   pats, inc, exc, default, rev))
 
 @predicate('file(pattern)', safe=True)
 def hasfile(repo, subset, x):
@@ -1268,7 +1188,7 @@ def keyword(repo, subset, x):
         return any(kw in encoding.lower(t)
                    for t in c.files() + [c.user(), c.description()])
 
-    return subset.filter(matches)
+    return subset.filter(matches, condrepr=('<keyword %r>', kw))
 
 @predicate('limit(set[, n[, offset]])', safe=True)
 def limit(repo, subset, x):
@@ -1304,7 +1224,8 @@ def limit(repo, subset, x):
             break
         elif y in subset:
             result.append(y)
-    return baseset(result)
+    return baseset(result, datarepr=('<limit n=%d, offset=%d, %r, %r>',
+                                     lim, ofs, subset, os))
 
 @predicate('last(set, [n])', safe=True)
 def last(repo, subset, x):
@@ -1330,7 +1251,7 @@ def last(repo, subset, x):
             break
         elif y in subset:
             result.append(y)
-    return baseset(result)
+    return baseset(result, datarepr=('<last n=%d, %r, %r>', lim, subset, os))
 
 @predicate('max(set)', safe=True)
 def maxrev(repo, subset, x):
@@ -1340,12 +1261,12 @@ def maxrev(repo, subset, x):
     try:
         m = os.max()
         if m in subset:
-            return baseset([m])
+            return baseset([m], datarepr=('<max %r, %r>', subset, os))
     except ValueError:
         # os.max() throws a ValueError when the collection is empty.
         # Same as python's max().
         pass
-    return baseset()
+    return baseset(datarepr=('<max %r, %r>', subset, os))
 
 @predicate('merge()', safe=True)
 def merge(repo, subset, x):
@@ -1354,7 +1275,8 @@ def merge(repo, subset, x):
     # i18n: "merge" is a keyword
     getargs(x, 0, 0, _("merge takes no arguments"))
     cl = repo.changelog
-    return subset.filter(lambda r: cl.parentrevs(r)[1] != -1)
+    return subset.filter(lambda r: cl.parentrevs(r)[1] != -1,
+                         condrepr='<merge>')
 
 @predicate('branchpoint()', safe=True)
 def branchpoint(repo, subset, x):
@@ -1373,7 +1295,8 @@ def branchpoint(repo, subset, x):
         for p in cl.parentrevs(r):
             if p >= baserev:
                 parentscount[p - baserev] += 1
-    return subset.filter(lambda r: parentscount[r - baserev] > 1)
+    return subset.filter(lambda r: parentscount[r - baserev] > 1,
+                         condrepr='<branchpoint>')
 
 @predicate('min(set)', safe=True)
 def minrev(repo, subset, x):
@@ -1383,12 +1306,12 @@ def minrev(repo, subset, x):
     try:
         m = os.min()
         if m in subset:
-            return baseset([m])
+            return baseset([m], datarepr=('<min %r, %r>', subset, os))
     except ValueError:
         # os.min() throws a ValueError when the collection is empty.
         # Same as python's min().
         pass
-    return baseset()
+    return baseset(datarepr=('<min %r, %r>', subset, os))
 
 @predicate('modifies(pattern)', safe=True)
 def modifies(repo, subset, x):
@@ -1630,7 +1553,8 @@ def _phase(repo, subset, target):
     else:
         phase = repo._phasecache.phase
         condition = lambda r: phase(repo, r) == target
-        return subset.filter(condition, cache=False)
+        return subset.filter(condition, condrepr=('<phase %r>', target),
+                             cache=False)
 
 @predicate('draft()', safe=True)
 def draft(repo, subset, x):
@@ -1703,7 +1627,8 @@ def _notpublic(repo, subset, x):
         phase = repo._phasecache.phase
         target = phases.public
         condition = lambda r: phase(repo, r) != target
-        return subset.filter(condition, cache=False)
+        return subset.filter(condition, condrepr=('<phase %r>', target),
+                             cache=False)
 
 @predicate('public()', safe=True)
 def public(repo, subset, x):
@@ -1713,7 +1638,8 @@ def public(repo, subset, x):
     phase = repo._phasecache.phase
     target = phases.public
     condition = lambda r: phase(repo, r) == target
-    return subset.filter(condition, cache=False)
+    return subset.filter(condition, condrepr=('<phase %r>', target),
+                         cache=False)
 
 @predicate('remote([id [,path]])', safe=True)
 def remote(repo, subset, x):
@@ -1888,7 +1814,7 @@ def matching(repo, subset, x):
                 return True
         return False
 
-    return subset.filter(matches)
+    return subset.filter(matches, condrepr=('<matching%r %r>', fields, revs))
 
 @predicate('reverse(set)', safe=True)
 def reverse(repo, subset, x):
@@ -1909,7 +1835,7 @@ def roots(repo, subset, x):
             if 0 <= p and p in s:
                 return False
         return True
-    return subset & s.filter(filter)
+    return subset & s.filter(filter, condrepr='<roots>')
 
 @predicate('sort(set[, [-]key...])', safe=True)
 def sort(repo, subset, x):
@@ -1981,6 +1907,7 @@ def subrepo(repo, subset, x):
     """
     # i18n: "subrepo" is a keyword
     args = getargs(x, 0, 1, _('subrepo takes at most one argument'))
+    pat = None
     if len(args) != 0:
         pat = getstring(args[0], _("subrepo requires a pattern"))
 
@@ -1996,7 +1923,7 @@ def subrepo(repo, subset, x):
         c = repo[x]
         s = repo.status(c.p1().node(), c.node(), match=m)
 
-        if len(args) == 0:
+        if pat is None:
             return s.added or s.modified or s.removed
 
         if s.added:
@@ -2015,7 +1942,7 @@ def subrepo(repo, subset, x):
 
         return False
 
-    return subset.filter(matches)
+    return subset.filter(matches, condrepr=('<subrepo %r>', pat))
 
 def _substringmatcher(pattern):
     kind, pattern, matcher = util.stringmatcher(pattern)
@@ -2144,6 +2071,7 @@ methods = {
     "and": andset,
     "or": orset,
     "not": notset,
+    "difference": differenceset,
     "list": listset,
     "keyvalue": keyvaluepair,
     "func": func,
@@ -2203,6 +2131,9 @@ def optimize(x, small):
             return w, ('func', ('symbol', 'only'), ('list', ta[2], tb[1][2]))
         if isonly(tb, ta):
             return w, ('func', ('symbol', 'only'), ('list', tb[2], ta[1][2]))
+
+        if tb is not None and tb[0] == 'not':
+            return wa, ('difference', ta, tb[1])
 
         if wa > wb:
             return w, (op, tb, ta)
@@ -2288,27 +2219,6 @@ def optimize(x, small):
         return w + wa, (op, x[1], ta)
     return 1, x
 
-_aliasarg = ('func', ('symbol', '_aliasarg'))
-def _getaliasarg(tree):
-    """If tree matches ('func', ('symbol', '_aliasarg'), ('string', X))
-    return X, None otherwise.
-    """
-    if (len(tree) == 3 and tree[:2] == _aliasarg
-        and tree[2][0] == 'string'):
-        return tree[2][1]
-    return None
-
-def _checkaliasarg(tree, known=None):
-    """Check tree contains no _aliasarg construct or only ones which
-    value is in known. Used to avoid alias placeholders injection.
-    """
-    if isinstance(tree, tuple):
-        arg = _getaliasarg(tree)
-        if arg is not None and (not known or arg not in known):
-            raise error.UnknownIdentifier('_aliasarg', [])
-        for t in tree:
-            _checkaliasarg(t, known)
-
 # the set of valid characters for the initial letter of symbols in
 # alias declarations and definitions
 _aliassyminitletters = set(c for c in [chr(i) for i in xrange(256)]
@@ -2324,238 +2234,35 @@ def _tokenizealias(program, lookup=None):
     return tokenize(program, lookup=lookup,
                     syminitletters=_aliassyminitletters)
 
-def _parsealiasdecl(decl):
-    """Parse alias declaration ``decl``
+def _parsealias(spec):
+    """Parse alias declaration/definition ``spec``
 
-    This returns ``(name, tree, args, errorstr)`` tuple:
-
-    - ``name``: of declared alias (may be ``decl`` itself at error)
-    - ``tree``: parse result (or ``None`` at error)
-    - ``args``: list of alias argument names (or None for symbol declaration)
-    - ``errorstr``: detail about detected error (or None)
-
-    >>> _parsealiasdecl('foo')
-    ('foo', ('symbol', 'foo'), None, None)
-    >>> _parsealiasdecl('$foo')
-    ('$foo', None, None, "'$' not for alias arguments")
-    >>> _parsealiasdecl('foo::bar')
-    ('foo::bar', None, None, 'invalid format')
-    >>> _parsealiasdecl('foo bar')
-    ('foo bar', None, None, 'at 4: invalid token')
-    >>> _parsealiasdecl('foo()')
-    ('foo', ('func', ('symbol', 'foo')), [], None)
-    >>> _parsealiasdecl('$foo()')
-    ('$foo()', None, None, "'$' not for alias arguments")
-    >>> _parsealiasdecl('foo($1, $2)')
-    ('foo', ('func', ('symbol', 'foo')), ['$1', '$2'], None)
-    >>> _parsealiasdecl('foo(bar_bar, baz.baz)')
-    ('foo', ('func', ('symbol', 'foo')), ['bar_bar', 'baz.baz'], None)
-    >>> _parsealiasdecl('foo($1, $2, nested($1, $2))')
-    ('foo($1, $2, nested($1, $2))', None, None, 'invalid argument list')
-    >>> _parsealiasdecl('foo(bar($1, $2))')
-    ('foo(bar($1, $2))', None, None, 'invalid argument list')
-    >>> _parsealiasdecl('foo("string")')
-    ('foo("string")', None, None, 'invalid argument list')
-    >>> _parsealiasdecl('foo($1, $2')
-    ('foo($1, $2', None, None, 'at 10: unexpected token: end')
-    >>> _parsealiasdecl('foo("string')
-    ('foo("string', None, None, 'at 5: unterminated string')
-    >>> _parsealiasdecl('foo($1, $2, $1)')
-    ('foo', None, None, 'argument names collide with each other')
+    >>> _parsealias('foo($1)')
+    ('func', ('symbol', 'foo'), ('symbol', '$1'))
+    >>> _parsealias('foo bar')
+    Traceback (most recent call last):
+      ...
+    ParseError: ('invalid token', 4)
     """
     p = parser.parser(elements)
-    try:
-        tree, pos = p.parse(_tokenizealias(decl))
-        if (pos != len(decl)):
-            raise error.ParseError(_('invalid token'), pos)
-        tree = parser.simplifyinfixops(tree, ('list',))
-
-        if isvalidsymbol(tree):
-            # "name = ...." style
-            name = getsymbol(tree)
-            if name.startswith('$'):
-                return (decl, None, None, _("'$' not for alias arguments"))
-            return (name, ('symbol', name), None, None)
-
-        if isvalidfunc(tree):
-            # "name(arg, ....) = ...." style
-            name = getfuncname(tree)
-            if name.startswith('$'):
-                return (decl, None, None, _("'$' not for alias arguments"))
-            args = []
-            for arg in getfuncargs(tree):
-                if not isvalidsymbol(arg):
-                    return (decl, None, None, _("invalid argument list"))
-                args.append(getsymbol(arg))
-            if len(args) != len(set(args)):
-                return (name, None, None,
-                        _("argument names collide with each other"))
-            return (name, ('func', ('symbol', name)), args, None)
-
-        return (decl, None, None, _("invalid format"))
-    except error.ParseError as inst:
-        return (decl, None, None, parseerrordetail(inst))
-
-def _parsealiasdefn(defn, args):
-    """Parse alias definition ``defn``
-
-    This function also replaces alias argument references in the
-    specified definition by ``_aliasarg(ARGNAME)``.
-
-    ``args`` is a list of alias argument names, or None if the alias
-    is declared as a symbol.
-
-    This returns "tree" as parsing result.
-
-    >>> args = ['$1', '$2', 'foo']
-    >>> print prettyformat(_parsealiasdefn('$1 or foo', args))
-    (or
-      (func
-        ('symbol', '_aliasarg')
-        ('string', '$1'))
-      (func
-        ('symbol', '_aliasarg')
-        ('string', 'foo')))
-    >>> try:
-    ...     _parsealiasdefn('$1 or $bar', args)
-    ... except error.ParseError, inst:
-    ...     print parseerrordetail(inst)
-    at 6: '$' not for alias arguments
-    >>> args = ['$1', '$10', 'foo']
-    >>> print prettyformat(_parsealiasdefn('$10 or foobar', args))
-    (or
-      (func
-        ('symbol', '_aliasarg')
-        ('string', '$10'))
-      ('symbol', 'foobar'))
-    >>> print prettyformat(_parsealiasdefn('"$1" or "foo"', args))
-    (or
-      ('string', '$1')
-      ('string', 'foo'))
-    """
-    def tokenizedefn(program, lookup=None):
-        if args:
-            argset = set(args)
-        else:
-            argset = set()
-
-        for t, value, pos in _tokenizealias(program, lookup=lookup):
-            if t == 'symbol':
-                if value in argset:
-                    # emulate tokenization of "_aliasarg('ARGNAME')":
-                    # "_aliasarg()" is an unknown symbol only used separate
-                    # alias argument placeholders from regular strings.
-                    yield ('symbol', '_aliasarg', pos)
-                    yield ('(', None, pos)
-                    yield ('string', value, pos)
-                    yield (')', None, pos)
-                    continue
-                elif value.startswith('$'):
-                    raise error.ParseError(_("'$' not for alias arguments"),
-                                           pos)
-            yield (t, value, pos)
-
-    p = parser.parser(elements)
-    tree, pos = p.parse(tokenizedefn(defn))
-    if pos != len(defn):
+    tree, pos = p.parse(_tokenizealias(spec))
+    if pos != len(spec):
         raise error.ParseError(_('invalid token'), pos)
     return parser.simplifyinfixops(tree, ('list', 'or'))
 
-class revsetalias(object):
-    # whether own `error` information is already shown or not.
-    # this avoids showing same warning multiple times at each `findaliases`.
-    warned = False
+class _aliasrules(parser.basealiasrules):
+    """Parsing and expansion rule set of revset aliases"""
+    _section = _('revset alias')
+    _parse = staticmethod(_parsealias)
 
-    def __init__(self, name, value):
-        '''Aliases like:
+    @staticmethod
+    def _trygetfunc(tree):
+        if tree[0] == 'func' and tree[1][0] == 'symbol':
+            return tree[1][1], getlist(tree[2])
 
-        h = heads(default)
-        b($1) = ancestors($1) - ancestors(default)
-        '''
-        self.name, self.tree, self.args, self.error = _parsealiasdecl(name)
-        if self.error:
-            self.error = _('failed to parse the declaration of revset alias'
-                           ' "%s": %s') % (self.name, self.error)
-            return
-
-        try:
-            self.replacement = _parsealiasdefn(value, self.args)
-            # Check for placeholder injection
-            _checkaliasarg(self.replacement, self.args)
-        except error.ParseError as inst:
-            self.error = _('failed to parse the definition of revset alias'
-                           ' "%s": %s') % (self.name, parseerrordetail(inst))
-
-def _getalias(aliases, tree):
-    """If tree looks like an unexpanded alias, return it. Return None
-    otherwise.
-    """
-    if isinstance(tree, tuple) and tree:
-        if tree[0] == 'symbol' and len(tree) == 2:
-            name = tree[1]
-            alias = aliases.get(name)
-            if alias and alias.args is None and alias.tree == tree:
-                return alias
-        if tree[0] == 'func' and len(tree) > 1:
-            if tree[1][0] == 'symbol' and len(tree[1]) == 2:
-                name = tree[1][1]
-                alias = aliases.get(name)
-                if alias and alias.args is not None and alias.tree == tree[:2]:
-                    return alias
-    return None
-
-def _expandargs(tree, args):
-    """Replace _aliasarg instances with the substitution value of the
-    same name in args, recursively.
-    """
-    if not tree or not isinstance(tree, tuple):
-        return tree
-    arg = _getaliasarg(tree)
-    if arg is not None:
-        return args[arg]
-    return tuple(_expandargs(t, args) for t in tree)
-
-def _expandaliases(aliases, tree, expanding, cache):
-    """Expand aliases in tree, recursively.
-
-    'aliases' is a dictionary mapping user defined aliases to
-    revsetalias objects.
-    """
-    if not isinstance(tree, tuple):
-        # Do not expand raw strings
-        return tree
-    alias = _getalias(aliases, tree)
-    if alias is not None:
-        if alias.error:
-            raise error.Abort(alias.error)
-        if alias in expanding:
-            raise error.ParseError(_('infinite expansion of revset alias "%s" '
-                                     'detected') % alias.name)
-        expanding.append(alias)
-        if alias.name not in cache:
-            cache[alias.name] = _expandaliases(aliases, alias.replacement,
-                                               expanding, cache)
-        result = cache[alias.name]
-        expanding.pop()
-        if alias.args is not None:
-            l = getlist(tree[2])
-            if len(l) != len(alias.args):
-                raise error.ParseError(
-                    _('invalid number of arguments: %d') % len(l))
-            l = [_expandaliases(aliases, a, [], cache) for a in l]
-            result = _expandargs(result, dict(zip(alias.args, l)))
-    else:
-        result = tuple(_expandaliases(aliases, t, expanding, cache)
-                       for t in tree)
-    return result
-
-def findaliases(ui, tree, showwarning=None):
-    _checkaliasarg(tree)
-    aliases = {}
-    for k, v in ui.configitems('revsetalias'):
-        alias = revsetalias(k, v)
-        aliases[alias.name] = alias
-    tree = _expandaliases(aliases, tree, [], {})
+def expandaliases(ui, tree, showwarning=None):
+    aliases = _aliasrules.buildmap(ui.configitems('revsetalias'))
+    tree = _aliasrules.expand(aliases, tree)
     if showwarning:
         # warn about problematic (but not referred) aliases
         for name, alias in sorted(aliases.iteritems()):
@@ -2625,7 +2332,7 @@ def matchany(ui, specs, repo=None):
 
 def _makematcher(ui, tree, repo):
     if ui:
-        tree = findaliases(ui, tree, showwarning=ui.warn)
+        tree = expandaliases(ui, tree, showwarning=ui.warn)
     tree = foldconcat(tree)
     weight, tree = optimize(tree, True)
     posttreebuilthook(tree, repo)
@@ -2753,6 +2460,29 @@ def funcsused(tree):
             funcs.add(tree[1][1])
         return funcs
 
+def _formatsetrepr(r):
+    """Format an optional printable representation of a set
+
+    ========  =================================
+    type(r)   example
+    ========  =================================
+    tuple     ('<not %r>', other)
+    str       '<branch closed>'
+    callable  lambda: '<branch %r>' % sorted(b)
+    object    other
+    ========  =================================
+    """
+    if r is None:
+        return ''
+    elif isinstance(r, tuple):
+        return r[0] % r[1:]
+    elif isinstance(r, str):
+        return r
+    elif callable(r):
+        return r()
+    else:
+        return repr(r)
+
 class abstractsmartset(object):
 
     def __nonzero__(self):
@@ -2833,7 +2563,7 @@ class abstractsmartset(object):
         This is part of the mandatory API for smartset."""
         if isinstance(other, fullreposet):
             return self
-        return self.filter(other.__contains__, cache=False)
+        return self.filter(other.__contains__, condrepr=other, cache=False)
 
     def __add__(self, other):
         """Returns a new object with the union of the two collections.
@@ -2846,19 +2576,21 @@ class abstractsmartset(object):
 
         This is part of the mandatory API for smartset."""
         c = other.__contains__
-        return self.filter(lambda r: not c(r), cache=False)
+        return self.filter(lambda r: not c(r), condrepr=('<not %r>', other),
+                           cache=False)
 
-    def filter(self, condition, cache=True):
+    def filter(self, condition, condrepr=None, cache=True):
         """Returns this smartset filtered by condition as a new smartset.
 
         `condition` is a callable which takes a revision number and returns a
-        boolean.
+        boolean. Optional `condrepr` provides a printable representation of
+        the given `condition`.
 
         This is part of the mandatory API for smartset."""
         # builtin cannot be cached. but do not needs to
         if cache and util.safehasattr(condition, 'func_code'):
             condition = util.cachefunc(condition)
-        return filteredset(self, condition)
+        return filteredset(self, condition, condrepr)
 
 class baseset(abstractsmartset):
     """Basic data structure that represents a revset and contains the basic
@@ -2866,13 +2598,20 @@ class baseset(abstractsmartset):
 
     Every method in this class should be implemented by any smartset class.
     """
-    def __init__(self, data=()):
+    def __init__(self, data=(), datarepr=None):
+        """
+        datarepr: a tuple of (format, obj, ...), a function or an object that
+                  provides a printable representation of the given data.
+        """
+        self._ascending = None
         if not isinstance(data, list):
             if isinstance(data, set):
                 self._set = data
+                # set has no order we pick one for stability purpose
+                self._ascending = True
             data = list(data)
         self._list = data
-        self._ascending = None
+        self._datarepr = datarepr
 
     @util.propertycache
     def _set(self):
@@ -2955,20 +2694,32 @@ class baseset(abstractsmartset):
 
     def __repr__(self):
         d = {None: '', False: '-', True: '+'}[self._ascending]
-        return '<%s%s %r>' % (type(self).__name__, d, self._list)
+        s = _formatsetrepr(self._datarepr)
+        if not s:
+            l = self._list
+            # if _list has been built from a set, it might have a different
+            # order from one python implementation to another.
+            # We fallback to the sorted version for a stable output.
+            if self._ascending is not None:
+                l = self._asclist
+            s = repr(l)
+        return '<%s%s %s>' % (type(self).__name__, d, s)
 
 class filteredset(abstractsmartset):
     """Duck type for baseset class which iterates lazily over the revisions in
     the subset and contains a function which tests for membership in the
     revset
     """
-    def __init__(self, subset, condition=lambda x: True):
+    def __init__(self, subset, condition=lambda x: True, condrepr=None):
         """
         condition: a function that decide whether a revision in the subset
                    belongs to the revset or not.
+        condrepr: a tuple of (format, obj, ...), a function or an object that
+                  provides a printable representation of the given condition.
         """
         self._subset = subset
         self._condition = condition
+        self._condrepr = condrepr
 
     def __contains__(self, x):
         return x in self._subset and self._condition(x)
@@ -3011,7 +2762,10 @@ class filteredset(abstractsmartset):
 
     def __len__(self):
         # Basic implementation to be changed in future patches.
-        l = baseset([r for r in self])
+        # until this gets improved, we use generator expression
+        # here, since list compr is free to call __len__ again
+        # causing infinite recursion
+        l = baseset(r for r in self)
         return len(l)
 
     def sort(self, reverse=False):
@@ -3048,7 +2802,11 @@ class filteredset(abstractsmartset):
             return x
 
     def __repr__(self):
-        return '<%s %r>' % (type(self).__name__, self._subset)
+        xs = [repr(self._subset)]
+        s = _formatsetrepr(self._condrepr)
+        if s:
+            xs.append(s)
+        return '<%s %s>' % (type(self).__name__, ', '.join(xs))
 
 def _iterordered(ascending, iter1, iter2):
     """produce an ordered iteration from two iterators with the same order
@@ -3111,7 +2869,8 @@ class addset(abstractsmartset):
 
     iterate unsorted:
     >>> rs = addset(xs, ys)
-    >>> [x for x in rs]  # without _genlist
+    >>> # (use generator because pypy could call len())
+    >>> list(x for x in rs)  # without _genlist
     [0, 3, 2, 5, 4]
     >>> assert not rs._genlist
     >>> len(rs)
@@ -3122,7 +2881,8 @@ class addset(abstractsmartset):
 
     iterate ascending:
     >>> rs = addset(xs, ys, ascending=True)
-    >>> [x for x in rs], [x for x in rs.fastasc()]  # without _asclist
+    >>> # (use generator because pypy could call len())
+    >>> list(x for x in rs), list(x for x in rs.fastasc())  # without _asclist
     ([0, 2, 3, 4, 5], [0, 2, 3, 4, 5])
     >>> assert not rs._asclist
     >>> len(rs)
@@ -3133,7 +2893,8 @@ class addset(abstractsmartset):
 
     iterate descending:
     >>> rs = addset(xs, ys, ascending=False)
-    >>> [x for x in rs], [x for x in rs.fastdesc()]  # without _asclist
+    >>> # (use generator because pypy could call len())
+    >>> list(x for x in rs), list(x for x in rs.fastdesc())  # without _asclist
     ([5, 4, 3, 2, 0], [5, 4, 3, 2, 0])
     >>> assert not rs._asclist
     >>> len(rs)
@@ -3621,6 +3382,17 @@ def prettyformatset(revs):
         lines.append((l, rs[p:q].rstrip()))
         p = q
     return '\n'.join('  ' * l + s for l, s in lines)
+
+def loadpredicate(ui, extname, registrarobj):
+    """Load revset predicates from specified registrarobj
+    """
+    for name, func in registrarobj._table.iteritems():
+        symbols[name] = func
+        if func._safe:
+            safesymbols.add(name)
+
+# load built-in predicates explicitly to setup safesymbols
+loadpredicate(None, None, predicate)
 
 # tell hggettext to extract docstrings from these functions:
 i18nfunctions = symbols.values()

@@ -58,7 +58,7 @@ Rebasing B onto H and collapsing changesets with different phases:
   > echo "===="
   > echo "edited manually" >> \$1
   > EOF
-  $ HGEDITOR="sh $TESTTMP/editor.sh" hg rebase --collapse --keepbranches -e
+  $ HGEDITOR="sh $TESTTMP/editor.sh" hg rebase --collapse --keepbranches -e --dest 7
   rebasing 1:42ccdea3bb16 "B"
   rebasing 2:5fddd98957c8 "C"
   rebasing 3:32af7686d403 "D"
@@ -115,7 +115,7 @@ Rebasing E onto H:
   $ cd a2
 
   $ hg phase --force --secret 6
-  $ hg rebase --source 4 --collapse
+  $ hg rebase --source 4 --collapse --dest 7
   rebasing 4:9520eea781bc "E"
   rebasing 6:eea13746799a "G"
   saved backup bundle to $TESTTMP/a2/.hg/strip-backup/9520eea781bc-fcd8edd4-backup.hg (glob)
@@ -157,7 +157,7 @@ Rebasing G onto H with custom message:
   > env | grep HGEDITFORM
   > true
   > EOF
-  $ HGEDITOR="sh $TESTTMP/checkeditform.sh" hg rebase --source 4 --collapse -m 'custom message' -e
+  $ HGEDITOR="sh $TESTTMP/checkeditform.sh" hg rebase --source 4 --collapse -m 'custom message' -e --dest 7
   rebasing 4:9520eea781bc "E"
   rebasing 6:eea13746799a "G"
   HGEDITFORM=rebase.collapse
@@ -261,13 +261,13 @@ Rebase and collapse - more than one external (fail):
   $ hg clone -q -u . b b1
   $ cd b1
 
-  $ hg rebase -s 2 --collapse
+  $ hg rebase -s 2 --dest 7 --collapse
   abort: unable to collapse on top of 7, there is more than one external parent: 1, 5
   [255]
 
 Rebase and collapse - E onto H:
 
-  $ hg rebase -s 4 --collapse # root (4) is not a merge
+  $ hg rebase -s 4 --dest 7 --collapse # root (4) is not a merge
   rebasing 4:8a5212ebc852 "E"
   rebasing 5:7f219660301f "F"
   rebasing 6:c772a8b2dc17 "G"
@@ -418,7 +418,7 @@ Rebase and collapse - E onto I:
   $ hg clone -q -u . c c1
   $ cd c1
 
-  $ hg rebase -s 4 --collapse # root (4) is not a merge
+  $ hg rebase -s 4 --dest 8 --collapse # root (4) is not a merge
   rebasing 4:8a5212ebc852 "E"
   rebasing 5:dca5924bb570 "F"
   merging E
@@ -512,7 +512,7 @@ Rebase and collapse - B onto F:
   $ hg clone -q -u . d d1
   $ cd d1
 
-  $ hg rebase -s 1 --collapse
+  $ hg rebase -s 1 --collapse --dest 5
   rebasing 1:27547f69f254 "B"
   rebasing 2:f838bfaca5c7 "C"
   rebasing 3:7bbcd6078bcc "D"
@@ -803,4 +803,53 @@ Test collapsing changes that add then remove a file
   b
   base
 
+  $ cd ..
+
+Test that rebase --collapse will remember message after
+running into merge conflict and invoking rebase --continue.
+
+  $ hg init collapse_remember_message
+  $ cd collapse_remember_message
+  $ touch a
+  $ hg add a
+  $ hg commit -m "a"
+  $ echo "a-default" > a
+  $ hg commit -m "a-default"
+  $ hg update -r 0
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg branch dev
+  marked working directory as branch dev
+  (branches are permanent and global, did you want a bookmark?)
+  $ echo "a-dev" > a
+  $ hg commit -m "a-dev"
+  $ hg rebase --collapse -m "a-default-dev" -d 1
+  rebasing 2:b8d8db2b242d "a-dev" (tip)
+  merging a
+  warning: conflicts while merging a! (edit, then use 'hg resolve --mark')
+  unresolved conflicts (see hg resolve, then hg rebase --continue)
+  [1]
+  $ rm a.orig
+  $ hg resolve --mark a
+  (no more unresolved files)
+  continue: hg rebase --continue
+  $ hg rebase --continue
+  rebasing 2:b8d8db2b242d "a-dev" (tip)
+  saved backup bundle to $TESTTMP/collapse_remember_message/.hg/strip-backup/b8d8db2b242d-f474c19a-backup.hg (glob)
+  $ hg log
+  changeset:   2:12bb766dceb1
+  tag:         tip
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     a-default-dev
+  
+  changeset:   1:3c8db56a44bc
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     a-default
+  
+  changeset:   0:3903775176ed
+  user:        test
+  date:        Thu Jan 01 00:00:00 1970 +0000
+  summary:     a
+  
   $ cd ..

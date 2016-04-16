@@ -575,11 +575,13 @@ class abstractsubrepo(object):
     def forget(self, match, prefix):
         return ([], [])
 
-    def removefiles(self, matcher, prefix, after, force, subrepos):
+    def removefiles(self, matcher, prefix, after, force, subrepos, warnings):
         """remove the matched files from the subrepository and the filesystem,
         possibly by force and/or after the file has been removed from the
         filesystem.  Return 0 on success, 1 on any warning.
         """
+        warnings.append(_("warning: removefiles not implemented (%s)")
+                        % self._path)
         return 1
 
     def revert(self, substate, *pats, **opts):
@@ -774,7 +776,7 @@ class hgsubrepo(abstractsubrepo):
         ctx = self._repo[rev]
         for subpath in ctx.substate:
             s = subrepo(ctx, subpath, True)
-            submatch = matchmod.narrowmatcher(subpath, match)
+            submatch = matchmod.subdirmatcher(subpath, match)
             total += s.archive(archiver, prefix + self._path + '/', submatch)
         return total
 
@@ -991,7 +993,7 @@ class hgsubrepo(abstractsubrepo):
                               self.wvfs.reljoin(prefix, self._path), True)
 
     @annotatesubrepoerror
-    def removefiles(self, matcher, prefix, after, force, subrepos):
+    def removefiles(self, matcher, prefix, after, force, subrepos, warnings):
         return cmdutil.remove(self.ui, self._repo, matcher,
                               self.wvfs.reljoin(prefix, self._path),
                               after, force, subrepos)
@@ -1385,6 +1387,8 @@ class gitsubrepo(abstractsubrepo):
         self.ui.debug('%s: git %s\n' % (self._relpath, ' '.join(commands)))
         if env is None:
             env = os.environ.copy()
+        # disable localization for Git output (issue5176)
+        env['LC_ALL'] = 'C'
         # fix for Git CVE-2015-7545
         if 'GIT_ALLOW_PROTOCOL' not in env:
             env['GIT_ALLOW_PROTOCOL'] = 'file:git:http:https:ssh'

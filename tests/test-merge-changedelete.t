@@ -77,14 +77,17 @@ Non-interactive merge:
   * version 2 records
   local: 13910f48cf7bdb2a0ba6e24b4900e4fdd5739dd4
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "u", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "u", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
     other path: file2 (node e7c1328648519852e723de86c0c0525acd779257)
+  file extras: file3 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file3 (record type "F", state "u", hash d5b0a58bc47161b1b8a831084b366f757c4f0b11)
     local path: file3 (flags "")
     ancestor path: file3 (node 2661d26c649684b482d10f91960cc3db683c38b4)
@@ -108,6 +111,7 @@ Interactive merge:
 
   $ hg co -C
   1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
   $ hg merge --config ui.interactive=true <<EOF
   > c
@@ -136,14 +140,17 @@ Interactive merge:
   * version 2 records
   local: 13910f48cf7bdb2a0ba6e24b4900e4fdd5739dd4
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "r", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "r", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
     other path: file2 (node e7c1328648519852e723de86c0c0525acd779257)
+  file extras: file3 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file3 (record type "F", state "u", hash d5b0a58bc47161b1b8a831084b366f757c4f0b11)
     local path: file3 (flags "")
     ancestor path: file3 (node 2661d26c649684b482d10f91960cc3db683c38b4)
@@ -165,6 +172,7 @@ Interactive merge with bad input:
 
   $ hg co -C
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
   $ hg merge --config ui.interactive=true <<EOF
   > foo
@@ -205,14 +213,17 @@ Interactive merge with bad input:
   * version 2 records
   local: 13910f48cf7bdb2a0ba6e24b4900e4fdd5739dd4
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "r", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "r", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
     other path: file2 (node e7c1328648519852e723de86c0c0525acd779257)
+  file extras: file3 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file3 (record type "F", state "u", hash d5b0a58bc47161b1b8a831084b366f757c4f0b11)
     local path: file3 (flags "")
     ancestor path: file3 (node 2661d26c649684b482d10f91960cc3db683c38b4)
@@ -234,6 +245,7 @@ Interactive merge with not enough input:
 
   $ hg co -C
   2 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
   $ hg merge --config ui.interactive=true <<EOF
   > d
@@ -261,14 +273,17 @@ Interactive merge with not enough input:
   * version 2 records
   local: 13910f48cf7bdb2a0ba6e24b4900e4fdd5739dd4
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "r", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "u", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
     other path: file2 (node e7c1328648519852e723de86c0c0525acd779257)
+  file extras: file3 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file3 (record type "F", state "u", hash d5b0a58bc47161b1b8a831084b366f757c4f0b11)
     local path: file3 (flags "")
     ancestor path: file3 (node 2661d26c649684b482d10f91960cc3db683c38b4)
@@ -289,6 +304,7 @@ Choose local versions of files
 
   $ hg co -C
   2 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
   $ hg merge --tool :local
   0 files updated, 3 files merged, 0 files removed, 0 files unresolved
@@ -306,14 +322,17 @@ Choose local versions of files
   * version 2 records
   local: 13910f48cf7bdb2a0ba6e24b4900e4fdd5739dd4
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "r", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "r", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
     other path: file2 (node e7c1328648519852e723de86c0c0525acd779257)
+  file extras: file3 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file3 (record type "F", state "r", hash d5b0a58bc47161b1b8a831084b366f757c4f0b11)
     local path: file3 (flags "")
     ancestor path: file3 (node 2661d26c649684b482d10f91960cc3db683c38b4)
@@ -330,6 +349,7 @@ Choose other versions of files
 
   $ hg co -C
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
   $ hg merge --tool :other
   0 files updated, 2 files merged, 1 files removed, 0 files unresolved
@@ -347,14 +367,17 @@ Choose other versions of files
   * version 2 records
   local: 13910f48cf7bdb2a0ba6e24b4900e4fdd5739dd4
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "r", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "r", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
     other path: file2 (node e7c1328648519852e723de86c0c0525acd779257)
+  file extras: file3 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file3 (record type "F", state "r", hash d5b0a58bc47161b1b8a831084b366f757c4f0b11)
     local path: file3 (flags "")
     ancestor path: file3 (node 2661d26c649684b482d10f91960cc3db683c38b4)
@@ -371,6 +394,7 @@ Fail
 
   $ hg co -C
   2 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
   $ hg merge --tool :fail
   0 files updated, 0 files merged, 0 files removed, 3 files unresolved
@@ -389,14 +413,17 @@ Fail
   * version 2 records
   local: 13910f48cf7bdb2a0ba6e24b4900e4fdd5739dd4
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "u", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "u", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
     other path: file2 (node e7c1328648519852e723de86c0c0525acd779257)
+  file extras: file3 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file3 (record type "F", state "u", hash d5b0a58bc47161b1b8a831084b366f757c4f0b11)
     local path: file3 (flags "")
     ancestor path: file3 (node 2661d26c649684b482d10f91960cc3db683c38b4)
@@ -415,6 +442,7 @@ Force prompts with no input (should be similar to :fail)
 
   $ hg co -C
   1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
   $ hg merge --config ui.interactive=True --tool :prompt
   local changed file1 which remote deleted
@@ -439,14 +467,17 @@ Force prompts with no input (should be similar to :fail)
   * version 2 records
   local: 13910f48cf7bdb2a0ba6e24b4900e4fdd5739dd4
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "u", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "u", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
     other path: file2 (node e7c1328648519852e723de86c0c0525acd779257)
+  file extras: file3 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file3 (record type "F", state "u", hash d5b0a58bc47161b1b8a831084b366f757c4f0b11)
     local path: file3 (flags "")
     ancestor path: file3 (node 2661d26c649684b482d10f91960cc3db683c38b4)
@@ -467,6 +498,7 @@ Force prompts
 
   $ hg co -C
   1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
   $ hg merge --tool :prompt
   local changed file1 which remote deleted
@@ -491,14 +523,17 @@ Force prompts
   * version 2 records
   local: 13910f48cf7bdb2a0ba6e24b4900e4fdd5739dd4
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "u", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "u", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
     other path: file2 (node e7c1328648519852e723de86c0c0525acd779257)
+  file extras: file3 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file3 (record type "F", state "u", hash d5b0a58bc47161b1b8a831084b366f757c4f0b11)
     local path: file3 (flags "")
     ancestor path: file3 (node 2661d26c649684b482d10f91960cc3db683c38b4)
@@ -517,6 +552,7 @@ Choose to merge all files
 
   $ hg co -C
   1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
   $ hg merge --tool :merge3
   local changed file1 which remote deleted
@@ -541,14 +577,17 @@ Choose to merge all files
   * version 2 records
   local: 13910f48cf7bdb2a0ba6e24b4900e4fdd5739dd4
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "u", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "u", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
     other path: file2 (node e7c1328648519852e723de86c0c0525acd779257)
+  file extras: file3 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file3 (record type "F", state "u", hash d5b0a58bc47161b1b8a831084b366f757c4f0b11)
     local path: file3 (flags "")
     ancestor path: file3 (node 2661d26c649684b482d10f91960cc3db683c38b4)
@@ -697,10 +736,15 @@ Non-interactive linear update
   * version 2 records
   local: ab57bf49aa276a22d35a473592d4c34b5abc3eff
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  labels:
+    local: working copy
+    other: destination
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "u", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "u", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
@@ -735,10 +779,15 @@ Choose local versions of files
   * version 2 records
   local: ab57bf49aa276a22d35a473592d4c34b5abc3eff
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  labels:
+    local: working copy
+    other: destination
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "r", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "r", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
@@ -771,10 +820,15 @@ Choose other versions of files
   * version 2 records
   local: ab57bf49aa276a22d35a473592d4c34b5abc3eff
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  labels:
+    local: working copy
+    other: destination
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "r", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "r", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
@@ -809,10 +863,15 @@ Fail
   * version 2 records
   local: ab57bf49aa276a22d35a473592d4c34b5abc3eff
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  labels:
+    local: working copy
+    other: destination
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "u", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "u", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
@@ -853,10 +912,15 @@ Force prompts with no input
   * version 2 records
   local: ab57bf49aa276a22d35a473592d4c34b5abc3eff
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  labels:
+    local: working copy
+    other: destination
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "u", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "u", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)
@@ -898,10 +962,15 @@ Choose to merge all files
   * version 2 records
   local: ab57bf49aa276a22d35a473592d4c34b5abc3eff
   other: 10f9a0a634e82080907e62f075ab119cbc565ea6
+  labels:
+    local: working copy
+    other: destination
+  file extras: file1 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file1 (record type "C", state "u", hash 60b27f004e454aca81b0480209cce5081ec52390)
     local path: file1 (flags "")
     ancestor path: file1 (node b8e02f6433738021a065f94175c7cd23db5f05be)
     other path: file1 (node null)
+  file extras: file2 (ancestorlinknode = ab57bf49aa276a22d35a473592d4c34b5abc3eff)
   file: file2 (record type "C", state "u", hash null)
     local path: file2 (flags "")
     ancestor path: file2 (node 5d9299349fc01ddd25d0070d149b124d8f10411e)

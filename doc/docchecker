@@ -10,45 +10,54 @@ import sys
 import re
 
 leadingline = re.compile(r'(^\s*)(\S.*)$')
-hg_backtick = re.compile(r""":hg:`[^`]*'[^`]*`""")
-hg_cramped = re.compile(r'\w:hg:`')
+
+checks = [
+  (r""":hg:`[^`]*'[^`]*`""",
+    """warning: please avoid nesting ' in :hg:`...`"""),
+  (r'\w:hg:`',
+    'warning: please have a space before :hg:'),
+  (r"""(?:[^a-z][^'.])hg ([^,;"`]*'(?!hg)){2}""",
+    '''warning: please use " instead of ' for hg ... "..."'''),
+]
 
 def check(line):
-  if hg_backtick.search(line):
-    print(line)
-    print("""warning: please avoid nesting ' in :hg:`...`""")
-  if hg_cramped.search(line):
-    print(line)
-    print('warning: please have a space before :hg:')
+    messages = []
+    for match, msg in checks:
+        if re.search(match, line):
+            messages.append(msg)
+    if messages:
+        print(line)
+        for msg in messages:
+            print(msg)
 
 def work(file):
-  (llead, lline) = ('', '')
+    (llead, lline) = ('', '')
 
-  for line in file:
-    # this section unwraps lines
-    match = leadingline.match(line)
-    if not match:
-      check(lline)
-      (llead, lline) = ('', '')
-      continue
+    for line in file:
+        # this section unwraps lines
+        match = leadingline.match(line)
+        if not match:
+            check(lline)
+            (llead, lline) = ('', '')
+            continue
 
-    lead, line = match.group(1), match.group(2)
-    if (lead == llead):
-      if (lline != ''):
-        lline += ' ' + line
-      else:
-        lline = line
-    else:
-      check(lline)
-      (llead, lline) = (lead, line)
-  check(lline)
+        lead, line = match.group(1), match.group(2)
+        if (lead == llead):
+            if (lline != ''):
+                lline += ' ' + line
+            else:
+                lline = line
+        else:
+            check(lline)
+            (llead, lline) = (lead, line)
+    check(lline)
 
 def main():
-  for f in sys.argv[1:]:
-    try:
-      with open(f) as file:
-        work(file)
-    except:
-      print("failed to process %s" % f)
+    for f in sys.argv[1:]:
+        try:
+            with open(f) as file:
+                work(file)
+        except BaseException as e:
+            print("failed to process %s: %s" % (f, e))
 
 main()

@@ -7,13 +7,18 @@
 
 from __future__ import absolute_import
 
+import array
 import locale
 import os
+import sys
 import unicodedata
 
 from . import (
     error,
 )
+
+if sys.version_info[0] >= 3:
+    unichr = chr
 
 # These unicode characters are ignored by HFS+ (Apple Technote 1150,
 # "Unicode Subtleties"), so we need to ignore them in some places for
@@ -22,7 +27,10 @@ _ignore = [unichr(int(x, 16)).encode("utf-8") for x in
            "200c 200d 200e 200f 202a 202b 202c 202d 202e "
            "206a 206b 206c 206d 206e 206f feff".split()]
 # verify the next function will work
-assert set([i[0] for i in _ignore]) == set(["\xe2", "\xef"])
+if sys.version_info[0] >= 3:
+    assert set(i[0] for i in _ignore) == set([ord(b'\xe2'), ord(b'\xef')])
+else:
+    assert set(i[0] for i in _ignore) == set(["\xe2", "\xef"])
 
 def hfsignoreclean(s):
     """Remove codepoints ignored by HFS+ from s.
@@ -378,9 +386,23 @@ class normcasespecs(object):
     upper = 1
     other = 0
 
-_jsonmap = {}
+_jsonmap = []
+_jsonmap.extend("\\u%04x" % x for x in range(32))
+_jsonmap.extend(chr(x) for x in range(32, 127))
+_jsonmap.append('\\u007f')
+_jsonmap[0x09] = '\\t'
+_jsonmap[0x0a] = '\\n'
+_jsonmap[0x22] = '\\"'
+_jsonmap[0x5c] = '\\\\'
+_jsonmap[0x08] = '\\b'
+_jsonmap[0x0c] = '\\f'
+_jsonmap[0x0d] = '\\r'
+_paranoidjsonmap = _jsonmap[:]
+_paranoidjsonmap[0x3c] = '\\u003c'  # '<' (e.g. escape "</script>")
+_paranoidjsonmap[0x3e] = '\\u003e'  # '>'
+_jsonmap.extend(chr(x) for x in range(128, 256))
 
-def jsonescape(s):
+def jsonescape(s, paranoid=False):
     '''returns a string suitable for JSON
 
     JSON is problematic for us because it doesn't support non-Unicode
@@ -405,24 +427,36 @@ def jsonescape(s):
     'utf-8: caf\\xc3\\xa9'
     >>> jsonescape('')
     ''
+
+    If paranoid, non-ascii and common troublesome characters are also escaped.
+    This is suitable for web output.
+
+    >>> jsonescape('escape boundary: \\x7e \\x7f \\xc2\\x80', paranoid=True)
+    'escape boundary: ~ \\\\u007f \\\\u0080'
+    >>> jsonescape('a weird byte: \\xdd', paranoid=True)
+    'a weird byte: \\\\udcdd'
+    >>> jsonescape('utf-8: caf\\xc3\\xa9', paranoid=True)
+    'utf-8: caf\\\\u00e9'
+    >>> jsonescape('non-BMP: \\xf0\\x9d\\x84\\x9e', paranoid=True)
+    'non-BMP: \\\\ud834\\\\udd1e'
+    >>> jsonescape('<foo@example.org>', paranoid=True)
+    '\\\\u003cfoo@example.org\\\\u003e'
     '''
 
-    if not _jsonmap:
-        for x in xrange(32):
-            _jsonmap[chr(x)] = "\\u%04x" % x
-        for x in xrange(32, 256):
-            c = chr(x)
-            _jsonmap[c] = c
-        _jsonmap['\x7f'] = '\\u007f'
-        _jsonmap['\t'] = '\\t'
-        _jsonmap['\n'] = '\\n'
-        _jsonmap['\"'] = '\\"'
-        _jsonmap['\\'] = '\\\\'
-        _jsonmap['\b'] = '\\b'
-        _jsonmap['\f'] = '\\f'
-        _jsonmap['\r'] = '\\r'
+    if paranoid:
+        jm = _paranoidjsonmap
+    else:
+        jm = _jsonmap
 
-    return ''.join(_jsonmap[c] for c in toutf8b(s))
+    u8chars = toutf8b(s)
+    try:
+        return ''.join(jm[x] for x in bytearray(u8chars))  # fast path
+    except IndexError:
+        pass
+    # non-BMP char is represented as UTF-16 surrogate pair
+    u16codes = array.array('H', u8chars.decode('utf-8').encode('utf-16'))
+    u16codes.pop(0)  # drop BOM
+    return ''.join(jm[x] if x < 128 else '\\u%04x' % x for x in u16codes)
 
 _utf8len = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 4]
 

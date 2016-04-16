@@ -31,8 +31,13 @@ from . import (
     error,
     extensions,
     fancyopts,
+    fileset,
     hg,
     hook,
+    revset,
+    templatefilters,
+    templatekw,
+    templater,
     ui as uimod,
     util,
 )
@@ -79,6 +84,8 @@ def _formatparse(write, inst):
     else:
         write(_("hg: parse error: %s\n") % inst.args[0])
         _reportsimilar(write, similar)
+    if inst.hint:
+        write(_("(%s)\n") % inst.hint)
 
 def dispatch(req):
     "run the command specified in req.args"
@@ -109,8 +116,6 @@ def dispatch(req):
         return -1
     except error.ParseError as inst:
         _formatparse(ferr.write, inst)
-        if inst.hint:
-            ferr.write(_("(%s)\n") % inst.hint)
         return -1
 
     msg = ' '.join(' ' in a and repr(a) or a for a in req.args)
@@ -118,11 +123,19 @@ def dispatch(req):
     ret = None
     try:
         ret = _runcatch(req)
-        return ret
+    except KeyboardInterrupt:
+        try:
+            req.ui.warn(_("interrupted!\n"))
+        except IOError as inst:
+            if inst.errno != errno.EPIPE:
+                raise
+        ret = -1
     finally:
         duration = time.time() - starttime
+        req.ui.flush()
         req.ui.log("commandfinish", "%s exited %s after %0.2f seconds\n",
                    msg, ret or 0, duration)
+    return ret
 
 def _runcatch(req):
     def catchterm(*args):
@@ -206,8 +219,6 @@ def _runcatch(req):
                 (inst.args[0], " ".join(inst.args[1])))
     except error.ParseError as inst:
         _formatparse(ui.warn, inst)
-        if inst.hint:
-            ui.warn(_("(%s)\n") % inst.hint)
         return -1
     except error.LockHeld as inst:
         if inst.errno == errno.ETIMEDOUT:
@@ -313,11 +324,7 @@ def _runcatch(req):
         else:
             ui.warn(_("abort: %s\n") % inst.strerror)
     except KeyboardInterrupt:
-        try:
-            ui.warn(_("interrupted!\n"))
-        except IOError as inst:
-            if inst.errno != errno.EPIPE:
-                raise
+        raise
     except MemoryError:
         ui.warn(_("abort: out of memory\n"))
     except SystemExit as inst:
@@ -326,61 +333,9 @@ def _runcatch(req):
         return inst.code
     except socket.error as inst:
         ui.warn(_("abort: %s\n") % inst.args[-1])
-    except: # re-raises
-        # For compatibility checking, we discard the portion of the hg
-        # version after the + on the assumption that if a "normal
-        # user" is running a build with a + in it the packager
-        # probably built from fairly close to a tag and anyone with a
-        # 'make local' copy of hg (where the version number can be out
-        # of date) will be clueful enough to notice the implausible
-        # version number and try updating.
-        ct = util.versiontuple(n=2)
-        worst = None, ct, ''
-        if ui.config('ui', 'supportcontact', None) is None:
-            for name, mod in extensions.extensions():
-                testedwith = getattr(mod, 'testedwith', '')
-                report = getattr(mod, 'buglink', _('the extension author.'))
-                if not testedwith.strip():
-                    # We found an untested extension. It's likely the culprit.
-                    worst = name, 'unknown', report
-                    break
-
-                # Never blame on extensions bundled with Mercurial.
-                if testedwith == 'internal':
-                    continue
-
-                tested = [util.versiontuple(t, 2) for t in testedwith.split()]
-                if ct in tested:
-                    continue
-
-                lower = [t for t in tested if t < ct]
-                nearest = max(lower or tested)
-                if worst[0] is None or nearest < worst[1]:
-                    worst = name, nearest, report
-        if worst[0] is not None:
-            name, testedwith, report = worst
-            if not isinstance(testedwith, str):
-                testedwith = '.'.join([str(c) for c in testedwith])
-            warning = (_('** Unknown exception encountered with '
-                         'possibly-broken third-party extension %s\n'
-                         '** which supports versions %s of Mercurial.\n'
-                         '** Please disable %s and try your action again.\n'
-                         '** If that fixes the bug please report it to %s\n')
-                       % (name, testedwith, name, report))
-        else:
-            bugtracker = ui.config('ui', 'supportcontact', None)
-            if bugtracker is None:
-                bugtracker = _("https://mercurial-scm.org/wiki/BugTracker")
-            warning = (_("** unknown exception encountered, "
-                         "please report by visiting\n** ") + bugtracker + '\n')
-        warning += ((_("** Python %s\n") % sys.version.replace('\n', '')) +
-                    (_("** Mercurial Distributed SCM (version %s)\n") %
-                     util.version()) +
-                    (_("** Extensions loaded: %s\n") %
-                     ", ".join([x[0] for x in extensions.extensions()])))
-        ui.log("commandexception", "%s\n%s\n", warning, traceback.format_exc())
-        ui.warn(warning)
-        raise
+    except:  # perhaps re-raises
+        if not handlecommandexception(ui):
+            raise
 
     return -1
 
@@ -424,7 +379,7 @@ def aliasinterpolate(name, args, cmd):
     return r.sub(lambda x: replacemap[x.group()], cmd)
 
 class cmdalias(object):
-    def __init__(self, name, definition, cmdtable):
+    def __init__(self, name, definition, cmdtable, source):
         self.name = self.cmd = name
         self.cmdname = ''
         self.definition = definition
@@ -432,11 +387,9 @@ class cmdalias(object):
         self.args = []
         self.opts = []
         self.help = ''
-        self.norepo = True
-        self.optionalrepo = False
-        self.inferrepo = False
         self.badalias = None
         self.unknowncmd = False
+        self.source = source
 
         try:
             aliases, entry = cmdutil.findcmd(self.name, cmdtable)
@@ -496,12 +449,6 @@ class cmdalias(object):
                 self.fn, self.opts = tableentry
 
             self.args = aliasargs(self.fn, args)
-            if cmd not in commands.norepo.split(' '):
-                self.norepo = False
-            if cmd in commands.optionalrepo.split(' '):
-                self.optionalrepo = True
-            if cmd in commands.inferrepo.split(' '):
-                self.inferrepo = True
             if self.help.startswith("hg " + cmd):
                 # drop prefix in old-style help lines so hg shows the alias
                 self.help = self.help[4 + len(cmd):]
@@ -514,6 +461,14 @@ class cmdalias(object):
         except error.AmbiguousCommand:
             self.badalias = (_("alias '%s' resolves to ambiguous command '%s'")
                              % (self.name, cmd))
+
+    def __getattr__(self, name):
+        adefaults = {'norepo': True, 'optionalrepo': False, 'inferrepo': False}
+        if name not in adefaults:
+            raise AttributeError(name)
+        if self.badalias or util.safehasattr(self, 'shell'):
+            return adefaults[name]
+        return getattr(self.fn, name)
 
     def __call__(self, ui, *args, **opts):
         if self.badalias:
@@ -545,7 +500,8 @@ def addaliases(ui, cmdtable):
     # may use extension commands. Aliases can also use other alias definitions,
     # but only if they have been defined prior to the current definition.
     for alias, definition in ui.configitems('alias'):
-        aliasdef = cmdalias(alias, definition, cmdtable)
+        source = ui.configsource('alias', alias)
+        aliasdef = cmdalias(alias, definition, cmdtable, source)
 
         try:
             olddef = cmdtable[aliasdef.cmd][0]
@@ -556,12 +512,6 @@ def addaliases(ui, cmdtable):
             pass
 
         cmdtable[aliasdef.name] = (aliasdef, aliasdef.opts, aliasdef.help)
-        if aliasdef.norepo:
-            commands.norepo += ' %s' % alias
-        if aliasdef.optionalrepo:
-            commands.optionalrepo += ' %s' % alias
-        if aliasdef.inferrepo:
-            commands.inferrepo += ' %s' % alias
 
 def _parse(ui, args):
     options = {}
@@ -609,7 +559,8 @@ def _parseconfig(ui, config):
 
     for cfg in config:
         try:
-            name, value = cfg.split('=', 1)
+            name, value = [cfgelem.strip()
+                           for cfgelem in cfg.split('=', 1)]
             section, name = name.split('.', 1)
             if not section or not name:
                 raise IndexError
@@ -684,16 +635,17 @@ def runcommand(lui, repo, cmd, fullargs, ui, options, d, cmdpats, cmdoptions):
               result=ret, pats=cmdpats, opts=cmdoptions)
     return ret
 
-def _getlocal(ui, rpath):
+def _getlocal(ui, rpath, wd=None):
     """Return (path, local ui object) for the given target path.
 
     Takes paths in [cwd]/.hg/hgrc into account."
     """
-    try:
-        wd = os.getcwd()
-    except OSError as e:
-        raise error.Abort(_("error getting current working directory: %s") %
-                         e.strerror)
+    if wd is None:
+        try:
+            wd = os.getcwd()
+        except OSError as e:
+            raise error.Abort(_("error getting current working directory: %s") %
+                              e.strerror)
     path = cmdutil.findrepo(wd) or ""
     if not path:
         lui = ui
@@ -726,26 +678,16 @@ def _checkshellalias(lui, ui, args, precheck=True):
 
     if precheck:
         strict = True
-        norepo = commands.norepo
-        optionalrepo = commands.optionalrepo
-        inferrepo = commands.inferrepo
-        def restorecommands():
-            commands.norepo = norepo
-            commands.optionalrepo = optionalrepo
-            commands.inferrepo = inferrepo
         cmdtable = commands.table.copy()
         addaliases(lui, cmdtable)
     else:
         strict = False
-        def restorecommands():
-            pass
         cmdtable = commands.table
 
     cmd = args[0]
     try:
         aliases, entry = cmdutil.findcmd(cmd, cmdtable, strict)
     except (error.AmbiguousCommand, error.UnknownCommand):
-        restorecommands()
         return
 
     cmd = aliases[0]
@@ -756,9 +698,31 @@ def _checkshellalias(lui, ui, args, precheck=True):
         return lambda: runcommand(lui, None, cmd, args[:1], ui, options, d,
                                   [], {})
 
-    restorecommands()
+def _cmdattr(ui, cmd, func, attr):
+    try:
+        return getattr(func, attr)
+    except AttributeError:
+        ui.deprecwarn("missing attribute '%s', use @command decorator "
+                      "to register '%s'" % (attr, cmd), '3.8')
+        return False
 
 _loaded = set()
+
+# list of (objname, loadermod, loadername) tuple:
+# - objname is the name of an object in extension module, from which
+#   extra information is loaded
+# - loadermod is the module where loader is placed
+# - loadername is the name of the function, which takes (ui, extensionname,
+#   extraobj) arguments
+extraloaders = [
+    ('cmdtable', commands, 'loadcmdtable'),
+    ('filesetpredicate', fileset, 'loadpredicate'),
+    ('revsetpredicate', revset, 'loadpredicate'),
+    ('templatefilter', templatefilters, 'loadfilter'),
+    ('templatefunc', templater, 'loadfunction'),
+    ('templatekeyword', templatekw, 'loadkeyword'),
+]
+
 def _dispatch(req):
     args = req.args
     ui = req.ui
@@ -788,12 +752,10 @@ def _dispatch(req):
     # (uisetup and extsetup are handled in extensions.loadall)
 
     for name, module in exts:
-        cmdtable = getattr(module, 'cmdtable', {})
-        overrides = [cmd for cmd in cmdtable if cmd in commands.table]
-        if overrides:
-            ui.warn(_("extension '%s' overrides commands: %s\n")
-                    % (name, " ".join(overrides)))
-        commands.table.update(cmdtable)
+        for objname, loadermod, loadername in extraloaders:
+            extraobj = getattr(module, objname, None)
+            if extraobj is not None:
+                getattr(loadermod, loadername)(ui, name, extraobj)
         _loaded.add(name)
 
     # (reposetup is handled in hg.repository)
@@ -874,7 +836,7 @@ def _dispatch(req):
 
     repo = None
     cmdpats = args[:]
-    if cmd not in commands.norepo.split():
+    if not _cmdattr(ui, cmd, func, 'norepo'):
         # use the repo from the request only if we don't have -R
         if not rpath and not cwd:
             repo = req.repo
@@ -895,9 +857,10 @@ def _dispatch(req):
             except error.RepoError:
                 if rpath and rpath[-1]: # invalid -R path
                     raise
-                if cmd not in commands.optionalrepo.split():
-                    if (cmd in commands.inferrepo.split() and
-                        args and not path): # try to infer -R from command args
+                if not _cmdattr(ui, cmd, func, 'optionalrepo'):
+                    if (_cmdattr(ui, cmd, func, 'inferrepo') and
+                        args and not path):
+                        # try to infer -R from command args
                         repos = map(cmdutil.findrepo, args)
                         guess = repos[0]
                         if guess and repos.count(guess) == len(repos):
@@ -1027,8 +990,7 @@ def _runcommand(ui, options, cmd, cmdfunc):
         output = ui.config('profiling', 'output')
 
         if output == 'blackbox':
-            import StringIO
-            fp = StringIO.StringIO()
+            fp = util.stringio()
         elif output:
             path = ui.expandpath(output)
             fp = open(path, 'wb')
@@ -1053,3 +1015,70 @@ def _runcommand(ui, options, cmd, cmdfunc):
                 fp.close()
     else:
         return checkargs()
+
+def _exceptionwarning(ui):
+    """Produce a warning message for the current active exception"""
+
+    # For compatibility checking, we discard the portion of the hg
+    # version after the + on the assumption that if a "normal
+    # user" is running a build with a + in it the packager
+    # probably built from fairly close to a tag and anyone with a
+    # 'make local' copy of hg (where the version number can be out
+    # of date) will be clueful enough to notice the implausible
+    # version number and try updating.
+    ct = util.versiontuple(n=2)
+    worst = None, ct, ''
+    if ui.config('ui', 'supportcontact', None) is None:
+        for name, mod in extensions.extensions():
+            testedwith = getattr(mod, 'testedwith', '')
+            report = getattr(mod, 'buglink', _('the extension author.'))
+            if not testedwith.strip():
+                # We found an untested extension. It's likely the culprit.
+                worst = name, 'unknown', report
+                break
+
+            # Never blame on extensions bundled with Mercurial.
+            if testedwith == 'internal':
+                continue
+
+            tested = [util.versiontuple(t, 2) for t in testedwith.split()]
+            if ct in tested:
+                continue
+
+            lower = [t for t in tested if t < ct]
+            nearest = max(lower or tested)
+            if worst[0] is None or nearest < worst[1]:
+                worst = name, nearest, report
+    if worst[0] is not None:
+        name, testedwith, report = worst
+        if not isinstance(testedwith, str):
+            testedwith = '.'.join([str(c) for c in testedwith])
+        warning = (_('** Unknown exception encountered with '
+                     'possibly-broken third-party extension %s\n'
+                     '** which supports versions %s of Mercurial.\n'
+                     '** Please disable %s and try your action again.\n'
+                     '** If that fixes the bug please report it to %s\n')
+                   % (name, testedwith, name, report))
+    else:
+        bugtracker = ui.config('ui', 'supportcontact', None)
+        if bugtracker is None:
+            bugtracker = _("https://mercurial-scm.org/wiki/BugTracker")
+        warning = (_("** unknown exception encountered, "
+                     "please report by visiting\n** ") + bugtracker + '\n')
+    warning += ((_("** Python %s\n") % sys.version.replace('\n', '')) +
+                (_("** Mercurial Distributed SCM (version %s)\n") %
+                 util.version()) +
+                (_("** Extensions loaded: %s\n") %
+                 ", ".join([x[0] for x in extensions.extensions()])))
+    return warning
+
+def handlecommandexception(ui):
+    """Produce a warning message for broken commands
+
+    Called when handling an exception; the exception is reraised if
+    this function returns False, ignored otherwise.
+    """
+    warning = _exceptionwarning(ui)
+    ui.log("commandexception", "%s\n%s\n", warning, traceback.format_exc())
+    ui.warn(warning)
+    return False  # re-raise the exception

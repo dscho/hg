@@ -59,7 +59,6 @@ edit the history
   > pick 652413bf663e f
   > pick 055a42cdd887 d
   > EOF
-  0 files updated, 0 files merged, 4 files removed, 0 files unresolved
 
 log after edit
   $ hg log --graph
@@ -124,7 +123,6 @@ Drop the last changeset
   > pick a4f7421b80f7 f
   > drop f518305ce889 d
   > EOF
-  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg log --graph
   @  changeset:   3:a4f7421b80f7
   |  tag:         tip
@@ -155,10 +153,13 @@ Drop the last changeset
   hg: parse error: missing rules for changeset a4f7421b80f7
   (use "drop a4f7421b80f7" to discard, see also: "hg help -e histedit.config")
   $ hg --config histedit.dropmissing=True histedit  cb9a9f314b8b --commands - 2>&1 << EOF | fixbundle
+  > EOF
+  hg: parse error: no rules provided
+  (use strip extension to remove commits)
+  $ hg --config histedit.dropmissing=True histedit  cb9a9f314b8b --commands - 2>&1 << EOF | fixbundle
   > pick cb9a9f314b8b a
   > pick ee283cb5f2d5 e
   > EOF
-  0 files updated, 0 files merged, 3 files removed, 0 files unresolved
   $ hg log --graph
   @  changeset:   1:e99c679bf03e
   |  tag:         tip

@@ -321,7 +321,7 @@ skip local changes transplanted to the source
 
 remote transplant with pull
 
-  $ hg -R ../t serve -p $HGPORT -d --pid-file=../t.pid
+  $ hg serve -R ../t -p $HGPORT -d --pid-file=../t.pid
   $ cat ../t.pid >> $DAEMON_PIDS
 
   $ hg clone -r 0 ../t ../rp
@@ -409,6 +409,7 @@ transplant -c shouldn't use an old changeset
 
   $ hg up -C
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
   $ rm added
   $ hg transplant --continue
   abort: no transplant to continue

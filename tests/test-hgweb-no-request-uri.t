@@ -15,12 +15,20 @@ should be used from d74fc8dec2b4 onward to route the request.
   summary:     test
   
   $ cat > request.py <<EOF
-  > from mercurial.hgweb import hgweb, hgwebdir
-  > from StringIO import StringIO
-  > import os, sys
+  > from __future__ import absolute_import
+  > import os
+  > import sys
+  > from mercurial.hgweb import (
+  >     hgweb,
+  >     hgwebdir,
+  > )
+  > from mercurial import (
+  >     util,
+  > )
+  > stringio = util.stringio
   > 
-  > errors = StringIO()
-  > input = StringIO()
+  > errors = stringio()
+  > input = stringio()
   > 
   > def startrsp(status, headers):
   >     print '---- STATUS'
@@ -53,22 +61,22 @@ should be used from d74fc8dec2b4 onward to route the request.
   >     print '---- ERRORS'
   >     print errors.getvalue()
   > 
-  > output = StringIO()
+  > output = stringio()
   > env['PATH_INFO'] = '/'
   > env['QUERY_STRING'] = 'style=atom'
   > process(hgweb('.', name = 'repo'))
   > 
-  > output = StringIO()
+  > output = stringio()
   > env['PATH_INFO'] = '/file/tip/'
   > env['QUERY_STRING'] = 'style=raw'
   > process(hgweb('.', name = 'repo'))
   > 
-  > output = StringIO()
+  > output = stringio()
   > env['PATH_INFO'] = '/'
   > env['QUERY_STRING'] = 'style=raw'
   > process(hgwebdir({'repo': '.'}))
   > 
-  > output = StringIO()
+  > output = stringio()
   > env['PATH_INFO'] = '/repo/file/tip/'
   > env['QUERY_STRING'] = 'style=raw'
   > process(hgwebdir({'repo': '.'}))

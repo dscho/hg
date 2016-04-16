@@ -3,62 +3,11 @@
   $ cd "$TESTDIR"/..
 
   $ hg files 'set:(**.py)' | sed 's|\\|/|g' | xargs python contrib/check-py3-compat.py
-  contrib/casesmash.py not using absolute_import
-  contrib/check-code.py not using absolute_import
-  contrib/check-code.py requires print_function
-  contrib/check-config.py not using absolute_import
-  contrib/check-config.py requires print_function
-  contrib/debugcmdserver.py not using absolute_import
-  contrib/debugcmdserver.py requires print_function
-  contrib/debugshell.py not using absolute_import
-  contrib/fixpax.py not using absolute_import
-  contrib/fixpax.py requires print_function
-  contrib/hgclient.py not using absolute_import
-  contrib/hgclient.py requires print_function
-  contrib/hgfixes/fix_bytes.py not using absolute_import
-  contrib/hgfixes/fix_bytesmod.py not using absolute_import
-  contrib/hgfixes/fix_leftover_imports.py not using absolute_import
-  contrib/import-checker.py not using absolute_import
-  contrib/import-checker.py requires print_function
-  contrib/memory.py not using absolute_import
-  contrib/perf.py not using absolute_import
-  contrib/python-hook-examples.py not using absolute_import
-  contrib/revsetbenchmarks.py not using absolute_import
-  contrib/revsetbenchmarks.py requires print_function
-  contrib/showstack.py not using absolute_import
-  contrib/synthrepo.py not using absolute_import
-  contrib/win32/hgwebdir_wsgi.py not using absolute_import
-  doc/check-seclevel.py not using absolute_import
-  doc/gendoc.py not using absolute_import
-  doc/hgmanpage.py not using absolute_import
-  hgext/__init__.py not using absolute_import
-  hgext/acl.py not using absolute_import
-  hgext/blackbox.py not using absolute_import
-  hgext/bugzilla.py not using absolute_import
-  hgext/censor.py not using absolute_import
-  hgext/children.py not using absolute_import
-  hgext/churn.py not using absolute_import
-  hgext/clonebundles.py not using absolute_import
-  hgext/color.py not using absolute_import
-  hgext/convert/__init__.py not using absolute_import
-  hgext/convert/bzr.py not using absolute_import
-  hgext/convert/common.py not using absolute_import
-  hgext/convert/convcmd.py not using absolute_import
-  hgext/convert/cvs.py not using absolute_import
-  hgext/convert/cvsps.py not using absolute_import
-  hgext/convert/darcs.py not using absolute_import
-  hgext/convert/filemap.py not using absolute_import
-  hgext/convert/git.py not using absolute_import
-  hgext/convert/gnuarch.py not using absolute_import
-  hgext/convert/hg.py not using absolute_import
-  hgext/convert/monotone.py not using absolute_import
-  hgext/convert/p4.py not using absolute_import
-  hgext/convert/subversion.py not using absolute_import
-  hgext/convert/transport.py not using absolute_import
-  hgext/eol.py not using absolute_import
-  hgext/extdiff.py not using absolute_import
-  hgext/factotum.py not using absolute_import
   hgext/fetch.py not using absolute_import
+  hgext/fsmonitor/pywatchman/__init__.py not using absolute_import
+  hgext/fsmonitor/pywatchman/__init__.py requires print_function
+  hgext/fsmonitor/pywatchman/capabilities.py not using absolute_import
+  hgext/fsmonitor/pywatchman/pybser.py not using absolute_import
   hgext/gpg.py not using absolute_import
   hgext/graphlog.py not using absolute_import
   hgext/hgcia.py not using absolute_import
@@ -66,7 +15,6 @@
   hgext/highlight/__init__.py not using absolute_import
   hgext/highlight/highlight.py not using absolute_import
   hgext/histedit.py not using absolute_import
-  hgext/keyword.py not using absolute_import
   hgext/largefiles/__init__.py not using absolute_import
   hgext/largefiles/basestore.py not using absolute_import
   hgext/largefiles/lfcommands.py not using absolute_import
@@ -79,103 +27,150 @@
   hgext/largefiles/uisetup.py not using absolute_import
   hgext/largefiles/wirestore.py not using absolute_import
   hgext/mq.py not using absolute_import
-  hgext/notify.py not using absolute_import
-  hgext/pager.py not using absolute_import
-  hgext/patchbomb.py not using absolute_import
-  hgext/purge.py not using absolute_import
   hgext/rebase.py not using absolute_import
-  hgext/record.py not using absolute_import
-  hgext/relink.py not using absolute_import
-  hgext/schemes.py not using absolute_import
   hgext/share.py not using absolute_import
-  hgext/shelve.py not using absolute_import
-  hgext/strip.py not using absolute_import
-  hgext/transplant.py not using absolute_import
-  hgext/win32mbcs.py not using absolute_import
   hgext/win32text.py not using absolute_import
-  hgext/zeroconf/Zeroconf.py not using absolute_import
-  hgext/zeroconf/Zeroconf.py requires print_function
-  hgext/zeroconf/__init__.py not using absolute_import
   i18n/check-translation.py not using absolute_import
   i18n/polib.py not using absolute_import
-  mercurial/cmdutil.py not using absolute_import
-  mercurial/commands.py not using absolute_import
   setup.py not using absolute_import
-  tests/filterpyflakes.py requires print_function
-  tests/generate-working-copy-states.py requires print_function
-  tests/get-with-headers.py requires print_function
   tests/heredoctest.py requires print_function
-  tests/hypothesishelpers.py not using absolute_import
-  tests/hypothesishelpers.py requires print_function
-  tests/killdaemons.py not using absolute_import
   tests/md5sum.py not using absolute_import
-  tests/mockblackbox.py not using absolute_import
-  tests/printenv.py not using absolute_import
   tests/readlink.py not using absolute_import
   tests/readlink.py requires print_function
-  tests/revlog-formatv0.py not using absolute_import
   tests/run-tests.py not using absolute_import
-  tests/seq.py not using absolute_import
-  tests/seq.py requires print_function
-  tests/silenttestrunner.py not using absolute_import
-  tests/silenttestrunner.py requires print_function
-  tests/sitecustomize.py not using absolute_import
   tests/svn-safe-append.py not using absolute_import
-  tests/svnxml.py not using absolute_import
-  tests/test-ancestor.py requires print_function
   tests/test-atomictempfile.py not using absolute_import
-  tests/test-batching.py not using absolute_import
-  tests/test-batching.py requires print_function
-  tests/test-bdiff.py not using absolute_import
-  tests/test-bdiff.py requires print_function
-  tests/test-context.py not using absolute_import
-  tests/test-context.py requires print_function
   tests/test-demandimport.py not using absolute_import
-  tests/test-demandimport.py requires print_function
-  tests/test-dispatch.py not using absolute_import
-  tests/test-dispatch.py requires print_function
-  tests/test-doctest.py not using absolute_import
-  tests/test-duplicateoptions.py not using absolute_import
-  tests/test-duplicateoptions.py requires print_function
-  tests/test-filecache.py not using absolute_import
-  tests/test-filecache.py requires print_function
-  tests/test-filelog.py not using absolute_import
-  tests/test-filelog.py requires print_function
-  tests/test-hg-parseurl.py not using absolute_import
-  tests/test-hg-parseurl.py requires print_function
-  tests/test-hgweb-auth.py not using absolute_import
-  tests/test-hgweb-auth.py requires print_function
-  tests/test-hgwebdir-paths.py not using absolute_import
-  tests/test-hybridencode.py not using absolute_import
-  tests/test-hybridencode.py requires print_function
-  tests/test-lrucachedict.py not using absolute_import
-  tests/test-lrucachedict.py requires print_function
-  tests/test-manifest.py not using absolute_import
-  tests/test-minirst.py not using absolute_import
-  tests/test-minirst.py requires print_function
-  tests/test-parseindex2.py not using absolute_import
-  tests/test-parseindex2.py requires print_function
-  tests/test-pathencode.py not using absolute_import
-  tests/test-pathencode.py requires print_function
-  tests/test-propertycache.py not using absolute_import
-  tests/test-propertycache.py requires print_function
-  tests/test-revlog-ancestry.py not using absolute_import
-  tests/test-revlog-ancestry.py requires print_function
-  tests/test-run-tests.py not using absolute_import
-  tests/test-simplemerge.py not using absolute_import
-  tests/test-status-inprocess.py not using absolute_import
-  tests/test-status-inprocess.py requires print_function
-  tests/test-symlink-os-yes-fs-no.py not using absolute_import
-  tests/test-trusted.py not using absolute_import
-  tests/test-trusted.py requires print_function
-  tests/test-ui-color.py not using absolute_import
-  tests/test-ui-color.py requires print_function
-  tests/test-ui-config.py not using absolute_import
-  tests/test-ui-config.py requires print_function
-  tests/test-ui-verbosity.py not using absolute_import
-  tests/test-ui-verbosity.py requires print_function
-  tests/test-url.py not using absolute_import
-  tests/test-url.py requires print_function
-  tests/test-walkrepo.py requires print_function
-  tests/test-wireproto.py requires print_function
-  tests/tinyproxy.py requires print_function
+
+#if py3exe
+  $ hg files 'set:(**.py)' | sed 's|\\|/|g' | xargs $PYTHON3 contrib/check-py3-compat.py
+  contrib/check-code.py: invalid syntax: (unicode error) 'unicodeescape' codec can't decode bytes in position *-*: malformed \N character escape (<unknown>, line *) (glob)
+  doc/hgmanpage.py: invalid syntax: invalid syntax (<unknown>, line *) (glob)
+  hgext/automv.py: error importing module: <SyntaxError> invalid syntax (commands.py, line *) (line *) (glob)
+  hgext/blackbox.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/bugzilla.py: error importing module: <ImportError> No module named 'urlparse' (line *) (glob)
+  hgext/censor.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/chgserver.py: error importing module: <ImportError> No module named 'SocketServer' (line *) (glob)
+  hgext/children.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/churn.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/clonebundles.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/color.py: invalid syntax: invalid syntax (<unknown>, line *) (glob)
+  hgext/convert/bzr.py: error importing module: <SystemError> Parent module 'hgext.convert' not loaded, cannot perform relative import (line *) (glob)
+  hgext/convert/common.py: error importing module: <ImportError> No module named 'cPickle' (line *) (glob)
+  hgext/convert/convcmd.py: error importing: <SyntaxError> invalid syntax (bundle*.py, line *) (error at bundlerepo.py:*) (glob)
+  hgext/convert/cvs.py: error importing module: <SystemError> Parent module 'hgext.convert' not loaded, cannot perform relative import (line *) (glob)
+  hgext/convert/cvsps.py: error importing module: <ImportError> No module named 'cPickle' (line *) (glob)
+  hgext/convert/darcs.py: error importing module: <SystemError> Parent module 'hgext.convert' not loaded, cannot perform relative import (line *) (glob)
+  hgext/convert/filemap.py: error importing module: <SystemError> Parent module 'hgext.convert' not loaded, cannot perform relative import (line *) (glob)
+  hgext/convert/git.py: error importing module: <SystemError> Parent module 'hgext.convert' not loaded, cannot perform relative import (line *) (glob)
+  hgext/convert/gnuarch.py: error importing module: <SystemError> Parent module 'hgext.convert' not loaded, cannot perform relative import (line *) (glob)
+  hgext/convert/hg.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/convert/monotone.py: error importing module: <SystemError> Parent module 'hgext.convert' not loaded, cannot perform relative import (line *) (glob)
+  hgext/convert/p*.py: error importing module: <SystemError> Parent module 'hgext.convert' not loaded, cannot perform relative import (line *) (glob)
+  hgext/convert/subversion.py: error importing module: <ImportError> No module named 'cPickle' (line *) (glob)
+  hgext/convert/transport.py: error importing module: <ImportError> No module named 'svn.client' (line *) (glob)
+  hgext/eol.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/extdiff.py: error importing module: <SyntaxError> invalid syntax (archival.py, line *) (line *) (glob)
+  hgext/factotum.py: error importing: <ImportError> No module named 'httplib' (error at __init__.py:*) (glob)
+  hgext/fetch.py: error importing module: <SyntaxError> invalid syntax (commands.py, line *) (line *) (glob)
+  hgext/fsmonitor/watchmanclient.py: error importing module: <SystemError> Parent module 'hgext.fsmonitor' not loaded, cannot perform relative import (line *) (glob)
+  hgext/gpg.py: error importing module: <SyntaxError> invalid syntax (commands.py, line *) (line *) (glob)
+  hgext/graphlog.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/hgcia.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/hgk.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/histedit.py: error importing module: <SyntaxError> invalid syntax (bundle*.py, line *) (line *) (glob)
+  hgext/keyword.py: error importing: <ImportError> No module named 'BaseHTTPServer' (error at common.py:*) (glob)
+  hgext/largefiles/basestore.py: error importing: <SyntaxError> invalid syntax (bundle*.py, line *) (error at bundlerepo.py:*) (glob)
+  hgext/largefiles/lfcommands.py: error importing: <SyntaxError> invalid syntax (bundle*.py, line *) (error at bundlerepo.py:*) (glob)
+  hgext/largefiles/lfutil.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/largefiles/localstore.py: error importing module: <ImportError> No module named 'lfutil' (line *) (glob)
+  hgext/largefiles/overrides.py: error importing: <SyntaxError> invalid syntax (bundle*.py, line *) (error at bundlerepo.py:*) (glob)
+  hgext/largefiles/proto.py: error importing: <ImportError> No module named 'httplib' (error at httppeer.py:*) (glob)
+  hgext/largefiles/remotestore.py: error importing: <SyntaxError> invalid syntax (bundle*.py, line *) (error at wireproto.py:*) (glob)
+  hgext/largefiles/reposetup.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/largefiles/uisetup.py: error importing module: <SyntaxError> invalid syntax (archival.py, line *) (line *) (glob)
+  hgext/largefiles/wirestore.py: error importing module: <ImportError> No module named 'lfutil' (line *) (glob)
+  hgext/mq.py: error importing module: <SyntaxError> invalid syntax (commands.py, line *) (line *) (glob)
+  hgext/notify.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/pager.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/patchbomb.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/purge.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/rebase.py: error importing: <SyntaxError> invalid syntax (bundle*.py, line *) (error at bundlerepo.py:*) (glob)
+  hgext/record.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/relink.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/schemes.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/share.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/shelve.py: error importing module: <SyntaxError> invalid syntax (bundle*.py, line *) (line *) (glob)
+  hgext/strip.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  hgext/transplant.py: error importing: <SyntaxError> invalid syntax (bundle*.py, line *) (error at bundlerepo.py:*) (glob)
+  mercurial/archival.py: invalid syntax: invalid syntax (<unknown>, line *) (glob)
+  mercurial/branchmap.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/bundle*.py: invalid syntax: invalid syntax (<unknown>, line *) (glob)
+  mercurial/bundlerepo.py: error importing module: <SyntaxError> invalid syntax (bundle*.py, line *) (line *) (glob)
+  mercurial/changegroup.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/changelog.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/cmdutil.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/commands.py: invalid syntax: invalid syntax (<unknown>, line *) (glob)
+  mercurial/commandserver.py: error importing module: <ImportError> No module named 'SocketServer' (line *) (glob)
+  mercurial/context.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/copies.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/crecord.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/dirstate.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/discovery.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/dispatch.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/exchange.py: error importing module: <SyntaxError> invalid syntax (bundle*.py, line *) (line *) (glob)
+  mercurial/extensions.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/filelog.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/filemerge.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/fileset.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/formatter.py: error importing module: <ImportError> No module named 'cPickle' (line *) (glob)
+  mercurial/graphmod.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/help.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/hg.py: error importing: <SyntaxError> invalid syntax (bundle*.py, line *) (error at bundlerepo.py:*) (glob)
+  mercurial/hgweb/common.py: error importing module: <ImportError> No module named 'BaseHTTPServer' (line *) (glob)
+  mercurial/hgweb/hgweb_mod.py: error importing module: <SystemError> Parent module 'mercurial.hgweb' not loaded, cannot perform relative import (line *) (glob)
+  mercurial/hgweb/hgwebdir_mod.py: error importing module: <SystemError> Parent module 'mercurial.hgweb' not loaded, cannot perform relative import (line *) (glob)
+  mercurial/hgweb/protocol.py: error importing module: <SystemError> Parent module 'mercurial.hgweb' not loaded, cannot perform relative import (line *) (glob)
+  mercurial/hgweb/request.py: error importing module: <SystemError> Parent module 'mercurial.hgweb' not loaded, cannot perform relative import (line *) (glob)
+  mercurial/hgweb/server.py: error importing module: <ImportError> No module named 'BaseHTTPServer' (line *) (glob)
+  mercurial/hgweb/webcommands.py: error importing module: <SystemError> Parent module 'mercurial.hgweb' not loaded, cannot perform relative import (line *) (glob)
+  mercurial/hgweb/webutil.py: error importing module: <SystemError> Parent module 'mercurial.hgweb' not loaded, cannot perform relative import (line *) (glob)
+  mercurial/hgweb/wsgicgi.py: error importing module: <SystemError> Parent module 'mercurial.hgweb' not loaded, cannot perform relative import (line *) (glob)
+  mercurial/hook.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/httpclient/_readers.py: error importing module: <ImportError> No module named 'httplib' (line *) (glob)
+  mercurial/httpconnection.py: error importing: <ImportError> No module named 'httplib' (error at __init__.py:*) (glob)
+  mercurial/httppeer.py: error importing module: <ImportError> No module named 'httplib' (line *) (glob)
+  mercurial/keepalive.py: error importing module: <ImportError> No module named 'httplib' (line *) (glob)
+  mercurial/localrepo.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/mail.py: error importing module: <AttributeError> module 'email' has no attribute 'Header' (line *) (glob)
+  mercurial/manifest.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/merge.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/namespaces.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/patch.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/pure/mpatch.py: error importing module: <ImportError> cannot import name 'pycompat' (line *) (glob)
+  mercurial/pure/parsers.py: error importing module: <ImportError> No module named 'mercurial.pure.node' (line *) (glob)
+  mercurial/repair.py: error importing module: <SyntaxError> invalid syntax (bundle*.py, line *) (line *) (glob)
+  mercurial/revlog.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/revset.py: error importing module: <AttributeError> 'dict' object has no attribute 'iteritems' (line *) (glob)
+  mercurial/scmutil.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/scmwindows.py: error importing module: <ImportError> No module named '_winreg' (line *) (glob)
+  mercurial/simplemerge.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/sshpeer.py: error importing: <SyntaxError> invalid syntax (bundle*.py, line *) (error at wireproto.py:*) (glob)
+  mercurial/sshserver.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/statichttprepo.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/store.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/streamclone.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/subrepo.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/templatefilters.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/templatekw.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/templater.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/ui.py: error importing: <ImportError> No module named 'cPickle' (error at formatter.py:*) (glob)
+  mercurial/unionrepo.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/url.py: error importing module: <ImportError> No module named 'httplib' (line *) (glob)
+  mercurial/verify.py: error importing: <AttributeError> 'dict' object has no attribute 'iteritems' (error at revset.py:*) (glob)
+  mercurial/win*.py: error importing module: <ImportError> No module named 'msvcrt' (line *) (glob)
+  mercurial/windows.py: error importing module: <ImportError> No module named '_winreg' (line *) (glob)
+  mercurial/wireproto.py: error importing module: <SyntaxError> invalid syntax (bundle*.py, line *) (line *) (glob)
+  tests/readlink.py: invalid syntax: invalid syntax (<unknown>, line *) (glob)
+
+#endif

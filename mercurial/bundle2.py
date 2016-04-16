@@ -152,7 +152,6 @@ import re
 import string
 import struct
 import sys
-import urllib
 
 from .i18n import _
 from . import (
@@ -164,6 +163,9 @@ from . import (
     url,
     util,
 )
+
+urlerr = util.urlerr
+urlreq = util.urlreq
 
 _pack = struct.pack
 _unpack = struct.unpack
@@ -457,8 +459,8 @@ def decodecaps(blob):
         else:
             key, vals = line.split('=', 1)
             vals = vals.split(',')
-        key = urllib.unquote(key)
-        vals = [urllib.unquote(v) for v in vals]
+        key = urlreq.unquote(key)
+        vals = [urlreq.unquote(v) for v in vals]
         caps[key] = vals
     return caps
 
@@ -467,12 +469,25 @@ def encodecaps(caps):
     chunks = []
     for ca in sorted(caps):
         vals = caps[ca]
-        ca = urllib.quote(ca)
-        vals = [urllib.quote(v) for v in vals]
+        ca = urlreq.quote(ca)
+        vals = [urlreq.quote(v) for v in vals]
         if vals:
             ca = "%s=%s" % (ca, ','.join(vals))
         chunks.append(ca)
     return '\n'.join(chunks)
+
+bundletypes = {
+    "": ("", None),       # only when using unbundle on ssh and old http servers
+                          # since the unification ssh accepts a header but there
+                          # is no capability signaling it.
+    "HG20": (), # special-cased below
+    "HG10UN": ("HG10UN", None),
+    "HG10BZ": ("HG10", 'BZ'),
+    "HG10GZ": ("HG10GZ", 'GZ'),
+}
+
+# hgweb uses this list to communicate its preferred type
+bundlepriority = ['HG10GZ', 'HG10BZ', 'HG10UN']
 
 class bundle20(object):
     """represent an outgoing bundle2 container
@@ -557,9 +572,9 @@ class bundle20(object):
         """return a encoded version of all stream parameters"""
         blocks = []
         for par, value in self._params:
-            par = urllib.quote(par)
+            par = urlreq.quote(par)
             if value is not None:
-                value = urllib.quote(value)
+                value = urlreq.quote(value)
                 par = '%s=%s' % (par, value)
             blocks.append(par)
         return ' '.join(blocks)
@@ -678,7 +693,7 @@ class unbundle20(unpackermixin):
         params = {}
         for p in paramsblock.split(' '):
             p = p.split('=', 1)
-            p = [urllib.unquote(i) for i in p]
+            p = [urlreq.unquote(i) for i in p]
             if len(p) < 2:
                 p.append(None)
             self._processparam(*p)
@@ -1256,7 +1271,7 @@ def bundle2caps(remote):
     raw = remote.capable('bundle2')
     if not raw and raw != '':
         return {}
-    capsblob = urllib.unquote(remote.capable('bundle2'))
+    capsblob = urlreq.unquote(remote.capable('bundle2'))
     return decodecaps(capsblob)
 
 def obsmarkersversion(caps):
@@ -1264,6 +1279,44 @@ def obsmarkersversion(caps):
     """
     obscaps = caps.get('obsmarkers', ())
     return [int(c[1:]) for c in obscaps if c.startswith('V')]
+
+def writebundle(ui, cg, filename, bundletype, vfs=None, compression=None):
+    """Write a bundle file and return its filename.
+
+    Existing files will not be overwritten.
+    If no filename is specified, a temporary file is created.
+    bz2 compression can be turned off.
+    The bundle file will be deleted in case of errors.
+    """
+
+    if bundletype == "HG20":
+        bundle = bundle20(ui)
+        bundle.setcompression(compression)
+        part = bundle.newpart('changegroup', data=cg.getchunks())
+        part.addparam('version', cg.version)
+        chunkiter = bundle.getchunks()
+    else:
+        # compression argument is only for the bundle2 case
+        assert compression is None
+        if cg.version != '01':
+            raise error.Abort(_('old bundle types only supports v1 '
+                                'changegroups'))
+        header, comp = bundletypes[bundletype]
+        if comp not in util.compressors:
+            raise error.Abort(_('unknown stream compression type: %s')
+                              % comp)
+        z = util.compressors[comp]()
+        subchunkiter = cg.getchunks()
+        def chunkiter():
+            yield header
+            for chunk in subchunkiter:
+                yield z.compress(chunk)
+            yield z.flush()
+        chunkiter = chunkiter()
+
+    # parse the changegroup data, otherwise we will block
+    # in case of sshrepo because we don't know the end of the stream
+    return changegroup.writechunks(ui, chunkiter, filename, vfs=vfs)
 
 @parthandler('changegroup', ('version', 'nbchanges', 'treemanifest'))
 def handlechangegroup(op, inpart):

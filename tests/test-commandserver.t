@@ -102,8 +102,7 @@ typical client does not want echo-back messages, so test without it:
   ...     print 'server exit code =', server.wait()
   server exit code = 1
 
-  >>> import cStringIO
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import readchannel, runcommand, check, stringio
   >>> @check
   ... def serverinput(server):
   ...     readchannel(server)
@@ -123,7 +122,7 @@ typical client does not want echo-back messages, so test without it:
   ... +1
   ... """
   ... 
-  ...     runcommand(server, ['import', '-'], input=cStringIO.StringIO(patch))
+  ...     runcommand(server, ['import', '-'], input=stringio(patch))
   ...     runcommand(server, ['log'])
   *** runcommand import -
   applying patch from stdin
@@ -211,15 +210,14 @@ check that local configs for the cached repo aren't inherited when -R is used:
   >     print 'now try to read something: %r' % sys.stdin.read()
   > EOF
 
-  >>> import cStringIO
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import readchannel, runcommand, check, stringio
   >>> @check
   ... def hookoutput(server):
   ...     readchannel(server)
   ...     runcommand(server, ['--config',
   ...                         'hooks.pre-identify=python:hook.hook',
   ...                         'id'],
-  ...                input=cStringIO.StringIO('some input'))
+  ...                input=stringio('some input'))
   *** runcommand --config hooks.pre-identify=python:hook.hook id
   hook talking
   now try to read something: 'some input'
@@ -587,17 +585,16 @@ changelog and manifest would have invalid node:
   > dbgui = dbgui.py
   > EOF
 
-  >>> import cStringIO
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import readchannel, runcommand, check, stringio
   >>> @check
   ... def getpass(server):
   ...     readchannel(server)
   ...     runcommand(server, ['debuggetpass', '--config',
   ...                         'ui.interactive=True'],
-  ...                input=cStringIO.StringIO('1234\n'))
+  ...                input=stringio('1234\n'))
   ...     runcommand(server, ['debugprompt', '--config',
   ...                         'ui.interactive=True'],
-  ...                input=cStringIO.StringIO('5678\n'))
+  ...                input=stringio('5678\n'))
   ...     runcommand(server, ['debugreadstdin'])
   ...     runcommand(server, ['debugwritestdout'])
   *** runcommand debuggetpass --config ui.interactive=True
@@ -611,14 +608,13 @@ changelog and manifest would have invalid node:
 
 run commandserver in commandserver, which is silly but should work:
 
-  >>> import cStringIO
-  >>> from hgclient import readchannel, runcommand, check
+  >>> from hgclient import readchannel, runcommand, check, stringio
   >>> @check
   ... def nested(server):
   ...     print '%c, %r' % readchannel(server)
   ...     class nestedserver(object):
-  ...         stdin = cStringIO.StringIO('getencoding\n')
-  ...         stdout = cStringIO.StringIO()
+  ...         stdin = stringio('getencoding\n')
+  ...         stdout = stringio()
   ...     runcommand(server, ['serve', '--cmdserver', 'pipe'],
   ...                output=nestedserver.stdout, input=nestedserver.stdin)
   ...     nestedserver.stdout.seek(0)
@@ -674,8 +670,7 @@ unix domain socket:
 
 #if unix-socket unix-permissions
 
-  >>> import cStringIO
-  >>> from hgclient import unixserver, readchannel, runcommand, check
+  >>> from hgclient import unixserver, readchannel, runcommand, check, stringio
   >>> server = unixserver('.hg/server.sock', '.hg/server.log')
   >>> def hellomessage(conn):
   ...     ch, data = readchannel(conn)
@@ -704,7 +699,7 @@ unix domain socket:
   ...  1
   ... +2
   ... """
-  ...     runcommand(conn, ['import', '-'], input=cStringIO.StringIO(patch))
+  ...     runcommand(conn, ['import', '-'], input=stringio(patch))
   ...     runcommand(conn, ['log', '-rtip', '-q'])
   >>> check(serverinput, server.connect)
   *** runcommand import -
@@ -717,6 +712,35 @@ unix domain socket:
   listening at .hg/server.sock
   abort: unknown command unknowncommand
   killed!
+  $ rm .hg/server.log
+
+ if server crashed before hello, traceback will be sent to 'e' channel as
+ last ditch:
+
+  $ cat <<EOF >> .hg/hgrc
+  > [cmdserver]
+  > log = inexistent/path.log
+  > EOF
+  >>> from hgclient import unixserver, readchannel, check
+  >>> server = unixserver('.hg/server.sock', '.hg/server.log')
+  >>> def earlycrash(conn):
+  ...     while True:
+  ...         try:
+  ...             ch, data = readchannel(conn)
+  ...             if not data.startswith('  '):
+  ...                 print '%c, %r' % (ch, data)
+  ...         except EOFError:
+  ...             break
+  >>> check(earlycrash, server.connect)
+  e, 'Traceback (most recent call last):\n'
+  e, "IOError: *" (glob)
+  >>> server.shutdown()
+
+  $ cat .hg/server.log | grep -v '^  '
+  listening at .hg/server.sock
+  Traceback (most recent call last):
+  IOError: * (glob)
+  killed!
 #endif
 #if no-unix-socket
 
@@ -725,3 +749,133 @@ unix domain socket:
   [255]
 
 #endif
+
+  $ cd ..
+
+Test that accessing to invalid changelog cache is avoided at
+subsequent operations even if repo object is reused even after failure
+of transaction (see 0a7610758c42 also)
+
+"hg log" after failure of transaction is needed to detect invalid
+cache in repoview: this can't detect by "hg verify" only.
+
+Combination of "finalization" and "empty-ness of changelog" (2 x 2 =
+4) are tested, because '00changelog.i' are differently changed in each
+cases.
+
+  $ cat > $TESTTMP/failafterfinalize.py <<EOF
+  > # extension to abort transaction after finalization forcibly
+  > from mercurial import commands, error, extensions, lock as lockmod
+  > def fail(tr):
+  >     raise error.Abort('fail after finalization')
+  > def reposetup(ui, repo):
+  >     class failrepo(repo.__class__):
+  >         def commitctx(self, ctx, error=False):
+  >             if self.ui.configbool('failafterfinalize', 'fail'):
+  >                 # 'sorted()' by ASCII code on category names causes
+  >                 # invoking 'fail' after finalization of changelog
+  >                 # using "'cl-%i' % id(self)" as category name
+  >                 self.currenttransaction().addfinalize('zzzzzzzz', fail)
+  >             return super(failrepo, self).commitctx(ctx, error)
+  >     repo.__class__ = failrepo
+  > EOF
+
+  $ hg init repo3
+  $ cd repo3
+
+  $ cat <<EOF >> $HGRCPATH
+  > [ui]
+  > logtemplate = {rev} {desc|firstline} ({files})\n
+  > 
+  > [extensions]
+  > failafterfinalize = $TESTTMP/failafterfinalize.py
+  > EOF
+
+- test failure with "empty changelog"
+
+  $ echo foo > foo
+  $ hg add foo
+
+(failuer before finalization)
+
+  >>> from hgclient import readchannel, runcommand, check
+  >>> @check
+  ... def abort(server):
+  ...     readchannel(server)
+  ...     runcommand(server, ['commit',
+  ...                         '--config', 'hooks.pretxncommit=false',
+  ...                         '-mfoo'])
+  ...     runcommand(server, ['log'])
+  ...     runcommand(server, ['verify', '-q'])
+  *** runcommand commit --config hooks.pretxncommit=false -mfoo
+  transaction abort!
+  rollback completed
+  abort: pretxncommit hook exited with status 1
+   [255]
+  *** runcommand log
+  *** runcommand verify -q
+
+(failuer after finalization)
+
+  >>> from hgclient import readchannel, runcommand, check
+  >>> @check
+  ... def abort(server):
+  ...     readchannel(server)
+  ...     runcommand(server, ['commit',
+  ...                         '--config', 'failafterfinalize.fail=true',
+  ...                         '-mfoo'])
+  ...     runcommand(server, ['log'])
+  ...     runcommand(server, ['verify', '-q'])
+  *** runcommand commit --config failafterfinalize.fail=true -mfoo
+  transaction abort!
+  rollback completed
+  abort: fail after finalization
+   [255]
+  *** runcommand log
+  *** runcommand verify -q
+
+- test failure with "not-empty changelog"
+
+  $ echo bar > bar
+  $ hg add bar
+  $ hg commit -mbar bar
+
+(failure before finalization)
+
+  >>> from hgclient import readchannel, runcommand, check
+  >>> @check
+  ... def abort(server):
+  ...     readchannel(server)
+  ...     runcommand(server, ['commit',
+  ...                         '--config', 'hooks.pretxncommit=false',
+  ...                         '-mfoo', 'foo'])
+  ...     runcommand(server, ['log'])
+  ...     runcommand(server, ['verify', '-q'])
+  *** runcommand commit --config hooks.pretxncommit=false -mfoo foo
+  transaction abort!
+  rollback completed
+  abort: pretxncommit hook exited with status 1
+   [255]
+  *** runcommand log
+  0 bar (bar)
+  *** runcommand verify -q
+
+(failure after finalization)
+
+  >>> from hgclient import readchannel, runcommand, check
+  >>> @check
+  ... def abort(server):
+  ...     readchannel(server)
+  ...     runcommand(server, ['commit',
+  ...                         '--config', 'failafterfinalize.fail=true',
+  ...                         '-mfoo', 'foo'])
+  ...     runcommand(server, ['log'])
+  ...     runcommand(server, ['verify', '-q'])
+  *** runcommand commit --config failafterfinalize.fail=true -mfoo foo
+  transaction abort!
+  rollback completed
+  abort: fail after finalization
+   [255]
+  *** runcommand log
+  0 bar (bar)
+  *** runcommand verify -q

@@ -93,8 +93,8 @@ Cases are run as shown in that table, row by row.
   parent=5
 
   $ norevtest 'none clean same'   clean 2
-  abort: not a linear update
-  (merge or update --check to force update)
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
   parent=2
 
 
@@ -140,8 +140,8 @@ Cases are run as shown in that table, row by row.
   M foo
 
   $ norevtest 'none dirty cross'  dirty 2
-  abort: uncommitted changes
-  (commit and merge, or update --clean to discard changes)
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
   parent=2
   M foo
 
@@ -166,13 +166,127 @@ Cases are run as shown in that table, row by row.
   M sub/suba
 
   $ norevtest '-c clean same'   clean 2 -c
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  parent=3
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
+  parent=2
 
   $ revtest '-cC dirty linear'  dirty 1 2 -cC
   abort: cannot specify both -c/--check and -C/--clean
   parent=1
   M foo
+
+  $ cd ..
+
+Test updating with closed head
+---------------------------------------------------------------------
+
+  $ hg clone -U -q b1 closed-heads
+  $ cd closed-heads
+
+Test updating if at least one non-closed branch head exists
+
+if on the closed branch head:
+- update to "."
+- "updated to a closed branch head ...." message is displayed
+- "N other heads for ...." message is displayed
+
+  $ hg update -q -C 3
+  $ hg commit --close-branch -m 6
+  $ norevtest "on closed branch head" clean 6
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  no open descendant heads on branch "default", updating to a closed head
+  (committing will reopen the head, use `hg heads .` to see 1 other heads)
+  parent=6
+
+if descendant non-closed branch head exists, and it is only one branch head:
+- update to it, even if its revision is less than closed one
+- "N other heads for ...." message isn't displayed
+
+  $ norevtest "non-closed 2 should be chosen" clean 1
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  parent=2
+
+if all descendant branch heads are closed, but there is another branch head:
+- update to the tipmost descendant head
+- "updated to a closed branch head ...." message is displayed
+- "N other heads for ...." message is displayed
+
+  $ norevtest "all descendant branch heads are closed" clean 3
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  no open descendant heads on branch "default", updating to a closed head
+  (committing will reopen the head, use `hg heads .` to see 1 other heads)
+  parent=6
+
+Test updating if all branch heads are closed
+
+if on the closed branch head:
+- update to "."
+- "updated to a closed branch head ...." message is displayed
+- "all heads of branch ...." message is displayed
+
+  $ hg update -q -C 2
+  $ hg commit --close-branch -m 7
+  $ norevtest "all heads of branch default are closed" clean 6
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  no open descendant heads on branch "default", updating to a closed head
+  (committing will reopen branch "default")
+  parent=6
+
+if not on the closed branch head:
+- update to the tipmost descendant (closed) head
+- "updated to a closed branch head ...." message is displayed
+- "all heads of branch ...." message is displayed
+
+  $ norevtest "all heads of branch default are closed" clean 1
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  no open descendant heads on branch "default", updating to a closed head
+  (committing will reopen branch "default")
+  parent=7
+
+  $ cd ..
+
+Test updating if "default" branch doesn't exist and no revision is
+checked out (= "default" is used as current branch)
+
+  $ hg init no-default-branch
+  $ cd no-default-branch
+
+  $ hg branch foobar
+  marked working directory as branch foobar
+  (branches are permanent and global, did you want a bookmark?)
+  $ echo a > a
+  $ hg commit -m "#0" -A
+  adding a
+  $ echo 1 >> a
+  $ hg commit -m "#1"
+  $ hg update -q 0
+  $ echo 3 >> a
+  $ hg commit -m "#2"
+  created new head
+  $ hg commit --close-branch -m "#3"
+
+if there is at least one non-closed branch head:
+- update to the tipmost branch head
+
+  $ norevtest "non-closed 1 should be chosen" clean null
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  parent=1
+
+if all branch heads are closed
+- update to "tip"
+- "updated to a closed branch head ...." message is displayed
+- "all heads for branch "XXXX" are closed" message is displayed
+
+  $ hg update -q -C 1
+  $ hg commit --close-branch -m "#4"
+
+  $ norevtest "all branches are closed" clean null
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  no open descendant heads on branch "foobar", updating to a closed head
+  (committing will reopen branch "foobar")
+  parent=4
+
+  $ cd ../b1
 
 Test obsolescence behavior
 ---------------------------------------------------------------------

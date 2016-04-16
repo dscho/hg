@@ -7,9 +7,7 @@
 
 from __future__ import absolute_import
 
-import cStringIO
 import cgi
-import urllib
 import zlib
 
 from .common import (
@@ -20,6 +18,10 @@ from .. import (
     util,
     wireproto,
 )
+stringio = util.stringio
+
+urlerr = util.urlerr
+urlreq = util.urlreq
 
 HGTYPE = 'application/mercurial-0.1'
 HGERRTYPE = 'application/hg-error'
@@ -45,6 +47,11 @@ class webproto(wireproto.abstractserverproto):
         return [data[k] for k in keys]
     def _args(self):
         args = self.req.form.copy()
+        postlen = int(self.req.env.get('HTTP_X_HGARGS_POST', 0))
+        if postlen:
+            args.update(cgi.parse_qs(
+                self.req.read(postlen), keep_blank_values=True))
+            return args
         chunks = []
         i = 1
         while True:
@@ -61,7 +68,7 @@ class webproto(wireproto.abstractserverproto):
             fp.write(s)
     def redirect(self):
         self.oldio = self.ui.fout, self.ui.ferr
-        self.ui.ferr = self.ui.fout = cStringIO.StringIO()
+        self.ui.ferr = self.ui.fout = stringio()
     def restore(self):
         val = self.ui.fout.getvalue()
         self.ui.ferr, self.ui.fout = self.oldio
@@ -77,8 +84,8 @@ class webproto(wireproto.abstractserverproto):
     def _client(self):
         return 'remote:%s:%s:%s' % (
             self.req.env.get('wsgi.url_scheme') or 'http',
-            urllib.quote(self.req.env.get('REMOTE_HOST', '')),
-            urllib.quote(self.req.env.get('REMOTE_USER', '')))
+            urlreq.quote(self.req.env.get('REMOTE_HOST', '')),
+            urlreq.quote(self.req.env.get('REMOTE_USER', '')))
 
 def iscmd(cmd):
     return cmd in wireproto.commands

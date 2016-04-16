@@ -169,7 +169,9 @@ names that should work without quoting
     ('symbol', 'a'))
   * set:
   <filteredset
-    <baseset [1]>>
+    <baseset [1]>,
+    <not
+      <baseset [0]>>>
   1
   $ try _a_b_c_
   ('symbol', '_a_b_c_')
@@ -182,7 +184,9 @@ names that should work without quoting
     ('symbol', 'a'))
   * set:
   <filteredset
-    <baseset [6]>>
+    <baseset [6]>,
+    <not
+      <baseset [0]>>>
   6
   $ try .a.b.c.
   ('symbol', '.a.b.c.')
@@ -195,7 +199,9 @@ names that should work without quoting
     ('symbol', 'a'))
   * set:
   <filteredset
-    <baseset [7]>>
+    <baseset [7]>,
+    <not
+      <baseset [0]>>>
   7
 
 names that should be caught by fallback mechanism
@@ -278,7 +284,9 @@ quoting needed
     ('symbol', 'a'))
   * set:
   <filteredset
-    <baseset [4]>>
+    <baseset [4]>,
+    <not
+      <baseset [0]>>>
   4
 
   $ log '1 or 2'
@@ -537,14 +545,16 @@ test ancestors
     ('string', '\x08issue\\d+'))
   * set:
   <filteredset
-    <fullreposet+ 0:9>>
+    <fullreposet+ 0:9>,
+    <grep '\x08issue\\d+'>>
   $ try 'grep(r"\bissue\d+")'
   (func
     ('symbol', 'grep')
     ('string', '\\bissue\\d+'))
   * set:
   <filteredset
-    <fullreposet+ 0:9>>
+    <fullreposet+ 0:9>,
+    <grep '\\bissue\\d+'>>
   6
   $ try 'grep(r"\")'
   hg: parse error at 7: unterminated string
@@ -693,12 +703,11 @@ Test opreand of '%' is optimized recursively (issue4670)
   * optimized:
   (func
     ('symbol', 'only')
-    (and
+    (difference
       (range
         ('symbol', '8')
         ('symbol', '9'))
-      (not
-        ('symbol', '8'))))
+      ('symbol', '8')))
   * set:
   <baseset+ [8, 9]>
   8
@@ -716,7 +725,7 @@ Test opreand of '%' is optimized recursively (issue4670)
       ('symbol', '9')
       ('symbol', '5')))
   * set:
-  <baseset+ [8, 9, 2, 4]>
+  <baseset+ [2, 4, 8, 9]>
   2
   4
   8
@@ -1230,7 +1239,7 @@ no crash by empty group "()" while optimizing `or` operations
 test that chained `or` operations never eat up stack (issue4624)
 (uses `0:1` instead of `0` to avoid future optimization of trivial revisions)
 
-  $ hg log -T '{rev}\n' -r "`python -c "print '|'.join(['0:1'] * 500)"`"
+  $ hg log -T '{rev}\n' -r `python -c "print '+'.join(['0:1'] * 500)"`
   0
   1
 
@@ -1581,12 +1590,14 @@ aliases:
 
   $ try m
   ('symbol', 'm')
+  * expanded:
   (func
     ('symbol', 'merge')
     None)
   * set:
   <filteredset
-    <fullreposet+ 0:9>>
+    <fullreposet+ 0:9>,
+    <merge>>
   6
 
   $ HGPLAIN=1
@@ -1600,12 +1611,14 @@ aliases:
   $ export HGPLAINEXCEPT
   $ try m
   ('symbol', 'm')
+  * expanded:
   (func
     ('symbol', 'merge')
     None)
   * set:
   <filteredset
-    <fullreposet+ 0:9>>
+    <fullreposet+ 0:9>,
+    <merge>>
   6
 
   $ unset HGPLAIN
@@ -1615,6 +1628,7 @@ aliases:
   (func
     ('symbol', 'p2')
     ('symbol', '.'))
+  * expanded:
   (func
     ('symbol', 'p1')
     ('symbol', '.'))
@@ -1637,6 +1651,7 @@ aliases:
   (func
     ('symbol', 'p2')
     ('symbol', '.'))
+  * expanded:
   (func
     ('symbol', 'p1')
     ('symbol', '.'))
@@ -1651,6 +1666,7 @@ test alias recursion
 
   $ try sincem
   ('symbol', 'sincem')
+  * expanded:
   (func
     ('symbol', 'descendants')
     (func
@@ -1659,7 +1675,8 @@ test alias recursion
   * set:
   <addset+
     <filteredset
-      <fullreposet+ 0:9>>,
+      <fullreposet+ 0:9>,
+      <merge>>,
     <generatorset+>>
   6
   7
@@ -1685,6 +1702,7 @@ test infinite recursion
           ('symbol', '1')
           ('symbol', '2')))
       ('symbol', '3')))
+  * expanded:
   (or
     ('symbol', '3')
     (or
@@ -1709,13 +1727,17 @@ test nesting and variable passing
     (range
       ('symbol', '2')
       ('symbol', '5')))
+  * expanded:
   (func
     ('symbol', 'max')
     (range
       ('symbol', '2')
       ('symbol', '5')))
   * set:
-  <baseset [5]>
+  <baseset
+    <max
+      <fullreposet+ 0:9>,
+      <spanset+ 2:5>>>
   5
 
 test chained `or` operations are flattened at parsing phase
@@ -1734,6 +1756,7 @@ test chained `or` operations are flattened at parsing phase
       (range
         ('symbol', '2')
         ('symbol', '3'))))
+  * expanded:
   (or
     (range
       ('symbol', '0')
@@ -1767,6 +1790,7 @@ far away.
     (range
       ('symbol', '2')
       ('symbol', '5')))
+  * expanded:
   (func
     ('symbol', 'descendants')
     (func
@@ -1775,25 +1799,42 @@ far away.
   abort: unknown revision '$1'!
   [255]
 
-  $ echo 'injectparamasstring2 = max(_aliasarg("$1"))' >> .hg/hgrc
-  $ echo 'callinjection2($1) = descendants(injectparamasstring2)' >> .hg/hgrc
-  $ try 'callinjection2(2:5)'
+test scope of alias expansion: 'universe' is expanded prior to 'shadowall(0)',
+but 'all()' should never be substituded to '0()'.
+
+  $ echo 'universe = all()' >> .hg/hgrc
+  $ echo 'shadowall(all) = all and universe' >> .hg/hgrc
+  $ try 'shadowall(0)'
   (func
-    ('symbol', 'callinjection2')
-    (range
-      ('symbol', '2')
-      ('symbol', '5')))
-  abort: failed to parse the definition of revset alias "injectparamasstring2": unknown identifier: _aliasarg
+    ('symbol', 'shadowall')
+    ('symbol', '0'))
+  * expanded:
+  (and
+    ('symbol', '0')
+    (func
+      ('symbol', 'all')
+      None))
+  * set:
+  <filteredset
+    <baseset [0]>,
+    <spanset+ 0:9>>
+  0
+
+test unknown reference:
+
+  $ try "unknownref(0)" --config 'revsetalias.unknownref($1)=$1:$2'
+  (func
+    ('symbol', 'unknownref')
+    ('symbol', '0'))
+  abort: failed to parse the definition of revset alias "unknownref": '$' not for alias arguments
   [255]
+
   $ hg debugrevspec --debug --config revsetalias.anotherbadone='branch(' "tip"
   ('symbol', 'tip')
   warning: failed to parse the definition of revset alias "anotherbadone": at 7: not a prefix: end
-  warning: failed to parse the definition of revset alias "injectparamasstring2": unknown identifier: _aliasarg
   * set:
   <baseset [9]>
   9
-  >>> data = file('.hg/hgrc', 'rb').read()
-  >>> file('.hg/hgrc', 'wb').write(data.replace('_aliasarg', ''))
 
   $ try 'tip'
   ('symbol', 'tip')
@@ -1814,6 +1855,7 @@ far away.
     (list
       ('string', 'foo')
       ('symbol', 'tip')))
+  * expanded:
   (or
     ('symbol', 'tip')
     (func
@@ -1823,7 +1865,8 @@ far away.
   <addset
     <baseset [9]>,
     <filteredset
-      <fullreposet+ 0:9>>>
+      <fullreposet+ 0:9>,
+      <desc '$1'>>>
   9
 
   $ try 'd(2:5)'
@@ -1832,6 +1875,7 @@ far away.
     (range
       ('symbol', '2')
       ('symbol', '5')))
+  * expanded:
   (func
     ('symbol', 'reverse')
     (func
@@ -1855,6 +1899,7 @@ far away.
         ('symbol', '2')
         ('symbol', '3'))
       ('symbol', 'date')))
+  * expanded:
   (func
     ('symbol', 'reverse')
     (func
@@ -1899,6 +1944,7 @@ far away.
       ('symbol', 'x')
       ('symbol', 'x')
       ('symbol', 'date')))
+  * expanded:
   (func
     ('symbol', 'reverse')
     (func
@@ -1971,11 +2017,80 @@ issue4553: check that revset aliases override existing hash prefix
 
 issue2549 - correct optimizations
 
-  $ log 'limit(1 or 2 or 3, 2) and not 2'
+  $ try 'limit(1 or 2 or 3, 2) and not 2'
+  (and
+    (func
+      ('symbol', 'limit')
+      (list
+        (or
+          ('symbol', '1')
+          ('symbol', '2')
+          ('symbol', '3'))
+        ('symbol', '2')))
+    (not
+      ('symbol', '2')))
+  * set:
+  <filteredset
+    <baseset
+      <limit n=2, offset=0,
+        <fullreposet+ 0:9>,
+        <baseset [1, 2, 3]>>>,
+    <not
+      <baseset [2]>>>
   1
-  $ log 'max(1 or 2) and not 2'
-  $ log 'min(1 or 2) and not 1'
-  $ log 'last(1 or 2, 1) and not 2'
+  $ try 'max(1 or 2) and not 2'
+  (and
+    (func
+      ('symbol', 'max')
+      (or
+        ('symbol', '1')
+        ('symbol', '2')))
+    (not
+      ('symbol', '2')))
+  * set:
+  <filteredset
+    <baseset
+      <max
+        <fullreposet+ 0:9>,
+        <baseset [1, 2]>>>,
+    <not
+      <baseset [2]>>>
+  $ try 'min(1 or 2) and not 1'
+  (and
+    (func
+      ('symbol', 'min')
+      (or
+        ('symbol', '1')
+        ('symbol', '2')))
+    (not
+      ('symbol', '1')))
+  * set:
+  <filteredset
+    <baseset
+      <min
+        <fullreposet+ 0:9>,
+        <baseset [1, 2]>>>,
+    <not
+      <baseset [1]>>>
+  $ try 'last(1 or 2, 1) and not 2'
+  (and
+    (func
+      ('symbol', 'last')
+      (list
+        (or
+          ('symbol', '1')
+          ('symbol', '2'))
+        ('symbol', '1')))
+    (not
+      ('symbol', '2')))
+  * set:
+  <filteredset
+    <baseset
+      <last n=1,
+        <fullreposet+ 0:9>,
+        <baseset [2, 1]>>>,
+    <not
+      <baseset [2]>>>
 
 issue4289 - ordering of built-ins
   $ hg log -M -q -r 3:2
@@ -2049,6 +2164,7 @@ tests for concatenation of strings/symbols by "##"
         ('string', '5f5'))
       ('symbol', '1ee'))
     ('string', 'ce5'))
+  * concatenated:
   ('string', '2785f51eece5')
   * set:
   <baseset [0]>
@@ -2063,6 +2179,7 @@ tests for concatenation of strings/symbols by "##"
       ('string', '5f5')
       ('symbol', '1ee')
       ('string', 'ce5')))
+  * expanded:
   (_concat
     (_concat
       (_concat
@@ -2070,6 +2187,7 @@ tests for concatenation of strings/symbols by "##"
         ('string', '5f5'))
       ('symbol', '1ee'))
     ('string', 'ce5'))
+  * concatenated:
   ('string', '2785f51eece5')
   * set:
   <baseset [0]>
@@ -2192,28 +2310,21 @@ test error message of bad revset
 
   $ cd ..
 
-Test registrar.delayregistrar via revset.extpredicate
-
-'extpredicate' decorator shouldn't register any functions until
-'setup()' on it.
+Test that revset predicate of extension isn't loaded at failure of
+loading it
 
   $ cd repo
 
   $ cat <<EOF > $TESTTMP/custompredicate.py
-  > from mercurial import revset
+  > from mercurial import error, registrar, revset
   > 
-  > revsetpredicate = revset.extpredicate()
+  > revsetpredicate = registrar.revsetpredicate()
   > 
   > @revsetpredicate('custom1()')
   > def custom1(repo, subset, x):
   >     return revset.baseset([1])
-  > @revsetpredicate('custom2()')
-  > def custom2(repo, subset, x):
-  >     return revset.baseset([2])
   > 
-  > def uisetup(ui):
-  >     if ui.configbool('custompredicate', 'enabled'):
-  >         revsetpredicate.setup()
+  > raise error.Abort('intentional failure of loading extension')
   > EOF
   $ cat <<EOF > .hg/hgrc
   > [extensions]
@@ -2221,13 +2332,8 @@ Test registrar.delayregistrar via revset.extpredicate
   > EOF
 
   $ hg debugrevspec "custom1()"
+  *** failed to import extension custompredicate from $TESTTMP/custompredicate.py: intentional failure of loading extension
   hg: parse error: unknown identifier: custom1
   [255]
-  $ hg debugrevspec "custom2()"
-  hg: parse error: unknown identifier: custom2
-  [255]
-  $ hg debugrevspec "custom1() or custom2()" --config custompredicate.enabled=true
-  1
-  2
 
   $ cd ..

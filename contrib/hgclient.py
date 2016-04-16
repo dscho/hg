@@ -1,6 +1,20 @@
 # A minimal client for Mercurial's command server
 
-import os, sys, signal, struct, socket, subprocess, time, cStringIO
+from __future__ import absolute_import, print_function
+import os
+import signal
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+try:
+    import cStringIO as io
+    stringio = io.StringIO
+except ImportError:
+    import io
+    stringio = io.StringIO
 
 def connectpipe(path=None):
     cmdline = ['hg', 'serve', '--cmdserver', 'pipe']
@@ -69,13 +83,13 @@ def sep(text):
 
 def runcommand(server, args, output=sys.stdout, error=sys.stderr, input=None,
                outfilter=lambda x: x):
-    print '*** runcommand', ' '.join(args)
+    print('*** runcommand', ' '.join(args))
     sys.stdout.flush()
     server.stdin.write('runcommand\n')
     writeblock(server, '\0'.join(args))
 
     if not input:
-        input = cStringIO.StringIO()
+        input = stringio()
 
     while True:
         ch, data = readchannel(server)
@@ -92,10 +106,10 @@ def runcommand(server, args, output=sys.stdout, error=sys.stderr, input=None,
         elif ch == 'r':
             ret, = struct.unpack('>i', data)
             if ret != 0:
-                print ' [%d]' % ret
+                print(' [%d]' % ret)
             return ret
         else:
-            print "unexpected channel %c: %r" % (ch, data)
+            print("unexpected channel %c: %r" % (ch, data))
             if ch.isupper():
                 return
 

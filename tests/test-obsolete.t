@@ -129,6 +129,13 @@ Register two markers with a missing node
   ca819180edb99ed25ceafb3e9584ac287e240b00 1337133713371337133713371337133713371337 0 (Thu Jan 01 00:22:18 1970 +0000) {'user': 'test'}
   1337133713371337133713371337133713371337 5601fb93a350734d935195fee37f4054c529ff39 0 (Thu Jan 01 00:22:19 1970 +0000) {'user': 'test'}
 
+Test the --index option of debugobsolete command
+  $ hg debugobsolete --index
+  0 245bde4270cd1072a27757984f9cda8ba26f08ca cdbce2fbb16313928851e97e0d85413f3f7eb77f C (Thu Jan 01 00:00:01 1970 -0002) {'user': 'test'}
+  1 cdbce2fbb16313928851e97e0d85413f3f7eb77f ca819180edb99ed25ceafb3e9584ac287e240b00 0 (Thu Jan 01 00:22:17 1970 +0000) {'user': 'test'}
+  2 ca819180edb99ed25ceafb3e9584ac287e240b00 1337133713371337133713371337133713371337 0 (Thu Jan 01 00:22:18 1970 +0000) {'user': 'test'}
+  3 1337133713371337133713371337133713371337 5601fb93a350734d935195fee37f4054c529ff39 0 (Thu Jan 01 00:22:19 1970 +0000) {'user': 'test'}
+
 Refuse pathological nullid successors
   $ hg debugobsolete -d '9001 0' 1337133713371337133713371337133713371337 0000000000000000000000000000000000000000
   transaction abort!
@@ -935,7 +942,7 @@ Test heads computation on pending index changes with obsolescence markers
   >   opts['message'] = 'Test'
   >   opts['logfile'] = None
   >   cmdutil.amend(ui, repo, commitfunc, repo['.'], {}, pats, opts)
-  >   print repo.changelog.headrevs()
+  >   ui.write('%s\n' % repo.changelog.headrevs())
   > EOF
   $ cat >> $HGRCPATH << EOF
   > [extensions]
@@ -960,6 +967,7 @@ Check that corrupted hidden cache does not crash
   $ hg log -r . -T '{node}' --debug
   8fd96dfc63e51ed5a8af1bec18eb4b19dbf83812 (no-eol)
 
+#if unix-permissions
 Check that wrong hidden cache permission does not crash
 
   $ chmod 000 .hg/cache/hidden
@@ -967,6 +975,7 @@ Check that wrong hidden cache permission does not crash
   cannot read hidden cache
   error writing hidden changesets cache
   8fd96dfc63e51ed5a8af1bec18eb4b19dbf83812 (no-eol)
+#endif
 
 Test cache consistency for the visible filter
 1) We want to make sure that the cached filtered revs are invalidated when
@@ -1074,4 +1083,40 @@ Test ability to pull changeset with locally applying obsolescence markers
   |
   @  0:a78f55e5508c (draft) [ ] 0
   
+Test that 'hg debugobsolete --index --rev' can show indices of obsmarkers when
+only a subset of those are displayed (because of --rev option)
+  $ hg init doindexrev
+  $ cd doindexrev
+  $ echo a > a
+  $ hg ci -Am a
+  adding a
+  $ hg ci --amend -m aa
+  $ echo b > b
+  $ hg ci -Am b
+  adding b
+  $ hg ci --amend -m bb
+  $ echo c > c
+  $ hg ci -Am c
+  adding c
+  $ hg ci --amend -m cc
+  $ echo d > d
+  $ hg ci -Am d
+  adding d
+  $ hg ci --amend -m dd
+  $ hg debugobsolete --index --rev "3+7"
+  1 6fdef60fcbabbd3d50e9b9cbc2a240724b91a5e1 d27fb9b066076fd921277a4b9e8b9cb48c95bc6a 0 \(.*\) {'user': 'test'} (re)
+  3 4715cf767440ed891755448016c2b8cf70760c30 7ae79c5d60f049c7b0dd02f5f25b9d60aaf7b36d 0 \(.*\) {'user': 'test'} (re)
+
+Test the --delete option of debugobsolete command
+  $ hg debugobsolete --index
+  0 cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b f9bd49731b0b175e42992a3c8fa6c678b2bc11f1 0 \(.*\) {'user': 'test'} (re)
+  1 6fdef60fcbabbd3d50e9b9cbc2a240724b91a5e1 d27fb9b066076fd921277a4b9e8b9cb48c95bc6a 0 \(.*\) {'user': 'test'} (re)
+  2 1ab51af8f9b41ef8c7f6f3312d4706d870b1fb74 29346082e4a9e27042b62d2da0e2de211c027621 0 \(.*\) {'user': 'test'} (re)
+  3 4715cf767440ed891755448016c2b8cf70760c30 7ae79c5d60f049c7b0dd02f5f25b9d60aaf7b36d 0 \(.*\) {'user': 'test'} (re)
+  $ hg debugobsolete --delete 1 --delete 3
+  deleted 2 obsolescense markers
+  $ hg debugobsolete
+  cb9a9f314b8b07ba71012fcdbc544b5a4d82ff5b f9bd49731b0b175e42992a3c8fa6c678b2bc11f1 0 \(.*\) {'user': 'test'} (re)
+  1ab51af8f9b41ef8c7f6f3312d4706d870b1fb74 29346082e4a9e27042b62d2da0e2de211c027621 0 \(.*\) {'user': 'test'} (re)
+  $ cd ..
 

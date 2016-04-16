@@ -36,7 +36,7 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
         d = funcname.rfind('.')
         if d == -1:
             raise error.HookLoadError(
-                _('%s hook is invalid ("%s" not in a module)')
+                _('%s hook is invalid: "%s" not in a module')
                 % (hname, funcname))
         modname = funcname[:d]
         oldpaths = sys.path
@@ -49,13 +49,13 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
         with demandimport.deactivated():
             try:
                 obj = __import__(modname)
-            except ImportError:
-                e1 = sys.exc_type, sys.exc_value, sys.exc_traceback
+            except (ImportError, SyntaxError):
+                e1 = sys.exc_info()
                 try:
                     # extensions are loaded with hgext_ prefix
                     obj = __import__("hgext_%s" % modname)
-                except ImportError:
-                    e2 = sys.exc_type, sys.exc_value, sys.exc_traceback
+                except (ImportError, SyntaxError):
+                    e2 = sys.exc_info()
                     if ui.tracebackflag:
                         ui.warn(_('exception from first failed import '
                                   'attempt:\n'))
@@ -64,20 +64,26 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
                         ui.warn(_('exception from second failed import '
                                   'attempt:\n'))
                     ui.traceback(e2)
+
+                    if not ui.tracebackflag:
+                        tracebackhint = _(
+                            'run with --traceback for stack trace')
+                    else:
+                        tracebackhint = None
                     raise error.HookLoadError(
-                        _('%s hook is invalid (import of "%s" failed)') %
-                        (hname, modname))
+                        _('%s hook is invalid: import of "%s" failed') %
+                        (hname, modname), hint=tracebackhint)
         sys.path = oldpaths
         try:
             for p in funcname.split('.')[1:]:
                 obj = getattr(obj, p)
         except AttributeError:
             raise error.HookLoadError(
-                _('%s hook is invalid ("%s" is not defined)')
+                _('%s hook is invalid: "%s" is not defined')
                 % (hname, funcname))
         if not callable(obj):
             raise error.HookLoadError(
-                _('%s hook is invalid ("%s" is not callable)')
+                _('%s hook is invalid: "%s" is not callable')
                 % (hname, funcname))
 
     ui.note(_("calling hook %s: %s\n") % (hname, funcname))
@@ -100,6 +106,8 @@ def _pythonhook(ui, repo, name, hname, funcname, args, throw):
                            '%s\n') % (hname, exc))
         if throw:
             raise
+        if not ui.tracebackflag:
+            ui.warn(_('(run with --traceback for stack trace)\n'))
         ui.traceback()
         return True, True
     finally:
@@ -153,13 +161,32 @@ def _exthook(ui, repo, name, cmd, args, throw):
         ui.warn(_('warning: %s hook %s\n') % (name, desc))
     return r
 
+# represent an untrusted hook command
+_fromuntrusted = object()
+
 def _allhooks(ui):
-    hooks = []
-    for name, cmd in ui.configitems('hooks'):
+    """return a list of (hook-id, cmd) pairs sorted by priority"""
+    hooks = _hookitems(ui)
+    # Be careful in this section, propagating the real commands from untrusted
+    # sources would create a security vulnerability, make sure anything altered
+    # in that section uses "_fromuntrusted" as its command.
+    untrustedhooks = _hookitems(ui, _untrusted=True)
+    for name, value in untrustedhooks.items():
+        trustedvalue = hooks.get(name, (None, None, name, _fromuntrusted))
+        if value != trustedvalue:
+            (lp, lo, lk, lv) = trustedvalue
+            hooks[name] = (lp, lo, lk, _fromuntrusted)
+    # (end of the security sensitive section)
+    return [(k, v) for p, o, k, v in sorted(hooks.values())]
+
+def _hookitems(ui, _untrusted=False):
+    """return all hooks items ready to be sorted"""
+    hooks = {}
+    for name, cmd in ui.configitems('hooks', untrusted=_untrusted):
         if not name.startswith('priority'):
             priority = ui.configint('hooks', 'priority.%s' % name, 0)
-            hooks.append((-priority, len(hooks), name, cmd))
-    return [(k, v) for p, o, k, v in sorted(hooks)]
+            hooks[name] = (-priority, len(hooks), name, cmd)
+    return hooks
 
 _redirect = False
 def redirect(state):
@@ -200,7 +227,15 @@ def runhooks(ui, repo, name, hooks, throw=False, **args):
                     # files seem to be bogus, give up on redirecting (WSGI, etc)
                     pass
 
-            if callable(cmd):
+            if cmd is _fromuntrusted:
+                if throw:
+                    raise error.HookAbort(
+                        _('untrusted hook %s not executed') % name,
+                        hint = _("see 'hg help config.trusted'"))
+                ui.warn(_('warning: untrusted hook %s not executed\n') % name)
+                r = 1
+                raised = False
+            elif callable(cmd):
                 r, raised = _pythonhook(ui, repo, name, hname, cmd, args, throw)
             elif cmd.startswith('python:'):
                 if cmd.count(':') >= 2:

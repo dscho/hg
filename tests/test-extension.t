@@ -7,9 +7,11 @@ Test basic extension support
   > command = cmdutil.command(cmdtable)
   > def uisetup(ui):
   >     ui.write("uisetup called\\n")
+  >     ui.flush()
   > def reposetup(ui, repo):
   >     ui.write("reposetup called for %s\\n" % os.path.basename(repo.root))
   >     ui.write("ui %s= repo.ui\\n" % (ui == repo.ui and "=" or "!"))
+  >     ui.flush()
   > @command('foo', [], 'hg foo')
   > def foo(ui, *args, **kwargs):
   >     ui.write("Foo\\n")
@@ -183,6 +185,7 @@ Check absolute/relative import of extension specific modules
   > import foo
   > def extsetup(ui):
   >     ui.write('(extroot) ', foo.func(), '\n')
+  >     ui.flush()
   > EOF
 
   $ cat > $TESTTMP/extroot/foo.py <<EOF
@@ -1003,7 +1006,7 @@ Test version number support in 'hg version':
   
   Enabled extensions:
   
-    throw  1.2.3
+    throw  external  1.2.3
   $ echo 'getversion = lambda: "1.twentythree"' >> throw.py
   $ rm -f throw.pyc throw.pyo
   $ hg version -v --config extensions.throw=throw.py
@@ -1016,7 +1019,7 @@ Test version number support in 'hg version':
   
   Enabled extensions:
   
-    throw  1.twentythree
+    throw  external  1.twentythree
 
 Refuse to load extensions with minimum version requirements
 
@@ -1077,6 +1080,7 @@ Commands handling multiple repositories at a time should invoke only
   > from mercurial import extensions
   > def reposetup(ui, repo):
   >     ui.write('reposetup() for %s\n' % (repo.root))
+  >     ui.flush()
   > EOF
   $ hg init src
   $ echo a > src/a
@@ -1196,6 +1200,48 @@ disabling in command line overlays with all configuration
   C sub2/.hgsubstate
   C sub2/sub21/21
   C sub3/3
+
+  $ cd ..
+
+Test compatibility with extension commands that don't use @command (issue5137)
+
+  $ hg init deprecated
+  $ cd deprecated
+
+  $ cat <<EOF > deprecatedcmd.py
+  > def deprecatedcmd(repo, ui):
+  >     pass
+  > cmdtable = {
+  >     'deprecatedcmd': (deprecatedcmd, [], ''),
+  > }
+  > EOF
+  $ cat <<EOF > .hg/hgrc
+  > [extensions]
+  > deprecatedcmd = `pwd`/deprecatedcmd.py
+  > mq = !
+  > hgext.mq = !
+  > hgext/mq = !
+  > [alias]
+  > deprecatedalias = deprecatedcmd
+  > EOF
+
+  $ hg deprecatedcmd
+  devel-warn: missing attribute 'norepo', use @command decorator to register 'deprecatedcmd'
+  (compatibility will be dropped after Mercurial-3.8, update your code.) at: * (glob)
+
+  $ hg deprecatedalias
+  devel-warn: missing attribute 'norepo', use @command decorator to register 'deprecatedalias'
+  (compatibility will be dropped after Mercurial-3.8, update your code.) at: * (glob)
+
+ no warning unless command is executed:
+
+  $ hg paths
+
+ but mq iterates over command table:
+
+  $ hg --config extensions.mq= paths
+  devel-warn: missing attribute 'norepo', use @command decorator to register 'deprecatedcmd'
+  (compatibility will be dropped after Mercurial-3.8, update your code.) at: * (glob)
 
   $ cd ..
 

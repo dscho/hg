@@ -527,7 +527,7 @@ Test hidden changesets in the rebase set (issue4504)
   $ hg commit -m J
   $ hg debugobsolete `hg log --rev . -T '{node}'`
 
-  $ hg rebase --rev .~1::. --dest 'max(desc(D))' --traceback
+  $ hg rebase --rev .~1::. --dest 'max(desc(D))' --traceback --config experimental.rebaseskipobsolete=off
   rebasing 9:4bde274eefcf "I"
   rebasing 13:06edfc82198f "J" (tip)
   $ hg log -G
@@ -771,8 +771,8 @@ If a rebase is going to create divergence, it should abort
   phases: 8 draft
   unstable: 1 changesets
   $ hg rebase -s 10 -d 12
-  abort: this rebase will cause divergence
-  (to force the rebase please set rebase.allowdivergence=True)
+  abort: this rebase will cause divergences from: 121d9e3bc4c6
+  (to force the rebase please set experimental.allowdivergence=True)
   [255]
   $ hg log -G
   @  15:73568ab6879d bar foo
@@ -791,9 +791,9 @@ If a rebase is going to create divergence, it should abort
   |
   o  0:4a2df7238c3b A
   
-With rebase.allowdivergence=True, rebase can create divergence
+With experimental.allowdivergence=True, rebase can create divergence
 
-  $ hg rebase -s 10 -d 12 --config rebase.allowdivergence=True
+  $ hg rebase -s 10 -d 12 --config experimental.allowdivergence=True
   rebasing 10:121d9e3bc4c6 "P"
   rebasing 15:73568ab6879d "bar foo" (tip)
   $ hg summary
@@ -805,3 +805,61 @@ With rebase.allowdivergence=True, rebase can create divergence
   phases: 8 draft
   divergent: 2 changesets
 
+rebase --continue + skipped rev because their successors are in destination
+we make a change in trunk and work on conflicting changes to make rebase abort.
+
+  $ hg log -G -r 17::
+  @  17:61bd55f69bc4 bar foo
+  |
+  ~
+
+Create the two changes in trunk
+  $ printf "a" > willconflict
+  $ hg add willconflict
+  $ hg commit -m "willconflict first version"
+
+  $ printf "dummy" > C
+  $ hg commit -m "dummy change successor"
+
+Create the changes that we will rebase
+  $ hg update -C 17 -q
+  $ printf "b" > willconflict
+  $ hg add willconflict
+  $ hg commit -m "willconflict second version"
+  created new head
+  $ printf "dummy" > K
+  $ hg add K
+  $ hg commit -m "dummy change"
+  $ printf "dummy" > L
+  $ hg add L
+  $ hg commit -m "dummy change"
+  $ hg debugobsolete `hg log -r ".^" -T '{node}'` `hg log -r 19 -T '{node}'` --config experimental.evolution=all
+
+  $ hg log -G -r 17::
+  @  22:7bdc8a87673d dummy change
+  |
+  x  21:8b31da3c4919 dummy change
+  |
+  o  20:b82fb57ea638 willconflict second version
+  |
+  | o  19:601db7a18f51 dummy change successor
+  | |
+  | o  18:357ddf1602d5 willconflict first version
+  |/
+  o  17:61bd55f69bc4 bar foo
+  |
+  ~
+  $ hg rebase -r ".^^ + .^ + ." -d 19
+  rebasing 20:b82fb57ea638 "willconflict second version"
+  merging willconflict
+  warning: conflicts while merging willconflict! (edit, then use 'hg resolve --mark')
+  unresolved conflicts (see hg resolve, then hg rebase --continue)
+  [1]
+
+  $ hg resolve --mark willconflict
+  (no more unresolved files)
+  continue: hg rebase --continue
+  $ hg rebase --continue
+  rebasing 20:b82fb57ea638 "willconflict second version"
+  note: not rebasing 21:8b31da3c4919 "dummy change", already in destination as 19:601db7a18f51 "dummy change successor"
+  rebasing 22:7bdc8a87673d "dummy change" (tip)

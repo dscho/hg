@@ -28,6 +28,9 @@ Mercurial-patchbomb/.* -> Mercurial-patchbomb/* (glob)
   $ echo "[extensions]" >> $HGRCPATH
   $ echo "patchbomb=" >> $HGRCPATH
 
+Ensure hg email output is sent to stdout
+  $ unset PAGER
+
   $ hg init t
   $ cd t
   $ echo a > a
@@ -2874,7 +2877,7 @@ basic version
   (use "hg push $TESTTMP/t2 -r 3b6f1ec9dde9")
   [1]
 
-remote missing
+public missing
 
   $ echo 'publicurl=$TESTTMP/missing' >> $HGRCPATH
   $ hg email --date '1980-1-1 0:1' -t foo -s test -r '10'
@@ -2882,7 +2885,7 @@ remote missing
   abort: repository $TESTTMP/missing not found!
   [255]
 
-node missing at remote
+node missing at public
 
   $ hg clone -r '9' . ../t3
   adding changesets
@@ -2896,3 +2899,11 @@ node missing at remote
   abort: public url $TESTTMP/t3 is missing 3b6f1ec9dde9
   (use "hg push $TESTTMP/t3 -r 3b6f1ec9dde9")
   [255]
+
+multiple heads are missing at public
+
+  $ hg email --date '1980-1-1 0:1' -t foo -s test -r '2+10'
+  abort: public "$TESTTMP/t3" is missing ff2c9fa2018b and 1 others
+  (use "hg push $TESTTMP/t3 -r ff2c9fa2018b -r 3b6f1ec9dde9")
+  [255]
+

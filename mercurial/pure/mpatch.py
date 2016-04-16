@@ -7,10 +7,14 @@
 
 from __future__ import absolute_import
 
-import cStringIO
 import struct
 
-StringIO = cStringIO.StringIO
+from . import pycompat
+stringio = pycompat.stringio
+
+class mpatchError(Exception):
+    """error raised when a delta cannot be decoded
+    """
 
 # This attempts to apply a series of patches in time proportional to
 # the total size of the patches, rather than patches * len(text). This
@@ -21,6 +25,33 @@ StringIO = cStringIO.StringIO
 # efficiently, we do all our operations inside a buffer created by
 # mmap and simply use memmove. This avoids creating a bunch of large
 # temporary string buffers.
+
+def _pull(dst, src, l): # pull l bytes from src
+    while l:
+        f = src.pop()
+        if f[0] > l: # do we need to split?
+            src.append((f[0] - l, f[1] + l))
+            dst.append((l, f[1]))
+            return
+        dst.append(f)
+        l -= f[0]
+
+def _move(m, dest, src, count):
+    """move count bytes from src to dest
+
+    The file pointer is left at the end of dest.
+    """
+    m.seek(src)
+    buf = m.read(count)
+    m.seek(dest)
+    m.write(buf)
+
+def _collect(m, buf, list):
+    start = buf
+    for l, p in reversed(list):
+        _move(m, buf, p, l)
+        buf += l
+    return (buf - start, start)
 
 def patches(a, bins):
     if not bins:
@@ -35,16 +66,7 @@ def patches(a, bins):
     if not tl:
         return a
 
-    m = StringIO()
-    def move(dest, src, count):
-        """move count bytes from src to dest
-
-        The file pointer is left at the end of dest.
-        """
-        m.seek(src)
-        buf = m.read(count)
-        m.seek(dest)
-        m.write(buf)
+    m = stringio()
 
     # load our original text
     m.write(a)
@@ -55,43 +77,29 @@ def patches(a, bins):
     m.seek(pos)
     for p in bins: m.write(p)
 
-    def pull(dst, src, l): # pull l bytes from src
-        while l:
-            f = src.pop()
-            if f[0] > l: # do we need to split?
-                src.append((f[0] - l, f[1] + l))
-                dst.append((l, f[1]))
-                return
-            dst.append(f)
-            l -= f[0]
-
-    def collect(buf, list):
-        start = buf
-        for l, p in reversed(list):
-            move(buf, p, l)
-            buf += l
-        return (buf - start, start)
-
     for plen in plens:
         # if our list gets too long, execute it
         if len(frags) > 128:
             b2, b1 = b1, b2
-            frags = [collect(b1, frags)]
+            frags = [_collect(m, b1, frags)]
 
         new = []
         end = pos + plen
         last = 0
         while pos < end:
             m.seek(pos)
-            p1, p2, l = struct.unpack(">lll", m.read(12))
-            pull(new, frags, p1 - last) # what didn't change
-            pull([], frags, p2 - p1)    # what got deleted
+            try:
+                p1, p2, l = struct.unpack(">lll", m.read(12))
+            except struct.error:
+                raise mpatchError("patch cannot be decoded")
+            _pull(new, frags, p1 - last) # what didn't change
+            _pull([], frags, p2 - p1)    # what got deleted
             new.append((l, pos + 12))   # what got added
             pos += l + 12
             last = p2
         frags.extend(reversed(new))     # what was left at the end
 
-    t = collect(b2, frags)
+    t = _collect(m, b2, frags)
 
     m.seek(t[1])
     return m.read(t[0])
@@ -113,7 +121,7 @@ def patchedsize(orig, delta):
         outlen += length
 
     if bin != binend:
-        raise ValueError("patch cannot be decoded")
+        raise mpatchError("patch cannot be decoded")
 
     outlen += orig - last
     return outlen

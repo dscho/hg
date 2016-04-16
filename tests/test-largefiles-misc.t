@@ -473,10 +473,10 @@ Test actions on largefiles using relative paths from subdir
   $ hg log -G anotherlarge
   @  changeset:   1:9627a577c5e9
   |  tag:         tip
-  |  user:        test
-  |  date:        Thu Jan 01 00:00:00 1970 +0000
-  |  summary:     anotherlarge
-  |
+  ~  user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     anotherlarge
+  
 
   $ hg log glob:another*
   changeset:   1:9627a577c5e9
@@ -489,6 +489,7 @@ Test actions on largefiles using relative paths from subdir
   updated patterns: ['glob:../.hglf/sub/another*', 'glob:another*']
   @  1: anotherlarge
   |
+  ~
 
 #if no-msys
   $ hg --debug log -T '{rev}: {desc}\n' 'glob:../.hglf/sub/another*' # no-msys
@@ -499,6 +500,7 @@ Test actions on largefiles using relative paths from subdir
   updated patterns: ['glob:../.hglf/sub/another*']
   @  1: anotherlarge
   |
+  ~
 #endif
 
   $ echo more >> anotherlarge
@@ -534,10 +536,10 @@ Test glob logging from the root dir
   $ hg log -G glob:**another*
   @  changeset:   1:9627a577c5e9
   |  tag:         tip
-  |  user:        test
-  |  date:        Thu Jan 01 00:00:00 1970 +0000
-  |  summary:     anotherlarge
-  |
+  ~  user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     anotherlarge
+  
 
   $ cd ..
 
@@ -682,8 +684,8 @@ check messages when there are files to upload:
   all remote heads known locally
   1:1acbe71ce432
   2:6095d0695d70
-  finding outgoing largefiles: 0/2 revision (0.00%)
-  finding outgoing largefiles: 1/2 revision (50.00%)
+  finding outgoing largefiles: 0/2 revisions (0.00%)
+  finding outgoing largefiles: 1/2 revisions (50.00%)
   largefiles to upload (1 entities):
   b
       89e6c98d92887913cadf06b2adb97f26cde4849b
@@ -740,11 +742,11 @@ check messages when there are files to upload:
   3:7983dce246cc
   4:233f12ada4ae
   5:036794ea641c
-  finding outgoing largefiles: 0/5 revision (0.00%)
-  finding outgoing largefiles: 1/5 revision (20.00%)
-  finding outgoing largefiles: 2/5 revision (40.00%)
-  finding outgoing largefiles: 3/5 revision (60.00%)
-  finding outgoing largefiles: 4/5 revision (80.00%)
+  finding outgoing largefiles: 0/5 revisions (0.00%)
+  finding outgoing largefiles: 1/5 revisions (20.00%)
+  finding outgoing largefiles: 2/5 revisions (40.00%)
+  finding outgoing largefiles: 3/5 revisions (60.00%)
+  finding outgoing largefiles: 4/5 revisions (80.00%)
   largefiles to upload (3 entities):
   b
       13f9ed0898e315bf59dc2973fec52037b6f441a2
@@ -791,10 +793,10 @@ and #5 refer it.
   3:7983dce246cc
   4:233f12ada4ae
   5:036794ea641c
-  finding outgoing largefiles: 0/4 revision (0.00%)
-  finding outgoing largefiles: 1/4 revision (25.00%)
-  finding outgoing largefiles: 2/4 revision (50.00%)
-  finding outgoing largefiles: 3/4 revision (75.00%)
+  finding outgoing largefiles: 0/4 revisions (0.00%)
+  finding outgoing largefiles: 1/4 revisions (25.00%)
+  finding outgoing largefiles: 2/4 revisions (50.00%)
+  finding outgoing largefiles: 3/4 revisions (75.00%)
   largefiles to upload (2 entities):
   b
       13f9ed0898e315bf59dc2973fec52037b6f441a2
@@ -1095,7 +1097,7 @@ Test "pull --rebase" when rebase is enabled before largefiles (issue3861)
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files
-  nothing to rebase - working directory parent is already an ancestor of destination bf5e395ced2c
+  nothing to rebase - updating instead
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
   $ cd ..

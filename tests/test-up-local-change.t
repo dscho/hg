@@ -73,6 +73,7 @@
    preserving a for resolve of a
    b: other deleted -> r
   removing b
+  starting 4 threads for background file closing (?)
    a: versions differ -> m (premerge)
   picked tool 'true' for a (binary False symlink False changedelete False)
   merging a
@@ -172,9 +173,8 @@ create a second head
   summary:     2
   
   $ hg --debug up
-  abort: uncommitted changes
-  (commit and merge, or update --clean to discard changes)
-  [255]
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
 
 test conflicting untracked files
 

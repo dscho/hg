@@ -1,38 +1,58 @@
 # Subversion 1.4/1.5 Python API backend
 #
 # Copyright(C) 2007 Daniel Holth et al
+from __future__ import absolute_import
 
-import os, re, sys, tempfile, urllib, urllib2
-import xml.dom.minidom
 import cPickle as pickle
+import os
+import re
+import sys
+import tempfile
+import xml.dom.minidom
 
-from mercurial import strutil, scmutil, util, encoding, error
+from mercurial import (
+    encoding,
+    error,
+    scmutil,
+    strutil,
+    util,
+)
 from mercurial.i18n import _
 
+from . import common
+
+stringio = util.stringio
 propertycache = util.propertycache
+urlerr = util.urlerr
+urlreq = util.urlreq
+
+commandline = common.commandline
+commit = common.commit
+converter_sink = common.converter_sink
+converter_source = common.converter_source
+decodeargs = common.decodeargs
+encodeargs = common.encodeargs
+makedatetimestamp = common.makedatetimestamp
+mapfile = common.mapfile
+MissingTool = common.MissingTool
+NoRepo = common.NoRepo
 
 # Subversion stuff. Works best with very recent Python SVN bindings
 # e.g. SVN 1.5 or backports. Thanks to the bzr folks for enhancing
 # these bindings.
 
-from cStringIO import StringIO
-
-from common import NoRepo, MissingTool, commit, encodeargs, decodeargs
-from common import commandline, converter_source, converter_sink, mapfile
-from common import makedatetimestamp
-
 try:
-    from svn.core import SubversionException, Pool
     import svn
     import svn.client
     import svn.core
     import svn.ra
     import svn.delta
-    import transport
+    from . import transport
     import warnings
     warnings.filterwarnings('ignore',
             module='svn.core',
             category=DeprecationWarning)
+    svn.core.SubversionException # trigger import to catch error
 
 except ImportError:
     svn = None
@@ -74,12 +94,12 @@ def quote(s):
     # so we can extend it safely with new components. The "safe"
     # characters were taken from the "svn_uri__char_validity" table in
     # libsvn_subr/path.c.
-    return urllib.quote(s, "!$&'()*+,-./:=@_~")
+    return urlreq.quote(s, "!$&'()*+,-./:=@_~")
 
 def geturl(path):
     try:
         return svn.client.url_from_path(svn.core.svn_path_canonicalize(path))
-    except SubversionException:
+    except svn.core.SubversionException:
         # svn.client.url_from_path() fails with local repositories
         pass
     if os.path.isdir(path):
@@ -213,10 +233,10 @@ def filecheck(ui, path, proto):
 # for the svn-specific "not found" XML.
 def httpcheck(ui, path, proto):
     try:
-        opener = urllib2.build_opener()
+        opener = urlreq.buildopener()
         rsp = opener.open('%s://%s/!svn/ver/0/.svn' % (proto, path))
         data = rsp.read()
-    except urllib2.HTTPError as inst:
+    except urlerr.httperror as inst:
         if inst.code != 404:
             # Except for 404 we cannot know for sure this is not an svn repo
             ui.warn(_('svn: cannot probe remote repository, assume it could '
@@ -225,7 +245,7 @@ def httpcheck(ui, path, proto):
             return True
         data = inst.fp.read()
     except Exception:
-        # Could be urllib2.URLError if the URL is invalid or anything else.
+        # Could be urlerr.urlerror if the URL is invalid or anything else.
         return False
     return '<m:human-readable errcode="160013">' in data
 
@@ -240,7 +260,7 @@ def issvnurl(ui, url):
             if (os.name == 'nt' and path[:1] == '/' and path[1:2].isalpha()
                 and path[2:6].lower() == '%3a/'):
                 path = path[:2] + ':/' + path[6:]
-            path = urllib.url2pathname(path)
+            path = urlreq.url2pathname(path)
     except ValueError:
         proto = 'file'
         path = os.path.abspath(url)
@@ -310,13 +330,13 @@ class svn_source(converter_source):
             self.baseurl = svn.ra.get_repos_root(self.ra)
             # Module is either empty or a repository path starting with
             # a slash and not ending with a slash.
-            self.module = urllib.unquote(self.url[len(self.baseurl):])
+            self.module = urlreq.unquote(self.url[len(self.baseurl):])
             self.prevmodule = None
             self.rootmodule = self.module
             self.commits = {}
             self.paths = {}
             self.uuid = svn.ra.get_uuid(self.ra)
-        except SubversionException:
+        except svn.core.SubversionException:
             ui.traceback()
             svnversion = '%d.%d.%d' % (svn.core.SVN_VER_MAJOR,
                                        svn.core.SVN_VER_MINOR,
@@ -377,7 +397,7 @@ class svn_source(converter_source):
             svn.client.ls(self.url.rstrip('/') + '/' + quote(path),
                                  optrev, False, self.ctx)
             return True
-        except SubversionException:
+        except svn.core.SubversionException:
             return False
 
     def getheads(self):
@@ -676,7 +696,7 @@ class svn_source(converter_source):
             prevmodule = self.reparent('')
             dirent = svn.ra.stat(self.ra, path.strip('/'), stop)
             self.reparent(prevmodule)
-        except SubversionException:
+        except svn.core.SubversionException:
             dirent = None
         if not dirent:
             raise SvnPathNotFound(_('%s not found up to revision %d')
@@ -728,7 +748,7 @@ class svn_source(converter_source):
 
         for i, (path, ent) in enumerate(paths):
             self.ui.progress(_('scanning paths'), i, item=path,
-                             total=len(paths))
+                             total=len(paths), unit=_('paths'))
             entrypath = self.getrelpath(path)
 
             kind = self._checkpath(entrypath, revnum)
@@ -948,7 +968,7 @@ class svn_source(converter_source):
                             firstcset.parents.append(latest)
                 except SvnPathNotFound:
                     pass
-        except SubversionException as xxx_todo_changeme:
+        except svn.core.SubversionException as xxx_todo_changeme:
             (inst, num) = xxx_todo_changeme.args
             if num == svn.core.SVN_ERR_FS_NO_SUCH_REVISION:
                 raise error.Abort(_('svn: branch has no revision %s')
@@ -965,7 +985,7 @@ class svn_source(converter_source):
             if self.module != new_module:
                 self.module = new_module
                 self.reparent(self.module)
-            io = StringIO()
+            io = stringio()
             info = svn.ra.get_file(self.ra, file, revnum, io)
             data = io.getvalue()
             # ra.get_file() seems to keep a reference on the input buffer
@@ -975,7 +995,7 @@ class svn_source(converter_source):
                 info = info[-1]
             mode = ("svn:executable" in info) and 'x' or ''
             mode = ("svn:special" in info) and 'l' or mode
-        except SubversionException as e:
+        except svn.core.SubversionException as e:
             notfound = (svn.core.SVN_ERR_FS_NOT_FOUND,
                 svn.core.SVN_ERR_RA_DAV_PATH_NOT_FOUND)
             if e.apr_err in notfound: # File not found
@@ -990,7 +1010,7 @@ class svn_source(converter_source):
     def _iterfiles(self, path, revnum):
         """Enumerate all files in path at revnum, recursively."""
         path = path.strip('/')
-        pool = Pool()
+        pool = svn.core.Pool()
         rpath = '/'.join([self.baseurl, quote(path)]).strip('/')
         entries = svn.client.ls(rpath, optrev(revnum), True, self.ctx, pool)
         if path:

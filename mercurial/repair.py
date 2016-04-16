@@ -17,6 +17,7 @@ from . import (
     changegroup,
     error,
     exchange,
+    obsolete,
     util,
 )
 
@@ -46,7 +47,7 @@ def _bundle(repo, bases, heads, node, suffix, compress=True):
         bundletype = "HG10BZ"
     else:
         bundletype = "HG10UN"
-    return changegroup.writebundle(repo.ui, cg, name, bundletype, vfs,
+    return bundle2.writebundle(repo.ui, cg, name, bundletype, vfs,
                                    compression=comp)
 
 def _collectfiles(repo, striprev):
@@ -254,7 +255,8 @@ def rebuildfncache(ui, repo):
 
         repolen = len(repo)
         for rev in repo:
-            ui.progress(_('changeset'), rev, total=repolen)
+            ui.progress(_('rebuilding'), rev, total=repolen,
+                        unit=_('changesets'))
 
             ctx = repo[rev]
             for f in ctx.files():
@@ -271,7 +273,17 @@ def rebuildfncache(ui, repo):
                 if repo.store._exists(d):
                     newentries.add(d)
 
-        ui.progress(_('changeset'), None)
+        ui.progress(_('rebuilding'), None)
+
+        if 'treemanifest' in repo.requirements: # safe but unnecessary otherwise
+            for dir in util.dirs(seenfiles):
+                i = 'meta/%s/00manifest.i' % dir
+                d = 'meta/%s/00manifest.d' % dir
+
+                if repo.store._exists(i):
+                    newentries.add(i)
+                if repo.store._exists(d):
+                    newentries.add(d)
 
         addcount = len(newentries - oldentries)
         removecount = len(oldentries - newentries)
@@ -302,3 +314,32 @@ def stripbmrevset(repo, mark):
                      "ancestors(head() and not bookmark(%s)) - "
                      "ancestors(bookmark() and not bookmark(%s))",
                      mark, mark, mark)
+
+def deleteobsmarkers(obsstore, indices):
+    """Delete some obsmarkers from obsstore and return how many were deleted
+
+    'indices' is a list of ints which are the indices
+    of the markers to be deleted.
+
+    Every invocation of this function completely rewrites the obsstore file,
+    skipping the markers we want to be removed. The new temporary file is
+    created, remaining markers are written there and on .close() this file
+    gets atomically renamed to obsstore, thus guaranteeing consistency."""
+    if not indices:
+        # we don't want to rewrite the obsstore with the same content
+        return
+
+    left = []
+    current = obsstore._all
+    n = 0
+    for i, m in enumerate(current):
+        if i in indices:
+            n += 1
+            continue
+        left.append(m)
+
+    newobsstorefile = obsstore.svfs('obsstore', 'w', atomictemp=True)
+    for bytes in obsolete.encodemarkers(left, True, obsstore._version):
+        newobsstorefile.write(bytes)
+    newobsstorefile.close()
+    return n

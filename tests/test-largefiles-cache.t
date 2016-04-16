@@ -189,7 +189,7 @@ conditional above.
 Inject corruption into the largefiles store and see how update handles that:
 
   $ cd src
-  $ hg up -qC
+  $ hg up -qC tip
   $ cat large
   modified
   $ rm large
@@ -202,6 +202,7 @@ Inject corruption into the largefiles store and see how update handles that:
   large: data corruption in $TESTTMP/src/.hg/largefiles/e2fb5f2139d086ded2cb600d5a91a196e76bf020 with hash 6a7bb2556144babe3899b25e5428123735bb1e27 (glob)
   0 largefiles updated, 0 removed
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  [12] other heads for branch "default" (re)
   $ hg st
   ! large
   ? z
@@ -233,5 +234,21 @@ Test coverage of 'missing from store':
   searching for changes
   abort: largefile e2fb5f2139d086ded2cb600d5a91a196e76bf020 missing from store (needs to be uploaded)
   [255]
+
+Verify that --lfrev controls which revisions are checked for largefiles to push
+
+  $ hg push http://localhost:$HGPORT2 -f --config largefiles.usercache=nocache --lfrev tip
+  pushing to http://localhost:$HGPORT2/
+  searching for changes
+  abort: largefile e2fb5f2139d086ded2cb600d5a91a196e76bf020 missing from store (needs to be uploaded)
+  [255]
+
+  $ hg push http://localhost:$HGPORT2 -f --config largefiles.usercache=nocache --lfrev null
+  pushing to http://localhost:$HGPORT2/
+  searching for changes
+  remote: adding changesets
+  remote: adding manifests
+  remote: adding file changes
+  remote: added 1 changesets with 1 changes to 1 files (+1 heads)
 
 #endif

@@ -1,26 +1,29 @@
-from pprint import pprint
-from mercurial import minirst
+from __future__ import absolute_import, print_function
+import pprint
+from mercurial import (
+    minirst,
+)
 
 def debugformat(text, form, **kwargs):
     if form == 'html':
-        print "html format:"
+        print("html format:")
         out = minirst.format(text, style=form, **kwargs)
     else:
-        print "%d column format:" % form
+        print("%d column format:" % form)
         out = minirst.format(text, width=form, **kwargs)
 
-    print "-" * 70
+    print("-" * 70)
     if type(out) == tuple:
-        print out[0][:-1]
-        print "-" * 70
-        pprint(out[1])
+        print(out[0][:-1])
+        print("-" * 70)
+        pprint.pprint(out[1])
     else:
-        print out[:-1]
-    print "-" * 70
-    print
+        print(out[:-1])
+    print("-" * 70)
+    print()
 
 def debugformats(title, text, **kwargs):
-    print "== %s ==" % title
+    print("== %s ==" % title)
     debugformat(text, 60, **kwargs)
     debugformat(text, 30, **kwargs)
     debugformat(text, 'html', **kwargs)
@@ -241,7 +244,7 @@ data = [['a', 'b', 'c'],
 rst = minirst.maketable(data, 2, True)
 table = ''.join(rst)
 
-print table
+print(table)
 
 debugformats('table', table)
 
@@ -251,7 +254,7 @@ data = [['s', 'long', 'line\ngoes on here'],
 rst = minirst.maketable(data, 1, False)
 table = ''.join(rst)
 
-print table
+print(table)
 
 debugformats('table+nl', table)
 

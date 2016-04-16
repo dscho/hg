@@ -153,7 +153,7 @@ class templateformatter(baseformatter):
         self._topic = topic
         self._t = gettemplater(ui, topic, opts.get('template', ''))
     def _showitem(self):
-        g = self._t(self._topic, **self._item)
+        g = self._t(self._topic, ui=self._ui, **self._item)
         self._ui.write(templater.stringify(g))
 
 def lookuptemplate(ui, topic, tmpl):
@@ -171,11 +171,7 @@ def lookuptemplate(ui, topic, tmpl):
     # perhaps it's a reference to [templates]
     t = ui.config('templates', tmpl)
     if t:
-        try:
-            tmpl = templater.unquotestring(t)
-        except SyntaxError:
-            tmpl = t
-        return tmpl, None
+        return templater.unquotestring(t), None
 
     if tmpl == 'list':
         ui.write(_("available styles: %s\n") % templater.stylelist())
@@ -194,7 +190,15 @@ def lookuptemplate(ui, topic, tmpl):
 
 def gettemplater(ui, topic, spec):
     tmpl, mapfile = lookuptemplate(ui, topic, spec)
-    t = templater.templater(mapfile, {})
+    assert not (tmpl and mapfile)
+    if mapfile:
+        return templater.templater.frommapfile(mapfile)
+    return maketemplater(ui, topic, tmpl)
+
+def maketemplater(ui, topic, tmpl, filters=None, cache=None):
+    """Create a templater from a string template 'tmpl'"""
+    aliases = ui.configitems('templatealias')
+    t = templater.templater(filters=filters, cache=cache, aliases=aliases)
     if tmpl:
         t.cache[topic] = tmpl
     return t

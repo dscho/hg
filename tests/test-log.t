@@ -1777,6 +1777,37 @@ issue3772: hg log -r :null showing revision 0 as well
   
 working-directory revision requires special treatment
 
+clean:
+
+  $ hg log -r 'wdir()' --debug
+  changeset:   2147483647:ffffffffffffffffffffffffffffffffffffffff
+  phase:       draft
+  parent:      0:65624cd9070a035fa7191a54f2b8af39f16b0c08
+  parent:      -1:0000000000000000000000000000000000000000
+  user:        test
+  date:        [A-Za-z0-9:+ ]+ (re)
+  extra:       branch=default
+  
+  $ hg log -r 'wdir()' -p --stat
+  changeset:   2147483647:ffffffffffff
+  parent:      0:65624cd9070a
+  user:        test
+  date:        [A-Za-z0-9:+ ]+ (re)
+  
+  
+  
+
+dirty:
+
+  $ echo 2 >> d1/f1
+  $ echo 2 > d1/f2
+  $ hg add d1/f2
+  $ hg remove .d6/f1
+  $ hg status
+  M d1/f1
+  A d1/f2
+  R .d6/f1
+
   $ hg log -r 'wdir()'
   changeset:   2147483647:ffffffffffff
   parent:      0:65624cd9070a
@@ -1793,7 +1824,40 @@ working-directory revision requires special treatment
   parent:      -1:0000000000000000000000000000000000000000
   user:        test
   date:        [A-Za-z0-9:+ ]+ (re)
+  files:       d1/f1
+  files+:      d1/f2
+  files-:      .d6/f1
   extra:       branch=default
+  
+  $ hg log -r 'wdir()' -p --stat --git
+  changeset:   2147483647:ffffffffffff
+  parent:      0:65624cd9070a
+  user:        test
+  date:        [A-Za-z0-9:+ ]+ (re)
+  
+   .d6/f1 |  1 -
+   d1/f1  |  1 +
+   d1/f2  |  1 +
+   3 files changed, 2 insertions(+), 1 deletions(-)
+  
+  diff --git a/.d6/f1 b/.d6/f1
+  deleted file mode 100644
+  --- a/.d6/f1
+  +++ /dev/null
+  @@ -1,1 +0,0 @@
+  -1
+  diff --git a/d1/f1 b/d1/f1
+  --- a/d1/f1
+  +++ b/d1/f1
+  @@ -1,1 +1,2 @@
+   1
+  +2
+  diff --git a/d1/f2 b/d1/f2
+  new file mode 100644
+  --- /dev/null
+  +++ b/d1/f2
+  @@ -0,0 +1,1 @@
+  +2
   
   $ hg log -r 'wdir()' -Tjson
   [
@@ -1834,11 +1898,13 @@ working-directory revision requires special treatment
     "parents": ["65624cd9070a035fa7191a54f2b8af39f16b0c08"],
     "manifest": null,
     "extra": {"branch": "default"},
-    "modified": [],
-    "added": [],
-    "removed": []
+    "modified": ["d1/f1"],
+    "added": ["d1/f2"],
+    "removed": [".d6/f1"]
    }
   ]
+
+  $ hg revert -aqC
 
 Check that adding an arbitrary name shows up in log automatically
 
@@ -1970,10 +2036,10 @@ log -f on the file should list the graft result.
   |  summary:     content3
   |
   o  changeset:   3:15b2327059e5
-  |  user:        test
-  |  date:        Thu Jan 01 00:00:00 1970 +0000
-  |  summary:     content2
-  |
+  :  user:        test
+  :  date:        Thu Jan 01 00:00:00 1970 +0000
+  :  summary:     content2
+  :
   o  changeset:   0:ae0a3c9f9e95
      user:        test
      date:        Thu Jan 01 00:00:00 1970 +0000
@@ -1985,16 +2051,16 @@ plain log lists the original version
 
   $ hg log -G a
   @  changeset:   4:50b9b36e9c5d
-  |  tag:         tip
-  |  user:        test
-  |  date:        Thu Jan 01 00:00:00 1970 +0000
-  |  summary:     content3
-  |
-  | o  changeset:   1:2294ae80ad84
-  |/   user:        test
-  |    date:        Thu Jan 01 00:00:00 1970 +0000
-  |    summary:     content2
-  |
+  :  tag:         tip
+  :  user:        test
+  :  date:        Thu Jan 01 00:00:00 1970 +0000
+  :  summary:     content3
+  :
+  : o  changeset:   1:2294ae80ad84
+  :/   user:        test
+  :    date:        Thu Jan 01 00:00:00 1970 +0000
+  :    summary:     content2
+  :
   o  changeset:   0:ae0a3c9f9e95
      user:        test
      date:        Thu Jan 01 00:00:00 1970 +0000
@@ -2008,10 +2074,10 @@ hg log -f from the grafted changeset
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg log -Gf a
   @  changeset:   3:15b2327059e5
-  |  user:        test
-  |  date:        Thu Jan 01 00:00:00 1970 +0000
-  |  summary:     content2
-  |
+  :  user:        test
+  :  date:        Thu Jan 01 00:00:00 1970 +0000
+  :  summary:     content2
+  :
   o  changeset:   0:ae0a3c9f9e95
      user:        test
      date:        Thu Jan 01 00:00:00 1970 +0000
@@ -2059,10 +2125,10 @@ Check that log on the file does not drop the file revision.
   |  summary:     content3
   |
   @  changeset:   3:15b2327059e5
-  |  user:        test
-  |  date:        Thu Jan 01 00:00:00 1970 +0000
-  |  summary:     content2
-  |
+  :  user:        test
+  :  date:        Thu Jan 01 00:00:00 1970 +0000
+  :  summary:     content2
+  :
   o  changeset:   0:ae0a3c9f9e95
      user:        test
      date:        Thu Jan 01 00:00:00 1970 +0000
@@ -2076,11 +2142,11 @@ Even when a head revision is linkrev-shadowed.
   $ hg debugobsolete 50b9b36e9c5df2c6fc6dcefa8ad0da929e84aed2
   $ hg log -G a
   @  changeset:   3:15b2327059e5
-  |  tag:         tip
-  |  user:        test
-  |  date:        Thu Jan 01 00:00:00 1970 +0000
-  |  summary:     content2
-  |
+  :  tag:         tip
+  :  user:        test
+  :  date:        Thu Jan 01 00:00:00 1970 +0000
+  :  summary:     content2
+  :
   o  changeset:   0:ae0a3c9f9e95
      user:        test
      date:        Thu Jan 01 00:00:00 1970 +0000
@@ -2133,17 +2199,17 @@ Even when the file revision is missing from some head:
   $ hg log -f -G b
   @  changeset:   3:9bc8ce7f9356
   |  parent:      0:f7b1eb17ad24
-  |  user:        test
-  |  date:        Thu Jan 01 00:00:00 1970 +0000
-  |  summary:     1
-  |
+  ~  user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     1
+  
   $ hg log -G b
   @  changeset:   3:9bc8ce7f9356
   |  parent:      0:f7b1eb17ad24
-  |  user:        test
-  |  date:        Thu Jan 01 00:00:00 1970 +0000
-  |  summary:     1
-  |
+  ~  user:        test
+     date:        Thu Jan 01 00:00:00 1970 +0000
+     summary:     1
+  
   $ cd ..
 
 Check proper report when the manifest changes but not the file issue4499

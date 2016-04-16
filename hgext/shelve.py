@@ -20,17 +20,36 @@ You can have more than one shelved change outstanding at a time; each
 shelved change has a distinct name. For details, see the help for "hg
 shelve".
 """
+from __future__ import absolute_import
 
 import collections
-import itertools
-from mercurial.i18n import _
-from mercurial.node import nullid, nullrev, bin, hex
-from mercurial import changegroup, cmdutil, scmutil, phases, commands
-from mercurial import error, hg, mdiff, merge, patch, repair, util
-from mercurial import templatefilters, exchange, bundlerepo, bundle2
-from mercurial import lock as lockmod
-from hgext import rebase
 import errno
+import itertools
+from mercurial import (
+    bundle2,
+    bundlerepo,
+    changegroup,
+    cmdutil,
+    commands,
+    error,
+    exchange,
+    hg,
+    lock as lockmod,
+    mdiff,
+    merge,
+    node as nodemod,
+    patch,
+    phases,
+    repair,
+    scmutil,
+    templatefilters,
+    util,
+)
+from mercurial.i18n import _
+
+from . import (
+    rebase,
+)
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
@@ -41,6 +60,7 @@ command = cmdutil.command(cmdtable)
 testedwith = 'internal'
 
 backupdir = 'shelve-backup'
+shelvedir = 'shelved'
 
 class shelvedfile(object):
     """Helper for the file storing a single shelve
@@ -50,7 +70,7 @@ class shelvedfile(object):
     def __init__(self, repo, name, filetype=None):
         self.repo = repo
         self.name = name
-        self.vfs = scmutil.vfs(repo.join('shelved'))
+        self.vfs = scmutil.vfs(repo.join(shelvedir))
         self.backupvfs = scmutil.vfs(repo.join(backupdir))
         self.ui = self.repo.ui
         if filetype:
@@ -122,7 +142,7 @@ class shelvedfile(object):
 
         cg = changegroup.changegroupsubset(self.repo, bases, [node], 'shelve',
                                            version=cgversion)
-        changegroup.writebundle(self.ui, cg, self.fname, btype, self.vfs,
+        bundle2.writebundle(self.ui, cg, self.fname, btype, self.vfs,
                                 compression=compression)
 
 class shelvedstate(object):
@@ -146,29 +166,35 @@ class shelvedstate(object):
             name = fp.readline().strip()
             wctx = fp.readline().strip()
             pendingctx = fp.readline().strip()
-            parents = [bin(h) for h in fp.readline().split()]
-            stripnodes = [bin(h) for h in fp.readline().split()]
+            parents = [nodemod.bin(h) for h in fp.readline().split()]
+            stripnodes = [nodemod.bin(h) for h in fp.readline().split()]
+            branchtorestore = fp.readline().strip()
         finally:
             fp.close()
 
         obj = cls()
         obj.name = name
-        obj.wctx = repo[bin(wctx)]
-        obj.pendingctx = repo[bin(pendingctx)]
+        obj.wctx = repo[nodemod.bin(wctx)]
+        obj.pendingctx = repo[nodemod.bin(pendingctx)]
         obj.parents = parents
         obj.stripnodes = stripnodes
+        obj.branchtorestore = branchtorestore
 
         return obj
 
     @classmethod
-    def save(cls, repo, name, originalwctx, pendingctx, stripnodes):
+    def save(cls, repo, name, originalwctx, pendingctx, stripnodes,
+             branchtorestore):
         fp = repo.vfs(cls._filename, 'wb')
         fp.write('%i\n' % cls._version)
         fp.write('%s\n' % name)
-        fp.write('%s\n' % hex(originalwctx.node()))
-        fp.write('%s\n' % hex(pendingctx.node()))
-        fp.write('%s\n' % ' '.join([hex(p) for p in repo.dirstate.parents()]))
-        fp.write('%s\n' % ' '.join([hex(n) for n in stripnodes]))
+        fp.write('%s\n' % nodemod.hex(originalwctx.node()))
+        fp.write('%s\n' % nodemod.hex(pendingctx.node()))
+        fp.write('%s\n' %
+                 ' '.join([nodemod.hex(p) for p in repo.dirstate.parents()]))
+        fp.write('%s\n' %
+                 ' '.join([nodemod.hex(n) for n in stripnodes]))
+        fp.write('%s\n' % branchtorestore)
         fp.close()
 
     @classmethod
@@ -233,7 +259,7 @@ def _docreatecmd(ui, repo, pats, opts):
         """return all mutable ancestors for ctx (included)
 
         Much faster than the revset ancestors(ctx) & draft()"""
-        seen = set([nullrev])
+        seen = set([nodemod.nullrev])
         visit = collections.deque()
         visit.append(ctx)
         while visit:
@@ -251,6 +277,7 @@ def _docreatecmd(ui, repo, pats, opts):
     if len(parents) > 1:
         raise error.Abort(_('cannot shelve while merging'))
     parent = parents[0]
+    origbranch = wctx.branch()
 
     # we never need the user, so we use a generic user for all shelve operations
     user = 'shelve@localhost'
@@ -264,15 +291,15 @@ def _docreatecmd(ui, repo, pats, opts):
         for i in xrange(1, 100):
             yield '%s-%02d' % (label, i)
 
-    if parent.node() != nullid:
+    if parent.node() != nodemod.nullid:
         desc = "changes to: %s" % parent.description().split('\n', 1)[0]
     else:
         desc = '(changes in empty repository)'
 
-    if not opts['message']:
+    if not opts.get('message'):
         opts['message'] = desc
 
-    name = opts['name']
+    name = opts.get('name')
 
     lock = tr = None
     try:
@@ -311,6 +338,11 @@ def _docreatecmd(ui, repo, pats, opts):
             if s.unknown:
                 extra['shelve_unknown'] = '\0'.join(s.unknown)
                 repo[None].add(s.unknown)
+
+        if _iswctxonnewbranch(repo) and not _isbareshelve(pats, opts):
+            # In non-bare shelve we don't store newly created branch
+            # at bundled commit
+            repo.dirstate.setbranch(repo['.'].branch())
 
         def commitfunc(ui, repo, message, match, opts):
             hasmq = util.safehasattr(repo, 'mq')
@@ -357,16 +389,27 @@ def _docreatecmd(ui, repo, pats, opts):
             desc = util.ellipsis(desc, ui.termwidth())
         ui.status(_('shelved as %s\n') % name)
         hg.update(repo, parent.node())
+        if origbranch != repo['.'].branch() and not _isbareshelve(pats, opts):
+            repo.dirstate.setbranch(origbranch)
 
         _aborttransaction(repo)
     finally:
         lockmod.release(tr, lock)
 
+def _isbareshelve(pats, opts):
+    return (not pats
+            and not opts.get('interactive', False)
+            and not opts.get('include', False)
+            and not opts.get('exclude', False))
+
+def _iswctxonnewbranch(repo):
+    return repo[None].branch() != repo['.'].branch()
+
 def cleanupcmd(ui, repo):
     """subcommand that deletes all shelves"""
 
     with repo.wlock():
-        for (name, _type) in repo.vfs.readdir('shelved'):
+        for (name, _type) in repo.vfs.readdir(shelvedir):
             suffix = name.rsplit('.', 1)[-1]
             if suffix in ('hg', 'patch'):
                 shelvedfile(repo, name).movetobackup()
@@ -390,7 +433,7 @@ def deletecmd(ui, repo, pats):
 def listshelves(repo):
     """return all shelves in repo as list of (time, filename)"""
     try:
-        names = repo.vfs.readdir('shelved')
+        names = repo.vfs.readdir(shelvedir)
     except OSError as err:
         if err.errno != errno.ENOENT:
             raise
@@ -517,9 +560,15 @@ def mergefiles(ui, repo, wctx, shelvectx):
     finally:
         ui.quiet = oldquiet
 
+def restorebranch(ui, repo, branchtorestore):
+    if branchtorestore and branchtorestore != repo.dirstate.branch():
+        repo.dirstate.setbranch(branchtorestore)
+        ui.status(_('marked working directory as branch %s\n')
+                  % branchtorestore)
+
 def unshelvecleanup(ui, repo, name, opts):
     """remove related files after an unshelve"""
-    if not opts['keep']:
+    if not opts.get('keep'):
         for filetype in 'hg patch'.split():
             shelvedfile(repo, name, filetype).movetobackup()
         cleanupoldbackups(repo)
@@ -556,6 +605,7 @@ def unshelvecontinue(ui, repo, state, opts):
             state.stripnodes.append(shelvectx.node())
 
         mergefiles(ui, repo, state.wctx, shelvectx)
+        restorebranch(ui, repo, state.branchtorestore)
 
         repair.strip(ui, repo, state.stripnodes, backup=False, topic='shelve')
         shelvedstate.clear(repo)
@@ -594,6 +644,10 @@ def unshelve(ui, repo, *shelved, **opts):
     that causes a conflict. This reverts the unshelved changes, and
     leaves the bundle in place.)
 
+    If bare shelved change(when no files are specified, without interactive,
+    include and exclude option) was done on newly created branch it would
+    restore branch information to the working directory.
+
     After a successful unshelve, the shelved changes are stored in a
     backup directory. Only the N most recent backups are kept. N
     defaults to 10 but can be overridden using the ``shelve.maxbackups``
@@ -609,8 +663,8 @@ def unshelve(ui, repo, *shelved, **opts):
         return _dounshelve(ui, repo, *shelved, **opts)
 
 def _dounshelve(ui, repo, *shelved, **opts):
-    abortf = opts['abort']
-    continuef = opts['continue']
+    abortf = opts.get('abort')
+    continuef = opts.get('continue')
     if not abortf and not continuef:
         cmdutil.checkunfinished(repo)
 
@@ -628,7 +682,7 @@ def _dounshelve(ui, repo, *shelved, **opts):
         except IOError as err:
             if err.errno != errno.ENOENT:
                 raise
-            raise error.Abort(_('no unshelve operation underway'))
+            cmdutil.wrongtooltocontinue(repo, _('unshelve'))
 
         if abortf:
             return unshelveabort(ui, repo, state, opts)
@@ -702,6 +756,10 @@ def _dounshelve(ui, repo, *shelved, **opts):
 
         shelvectx = repo['tip']
 
+        branchtorestore = ''
+        if shelvectx.branch() != shelvectx.p1().branch():
+            branchtorestore = shelvectx.branch()
+
         # If the shelve is not immediately on top of the commit
         # we'll be merging with, rebase it to be on top.
         if tmpwctx.node() != shelvectx.parents()[0].node():
@@ -718,7 +776,8 @@ def _dounshelve(ui, repo, *shelved, **opts):
 
                 stripnodes = [repo.changelog.node(rev)
                               for rev in xrange(oldtiprev, len(repo))]
-                shelvedstate.save(repo, basename, pctx, tmpwctx, stripnodes)
+                shelvedstate.save(repo, basename, pctx, tmpwctx, stripnodes,
+                                  branchtorestore)
 
                 util.rename(repo.join('rebasestate'),
                             repo.join('unshelverebasestate'))
@@ -734,6 +793,7 @@ def _dounshelve(ui, repo, *shelved, **opts):
                 shelvectx = tmpwctx
 
         mergefiles(ui, repo, pctx, shelvectx)
+        restorebranch(ui, repo, branchtorestore)
 
         # Forget any files that were unknown before the shelve, unknown before
         # unshelve started, but are now added.
@@ -803,6 +863,12 @@ def shelvecmd(ui, repo, *pats, **opts):
     files. If specific files or directories are named, only changes to
     those files are shelved.
 
+    In bare shelve(when no files are specified, without interactive,
+    include and exclude option), shelving remembers information if the
+    working directory was on newly created branch, in other words working
+    directory was on different branch than its first parent. In this
+    situation unshelving restores branch information to the working directory.
+
     Each shelved change has a name that makes it easier to find later.
     The name of a shelved change defaults to being based on the active
     bookmark, or if there is no active bookmark, the current named
@@ -829,7 +895,7 @@ def shelvecmd(ui, repo, *pats, **opts):
         ('stat', set(['stat', 'list'])),
     ]
     def checkopt(opt):
-        if opts[opt]:
+        if opts.get(opt):
             for i, allowable in allowables:
                 if opts[i] and opt not in allowable:
                     raise error.Abort(_("options '--%s' and '--%s' may not be "

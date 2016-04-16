@@ -103,6 +103,29 @@ delete a remote bookmark
   deleting remote bookmark W
   [1]
 
+export the active bookmark
+
+  $ hg bookmark V
+  $ hg push -B . ../a
+  pushing to ../a
+  searching for changes
+  no changes found
+  exporting bookmark V
+  [1]
+
+delete the bookmark
+
+  $ hg book -d V
+  $ hg push -B V ../a
+  pushing to ../a
+  searching for changes
+  no changes found
+  deleting remote bookmark V
+  [1]
+  $ hg up foobar
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  (activating bookmark foobar)
+
 push/pull name that doesn't exist
 
   $ hg push -B badname ../a
@@ -267,7 +290,7 @@ update a bookmark in the middle of a client pulling changes
 We want to use http because it is stateless and therefore more susceptible to
 race conditions
 
-  $ hg -R pull-race serve -p $HGPORT -d --pid-file=pull-race.pid -E main-error.log
+  $ hg serve -R pull-race -p $HGPORT -d --pid-file=pull-race.pid -E main-error.log
   $ cat pull-race.pid >> $DAEMON_PIDS
 
   $ hg clone -q http://localhost:$HGPORT/ pull-race2
@@ -285,7 +308,7 @@ race conditions
 
   $ cd ..
   $ killdaemons.py
-  $ hg -R pull-race serve -p $HGPORT -d --pid-file=pull-race.pid -E main-error.log
+  $ hg serve -R pull-race -p $HGPORT -d --pid-file=pull-race.pid -E main-error.log
   $ cat pull-race.pid >> $DAEMON_PIDS
   $ cd pull-race2
   $ hg -R $TESTTMP/pull-race book
@@ -322,7 +345,7 @@ Update a bookmark right after the initial lookup -B (issue4689)
 (new config need server restart)
 
   $ killdaemons.py
-  $ hg -R ../pull-race serve -p $HGPORT -d --pid-file=../pull-race.pid -E main-error.log
+  $ hg serve -R ../pull-race -p $HGPORT -d --pid-file=../pull-race.pid -E main-error.log
   $ cat ../pull-race.pid >> $DAEMON_PIDS
 
   $ hg -R $TESTTMP/pull-race book
@@ -381,7 +404,7 @@ diverging a remote bookmark fails
   > allow_push = *
   > EOF
 
-  $ hg -R ../a serve -p $HGPORT2 -d --pid-file=../hg2.pid
+  $ hg serve -R ../a -p $HGPORT2 -d --pid-file=../hg2.pid
   $ cat ../hg2.pid >> $DAEMON_PIDS
 
   $ hg push http://localhost:$HGPORT2/
@@ -680,12 +703,12 @@ pushing a new bookmark on a new head does not require -f if -B is specified
 
 pushing an existing but divergent bookmark with -B still requires -f
 
-  $ hg clone -q . r
+  $ hg clone -q . ../r
   $ hg up -q X
   $ echo 1 > f2
   $ hg ci -qAml
 
-  $ cd r
+  $ cd ../r
   $ hg up -q X
   $ echo 2 > f2
   $ hg ci -qAmr
@@ -696,7 +719,7 @@ pushing an existing but divergent bookmark with -B still requires -f
   abort: push creates new remote head 54694f811df9 with bookmark 'X'!
   (pull and merge or see "hg help push" for details about pushing new heads)
   [255]
-  $ cd ..
+  $ cd ../addmarks
 
 Check summary output for incoming/outgoing bookmarks
 
@@ -764,7 +787,7 @@ Check hook preventing push (issue4455)
   > allow_push = *
   > EOF
   $ killdaemons.py
-  $ hg -R ../issue4455-dest serve -p $HGPORT -d --pid-file=../issue4455.pid -E ../issue4455-error.log
+  $ hg serve -R ../issue4455-dest -p $HGPORT -d --pid-file=../issue4455.pid -E ../issue4455-error.log
   $ cat ../issue4455.pid >> $DAEMON_PIDS
 
 Local push

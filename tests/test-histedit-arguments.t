@@ -63,6 +63,8 @@ Run a dummy edit to make sure we get tip^^ correctly via revsingle.
   #
   # Commits are listed from least to most recent
   #
+  # You can reorder changesets by reordering the lines
+  #
   # Commands:
   #
   #  e, edit = use commit, but stop for amending
@@ -124,6 +126,7 @@ temporarily.
   |
   o  2 eb57 three
   |
+  ~
   $ HGEDITOR=cat hg histedit -r 4 --commands - << EOF
   > edit 08d98a8350f3 4 five
   > EOF
@@ -132,6 +135,11 @@ temporarily.
   Editing (08d98a8350f3), you may commit or record as needed now.
   (hg histedit --continue to resume)
   [1]
+
+  $ hg graft --continue
+  abort: no graft in progress
+  (continue: hg histedit --continue)
+  [255]
 
   $ mv .hg/histedit-state .hg/histedit-state.back
   $ hg update --quiet --clean 2
@@ -147,6 +155,7 @@ temporarily.
   |/
   o  2 eb57 three
   |
+  ~
 
   $ hg unbundle -q $TESTTMP/foo/.hg/strip-backup/08d98a8350f3-02594089-backup.hg
   $ hg strip -q -r f5ed --config extensions.strip=
@@ -243,9 +252,6 @@ short hash. This tests issue3893.
   > p    c8e68270e35a 3 four
   > f 08d98a8350f3 4 five
   > EOF
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
-  reverting alpha
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   four
   ***
   five
@@ -258,7 +264,6 @@ short hash. This tests issue3893.
   HG: user: test
   HG: branch 'default'
   HG: changed alpha
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   saved backup bundle to $TESTTMP/foo/.hg/strip-backup/*-backup.hg (glob)
   saved backup bundle to $TESTTMP/foo/.hg/strip-backup/*-backup.hg (glob)
 
@@ -293,6 +298,8 @@ Test that trimming description using multi-byte characters
   # Edit history between 3d3ea1f3a10b and 3d3ea1f3a10b
   #
   # Commits are listed from least to most recent
+  #
+  # You can reorder changesets by reordering the lines
   #
   # Commands:
   #
@@ -449,3 +456,46 @@ Default base revision should stop at merge commit
   > pick 6f2f0241f119
   > pick 8cde254db839
   > EOF
+
+commit --amend should abort if histedit is in progress
+(issue4800) and markers are not being created.
+Eventually, histedit could perhaps look at `source` extra,
+in which case this test should be revisited.
+
+  $ hg -q up 8cde254db839
+  $ hg histedit 6f2f0241f119 --commands - <<EOF
+  > pick 8cde254db839
+  > edit 6f2f0241f119
+  > EOF
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  merging foo
+  warning: conflicts while merging foo! (edit, then use 'hg resolve --mark')
+  Fix up the change (pick 8cde254db839)
+  (hg histedit --continue to resume)
+  [1]
+  $ hg resolve -m --all
+  (no more unresolved files)
+  continue: hg histedit --continue
+  $ hg histedit --cont
+  merging foo
+  warning: conflicts while merging foo! (edit, then use 'hg resolve --mark')
+  Editing (6f2f0241f119), you may commit or record as needed now.
+  (hg histedit --continue to resume)
+  [1]
+  $ hg resolve -m --all
+  (no more unresolved files)
+  continue: hg histedit --continue
+  $ hg commit --amend -m 'reject this fold'
+  abort: histedit in progress
+  (use 'hg histedit --continue' or 'hg histedit --abort')
+  [255]
+
+With markers enabled, histedit does not get confused, and
+amend should not be blocked by the ongoing histedit.
+
+  $ cat >>$HGRCPATH <<EOF
+  > [experimental]
+  > evolution=createmarkers,allowunstable
+  > EOF
+  $ hg commit --amend -m 'allow this fold'
+  $ hg histedit --continue

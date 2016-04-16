@@ -82,12 +82,33 @@ like CVS' $Log$, are not supported. A keyword template map "Log =
 {desc}" expands to the first line of the changeset description.
 '''
 
-from mercurial import commands, context, cmdutil, dispatch, filelog, extensions
-from mercurial import localrepo, match, patch, templatefilters, util, error
-from mercurial import scmutil, pathutil
+
+from __future__ import absolute_import
+
+import os
+import re
+import tempfile
+
 from mercurial.hgweb import webcommands
 from mercurial.i18n import _
-import os, re, tempfile
+
+from mercurial import (
+    cmdutil,
+    commands,
+    context,
+    dispatch,
+    error,
+    extensions,
+    filelog,
+    localrepo,
+    match,
+    patch,
+    pathutil,
+    registrar,
+    scmutil,
+    templatefilters,
+    util,
+)
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
@@ -117,27 +138,28 @@ colortable = {
     'kwfiles.ignoredunknown': 'none'
 }
 
+templatefilter = registrar.templatefilter()
+
 # date like in cvs' $Date
+@templatefilter('utcdate')
 def utcdate(text):
-    ''':utcdate: Date. Returns a UTC-date in this format: "2009/08/18 11:00:13".
+    '''Date. Returns a UTC-date in this format: "2009/08/18 11:00:13".
     '''
     return util.datestr((util.parsedate(text)[0], 0), '%Y/%m/%d %H:%M:%S')
 # date like in svn's $Date
+@templatefilter('svnisodate')
 def svnisodate(text):
-    ''':svnisodate: Date. Returns a date in this format: "2009-08-18 13:00:13
+    '''Date. Returns a date in this format: "2009-08-18 13:00:13
     +0200 (Tue, 18 Aug 2009)".
     '''
     return util.datestr(text, '%Y-%m-%d %H:%M:%S %1%2 (%a, %d %b %Y)')
 # date like in svn's $Id
+@templatefilter('svnutcdate')
 def svnutcdate(text):
-    ''':svnutcdate: Date. Returns a UTC-date in this format: "2009-08-18
+    '''Date. Returns a UTC-date in this format: "2009-08-18
     11:00:13Z".
     '''
     return util.datestr((util.parsedate(text)[0], 0), '%Y-%m-%d %H:%M:%SZ')
-
-templatefilters.filters.update({'utcdate': utcdate,
-                                'svnisodate': svnisodate,
-                                'svnutcdate': svnutcdate})
 
 # make keyword tools accessible
 kwtools = {'templater': None, 'hgcmd': ''}
@@ -410,10 +432,8 @@ def demo(ui, repo, *args, **opts):
             ui.readconfig(opts.get('rcfile'))
         if args:
             # simulate hgrc parsing
-            rcmaps = ['[keywordmaps]\n'] + [a + '\n' for a in args]
-            fp = repo.vfs('hgrc', 'w')
-            fp.writelines(rcmaps)
-            fp.close()
+            rcmaps = '[keywordmaps]\n%s\n' % '\n'.join(args)
+            repo.vfs.write('hgrc', rcmaps)
             ui.readconfig(repo.join('hgrc'))
         kwmaps = dict(ui.configitems('keywordmaps'))
     elif opts.get('default'):

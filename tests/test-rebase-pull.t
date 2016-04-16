@@ -85,13 +85,14 @@ Invoke pull --rebase and nothing to rebase:
   adding manifests
   adding file changes
   added 1 changesets with 1 changes to 1 files
-  nothing to rebase - working directory parent is already an ancestor of destination 77ae9631bcca
+  nothing to rebase - updating instead
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   updating bookmark norebase
 
   $ hg tglog -l 1
   @  2: 'R1'
   |
+  ~
 
 pull --rebase --update should ignore --update:
 
@@ -112,6 +113,7 @@ pull --rebase doesn't update if nothing has been pulled:
   $ hg tglog -l 1
   o  2: 'R1'
   |
+  ~
 
   $ cd ..
 
@@ -196,6 +198,106 @@ pull --rebase works with bundle2 turned on
   saved backup bundle to $TESTTMP/c/.hg/strip-backup/518d153c0ba3-73407f14-backup.hg (glob)
   $ hg tglog
   @  6: 'L1'
+  |
+  o  5: 'R4'
+  |
+  o  4: 'R3'
+  |
+  o  3: 'R2'
+  |
+  o  2: 'R1'
+  |
+  o  1: 'C2'
+  |
+  o  0: 'C1'
+  
+
+pull --rebase only update if there is nothing to rebase
+
+  $ cd ../a
+  $ echo R5 > R5
+  $ hg ci -Am R5
+  adding R5
+  $ hg tglog
+  @  6: 'R5'
+  |
+  o  5: 'R4'
+  |
+  o  4: 'R3'
+  |
+  o  3: 'R2'
+  |
+  o  2: 'R1'
+  |
+  o  1: 'C2'
+  |
+  o  0: 'C1'
+  
+  $ cd ../c
+  $ echo L2 > L2
+  $ hg ci -Am L2
+  adding L2
+  $ hg up 'desc(L1)'
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg pull --rebase
+  pulling from $TESTTMP/a (glob)
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files (+1 heads)
+  rebasing 6:0d0727eb7ce0 "L1"
+  rebasing 7:c1f58876e3bf "L2"
+  saved backup bundle to $TESTTMP/c/.hg/strip-backup/0d0727eb7ce0-ef61ccb2-backup.hg (glob)
+  $ hg tglog
+  o  8: 'L2'
+  |
+  @  7: 'L1'
+  |
+  o  6: 'R5'
+  |
+  o  5: 'R4'
+  |
+  o  4: 'R3'
+  |
+  o  3: 'R2'
+  |
+  o  2: 'R1'
+  |
+  o  1: 'C2'
+  |
+  o  0: 'C1'
+  
+
+pull --rebase update (no rebase) use proper update:
+
+- warn about other head.
+
+  $ cd ../a
+  $ echo R6 > R6
+  $ hg ci -Am R6
+  adding R6
+  $ cd ../c
+  $ hg up 'desc(R5)'
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg pull --rebase
+  pulling from $TESTTMP/a (glob)
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files (+1 heads)
+  nothing to rebase - updating instead
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  1 other heads for branch "default"
+  $ hg tglog
+  @  9: 'R6'
+  |
+  | o  8: 'L2'
+  | |
+  | o  7: 'L1'
+  |/
+  o  6: 'R5'
   |
   o  5: 'R4'
   |

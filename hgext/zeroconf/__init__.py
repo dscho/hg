@@ -4,7 +4,6 @@
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
-
 '''discover and advertise repositories on the local network
 
 Zeroconf-enabled repositories will be announced in a network without
@@ -23,13 +22,23 @@ You can discover Zeroconf-enabled repositories by running
   $ hg paths
   zc-test = http://example.com:8000/test
 '''
+from __future__ import absolute_import
 
-import socket, time, os
+import os
+import socket
+import time
 
-import Zeroconf
-from mercurial import ui, hg, encoding, dispatch
-from mercurial import extensions
-from mercurial.hgweb import server as servermod
+from . import Zeroconf
+from mercurial import (
+    dispatch,
+    encoding,
+    extensions,
+    hg,
+    ui as uimod,
+)
+from mercurial.hgweb import (
+    server as servermod
+)
 
 # Note for extension authors: ONLY specify testedwith = 'internal' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
@@ -169,6 +178,16 @@ def configitems(orig, self, section, *args, **kwargs):
         repos += getzcpaths()
     return repos
 
+def configsuboptions(orig, self, section, name, *args, **kwargs):
+    opt, sub = orig(self, section, name, *args, **kwargs)
+    if section == "paths" and name.startswith("zc-"):
+        # We have to find the URL in the zeroconf paths.  We can't cons up any
+        # suboptions, so we use any that we found in the original config.
+        for zcname, zcurl in getzcpaths():
+            if zcname == name:
+                return zcurl, sub
+    return opt, sub
+
 def defaultdest(orig, source):
     for name, path in getzcpaths():
         if path == source:
@@ -187,7 +206,8 @@ def cleanupafterdispatch(orig, ui, options, cmd, cmdfunc):
 
 extensions.wrapfunction(dispatch, '_runcommand', cleanupafterdispatch)
 
-extensions.wrapfunction(ui.ui, 'config', config)
-extensions.wrapfunction(ui.ui, 'configitems', configitems)
+extensions.wrapfunction(uimod.ui, 'config', config)
+extensions.wrapfunction(uimod.ui, 'configitems', configitems)
+extensions.wrapfunction(uimod.ui, 'configsuboptions', configsuboptions)
 extensions.wrapfunction(hg, 'defaultdest', defaultdest)
 extensions.wrapfunction(servermod, 'create_server', zc_create_server)

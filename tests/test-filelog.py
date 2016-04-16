@@ -2,10 +2,17 @@
 """
 Tests the behavior of filelog w.r.t. data starting with '\1\n'
 """
-from mercurial import ui, hg
-from mercurial.node import nullid, hex
+from __future__ import absolute_import, print_function
+from mercurial import (
+    hg,
+    ui as uimod,
+)
+from mercurial.node import (
+    hex,
+    nullid,
+)
 
-myui = ui.ui()
+myui = uimod.ui()
 repo = hg.repository(myui, path='.', create=True)
 
 fl = repo.file('foobar')
@@ -30,7 +37,7 @@ def addrev(text, renamed=False):
             lock.release()
 
 def error(text):
-    print 'ERROR: ' + text
+    print('ERROR: ' + text)
 
 textwith = '\1\nfoo'
 without = 'foo'
@@ -52,4 +59,4 @@ if fl.cmp(node, textwith) or not fl.cmp(node, without):
 if fl.size(1) != len(textwith):
     error('filelog.size for a renaming + data starting with \\1\\n')
 
-print 'OK.'
+print('OK.')

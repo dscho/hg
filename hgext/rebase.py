@@ -16,7 +16,7 @@ https://mercurial-scm.org/wiki/RebaseExtension
 
 from mercurial import hg, util, repair, merge, cmdutil, commands, bookmarks
 from mercurial import extensions, patch, scmutil, phases, obsolete, error
-from mercurial import copies, repoview, revset
+from mercurial import copies, destutil, repoview, registrar, revset
 from mercurial.commands import templateopts
 from mercurial.node import nullrev, nullid, hex, short
 from mercurial.lock import release
@@ -69,13 +69,14 @@ def _makeextrafn(copiers):
             c(ctx, extra)
     return extrafn
 
-def _destrebase(repo):
-    # Destination defaults to the latest revision in the
-    # current branch
-    branch = repo[None].branch()
-    return repo[branch].rev()
+def _destrebase(repo, sourceset):
+    """small wrapper around destmerge to pass the right extra args
 
-revsetpredicate = revset.extpredicate()
+    Please wrap destutil.destmerge instead."""
+    return destutil.destmerge(repo, action='rebase', sourceset=sourceset,
+                              onheadcheck=False)
+
+revsetpredicate = registrar.revsetpredicate()
 
 @revsetpredicate('_destrebase')
 def _revsetdestrebase(repo, subset, x):
@@ -83,12 +84,12 @@ def _revsetdestrebase(repo, subset, x):
 
     # default destination for rebase.
     # # XXX: Currently private because I expect the signature to change.
-    # # XXX: - taking rev as arguments,
     # # XXX: - bailing out in case of ambiguity vs returning all data.
-    # # XXX: - probably merging with the merge destination.
     # i18n: "_rebasedefaultdest" is a keyword
-    revset.getargs(x, 0, 0, _("_rebasedefaultdest takes no arguments"))
-    return subset & revset.baseset([_destrebase(repo)])
+    sourceset = None
+    if x is not None:
+        sourceset = revset.getset(repo, revset.fullreposet(repo), x)
+    return subset & revset.baseset([_destrebase(repo, sourceset)])
 
 @command('rebase',
     [('s', 'source', '',
@@ -127,10 +128,13 @@ def rebase(ui, repo, **opts):
     Published commits cannot be rebased (see :hg:`help phases`).
     To copy commits, see :hg:`help graft`.
 
-    If you don't specify a destination changeset (``-d/--dest``),
-    rebase uses the current branch tip as the destination. (The
-    destination changeset is not modified by rebasing, but new
-    changesets are added as its descendants.)
+    If you don't specify a destination changeset (``-d/--dest``), rebase
+    will use the same logic as :hg:`merge` to pick a destination.  if
+    the current branch contains exactly one other head, the other head
+    is merged with by default.  Otherwise, an explicit revision with
+    which to merge with must be provided.  (destination changeset is not
+    modified by rebasing, but new changesets are added as its
+    descendants.)
 
     Here are the ways to select changesets:
 
@@ -154,6 +158,11 @@ def rebase(ui, repo, **opts):
     Unlike ``merge``, rebase will do nothing if you are at the branch tip of
     a named branch with two heads. You will need to explicitly specify source
     and/or destination.
+
+    If you need to use a tool to automate merge/conflict decisions, you
+    can specify one with ``--tool``, see :hg:`help merge-tools`.
+    As a caveat: the tool will not be used to mediate when a file was
+    deleted, there is no hook presently available for this.
 
     If a rebase is interrupted to manually resolve a conflict, it can be
     continued with --continue/-c or aborted with --abort/-a.
@@ -258,9 +267,11 @@ def rebase(ui, repo, **opts):
             try:
                 (originalwd, target, state, skipped, collapsef, keepf,
                  keepbranchesf, external, activebookmark) = restorestatus(repo)
+                collapsemsg = restorecollapsemsg(repo)
             except error.RepoLookupError:
                 if abortf:
                     clearstatus(repo)
+                    clearcollapsemsg(repo)
                     repo.ui.warn(_('rebase aborted (no revision is removed,'
                                    ' only broken state is cleared)\n'))
                     return 0
@@ -271,79 +282,23 @@ def rebase(ui, repo, **opts):
             if abortf:
                 return abort(repo, originalwd, target, state,
                              activebookmark=activebookmark)
+
+            obsoletenotrebased = {}
+            if ui.configbool('experimental', 'rebaseskipobsolete',
+                             default=True):
+                rebaseobsrevs = set([r for r, status in state.items()
+                                     if status == revprecursor])
+                rebasesetrevs = set(state.keys())
+                obsoletenotrebased = _computeobsoletenotrebased(repo,
+                                                                rebaseobsrevs,
+                                                                target)
+                rebaseobsskipped = set(obsoletenotrebased)
+                _checkobsrebase(repo, ui, rebaseobsrevs, rebasesetrevs,
+                                rebaseobsskipped)
         else:
-            if srcf and basef:
-                raise error.Abort(_('cannot specify both a '
-                                   'source and a base'))
-            if revf and basef:
-                raise error.Abort(_('cannot specify both a '
-                                   'revision and a base'))
-            if revf and srcf:
-                raise error.Abort(_('cannot specify both a '
-                                   'revision and a source'))
-
-            cmdutil.checkunfinished(repo)
-            cmdutil.bailifchanged(repo)
-
-            if destf:
-                dest = scmutil.revsingle(repo, destf)
-            else:
-                dest = repo[_destrebase(repo)]
-                destf = str(dest)
-
-            if revf:
-                rebaseset = scmutil.revrange(repo, revf)
-                if not rebaseset:
-                    ui.status(_('empty "rev" revision set - '
-                                'nothing to rebase\n'))
-                    return _nothingtorebase()
-            elif srcf:
-                src = scmutil.revrange(repo, [srcf])
-                if not src:
-                    ui.status(_('empty "source" revision set - '
-                                'nothing to rebase\n'))
-                    return _nothingtorebase()
-                rebaseset = repo.revs('(%ld)::', src)
-                assert rebaseset
-            else:
-                base = scmutil.revrange(repo, [basef or '.'])
-                if not base:
-                    ui.status(_('empty "base" revision set - '
-                                "can't compute rebase set\n"))
-                    return _nothingtorebase()
-                commonanc = repo.revs('ancestor(%ld, %d)', base, dest).first()
-                if commonanc is not None:
-                    rebaseset = repo.revs('(%d::(%ld) - %d)::',
-                                          commonanc, base, commonanc)
-                else:
-                    rebaseset = []
-
-                if not rebaseset:
-                    # transform to list because smartsets are not comparable to
-                    # lists. This should be improved to honor laziness of
-                    # smartset.
-                    if list(base) == [dest.rev()]:
-                        if basef:
-                            ui.status(_('nothing to rebase - %s is both "base"'
-                                        ' and destination\n') % dest)
-                        else:
-                            ui.status(_('nothing to rebase - working directory '
-                                        'parent is also destination\n'))
-                    elif not repo.revs('%ld - ::%d', base, dest):
-                        if basef:
-                            ui.status(_('nothing to rebase - "base" %s is '
-                                        'already an ancestor of destination '
-                                        '%s\n') %
-                                      ('+'.join(str(repo[r]) for r in base),
-                                       dest))
-                        else:
-                            ui.status(_('nothing to rebase - working '
-                                        'directory parent is already an '
-                                        'ancestor of destination %s\n') % dest)
-                    else: # can it happen?
-                        ui.status(_('nothing to rebase from %s to %s\n') %
-                                  ('+'.join(str(repo[r]) for r in base), dest))
-                    return _nothingtorebase()
+            dest, rebaseset = _definesets(ui, repo, destf, srcf, basef, revf)
+            if dest is None:
+                return _nothingtorebase()
 
             allowunstable = obsolete.isenabled(repo, obsolete.allowunstableopt)
             if (not (keepf or allowunstable)
@@ -355,35 +310,17 @@ def rebase(ui, repo, **opts):
                     hint=_('use --keep to keep original changesets'))
 
             obsoletenotrebased = {}
-            if ui.configbool('experimental', 'rebaseskipobsolete'):
+            if ui.configbool('experimental', 'rebaseskipobsolete',
+                             default=True):
                 rebasesetrevs = set(rebaseset)
                 rebaseobsrevs = _filterobsoleterevs(repo, rebasesetrevs)
                 obsoletenotrebased = _computeobsoletenotrebased(repo,
                                                                 rebaseobsrevs,
                                                                 dest)
                 rebaseobsskipped = set(obsoletenotrebased)
-
-                # Obsolete node with successors not in dest leads to divergence
-                divergenceok = ui.configbool('rebase',
-                                             'allowdivergence')
-                divergencebasecandidates = rebaseobsrevs - rebaseobsskipped
-
-                if divergencebasecandidates and not divergenceok:
-                    msg = _("this rebase will cause divergence")
-                    h = _("to force the rebase please set "
-                          "rebase.allowdivergence=True")
-                    raise error.Abort(msg, hint=h)
-
-                # - plain prune (no successor) changesets are rebased
-                # - split changesets are not rebased if at least one of the
-                # changeset resulting from the split is an ancestor of dest
-                rebaseset = rebasesetrevs - rebaseobsskipped
-                if rebasesetrevs and not rebaseset:
-                    msg = _('all requested changesets have equivalents '
-                            'or were marked as obsolete')
-                    hint = _('to force the rebase, set the config '
-                             'experimental.rebaseskipobsolete to False')
-                    raise error.Abort(msg, hint=hint)
+                _checkobsrebase(repo, ui, rebaseobsrevs,
+                                              rebasesetrevs,
+                                              rebaseobsskipped)
 
             result = buildstate(repo, dest, rebaseset, collapsef,
                                 obsoletenotrebased)
@@ -452,6 +389,7 @@ def rebase(ui, repo, **opts):
                                              targetancestors)
                 storestatus(repo, originalwd, target, state, collapsef, keepf,
                             keepbranchesf, external, activebookmark)
+                storecollapsemsg(repo, collapsemsg)
                 if len(repo[None].parents()) == 2:
                     repo.ui.debug('resuming interrupted rebase\n')
                 else:
@@ -573,6 +511,7 @@ def rebase(ui, repo, **opts):
                     # active bookmark was divergent one and has been deleted
                     activebookmark = None
         clearstatus(repo)
+        clearcollapsemsg(repo)
 
         ui.note(_("rebase completed\n"))
         util.unlinkpath(repo.sjoin('undo'), ignoremissing=True)
@@ -585,6 +524,84 @@ def rebase(ui, repo, **opts):
 
     finally:
         release(lock, wlock)
+
+def _definesets(ui, repo, destf=None, srcf=None, basef=None, revf=[]):
+    """use revisions argument to define destination and rebase set
+    """
+    if srcf and basef:
+        raise error.Abort(_('cannot specify both a source and a base'))
+    if revf and basef:
+        raise error.Abort(_('cannot specify both a revision and a base'))
+    if revf and srcf:
+        raise error.Abort(_('cannot specify both a revision and a source'))
+
+    cmdutil.checkunfinished(repo)
+    cmdutil.bailifchanged(repo)
+
+    if destf:
+        dest = scmutil.revsingle(repo, destf)
+
+    if revf:
+        rebaseset = scmutil.revrange(repo, revf)
+        if not rebaseset:
+            ui.status(_('empty "rev" revision set - nothing to rebase\n'))
+            return None, None
+    elif srcf:
+        src = scmutil.revrange(repo, [srcf])
+        if not src:
+            ui.status(_('empty "source" revision set - nothing to rebase\n'))
+            return None, None
+        rebaseset = repo.revs('(%ld)::', src)
+        assert rebaseset
+    else:
+        base = scmutil.revrange(repo, [basef or '.'])
+        if not base:
+            ui.status(_('empty "base" revision set - '
+                        "can't compute rebase set\n"))
+            return None, None
+        if not destf:
+            dest = repo[_destrebase(repo, base)]
+            destf = str(dest)
+
+        commonanc = repo.revs('ancestor(%ld, %d)', base, dest).first()
+        if commonanc is not None:
+            rebaseset = repo.revs('(%d::(%ld) - %d)::',
+                                  commonanc, base, commonanc)
+        else:
+            rebaseset = []
+
+        if not rebaseset:
+            # transform to list because smartsets are not comparable to
+            # lists. This should be improved to honor laziness of
+            # smartset.
+            if list(base) == [dest.rev()]:
+                if basef:
+                    ui.status(_('nothing to rebase - %s is both "base"'
+                                ' and destination\n') % dest)
+                else:
+                    ui.status(_('nothing to rebase - working directory '
+                                'parent is also destination\n'))
+            elif not repo.revs('%ld - ::%d', base, dest):
+                if basef:
+                    ui.status(_('nothing to rebase - "base" %s is '
+                                'already an ancestor of destination '
+                                '%s\n') %
+                              ('+'.join(str(repo[r]) for r in base),
+                               dest))
+                else:
+                    ui.status(_('nothing to rebase - working '
+                                'directory parent is already an '
+                                'ancestor of destination %s\n') % dest)
+            else: # can it happen?
+                ui.status(_('nothing to rebase from %s to %s\n') %
+                          ('+'.join(str(repo[r]) for r in base), dest))
+            return None, None
+
+    if not destf:
+        dest = repo[_destrebase(repo, rebaseset)]
+        destf = str(dest)
+
+    return dest, rebaseset
 
 def externalparent(repo, state, targetancestors):
     """Return the revision that should be used as the second parent
@@ -682,6 +699,43 @@ def nearestrebased(repo, rev, state):
         return state[candidates.first()]
     else:
         return None
+
+def _checkobsrebase(repo, ui,
+                                  rebaseobsrevs,
+                                  rebasesetrevs,
+                                  rebaseobsskipped):
+    """
+    Abort if rebase will create divergence or rebase is noop because of markers
+
+    `rebaseobsrevs`: set of obsolete revision in source
+    `rebasesetrevs`: set of revisions to be rebased from source
+    `rebaseobsskipped`: set of revisions from source skipped because they have
+    successors in destination
+    """
+    # Obsolete node with successors not in dest leads to divergence
+    divergenceok = ui.configbool('experimental',
+                                 'allowdivergence')
+    divergencebasecandidates = rebaseobsrevs - rebaseobsskipped
+
+    if divergencebasecandidates and not divergenceok:
+        divhashes = (str(repo[r])
+                     for r in divergencebasecandidates)
+        msg = _("this rebase will cause "
+                "divergences from: %s")
+        h = _("to force the rebase please set "
+              "experimental.allowdivergence=True")
+        raise error.Abort(msg % (",".join(divhashes),), hint=h)
+
+    # - plain prune (no successor) changesets are rebased
+    # - split changesets are not rebased if at least one of the
+    # changeset resulting from the split is an ancestor of dest
+    rebaseset = rebasesetrevs - rebaseobsskipped
+    if rebasesetrevs and not rebaseset:
+        msg = _('all requested changesets have equivalents '
+                'or were marked as obsolete')
+        hint = _('to force the rebase, set the config '
+                 'experimental.rebaseskipobsolete to False')
+        raise error.Abort(msg, hint=hint)
 
 def defineparents(repo, rev, target, state, targetancestors):
     'Return the new parent relationship of the revision that will be rebased'
@@ -838,6 +892,29 @@ def updatebookmarks(repo, targetnode, nstate, originalbookmarks, tr):
             bookmarks.deletedivergent(repo, [targetnode], k)
     marks.recordchange(tr)
 
+def storecollapsemsg(repo, collapsemsg):
+    'Store the collapse message to allow recovery'
+    collapsemsg = collapsemsg or ''
+    f = repo.vfs("last-message.txt", "w")
+    f.write("%s\n" % collapsemsg)
+    f.close()
+
+def clearcollapsemsg(repo):
+    'Remove collapse message file'
+    util.unlinkpath(repo.join("last-message.txt"), ignoremissing=True)
+
+def restorecollapsemsg(repo):
+    'Restore previously stored collapse message'
+    try:
+        f = repo.vfs("last-message.txt")
+        collapsemsg = f.readline().strip()
+        f.close()
+    except IOError as err:
+        if err.errno != errno.ENOENT:
+            raise
+        raise error.Abort(_('no rebase in progress'))
+    return collapsemsg
+
 def storestatus(repo, originalwd, target, state, collapse, keep, keepbranches,
                 external, activebookmark):
     'Store the current status to allow recovery'
@@ -910,7 +987,7 @@ def restorestatus(repo):
     except IOError as err:
         if err.errno != errno.ENOENT:
             raise
-        raise error.Abort(_('no rebase in progress'))
+        cmdutil.wrongtooltocontinue(repo, _('rebase'))
 
     if keepbranches is None:
         raise error.Abort(_('.hg/rebasestate is incomplete'))
@@ -997,6 +1074,7 @@ def abort(repo, originalwd, target, state, activebookmark=None):
 
     finally:
         clearstatus(repo)
+        clearcollapsemsg(repo)
         repo.ui.warn(_('rebase aborted\n'))
     return 0
 
@@ -1140,7 +1218,6 @@ def pullrebase(orig, ui, repo, *args, **opts):
                 ui.debug('--update and --rebase are not compatible, ignoring '
                          'the update flag\n')
 
-            movemarkfrom = repo['.'].node()
             revsprepull = len(repo)
             origpostincoming = commands.postincoming
             def _dummy(*args, **kwargs):
@@ -1160,15 +1237,18 @@ def pullrebase(orig, ui, repo, *args, **opts):
                 # --source.
                 if 'source' in opts:
                     del opts['source']
-                rebase(ui, repo, **opts)
-                branch = repo[None].branch()
-                dest = repo[branch].rev()
-                if dest != repo['.'].rev():
-                    # there was nothing to rebase we force an update
-                    hg.update(repo, dest)
-                    if bookmarks.update(repo, [movemarkfrom], repo['.'].node()):
-                        ui.status(_("updating bookmark %s\n")
-                                  % repo._activebookmark)
+                try:
+                    rebase(ui, repo, **opts)
+                except error.NoMergeDestAbort:
+                    # we can maybe update instead
+                    rev, _a, _b = destutil.destupdate(repo)
+                    if rev == repo['.'].rev():
+                        ui.status(_('nothing to rebase\n'))
+                    else:
+                        ui.status(_('nothing to rebase - updating instead\n'))
+                        # not passing argument to get the bare update behavior
+                        # with warning and trumpets
+                        commands.update(ui, repo)
         finally:
             release(lock, wlock)
     else:
@@ -1274,4 +1354,3 @@ def uisetup(ui):
         ['rebasestate', _('hg rebase --continue')])
     # ensure rebased rev are not hidden
     extensions.wrapfunction(repoview, '_getdynamicblockers', _rebasedvisible)
-    revsetpredicate.setup()

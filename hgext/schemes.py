@@ -39,11 +39,22 @@ For convenience, the extension adds these schemes by default::
 You can override a predefined scheme by defining a new scheme with the
 same name.
 """
+from __future__ import absolute_import
 
-import os, re
-from mercurial import extensions, hg, templater, util, error
+import os
+import re
+from mercurial import (
+    cmdutil,
+    error,
+    extensions,
+    hg,
+    templater,
+    util,
+)
 from mercurial.i18n import _
 
+cmdtable = {}
+command = cmdutil.command(cmdtable)
 # Note for extension authors: ONLY specify testedwith = 'internal' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
 # be specifying the version(s) of Mercurial they are tested with, or
@@ -65,6 +76,10 @@ class ShortRepository(object):
         return '<ShortRepository: %s>' % self.scheme
 
     def instance(self, ui, url, create):
+        url = self.resolve(url)
+        return hg._peerlookup(url).instance(ui, url, create)
+
+    def resolve(self, url):
         # Should this use the util.url class, or is manual parsing better?
         try:
             url = url.split('://', 1)[1]
@@ -77,8 +92,7 @@ class ShortRepository(object):
         else:
             tail = ''
         context = dict((str(i + 1), v) for i, v in enumerate(parts))
-        url = ''.join(self.templater.process(self.url, context)) + tail
-        return hg._peerlookup(url).instance(ui, url, create)
+        return ''.join(self.templater.process(self.url, context)) + tail
 
 def hasdriveletter(orig, path):
     if path:
@@ -106,3 +120,12 @@ def extsetup(ui):
         hg.schemes[scheme] = ShortRepository(url, scheme, t)
 
     extensions.wrapfunction(util, 'hasdriveletter', hasdriveletter)
+
+@command('debugexpandscheme', norepo=True)
+def expandscheme(ui, url, **opts):
+    """given a repo path, provide the scheme-expanded path
+    """
+    repo = hg._peerlookup(url)
+    if isinstance(repo, ShortRepository):
+        url = repo.resolve(url)
+    ui.write(url + '\n')

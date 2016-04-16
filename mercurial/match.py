@@ -334,13 +334,13 @@ def badmatch(match, badfn):
     m.bad = badfn
     return m
 
-class narrowmatcher(match):
+class subdirmatcher(match):
     """Adapt a matcher to work on a subdirectory only.
 
     The paths are remapped to remove/insert the path as needed:
 
     >>> m1 = match('root', '', ['a.txt', 'sub/b.txt'])
-    >>> m2 = narrowmatcher('sub', m1)
+    >>> m2 = subdirmatcher('sub', m1)
     >>> bool(m2('a.txt'))
     False
     >>> bool(m2('b.txt'))
@@ -381,7 +381,16 @@ class narrowmatcher(match):
             self._always = any(f == path for f in matcher._files)
 
         self._anypats = matcher._anypats
+        # Some information is lost in the superclass's constructor, so we
+        # can not accurately create the matching function for the subdirectory
+        # from the inputs. Instead, we override matchfn() and visitdir() to
+        # call the original matcher with the subdirectory path prepended.
         self.matchfn = lambda fn: matcher.matchfn(self._path + "/" + fn)
+        def visitdir(dir):
+            if dir == '.':
+                return matcher.visitdir(self._path)
+            return matcher.visitdir(self._path + "/" + dir)
+        self.visitdir = visitdir
         self._fileroots = set(self._files)
 
     def abs(self, f):

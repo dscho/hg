@@ -4,22 +4,50 @@
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
+from __future__ import absolute_import
 
-from common import NoRepo, MissingTool, SKIPREV, mapfile
-from cvs import convert_cvs
-from darcs import darcs_source
-from git import convert_git
-from hg import mercurial_source, mercurial_sink
-from subversion import svn_source, svn_sink
-from monotone import monotone_source
-from gnuarch import gnuarch_source
-from bzr import bzr_source
-from p4 import p4_source
-import filemap
+import os
+import shlex
+import shutil
 
-import os, shutil, shlex
-from mercurial import hg, util, encoding, error
+from mercurial import (
+    encoding,
+    error,
+    hg,
+    util,
+)
 from mercurial.i18n import _
+
+from . import (
+    bzr,
+    common,
+    cvs,
+    darcs,
+    filemap,
+    git,
+    gnuarch,
+    hg as hgconvert,
+    monotone,
+    p4,
+    subversion,
+)
+
+mapfile = common.mapfile
+MissingTool = common.MissingTool
+NoRepo = common.NoRepo
+SKIPREV = common.SKIPREV
+
+bzr_source = bzr.bzr_source
+convert_cvs = cvs.convert_cvs
+convert_git = git.convert_git
+darcs_source = darcs.darcs_source
+gnuarch_source = gnuarch.gnuarch_source
+mercurial_sink = hgconvert.mercurial_sink
+mercurial_source = hgconvert.mercurial_source
+monotone_source = monotone.monotone_source
+p4_source = p4.p4_source
+svn_sink = subversion.svn_sink
+svn_source = subversion.svn_source
 
 orig_encoding = 'ascii'
 
@@ -117,7 +145,7 @@ class progresssource(object):
     def getfile(self, file, rev):
         self.retrieved += 1
         self.ui.progress(_('getting files'), self.retrieved,
-                         item=file, total=self.filecount)
+                         item=file, total=self.filecount, unit=_('files'))
         return self.source.getfile(file, rev)
 
     def targetfilebelongstosource(self, targetfilename):
@@ -444,6 +472,9 @@ class converter(object):
             parents = [self.map.get(p, p) for p in parents]
         except KeyError:
             parents = [b[0] for b in pbranches]
+            parents.extend(self.map[x]
+                           for x in commit.optparents
+                           if x in self.map)
         if len(pbranches) != 2:
             cleanp2 = set()
         if len(parents) < 3:
