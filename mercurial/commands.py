@@ -4231,9 +4231,9 @@ def _dograft(ui, repo, *revs, **opts):
                 repo.vfs.write('graftstate', ''.join(nodelines))
                 extra = ''
                 if opts.get('user'):
-                    extra += ' --user %s' % opts['user']
+                    extra += ' --user %s' % util.shellquote(opts['user'])
                 if opts.get('date'):
-                    extra += ' --date %s' % opts['date']
+                    extra += ' --date %s' % util.shellquote(opts['date'])
                 if opts.get('log'):
                     extra += ' --log'
                 hint=_("use 'hg resolve' and 'hg graft --continue%s'") % extra
@@ -7101,8 +7101,7 @@ def unbundle(ui, repo, fname1, *fnames, **opts):
 
 @command('^update|up|checkout|co',
     [('C', 'clean', None, _('discard uncommitted changes (no backup)')),
-    ('c', 'check', None,
-     _('update across branches if no uncommitted changes')),
+    ('c', 'check', None, _('require clean working directory')),
     ('d', 'date', '', _('tipmost revision matching date'), _('DATE')),
     ('r', 'rev', '', _('revision'), _('REV'))
      ] + mergetoolopts,

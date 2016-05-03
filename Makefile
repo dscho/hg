@@ -4,8 +4,7 @@
 #
 # % make PREFIX=/opt/ install
 
-PREFIX=/usr/local
-export PREFIX
+export PREFIX=/usr/local
 PYTHON=python
 $(eval HGROOT := $(shell pwd))
 HGPYTHONS ?= $(HGROOT)/build/pythons
@@ -18,6 +17,10 @@ TESTFLAGS ?= $(shell echo $$HGTESTFLAGS)
 
 # Set this to e.g. "mingw32" to use a non-default compiler.
 COMPILER=
+
+COMPILERFLAG_tmp_ =
+COMPILERFLAG_tmp_${COMPILER} ?= -c $(COMPILER)
+COMPILERFLAG=${COMPILERFLAG_tmp_${COMPILER}}
 
 help:
 	@echo 'Commonly used make targets:'
@@ -43,16 +46,16 @@ all: build doc
 local:
 	$(PYTHON) setup.py $(PURE) \
 	  build_py -c -d . \
-	  build_ext $(COMPILER:%=-c %) -i \
-	  build_hgexe $(COMPILER:%=-c %) -i \
+	  build_ext $(COMPILERFLAG) -i \
+	  build_hgexe $(COMPILERFLAG) -i \
 	  build_mo
 	env HGRCPATH= $(PYTHON) hg version
 
 build:
-	$(PYTHON) setup.py $(PURE) build $(COMPILER:%=-c %)
+	$(PYTHON) setup.py $(PURE) build $(COMPILERFLAG)
 
 wheel:
-	FORCE_SETUPTOOLS=1 $(PYTHON) setup.py $(PURE) bdist_wheel $(COMPILER:%=-c %)
+	FORCE_SETUPTOOLS=1 $(PYTHON) setup.py $(PURE) bdist_wheel $(COMPILERFLAG)
 
 doc:
 	$(MAKE) -C doc
@@ -153,25 +156,51 @@ i18n/hg.pot: $(PYFILES) $(DOCFILES) i18n/posplit i18n/hggettext
 # Packaging targets
 
 osx:
-	python -c 'import bdist_mpkg.script_bdist_mpkg' || \
-	   (echo "Missing bdist_mpkg (easy_install bdist_mpkg)"; false)
-	rm -rf dist/mercurial-*.mpkg
-	python -m bdist_mpkg.script_bdist_mpkg setup.py --
-	python contrib/fixpax.py dist/mercurial-*.mpkg/Contents/Packages/*.pkg/Contents/Archive.pax.gz
-	mkdir -p packages/osx
-	N=`cd dist && echo mercurial-*.mpkg | sed 's,\.mpkg$$,,'` && hdiutil create -srcfolder dist/$$N.mpkg/ -scrub -volname "$$N" -ov packages/osx/$$N.dmg
-	rm -rf dist/mercurial-*.mpkg
+	python setup.py install --optimize=1 \
+	  --root=build/mercurial/ --prefix=/usr/local/ \
+	  --install-lib=/Library/Python/2.7/site-packages/
+	make -C doc all install DESTDIR="$(PWD)/build/mercurial/"
+	mkdir -p $${OUTPUTDIR:-dist}
+	pkgbuild --root build/mercurial/ --identifier org.mercurial-scm.mercurial \
+	  build/mercurial.pkg
+	HGVER=$$((cat build/mercurial/Library/Python/2.7/site-packages/mercurial/__version__.py; echo 'print(version)') | python) && \
+	OSXVER=$$(sw_vers -productVersion | cut -d. -f1,2) && \
+	productbuild --distribution contrib/macosx/distribution.xml \
+	  --package-path build/ \
+	  --version "$${HGVER}" \
+	  --resources contrib/macosx/ \
+	  "$${OUTPUTDIR:-dist/}"/Mercurial-"$${HGVER}"-macosx"$${OSXVER}".pkg
 
 deb:
 	contrib/builddeb
+
+ppa:
+	contrib/builddeb --source-only
 
 docker-debian-jessie:
 	mkdir -p packages/debian-jessie
 	contrib/dockerdeb debian jessie
 
-docker-ubuntu-trusty:
-	mkdir -p packages/ubuntu-trusty
+contrib/docker/ubuntu-%: contrib/docker/ubuntu.template
+	sed "s/__CODENAME__/$*/" $< > $@
+
+docker-ubuntu-trusty: contrib/docker/ubuntu-trusty
 	contrib/dockerdeb ubuntu trusty
+
+docker-ubuntu-trusty-ppa: contrib/docker/ubuntu-trusty
+	contrib/dockerdeb ubuntu trusty --source-only
+
+docker-ubuntu-wily: contrib/docker/ubuntu-wily
+	contrib/dockerdeb ubuntu wily
+
+docker-ubuntu-wily-ppa: contrib/docker/ubuntu-wily
+	contrib/dockerdeb ubuntu wily --source-only
+
+docker-ubuntu-xenial: contrib/docker/ubuntu-xenial
+	contrib/dockerdeb ubuntu xenial
+
+docker-ubuntu-xenial-ppa: contrib/docker/ubuntu-xenial
+	contrib/dockerdeb ubuntu xenial --source-only
 
 fedora20:
 	mkdir -p packages/fedora20

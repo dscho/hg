@@ -16,7 +16,6 @@ import array
 import errno
 import time
 
-from .i18n import _
 from .node import (
     bin,
     hex,
@@ -176,8 +175,8 @@ def _readtaghist(ui, repo, lines, fn, recode=None, calcnodelines=False):
     hextaglines = util.sortdict()
     count = 0
 
-    def warn(msg):
-        ui.warn(_("%s, line %s: %s\n") % (fn, count, msg))
+    def dbg(msg):
+        ui.debug("%s, line %s: %s\n" % (fn, count, msg))
 
     for nline, line in enumerate(lines):
         count += 1
@@ -186,7 +185,7 @@ def _readtaghist(ui, repo, lines, fn, recode=None, calcnodelines=False):
         try:
             (nodehex, name) = line.split(" ", 1)
         except ValueError:
-            warn(_("cannot parse entry"))
+            dbg("cannot parse entry")
             continue
         name = name.strip()
         if recode:
@@ -194,7 +193,7 @@ def _readtaghist(ui, repo, lines, fn, recode=None, calcnodelines=False):
         try:
             nodebin = bin(nodehex)
         except TypeError:
-            warn(_("node '%s' is not well formed") % nodehex)
+            dbg("node '%s' is not well formed" % nodehex)
             continue
 
         # update filetags
@@ -433,7 +432,10 @@ class hgtagsfnodescache(object):
 
         self._raw = array('c')
 
-        data = repo.vfs.tryread(_fnodescachefile)
+        try:
+            data = repo.vfs.read(_fnodescachefile)
+        except (OSError, IOError):
+            data = ""
         self._raw.fromstring(data)
 
         # The end state of self._raw is an array that is of the exact length

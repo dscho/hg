@@ -456,6 +456,19 @@ def has_aix():
 def has_osx():
     return sys.platform == 'darwin'
 
+@check("osxpackaging", "OS X packaging tools")
+def has_osxpackaging():
+    try:
+        return (matchoutput('pkgbuild', 'Usage: pkgbuild ', ignorestatus=1)
+                and matchoutput(
+                    'productbuild', 'Usage: productbuild ',
+                    ignorestatus=1)
+                and matchoutput('lsbom', 'Usage: lsbom', ignorestatus=1)
+                and matchoutput(
+                    'xar --help', 'Usage: xar', ignorestatus=1))
+    except ImportError:
+        return False
+
 @check("docker", "docker support")
 def has_docker():
     pat = r'A self-sufficient runtime for'

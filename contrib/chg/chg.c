@@ -42,7 +42,7 @@ struct cmdserveropts {
 static void initcmdserveropts(struct cmdserveropts *opts) {
 	memset(opts, 0, sizeof(struct cmdserveropts));
 	opts->lockfd = -1;
-	opts->sockdirfd = AT_FDCWD;
+	opts->sockdirfd = -1;
 }
 
 static void freecmdserveropts(struct cmdserveropts *opts) {
@@ -50,9 +50,9 @@ static void freecmdserveropts(struct cmdserveropts *opts) {
 	opts->args = NULL;
 	opts->argsize = 0;
 	assert(opts->lockfd == -1 && "should be closed by unlockcmdserver()");
-	if (opts->sockdirfd != AT_FDCWD) {
+	if (opts->sockdirfd >= 0) {
 		close(opts->sockdirfd);
-		opts->sockdirfd = AT_FDCWD;
+		opts->sockdirfd = -1;
 	}
 }
 
@@ -397,6 +397,10 @@ static void setupsignalhandler(pid_t pid)
 	if (sigaction(SIGTERM, &sa, NULL) < 0)
 		goto error;
 
+	/* notify the worker about window resize events */
+	sa.sa_flags = SA_RESTART;
+	if (sigaction(SIGWINCH, &sa, NULL) < 0)
+		goto error;
 	/* propagate job control requests to worker */
 	sa.sa_handler = forwardsignal;
 	sa.sa_flags = SA_RESTART;

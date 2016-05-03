@@ -103,14 +103,14 @@ static int equatelines(struct line *a, int an, struct line *b, int bn)
 
 	/* clear the hash table */
 	for (i = 0; i <= buckets; i++) {
-		h[i].pos = INT_MAX;
+		h[i].pos = -1;
 		h[i].len = 0;
 	}
 
 	/* add lines to the hash table chains */
-	for (i = bn - 1; i >= 0; i--) {
+	for (i = 0; i < bn; i++) {
 		/* find the equivalence class */
-		for (j = b[i].hash & buckets; h[j].pos != INT_MAX;
+		for (j = b[i].hash & buckets; h[j].pos != -1;
 		     j = (j + 1) & buckets)
 			if (!cmp(b + i, b + h[j].pos))
 				break;
@@ -128,7 +128,7 @@ static int equatelines(struct line *a, int an, struct line *b, int bn)
 	/* match items in a to their equivalence class in b */
 	for (i = 0; i < an; i++) {
 		/* find the equivalence class */
-		for (j = a[i].hash & buckets; h[j].pos != INT_MAX;
+		for (j = a[i].hash & buckets; h[j].pos != -1;
 		     j = (j + 1) & buckets)
 			if (!cmp(a + i, b + h[j].pos))
 				break;
@@ -137,7 +137,7 @@ static int equatelines(struct line *a, int an, struct line *b, int bn)
 		if (h[j].len <= t)
 			a[i].n = h[j].pos; /* point to head of match list */
 		else
-			a[i].n = INT_MAX; /* too popular */
+			a[i].n = -1; /* too popular */
 	}
 
 	/* discard hash tables */
@@ -148,15 +148,23 @@ static int equatelines(struct line *a, int an, struct line *b, int bn)
 static int longest_match(struct line *a, struct line *b, struct pos *pos,
 			 int a1, int a2, int b1, int b2, int *omi, int *omj)
 {
-	int mi = a1, mj = b1, mk = 0, mb = 0, i, j, k;
+	int mi = a1, mj = b1, mk = 0, mb = 0, i, j, k, half;
+
+	/* window our search on large regions to better bound
+	   worst-case performance. by choosing a window at the end, we
+	   reduce skipping overhead on the b chains. */
+	if (a2 - a1 > 30000)
+		a1 = a2 - 30000;
+
+	half = (a1 + a2) / 2;
 
 	for (i = a1; i < a2; i++) {
-		/* skip things before the current block */
-		for (j = a[i].n; j < b1; j = b[j].n)
+		/* skip all lines in b after the current block */
+		for (j = a[i].n; j >= b2; j = b[j].n)
 			;
 
 		/* loop through all lines match a[i] in b */
-		for (; j < b2; j = b[j].n) {
+		for (; j >= b1; j = b[j].n) {
 			/* does this extend an earlier match? */
 			if (i > a1 && j > b1 && pos[j - 1].pos == i - 1)
 				k = pos[j - 1].len + 1;
@@ -165,8 +173,9 @@ static int longest_match(struct line *a, struct line *b, struct pos *pos,
 			pos[j].pos = i;
 			pos[j].len = k;
 
-			/* best match so far? */
-			if (k > mk) {
+			/* best match so far? we prefer matches closer
+			   to the middle to balance recursion */
+			if (k > mk || (k == mk && (i <= mi || i < half))) {
 				mi = i;
 				mj = j;
 				mk = k;
@@ -259,27 +268,20 @@ static int diff(struct line *a, int an, struct line *b, int bn,
 	/* normalize the hunk list, try to push each hunk towards the end */
 	for (curr = base->next; curr; curr = curr->next) {
 		struct hunk *next = curr->next;
-		int shift = 0;
 
 		if (!next)
 			break;
 
-		if (curr->a2 == next->a1)
-			while (curr->a2 + shift < an && curr->b2 + shift < bn
-			       && !cmp(a + curr->a2 + shift,
-				       b + curr->b2 + shift))
-				shift++;
-		else if (curr->b2 == next->b1)
-			while (curr->b2 + shift < bn && curr->a2 + shift < an
-			       && !cmp(b + curr->b2 + shift,
-				       a + curr->a2 + shift))
-				shift++;
-		if (!shift)
-			continue;
-		curr->b2 += shift;
-		next->b1 += shift;
-		curr->a2 += shift;
-		next->a1 += shift;
+		if (curr->a2 == next->a1 || curr->b2 == next->b1)
+			while (curr->a2 < an && curr->b2 < bn
+			       && next->a1 < next->a2
+			       && next->b1 < next->b2
+			       && !cmp(a + curr->a2, b + curr->b2)) {
+				curr->a2++;
+				next->a1++;
+				curr->b2++;
+				next->b1++;
+			}
 	}
 
 	for (curr = base->next; curr; curr = curr->next)

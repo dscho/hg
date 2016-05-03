@@ -10,6 +10,7 @@ BUILD=1
 CLEANUP=1
 DISTID=`(lsb_release -is 2> /dev/null | tr '[:upper:]' '[:lower:]') || echo debian`
 CODENAME=`lsb_release -cs 2> /dev/null || echo unknown`
+DEBFLAGS=-b
 while [ "$1" ]; do
     case "$1" in
     --distid )
@@ -29,6 +30,10 @@ while [ "$1" ]; do
     --build )
         shift
         CLEANUP=
+        ;;
+    --source-only )
+        shift
+        DEBFLAGS=-S
         ;;
     * )
         echo "Invalid parameter $1!" 1>&2
@@ -52,7 +57,7 @@ if [ -n "$type" ] ; then
     debver="$debver~$type"
 fi
 if [ -n "$distance" ] ; then
-    debver="$debver+$distance-$node"
+    debver="$debver+$distance-$CODENAME-$node"
 fi
 
 control=debian/control
@@ -65,16 +70,17 @@ if [ "$BUILD" ]; then
     fi
 
     cp -r $PWD/contrib/debian debian
-    chmod -R 0755 debian
 
-    # This looks like sed -i, but sed -i behaves just differently enough
-    # between BSD and GNU sed that I gave up and did the dumb thing.
-    sed "s/__VERSION__/$debver/" < $changelog > $changelog.tmp
-    date=$(date --rfc-2822)
-    sed "s/__DATE__/$date/" < $changelog.tmp > $changelog
+    sed -i.tmp "s/__VERSION__/$debver/" $changelog
+    sed -i.tmp "s/__DATE__/$(date --rfc-2822)/" $changelog
+    sed -i.tmp "s/__CODENAME__/$CODENAME/" $changelog
     rm $changelog.tmp
 
-    debuild -us -uc -b
+    # remove the node from the version string
+    SRCFILE="mercurial_$(echo $debver | sed "s,-$node,,").orig.tar.gz"
+    "$PWD/hg" archive $SRCFILE
+    mv $SRCFILE ..
+    debuild -us -uc -i -I $DEBFLAGS
     if [ $? != 0 ]; then
         echo 'debuild failed!'
         exit 1
@@ -86,7 +92,8 @@ if [ "$CLEANUP" ] ; then
     OUTPUTDIR=${OUTPUTDIR:=packages/$DISTID-$CODENAME}
     mkdir -p "$OUTPUTDIR"
     find ../mercurial*.deb ../mercurial_*.build ../mercurial_*.changes \
-          -type f -newer $control -print0 | \
+          ../mercurial*.dsc ../mercurial*.gz \
+          -type f -newer $control -print0 2>/dev/null | \
       xargs -Inarf -0 mv narf "$OUTPUTDIR"
     echo "Built packages for $debver:"
     find "$OUTPUTDIR" -type f -newer $control -name '*.deb'
