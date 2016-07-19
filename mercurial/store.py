@@ -8,6 +8,7 @@
 from __future__ import absolute_import
 
 import errno
+import hashlib
 import os
 import stat
 
@@ -18,8 +19,6 @@ from . import (
     scmutil,
     util,
 )
-
-_sha = util.sha1
 
 # This avoids a collision between a file named foo and a dir named
 # foo.i or foo.d
@@ -57,6 +56,23 @@ def decodedir(path):
             .replace(".i.hg/", ".i/")
             .replace(".hg.hg/", ".hg/"))
 
+def _reserved():
+    ''' characters that are problematic for filesystems
+
+    * ascii escapes (0..31)
+    * ascii hi (126..255)
+    * windows specials
+
+    these characters will be escaped by encodefunctions
+    '''
+    winreserved = [ord(x) for x in '\\:*?"<>|']
+    for x in range(32):
+        yield x
+    for x in range(126, 256):
+        yield x
+    for x in winreserved:
+        yield x
+
 def _buildencodefun():
     '''
     >>> enc, dec = _buildencodefun()
@@ -82,11 +98,10 @@ def _buildencodefun():
     'the\\x07quick\\xadshot'
     '''
     e = '_'
-    winreserved = [ord(x) for x in '\\:*?"<>|']
     cmap = dict([(chr(x), chr(x)) for x in xrange(127)])
-    for x in (range(32) + range(126, 256) + winreserved):
+    for x in _reserved():
         cmap[chr(x)] = "~%02x" % x
-    for x in range(ord("A"), ord("Z") + 1) + [ord(e)]:
+    for x in list(range(ord("A"), ord("Z") + 1)) + [ord(e)]:
         cmap[chr(x)] = e + chr(x).lower()
     dmap = {}
     for k, v in cmap.iteritems():
@@ -134,9 +149,8 @@ def _buildlowerencodefun():
     >>> f('the\x07quick\xADshot')
     'the~07quick~adshot'
     '''
-    winreserved = [ord(x) for x in '\\:*?"<>|']
     cmap = dict([(chr(x), chr(x)) for x in xrange(127)])
-    for x in (range(32) + range(126, 256) + winreserved):
+    for x in _reserved():
         cmap[chr(x)] = "~%02x" % x
     for x in range(ord("A"), ord("Z") + 1):
         cmap[chr(x)] = chr(x).lower()
@@ -196,7 +210,7 @@ _dirprefixlen = 8
 _maxshortdirslen = 8 * (_dirprefixlen + 1) - 4
 
 def _hashencode(path, dotencode):
-    digest = _sha(path).hexdigest()
+    digest = hashlib.sha1(path).hexdigest()
     le = lowerencode(path[5:]).split('/') # skips prefix 'data/' or 'meta/'
     parts = _auxencode(le, dotencode)
     basename = parts[-1]

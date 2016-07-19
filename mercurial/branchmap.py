@@ -363,7 +363,7 @@ class revbranchcache(object):
             bndata = repo.vfs.read(_rbcnames)
             self._rbcsnameslen = len(bndata) # for verification before writing
             self._names = [encoding.tolocal(bn) for bn in bndata.split('\0')]
-        except (IOError, OSError) as inst:
+        except (IOError, OSError):
             if readonly:
                 # don't try to use cache - fall back to the slow path
                 self.branchinfo = self._branchinfo
@@ -402,10 +402,9 @@ class revbranchcache(object):
         if rev == nullrev:
             return changelog.branchinfo(rev)
 
-        # if requested rev is missing, add and populate all missing revs
+        # if requested rev isn't allocated, grow and cache the rev info
         if len(self._rbcrevs) < rbcrevidx + _rbcrecsize:
-            self._rbcrevs.extend('\0' * (len(changelog) * _rbcrecsize -
-                                         len(self._rbcrevs)))
+            return self._branchinfo(rev)
 
         # fast path: extract data from cache, use it if node is matching
         reponode = changelog.node(rev)[:_rbcnodelen]
@@ -452,6 +451,10 @@ class revbranchcache(object):
         rbcrevidx = rev * _rbcrecsize
         rec = array('c')
         rec.fromstring(pack(_rbcrecfmt, node, branchidx))
+        if len(self._rbcrevs) < rbcrevidx + _rbcrecsize:
+            self._rbcrevs.extend('\0' *
+                                 (len(self._repo.changelog) * _rbcrecsize -
+                                  len(self._rbcrevs)))
         self._rbcrevs[rbcrevidx:rbcrevidx + _rbcrecsize] = rec
         self._rbcrevslen = min(self._rbcrevslen, rev)
 

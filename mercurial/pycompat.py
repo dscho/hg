@@ -10,18 +10,26 @@ This contains aliases to hide python version-specific details from the core.
 
 from __future__ import absolute_import
 
-try:
-    import cStringIO as io
-    stringio = io.StringIO
-except ImportError:
-    import io
-    stringio = io.StringIO
+import sys
 
-try:
+if sys.version_info[0] < 3:
+    import cPickle as pickle
+    import cStringIO as io
+    import httplib
     import Queue as _queue
-    _queue.Queue
-except ImportError:
+    import SocketServer as socketserver
+    import urlparse
+    import xmlrpclib
+else:
+    import http.client as httplib
+    import io
+    import pickle
     import queue as _queue
+    import socketserver
+    import urllib.parse as urlparse
+    import xmlrpc.client as xmlrpclib
+
+stringio = io.StringIO
 empty = _queue.Empty
 queue = _queue.Queue
 
@@ -41,9 +49,13 @@ def _alias(alias, origin, items):
         except AttributeError:
             pass
 
+httpserver = _pycompatstub()
 urlreq = _pycompatstub()
 urlerr = _pycompatstub()
 try:
+    import BaseHTTPServer
+    import CGIHTTPServer
+    import SimpleHTTPServer
     import urllib2
     import urllib
     _alias(urlreq, urllib, (
@@ -81,6 +93,16 @@ try:
         "HTTPError",
         "URLError",
     ))
+    _alias(httpserver, BaseHTTPServer, (
+        "HTTPServer",
+        "BaseHTTPRequestHandler",
+    ))
+    _alias(httpserver, SimpleHTTPServer, (
+        "SimpleHTTPRequestHandler",
+    ))
+    _alias(httpserver, CGIHTTPServer, (
+        "CGIHTTPRequestHandler",
+    ))
 
 except ImportError:
     import urllib.request
@@ -99,6 +121,7 @@ except ImportError:
         "pathname2url",
         "HTTPBasicAuthHandler",
         "HTTPDigestAuthHandler",
+        "HTTPPasswordMgrWithDefaultRealm",
         "ProxyHandler",
         "quote",
         "Request",
@@ -114,6 +137,13 @@ except ImportError:
     _alias(urlerr, urllib.error, (
         "HTTPError",
         "URLError",
+    ))
+    import http.server
+    _alias(httpserver, http.server, (
+        "HTTPServer",
+        "BaseHTTPRequestHandler",
+        "SimpleHTTPRequestHandler",
+        "CGIHTTPRequestHandler",
     ))
 
 try:

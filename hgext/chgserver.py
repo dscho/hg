@@ -40,18 +40,15 @@ Config
 
 from __future__ import absolute_import
 
-import SocketServer
 import errno
-import gc
+import hashlib
 import inspect
 import os
-import random
 import re
+import signal
 import struct
 import sys
-import threading
 import time
-import traceback
 
 from mercurial.i18n import _
 
@@ -76,10 +73,11 @@ _log = commandserver.log
 
 def _hashlist(items):
     """return sha1 hexdigest for a list"""
-    return util.sha1(str(items)).hexdigest()
+    return hashlib.sha1(str(items)).hexdigest()
 
 # sensitive config sections affecting confighash
 _configsections = [
+    'alias',  # affects global state commands.table
     'extdiff',  # uisetup will register new commands
     'extensions',
 ]
@@ -150,6 +148,10 @@ def _mtimehash(paths):
 
     for chgserver, it is designed that once mtimehash changes, the server is
     considered outdated immediately and should no longer provide service.
+
+    mtimehash is not included in confighash because we only know the paths of
+    extensions after importing them (there is imp.find_module but that faces
+    race conditions). We need to calculate confighash without importing.
     """
     def trystat(path):
         try:
@@ -212,18 +214,6 @@ def _setuppagercmd(ui, options, cmd):
         ui.setconfig('ui', 'formatted', ui.formatted(), 'pager')
         ui.setconfig('ui', 'interactive', False, 'pager')
         return p
-
-_envvarre = re.compile(r'\$[a-zA-Z_]+')
-
-def _clearenvaliases(cmdtable):
-    """Remove stale command aliases referencing env vars; variable expansion
-    is done at dispatch.addaliases()"""
-    for name, tab in cmdtable.items():
-        cmddef = tab[0]
-        if (isinstance(cmddef, dispatch.cmdalias) and
-            not cmddef.definition.startswith('!') and  # shell alias
-            _envvarre.search(cmddef.definition)):
-            del cmdtable[name]
 
 def _newchgui(srcui, csystem):
     class chgui(srcui.__class__):
@@ -357,6 +347,7 @@ class chgcmdserver(commandserver.server):
             self.capabilities['validate'] = chgcmdserver.validate
 
     def cleanup(self):
+        super(chgcmdserver, self).cleanup()
         # dispatch._runcatch() does not flush outputs if exception is not
         # handled by dispatch._dispatch()
         self.ui.flush()
@@ -508,6 +499,11 @@ class chgcmdserver(commandserver.server):
 
         pagercmd = _setuppagercmd(self.ui, options, cmd)
         if pagercmd:
+            # Python's SIGPIPE is SIG_IGN by default. change to SIG_DFL so
+            # we can exit if the pipe to the pager is closed
+            if util.safehasattr(signal, 'SIGPIPE') and \
+                    signal.getsignal(signal.SIGPIPE) == signal.SIG_IGN:
+                signal.signal(signal.SIGPIPE, signal.SIG_DFL)
             self.cresult.write(pagercmd)
         else:
             self.cresult.write('\0')
@@ -525,7 +521,6 @@ class chgcmdserver(commandserver.server):
         _log('setenv: %r\n' % sorted(newenv.keys()))
         os.environ.clear()
         os.environ.update(newenv)
-        _clearenvaliases(commands.table)
 
     capabilities = commandserver.server.capabilities.copy()
     capabilities.update({'attachio': attachio,
@@ -534,174 +529,110 @@ class chgcmdserver(commandserver.server):
                          'setenv': setenv,
                          'setumask': setumask})
 
-# copied from mercurial/commandserver.py
-class _requesthandler(SocketServer.StreamRequestHandler):
-    def handle(self):
-        # use a different process group from the master process, making this
-        # process pass kernel "is_current_pgrp_orphaned" check so signals like
-        # SIGTSTP, SIGTTIN, SIGTTOU are not ignored.
-        os.setpgid(0, 0)
-        # change random state otherwise forked request handlers would have a
-        # same state inherited from parent.
-        random.seed()
-        ui = self.server.ui
-        repo = self.server.repo
-        sv = None
-        try:
-            sv = chgcmdserver(ui, repo, self.rfile, self.wfile, self.connection,
-                              self.server.hashstate, self.server.baseaddress)
-            try:
-                sv.serve()
-            # handle exceptions that may be raised by command server. most of
-            # known exceptions are caught by dispatch.
-            except error.Abort as inst:
-                ui.warn(_('abort: %s\n') % inst)
-            except IOError as inst:
-                if inst.errno != errno.EPIPE:
-                    raise
-            except KeyboardInterrupt:
-                pass
-            finally:
-                sv.cleanup()
-        except: # re-raises
-            # also write traceback to error channel. otherwise client cannot
-            # see it because it is written to server's stderr by default.
-            if sv:
-                cerr = sv.cerr
-            else:
-                cerr = commandserver.channeledoutput(self.wfile, 'e')
-            traceback.print_exc(file=cerr)
-            raise
-        finally:
-            # trigger __del__ since ForkingMixIn uses os._exit
-            gc.collect()
-
 def _tempaddress(address):
     return '%s.%d.tmp' % (address, os.getpid())
 
 def _hashaddress(address, hashstr):
     return '%s-%s' % (address, hashstr)
 
-class AutoExitMixIn:  # use old-style to comply with SocketServer design
-    lastactive = time.time()
-    idletimeout = 3600  # default 1 hour
+class chgunixservicehandler(object):
+    """Set of operations for chg services"""
 
-    def startautoexitthread(self):
-        # note: the auto-exit check here is cheap enough to not use a thread,
-        # be done in serve_forever. however SocketServer is hook-unfriendly,
-        # you simply cannot hook serve_forever without copying a lot of code.
-        # besides, serve_forever's docstring suggests using thread.
-        thread = threading.Thread(target=self._autoexitloop)
-        thread.daemon = True
-        thread.start()
+    pollinterval = 1  # [sec]
 
-    def _autoexitloop(self, interval=1):
-        while True:
-            time.sleep(interval)
-            if not self.issocketowner():
-                _log('%s is not owned, exiting.\n' % self.server_address)
-                break
-            if time.time() - self.lastactive > self.idletimeout:
-                _log('being idle too long. exiting.\n')
-                break
-        self.shutdown()
+    def __init__(self, ui):
+        self.ui = ui
+        self._idletimeout = ui.configint('chgserver', 'idletimeout', 3600)
+        self._lastactive = time.time()
 
-    def process_request(self, request, address):
-        self.lastactive = time.time()
-        return SocketServer.ForkingMixIn.process_request(
-            self, request, address)
+    def bindsocket(self, sock, address):
+        self._inithashstate(address)
+        self._checkextensions()
+        self._bind(sock)
+        self._createsymlink()
 
-    def server_bind(self):
+    def _inithashstate(self, address):
+        self._baseaddress = address
+        if self.ui.configbool('chgserver', 'skiphash', False):
+            self._hashstate = None
+            self._realaddress = address
+            return
+        self._hashstate = hashstate.fromui(self.ui)
+        self._realaddress = _hashaddress(address, self._hashstate.confighash)
+
+    def _checkextensions(self):
+        if not self._hashstate:
+            return
+        if extensions.notloaded():
+            # one or more extensions failed to load. mtimehash becomes
+            # meaningless because we do not know the paths of those extensions.
+            # set mtimehash to an illegal hash value to invalidate the server.
+            self._hashstate.mtimehash = ''
+
+    def _bind(self, sock):
         # use a unique temp address so we can stat the file and do ownership
         # check later
-        tempaddress = _tempaddress(self.server_address)
-        # use relative path instead of full path at bind() if possible, since
-        # AF_UNIX path has very small length limit (107 chars) on common
-        # platforms (see sys/un.h)
-        dirname, basename = os.path.split(tempaddress)
-        bakwdfd = None
-        if dirname:
-            bakwdfd = os.open('.', os.O_DIRECTORY)
-            os.chdir(dirname)
-        self.socket.bind(basename)
-        self._socketstat = os.stat(basename)
+        tempaddress = _tempaddress(self._realaddress)
+        util.bindunixsocket(sock, tempaddress)
+        self._socketstat = os.stat(tempaddress)
         # rename will replace the old socket file if exists atomically. the
         # old server will detect ownership change and exit.
-        util.rename(basename, self.server_address)
-        if bakwdfd:
-            os.fchdir(bakwdfd)
-            os.close(bakwdfd)
+        util.rename(tempaddress, self._realaddress)
 
-    def issocketowner(self):
+    def _createsymlink(self):
+        if self._baseaddress == self._realaddress:
+            return
+        tempaddress = _tempaddress(self._baseaddress)
+        os.symlink(os.path.basename(self._realaddress), tempaddress)
+        util.rename(tempaddress, self._baseaddress)
+
+    def _issocketowner(self):
         try:
-            stat = os.stat(self.server_address)
+            stat = os.stat(self._realaddress)
             return (stat.st_ino == self._socketstat.st_ino and
                     stat.st_mtime == self._socketstat.st_mtime)
         except OSError:
             return False
 
-    def unlinksocketfile(self):
-        if not self.issocketowner():
+    def unlinksocket(self, address):
+        if not self._issocketowner():
             return
         # it is possible to have a race condition here that we may
         # remove another server's socket file. but that's okay
         # since that server will detect and exit automatically and
         # the client will start a new server on demand.
         try:
-            os.unlink(self.server_address)
+            os.unlink(self._realaddress)
         except OSError as exc:
             if exc.errno != errno.ENOENT:
                 raise
 
-class chgunixservice(commandserver.unixservice):
-    def init(self):
-        if self.repo:
-            # one chgserver can serve multiple repos. drop repo infomation
-            self.ui.setconfig('bundle', 'mainreporoot', '', 'repo')
-            self.repo = None
-        self._inithashstate()
-        self._checkextensions()
-        class cls(AutoExitMixIn, SocketServer.ForkingMixIn,
-                  SocketServer.UnixStreamServer):
-            ui = self.ui
-            repo = self.repo
-            hashstate = self.hashstate
-            baseaddress = self.baseaddress
-        self.server = cls(self.address, _requesthandler)
-        self.server.idletimeout = self.ui.configint(
-            'chgserver', 'idletimeout', self.server.idletimeout)
-        self.server.startautoexitthread()
-        self._createsymlink()
+    def printbanner(self, address):
+        # no "listening at" message should be printed to simulate hg behavior
+        pass
 
-    def _inithashstate(self):
-        self.baseaddress = self.address
-        if self.ui.configbool('chgserver', 'skiphash', False):
-            self.hashstate = None
-            return
-        self.hashstate = hashstate.fromui(self.ui)
-        self.address = _hashaddress(self.address, self.hashstate.confighash)
+    def shouldexit(self):
+        if not self._issocketowner():
+            self.ui.debug('%s is not owned, exiting.\n' % self._realaddress)
+            return True
+        if time.time() - self._lastactive > self._idletimeout:
+            self.ui.debug('being idle too long. exiting.\n')
+            return True
+        return False
 
-    def _checkextensions(self):
-        if not self.hashstate:
-            return
-        if extensions.notloaded():
-            # one or more extensions failed to load. mtimehash becomes
-            # meaningless because we do not know the paths of those extensions.
-            # set mtimehash to an illegal hash value to invalidate the server.
-            self.hashstate.mtimehash = ''
+    def newconnection(self):
+        self._lastactive = time.time()
 
-    def _createsymlink(self):
-        if self.baseaddress == self.address:
-            return
-        tempaddress = _tempaddress(self.baseaddress)
-        os.symlink(os.path.basename(self.address), tempaddress)
-        util.rename(tempaddress, self.baseaddress)
+    def createcmdserver(self, repo, conn, fin, fout):
+        return chgcmdserver(self.ui, repo, fin, fout, conn,
+                            self._hashstate, self._baseaddress)
 
-    def run(self):
-        try:
-            self.server.serve_forever()
-        finally:
-            self.server.unlinksocketfile()
+def chgunixservice(ui, repo, opts):
+    if repo:
+        # one chgserver can serve multiple repos. drop repo infomation
+        ui.setconfig('bundle', 'mainreporoot', '', 'repo')
+    h = chgunixservicehandler(ui)
+    return commandserver.unixforkingservice(ui, repo=None, opts=opts, handler=h)
 
 def uisetup(ui):
     commandserver._servicemap['chgunix'] = chgunixservice

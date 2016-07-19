@@ -499,3 +499,52 @@ amend should not be blocked by the ongoing histedit.
   > EOF
   $ hg commit --amend -m 'allow this fold'
   $ hg histedit --continue
+
+  $ cd ..
+
+Test autoverb feature
+
+  $ hg init autoverb
+  $ cd autoverb
+  $ echo alpha >> alpha
+  $ hg ci -qAm one
+  $ echo alpha >> alpha
+  $ hg ci -qm two
+  $ echo beta >> beta
+  $ hg ci -qAm "roll! one"
+
+  $ hg log --style compact --graph
+  @  2[tip]   4f34d0f8b5fa   1970-01-01 00:00 +0000   test
+  |    roll! one
+  |
+  o  1   579e40513370   1970-01-01 00:00 +0000   test
+  |    two
+  |
+  o  0   6058cbb6cfd7   1970-01-01 00:00 +0000   test
+       one
+  
+
+Check that 'roll' is selected by default
+
+  $ HGEDITOR=cat hg histedit 0 --config experimental.histedit.autoverb=True
+  pick 6058cbb6cfd7 0 one
+  roll 4f34d0f8b5fa 2 roll! one
+  pick 579e40513370 1 two
+  
+  # Edit history between 6058cbb6cfd7 and 4f34d0f8b5fa
+  #
+  # Commits are listed from least to most recent
+  #
+  # You can reorder changesets by reordering the lines
+  #
+  # Commands:
+  #
+  #  e, edit = use commit, but stop for amending
+  #  m, mess = edit commit message without changing commit content
+  #  p, pick = use commit
+  #  d, drop = remove commit from history
+  #  f, fold = use commit, but combine it with the one above
+  #  r, roll = like fold, but discard this commit's description
+  #
+
+  $ cd ..

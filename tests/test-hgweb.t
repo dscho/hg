@@ -340,7 +340,7 @@ static file
 
   $ get-with-headers.py --twice localhost:$HGPORT 'static/style-gitweb.css' - date etag server
   200 Script output follows
-  content-length: 6521
+  content-length: 6947
   content-type: text/css
   
   body { font-family: sans-serif; font-size: 12px; border:solid #d9d8d1; border-width:1px; margin:10px; background: white; color: black; }
@@ -374,6 +374,7 @@ static file
   a.list:hover { text-decoration:underline; color:#880000; }
   table { padding:8px 4px; }
   th { padding:2px 5px; font-size:12px; text-align:left; }
+  .parity0 { background-color:#ffffff; }
   tr.dark, .parity1, pre.sourcelines.stripes > :nth-child(4n+4) { background-color:#f6f6f0; }
   tr.light:hover, .parity0:hover, tr.dark:hover, .parity1:hover,
   pre.sourcelines.stripes > :nth-child(4n+2):hover,
@@ -397,6 +398,19 @@ static file
   div.diff_info { font-family:monospace; color:#000099; background-color:#edece6; font-style:italic; }
   div.index_include { border:solid #d9d8d1; border-width:0px 0px 1px; padding:12px 8px; }
   div.search { margin:4px 8px; position:absolute; top:56px; right:12px }
+  tr.thisrev a { color:#999999; text-decoration: none; }
+  tr.thisrev pre { color:#009900; }
+  div.annotate-info {
+    display: none;
+    position: absolute;
+    background-color: #FFFFFF;
+    border: 1px solid #000000;
+    text-align: left;
+    color: #000000;
+    padding: 5px;
+  }
+  div.annotate-info a { color: #0000FF; text-decoration: underline; }
+  td.annotate:hover div.annotate-info { display: inline; }
   .linenr { color:#999999; text-decoration:none }
   div.rss_logo { float: right; white-space: nowrap; }
   div.rss_logo a {

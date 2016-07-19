@@ -1044,8 +1044,8 @@ with general delta
   shelved as default
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   $ hg debugbundle .hg/shelved/*.hg
-  Stream params: {'Compression': 'BZ'}
-  changegroup -- "{'version': '02'}"
+  Stream params: sortdict([('Compression', 'BZ')])
+  changegroup -- "sortdict([('version', '02'), ('nbchanges', '1')])"
       45993d65fe9dc3c6d8764b9c3b07fa831ee7d92d
   $ cd ..
 
@@ -1585,3 +1585,40 @@ On non bare shelve the branch information shouldn't be restored
   ? b
   $ hg branch
   default
+  $ cd ..
+
+Prepare unshleve with a corrupted shelvedstate
+  $ hg init r1 && cd r1
+  $ echo text1 > file && hg add file
+  $ hg shelve
+  shelved as default
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo text2 > file && hg ci -Am text1
+  adding file
+  $ hg unshelve
+  unshelving change 'default'
+  rebasing shelved changes
+  rebasing 1:396ea74229f9 "(changes in empty repository)" (tip)
+  merging file
+  warning: conflicts while merging file! (edit, then use 'hg resolve --mark')
+  unresolved conflicts (see 'hg resolve', then 'hg unshelve --continue')
+  [1]
+  $ echo somethingsomething > .hg/shelvedstate
+
+Unshelve --continue fails with appropriate message if shelvedstate is corrupted
+  $ hg unshelve --continue
+  abort: corrupted shelved state file
+  (please run hg unshelve --abort to abort unshelve operation)
+  [255]
+
+Unshelve --abort works with a corrupted shelvedstate
+  $ hg unshelve --abort
+  could not read shelved state file, your working copy may be in an unexpected state
+  please update to some commit
+
+Unshelve --abort fails with appropriate message if there's no unshelve in
+progress
+  $ hg unshelve --abort
+  abort: no unshelve in progress
+  [255]
+  $ cd ..

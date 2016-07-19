@@ -12,6 +12,7 @@ import collections
 import copy
 import email
 import errno
+import hashlib
 import os
 import posixpath
 import re
@@ -978,7 +979,19 @@ class recordhunk(object):
 def filterpatch(ui, headers, operation=None):
     """Interactively filter patch chunks into applied-only chunks"""
     if operation is None:
-        operation = _('record')
+        operation = 'record'
+    messages = {
+        'multiple': {
+            'discard': _("discard change %d/%d to '%s'?"),
+            'record': _("record change %d/%d to '%s'?"),
+            'revert': _("revert change %d/%d to '%s'?"),
+        }[operation],
+        'single': {
+            'discard': _("discard this change to '%s'?"),
+            'record': _("record this change to '%s'?"),
+            'revert': _("revert this change to '%s'?"),
+        }[operation],
+    }
 
     def prompt(skipfile, skipall, query, chunk):
         """prompt query, and process base inputs
@@ -1109,11 +1122,10 @@ the hunk is left unchanged.
             if skipfile is None and skipall is None:
                 chunk.pretty(ui)
             if total == 1:
-                msg = _("record this change to '%s'?") % chunk.filename()
+                msg = messages['single'] % chunk.filename()
             else:
                 idx = pos - len(h.hunks) + i
-                msg = _("record change %d/%d to '%s'?") % (idx, total,
-                                                           chunk.filename())
+                msg = messages['multiple'] % (idx, total, chunk.filename())
             r, skipfile, skipall, newpatches = prompt(skipfile,
                     skipall, msg, chunk)
             if r:
@@ -2172,7 +2184,7 @@ def difffeatureopts(ui, opts=None, untrusted=False, section='diff', git=False,
     return mdiff.diffopts(**buildopts)
 
 def diff(repo, node1=None, node2=None, match=None, changes=None, opts=None,
-         losedatafn=None, prefix='', relroot=''):
+         losedatafn=None, prefix='', relroot='', copy=None):
     '''yields diff of changes to files between two nodes, or node and
     working directory.
 
@@ -2191,7 +2203,10 @@ def diff(repo, node1=None, node2=None, match=None, changes=None, opts=None,
     display (used for subrepos).
 
     relroot, if not empty, must be normalized with a trailing /. Any match
-    patterns that fall outside it will be ignored.'''
+    patterns that fall outside it will be ignored.
+
+    copy, if not empty, should contain mappings {dst@y: src@x} of copy
+    information.'''
 
     if opts is None:
         opts = mdiff.defaultopts
@@ -2238,9 +2253,10 @@ def diff(repo, node1=None, node2=None, match=None, changes=None, opts=None,
         hexfunc = short
     revs = [hexfunc(node) for node in [ctx1.node(), ctx2.node()] if node]
 
-    copy = {}
-    if opts.git or opts.upgrade:
-        copy = copies.pathcopies(ctx1, ctx2, match=match)
+    if copy is None:
+        copy = {}
+        if opts.git or opts.upgrade:
+            copy = copies.pathcopies(ctx1, ctx2, match=match)
 
     if relroot is not None:
         if not relfiltered:
@@ -2401,7 +2417,7 @@ def trydiff(repo, revs, ctx1, ctx2, modified, added, removed,
         if not text:
             text = ""
         l = len(text)
-        s = util.sha1('blob %d\0' % l)
+        s = hashlib.sha1('blob %d\0' % l)
         s.update(text)
         return s.hexdigest()
 

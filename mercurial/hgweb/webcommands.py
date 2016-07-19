@@ -139,7 +139,7 @@ def _filerevision(web, req, tmpl, fctx):
             yield {"line": t,
                    "lineid": "l%d" % (lineno + 1),
                    "linenumber": "% 6d" % (lineno + 1),
-                   "parity": parity.next()}
+                   "parity": next(parity)}
 
     return tmpl("filerevision",
                 file=f,
@@ -278,7 +278,7 @@ def _search(web, req, tmpl):
             files = webutil.listfilediffs(tmpl, ctx.files(), n, web.maxfiles)
 
             yield tmpl('searchentry',
-                       parity=parity.next(),
+                       parity=next(parity),
                        changelogtag=showtags,
                        files=files,
                        **webutil.commonentry(web.repo, ctx))
@@ -375,7 +375,7 @@ def changelog(web, req, tmpl, shortlog=False):
                 break
 
             entry = webutil.changelistentry(web, web.repo[rev], tmpl)
-            entry['parity'] = parity.next()
+            entry['parity'] = next(parity)
             yield entry
 
     if shortlog:
@@ -527,7 +527,7 @@ def manifest(web, req, tmpl):
 
             fctx = ctx.filectx(full)
             yield {"file": full,
-                   "parity": parity.next(),
+                   "parity": next(parity),
                    "basename": f,
                    "date": fctx.date(),
                    "size": fctx.size(),
@@ -545,7 +545,7 @@ def manifest(web, req, tmpl):
                 h = v
 
             path = "%s%s" % (abspath, d)
-            yield {"parity": parity.next(),
+            yield {"parity": next(parity),
                    "path": path,
                    "emptydirs": "/".join(emptydirs),
                    "basename": d}
@@ -554,7 +554,7 @@ def manifest(web, req, tmpl):
                 symrev=symrev,
                 path=abspath,
                 up=webutil.up(abspath),
-                upparity=parity.next(),
+                upparity=next(parity),
                 fentries=filelist,
                 dentries=dirlist,
                 archives=web.archivelist(hex(node)),
@@ -582,7 +582,7 @@ def tags(web, req, tmpl):
         if latestonly:
             t = t[:1]
         for k, n in t:
-            yield {"parity": parity.next(),
+            yield {"parity": next(parity),
                    "tag": k,
                    "date": web.repo[n].date(),
                    "node": hex(n)}
@@ -615,7 +615,7 @@ def bookmarks(web, req, tmpl):
         if latestonly:
             t = i[:1]
         for k, n in t:
-            yield {"parity": parity.next(),
+            yield {"parity": next(parity),
                    "bookmark": k,
                    "date": web.repo[n].date(),
                    "node": hex(n)}
@@ -677,7 +677,7 @@ def summary(web, req, tmpl):
                 break
 
             yield tmpl("tagentry",
-                       parity=parity.next(),
+                       parity=next(parity),
                        tag=k,
                        node=hex(n),
                        date=web.repo[n].date())
@@ -688,7 +688,7 @@ def summary(web, req, tmpl):
         sortkey = lambda b: (web.repo[b[1]].rev(), b[0])
         marks = sorted(marks, key=sortkey, reverse=True)
         for k, n in marks[:10]:  # limit to 10 bookmarks
-            yield {'parity': parity.next(),
+            yield {'parity': next(parity),
                    'bookmark': k,
                    'date': web.repo[n].date(),
                    'node': hex(n)}
@@ -704,11 +704,11 @@ def summary(web, req, tmpl):
 
             l.append(tmpl(
                 'shortlogentry',
-                parity=parity.next(),
+                parity=next(parity),
                 **webutil.commonentry(web.repo, ctx)))
 
-        l.reverse()
-        yield l
+        for entry in reversed(l):
+            yield entry
 
     tip = web.repo['tip']
     count = len(web.repo)
@@ -725,7 +725,8 @@ def summary(web, req, tmpl):
                 shortlog=changelist,
                 node=tip.hex(),
                 symrev='tip',
-                archives=web.archivelist("tip"))
+                archives=web.archivelist("tip"),
+                labels=web.configlist('web', 'labels'))
 
 @webcommand('filediff')
 def filediff(web, req, tmpl):
@@ -863,29 +864,41 @@ def annotate(web, req, tmpl):
     diffopts = patch.difffeatureopts(web.repo.ui, untrusted=True,
                                      section='annotate', whitespace=True)
 
+    def parents(f):
+        for p in f.parents():
+            yield {
+                "node": p.hex(),
+                "rev": p.rev(),
+            }
+
     def annotate(**map):
-        last = None
         if util.binary(fctx.data()):
             mt = (mimetypes.guess_type(fctx.path())[0]
                   or 'application/octet-stream')
-            lines = enumerate([((fctx.filectx(fctx.filerev()), 1),
-                                '(binary:%s)' % mt)])
+            lines = [((fctx.filectx(fctx.filerev()), 1), '(binary:%s)' % mt)]
         else:
-            lines = enumerate(fctx.annotate(follow=True, linenumber=True,
-                                            diffopts=diffopts))
-        for lineno, ((f, targetline), l) in lines:
-            fnode = f.filenode()
-
-            if last != fnode:
-                last = fnode
-
-            yield {"parity": parity.next(),
+            lines = fctx.annotate(follow=True, linenumber=True,
+                                  diffopts=diffopts)
+        previousrev = None
+        blockparitygen = paritygen(1)
+        for lineno, ((f, targetline), l) in enumerate(lines):
+            rev = f.rev()
+            if rev != previousrev:
+                blockhead = True
+                blockparity = next(blockparitygen)
+            else:
+                blockhead = None
+            previousrev = rev
+            yield {"parity": next(parity),
                    "node": f.hex(),
-                   "rev": f.rev(),
+                   "rev": rev,
                    "author": f.user(),
+                   "parents": parents(f),
                    "desc": f.description(),
                    "extra": f.extra(),
                    "file": f.path(),
+                   "blockhead": blockhead,
+                   "blockparity": blockparity,
                    "targetline": targetline,
                    "line": l,
                    "lineno": lineno + 1,
@@ -963,7 +976,7 @@ def filelog(web, req, tmpl):
             iterfctx = fctx.filectx(i)
 
             l.append(dict(
-                parity=parity.next(),
+                parity=next(parity),
                 filerev=i,
                 file=f,
                 rename=webutil.renamelink(iterfctx),

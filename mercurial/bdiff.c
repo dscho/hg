@@ -9,37 +9,25 @@
  Based roughly on Python difflib
 */
 
-#define PY_SSIZE_T_CLEAN
-#include <Python.h>
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
 
-#include "util.h"
-
-struct line {
-	int hash, n, e;
-	Py_ssize_t len;
-	const char *l;
-};
+#include "compat.h"
+#include "bitmanipulation.h"
+#include "bdiff.h"
 
 struct pos {
 	int pos, len;
 };
 
-struct hunk;
-struct hunk {
-	int a1, a2, b1, b2;
-	struct hunk *next;
-};
-
-static int splitlines(const char *a, Py_ssize_t len, struct line **lr)
+int bdiff_splitlines(const char *a, ssize_t len, struct bdiff_line **lr)
 {
 	unsigned hash;
 	int i;
 	const char *p, *b = a;
 	const char * const plast = a + len - 1;
-	struct line *l;
+	struct bdiff_line *l;
 
 	/* count the lines */
 	i = 1; /* extra line for sentinel */
@@ -47,7 +35,7 @@ static int splitlines(const char *a, Py_ssize_t len, struct line **lr)
 		if (*p == '\n' || p == plast)
 			i++;
 
-	*lr = l = (struct line *)malloc(sizeof(struct line) * i);
+	*lr = l = (struct bdiff_line *)malloc(sizeof(struct bdiff_line) * i);
 	if (!l)
 		return -1;
 
@@ -75,12 +63,13 @@ static int splitlines(const char *a, Py_ssize_t len, struct line **lr)
 	return i - 1;
 }
 
-static inline int cmp(struct line *a, struct line *b)
+static inline int cmp(struct bdiff_line *a, struct bdiff_line *b)
 {
 	return a->hash != b->hash || a->len != b->len || memcmp(a->l, b->l, a->len);
 }
 
-static int equatelines(struct line *a, int an, struct line *b, int bn)
+static int equatelines(struct bdiff_line *a, int an, struct bdiff_line *b,
+	int bn)
 {
 	int i, j, buckets = 1, t, scale;
 	struct pos *h = NULL;
@@ -145,7 +134,8 @@ static int equatelines(struct line *a, int an, struct line *b, int bn)
 	return 1;
 }
 
-static int longest_match(struct line *a, struct line *b, struct pos *pos,
+static int longest_match(struct bdiff_line *a, struct bdiff_line *b,
+			struct pos *pos,
 			 int a1, int a2, int b1, int b2, int *omi, int *omj)
 {
 	int mi = a1, mj = b1, mk = 0, i, j, k, half;
@@ -206,8 +196,9 @@ static int longest_match(struct line *a, struct line *b, struct pos *pos,
 	return mk;
 }
 
-static struct hunk *recurse(struct line *a, struct line *b, struct pos *pos,
-			    int a1, int a2, int b1, int b2, struct hunk *l)
+static struct bdiff_hunk *recurse(struct bdiff_line *a, struct bdiff_line *b,
+				struct pos *pos,
+			    int a1, int a2, int b1, int b2, struct bdiff_hunk *l)
 {
 	int i, j, k;
 
@@ -222,7 +213,7 @@ static struct hunk *recurse(struct line *a, struct line *b, struct pos *pos,
 		if (!l)
 			return NULL;
 
-		l->next = (struct hunk *)malloc(sizeof(struct hunk));
+		l->next = (struct bdiff_hunk *)malloc(sizeof(struct bdiff_hunk));
 		if (!l->next)
 			return NULL;
 
@@ -239,10 +230,10 @@ static struct hunk *recurse(struct line *a, struct line *b, struct pos *pos,
 	}
 }
 
-static int diff(struct line *a, int an, struct line *b, int bn,
-		 struct hunk *base)
+int bdiff_diff(struct bdiff_line *a, int an, struct bdiff_line *b,
+		int bn, struct bdiff_hunk *base)
 {
-	struct hunk *curr;
+	struct bdiff_hunk *curr;
 	struct pos *pos;
 	int t, count = 0;
 
@@ -258,7 +249,7 @@ static int diff(struct line *a, int an, struct line *b, int bn,
 			return -1;
 
 		/* sentinel end hunk */
-		curr->next = (struct hunk *)malloc(sizeof(struct hunk));
+		curr->next = (struct bdiff_hunk *)malloc(sizeof(struct bdiff_hunk));
 		if (!curr->next)
 			return -1;
 		curr = curr->next;
@@ -271,7 +262,7 @@ static int diff(struct line *a, int an, struct line *b, int bn,
 
 	/* normalize the hunk list, try to push each hunk towards the end */
 	for (curr = base->next; curr; curr = curr->next) {
-		struct hunk *next = curr->next;
+		struct bdiff_hunk *next = curr->next;
 
 		if (!next)
 			break;
@@ -293,195 +284,13 @@ static int diff(struct line *a, int an, struct line *b, int bn,
 	return count;
 }
 
-static void freehunks(struct hunk *l)
+void bdiff_freehunks(struct bdiff_hunk *l)
 {
-	struct hunk *n;
+	struct bdiff_hunk *n;
 	for (; l; l = n) {
 		n = l->next;
 		free(l);
 	}
 }
 
-static PyObject *blocks(PyObject *self, PyObject *args)
-{
-	PyObject *sa, *sb, *rl = NULL, *m;
-	struct line *a, *b;
-	struct hunk l, *h;
-	int an, bn, count, pos = 0;
-
-	l.next = NULL;
-
-	if (!PyArg_ParseTuple(args, "SS:bdiff", &sa, &sb))
-		return NULL;
-
-	an = splitlines(PyBytes_AsString(sa), PyBytes_Size(sa), &a);
-	bn = splitlines(PyBytes_AsString(sb), PyBytes_Size(sb), &b);
-
-	if (!a || !b)
-		goto nomem;
-
-	count = diff(a, an, b, bn, &l);
-	if (count < 0)
-		goto nomem;
-
-	rl = PyList_New(count);
-	if (!rl)
-		goto nomem;
-
-	for (h = l.next; h; h = h->next) {
-		m = Py_BuildValue("iiii", h->a1, h->a2, h->b1, h->b2);
-		PyList_SetItem(rl, pos, m);
-		pos++;
-	}
-
-nomem:
-	free(a);
-	free(b);
-	freehunks(l.next);
-	return rl ? rl : PyErr_NoMemory();
-}
-
-static PyObject *bdiff(PyObject *self, PyObject *args)
-{
-	char *sa, *sb, *rb;
-	PyObject *result = NULL;
-	struct line *al, *bl;
-	struct hunk l, *h;
-	int an, bn, count;
-	Py_ssize_t len = 0, la, lb;
-	PyThreadState *_save;
-
-	l.next = NULL;
-
-	if (!PyArg_ParseTuple(args, "s#s#:bdiff", &sa, &la, &sb, &lb))
-		return NULL;
-
-	if (la > UINT_MAX || lb > UINT_MAX) {
-		PyErr_SetString(PyExc_ValueError, "bdiff inputs too large");
-		return NULL;
-	}
-
-	_save = PyEval_SaveThread();
-	an = splitlines(sa, la, &al);
-	bn = splitlines(sb, lb, &bl);
-	if (!al || !bl)
-		goto nomem;
-
-	count = diff(al, an, bl, bn, &l);
-	if (count < 0)
-		goto nomem;
-
-	/* calculate length of output */
-	la = lb = 0;
-	for (h = l.next; h; h = h->next) {
-		if (h->a1 != la || h->b1 != lb)
-			len += 12 + bl[h->b1].l - bl[lb].l;
-		la = h->a2;
-		lb = h->b2;
-	}
-	PyEval_RestoreThread(_save);
-	_save = NULL;
-
-	result = PyBytes_FromStringAndSize(NULL, len);
-
-	if (!result)
-		goto nomem;
-
-	/* build binary patch */
-	rb = PyBytes_AsString(result);
-	la = lb = 0;
-
-	for (h = l.next; h; h = h->next) {
-		if (h->a1 != la || h->b1 != lb) {
-			len = bl[h->b1].l - bl[lb].l;
-			putbe32((uint32_t)(al[la].l - al->l), rb);
-			putbe32((uint32_t)(al[h->a1].l - al->l), rb + 4);
-			putbe32((uint32_t)len, rb + 8);
-			memcpy(rb + 12, bl[lb].l, len);
-			rb += 12 + len;
-		}
-		la = h->a2;
-		lb = h->b2;
-	}
-
-nomem:
-	if (_save)
-		PyEval_RestoreThread(_save);
-	free(al);
-	free(bl);
-	freehunks(l.next);
-	return result ? result : PyErr_NoMemory();
-}
-
-/*
- * If allws != 0, remove all whitespace (' ', \t and \r). Otherwise,
- * reduce whitespace sequences to a single space and trim remaining whitespace
- * from end of lines.
- */
-static PyObject *fixws(PyObject *self, PyObject *args)
-{
-	PyObject *s, *result = NULL;
-	char allws, c;
-	const char *r;
-	Py_ssize_t i, rlen, wlen = 0;
-	char *w;
-
-	if (!PyArg_ParseTuple(args, "Sb:fixws", &s, &allws))
-		return NULL;
-	r = PyBytes_AsString(s);
-	rlen = PyBytes_Size(s);
-
-	w = (char *)malloc(rlen ? rlen : 1);
-	if (!w)
-		goto nomem;
-
-	for (i = 0; i != rlen; i++) {
-		c = r[i];
-		if (c == ' ' || c == '\t' || c == '\r') {
-			if (!allws && (wlen == 0 || w[wlen - 1] != ' '))
-				w[wlen++] = ' ';
-		} else if (c == '\n' && !allws
-			  && wlen > 0 && w[wlen - 1] == ' ') {
-			w[wlen - 1] = '\n';
-		} else {
-			w[wlen++] = c;
-		}
-	}
-
-	result = PyBytes_FromStringAndSize(w, wlen);
-
-nomem:
-	free(w);
-	return result ? result : PyErr_NoMemory();
-}
-
-
-static char mdiff_doc[] = "Efficient binary diff.";
-
-static PyMethodDef methods[] = {
-	{"bdiff", bdiff, METH_VARARGS, "calculate a binary diff\n"},
-	{"blocks", blocks, METH_VARARGS, "find a list of matching lines\n"},
-	{"fixws", fixws, METH_VARARGS, "normalize diff whitespaces\n"},
-	{NULL, NULL}
-};
-
-#ifdef IS_PY3K
-static struct PyModuleDef bdiff_module = {
-	PyModuleDef_HEAD_INIT,
-	"bdiff",
-	mdiff_doc,
-	-1,
-	methods
-};
-
-PyMODINIT_FUNC PyInit_bdiff(void)
-{
-	return PyModule_Create(&bdiff_module);
-}
-#else
-PyMODINIT_FUNC initbdiff(void)
-{
-	Py_InitModule3("bdiff", methods, mdiff_doc);
-}
-#endif
 

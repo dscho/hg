@@ -100,6 +100,8 @@
      summary:     initial
   
 
+  $ echo '[web]' >> .hg/hgrc
+  $ echo 'allow_archive = bz2' >> .hg/hgrc
   $ hg serve -p $HGPORT -d --pid-file=hg.pid -A access.log -E error.log
   $ cat hg.pid >> $DAEMON_PIDS
 
@@ -111,10 +113,33 @@
 
 file/{revision}/{path} shows file revision
 
-  $ request json-file/06e557f3edf6/foo
+  $ request json-file/78896eb0e102/foo-new
   200 Script output follows
   
-  "not yet implemented"
+  {
+    "bookmarks": [],
+    "branch": "default",
+    "date": [
+      0.0,
+      0
+    ],
+    "desc": "move foo",
+    "lines": [
+      {
+        "line": "bar\n"
+      }
+    ],
+    "node": "78896eb0e102174ce9278438a95e12543e4367a7",
+    "parents": [
+      "f8bbb9024b10f93cdbb8d940337398291d40dea8"
+    ],
+    "path": "foo-new",
+    "phase": "public",
+    "tags": [
+      "tag1"
+    ],
+    "user": "test"
+  }
 
 file/{revision} shows root directory info
 
@@ -169,6 +194,7 @@ changelog/ shows information about several changesets
     "changesets": [
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -179,6 +205,7 @@ changelog/ shows information about several changesets
           "ceed296fe500c3fac9541e31dad860cb49c89e45",
           "ed66c30e87eb65337c05a4229efaa5f1d5285a90"
         ],
+        "phase": "draft",
         "tags": [
           "tip"
         ],
@@ -186,6 +213,7 @@ changelog/ shows information about several changesets
       },
       {
         "bookmarks": [],
+        "branch": "test-branch",
         "date": [
           0.0,
           0
@@ -195,11 +223,13 @@ changelog/ shows information about several changesets
         "parents": [
           "6ab967a8ab3489227a83f80e920faa039a71819f"
         ],
+        "phase": "draft",
         "tags": [],
         "user": "test"
       },
       {
         "bookmarks": [],
+        "branch": "test-branch",
         "date": [
           0.0,
           0
@@ -209,6 +239,7 @@ changelog/ shows information about several changesets
         "parents": [
           "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e"
         ],
+        "phase": "draft",
         "tags": [],
         "user": "test"
       },
@@ -216,6 +247,7 @@ changelog/ shows information about several changesets
         "bookmarks": [
           "bookmark2"
         ],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -225,11 +257,13 @@ changelog/ shows information about several changesets
         "parents": [
           "f2890a05fea49bfaf9fb27ed5490894eba32da78"
         ],
+        "phase": "draft",
         "tags": [],
         "user": "test"
       },
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -239,6 +273,7 @@ changelog/ shows information about several changesets
         "parents": [
           "93a8ce14f89156426b7fa981af8042da53f03aa0"
         ],
+        "phase": "draft",
         "tags": [
           "tag2"
         ],
@@ -246,6 +281,7 @@ changelog/ shows information about several changesets
       },
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -255,11 +291,13 @@ changelog/ shows information about several changesets
         "parents": [
           "78896eb0e102174ce9278438a95e12543e4367a7"
         ],
+        "phase": "public",
         "tags": [],
         "user": "test"
       },
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -269,6 +307,7 @@ changelog/ shows information about several changesets
         "parents": [
           "8d7c456572acf3557e8ed8a07286b10c408bcec5"
         ],
+        "phase": "public",
         "tags": [
           "tag1"
         ],
@@ -278,6 +317,7 @@ changelog/ shows information about several changesets
         "bookmarks": [
           "bookmark1"
         ],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -287,11 +327,13 @@ changelog/ shows information about several changesets
         "parents": [
           "f8bbb9024b10f93cdbb8d940337398291d40dea8"
         ],
+        "phase": "public",
         "tags": [],
         "user": "test"
       },
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -301,11 +343,13 @@ changelog/ shows information about several changesets
         "parents": [
           "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e"
         ],
+        "phase": "public",
         "tags": [],
         "user": "test"
       },
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -313,6 +357,7 @@ changelog/ shows information about several changesets
         "desc": "initial",
         "node": "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e",
         "parents": [],
+        "phase": "public",
         "tags": [],
         "user": "test"
       }
@@ -330,6 +375,7 @@ changelog/{revision} shows information starting at a specific changeset
     "changesets": [
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -339,11 +385,13 @@ changelog/{revision} shows information starting at a specific changeset
         "parents": [
           "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e"
         ],
+        "phase": "public",
         "tags": [],
         "user": "test"
       },
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -351,6 +399,7 @@ changelog/{revision} shows information starting at a specific changeset
         "desc": "initial",
         "node": "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e",
         "parents": [],
+        "phase": "public",
         "tags": [],
         "user": "test"
       }
@@ -368,6 +417,7 @@ shortlog/ shows information about a set of changesets
     "changesets": [
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -378,6 +428,7 @@ shortlog/ shows information about a set of changesets
           "ceed296fe500c3fac9541e31dad860cb49c89e45",
           "ed66c30e87eb65337c05a4229efaa5f1d5285a90"
         ],
+        "phase": "draft",
         "tags": [
           "tip"
         ],
@@ -385,6 +436,7 @@ shortlog/ shows information about a set of changesets
       },
       {
         "bookmarks": [],
+        "branch": "test-branch",
         "date": [
           0.0,
           0
@@ -394,11 +446,13 @@ shortlog/ shows information about a set of changesets
         "parents": [
           "6ab967a8ab3489227a83f80e920faa039a71819f"
         ],
+        "phase": "draft",
         "tags": [],
         "user": "test"
       },
       {
         "bookmarks": [],
+        "branch": "test-branch",
         "date": [
           0.0,
           0
@@ -408,6 +462,7 @@ shortlog/ shows information about a set of changesets
         "parents": [
           "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e"
         ],
+        "phase": "draft",
         "tags": [],
         "user": "test"
       },
@@ -415,6 +470,7 @@ shortlog/ shows information about a set of changesets
         "bookmarks": [
           "bookmark2"
         ],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -424,11 +480,13 @@ shortlog/ shows information about a set of changesets
         "parents": [
           "f2890a05fea49bfaf9fb27ed5490894eba32da78"
         ],
+        "phase": "draft",
         "tags": [],
         "user": "test"
       },
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -438,6 +496,7 @@ shortlog/ shows information about a set of changesets
         "parents": [
           "93a8ce14f89156426b7fa981af8042da53f03aa0"
         ],
+        "phase": "draft",
         "tags": [
           "tag2"
         ],
@@ -445,6 +504,7 @@ shortlog/ shows information about a set of changesets
       },
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -454,11 +514,13 @@ shortlog/ shows information about a set of changesets
         "parents": [
           "78896eb0e102174ce9278438a95e12543e4367a7"
         ],
+        "phase": "public",
         "tags": [],
         "user": "test"
       },
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -468,6 +530,7 @@ shortlog/ shows information about a set of changesets
         "parents": [
           "8d7c456572acf3557e8ed8a07286b10c408bcec5"
         ],
+        "phase": "public",
         "tags": [
           "tag1"
         ],
@@ -477,6 +540,7 @@ shortlog/ shows information about a set of changesets
         "bookmarks": [
           "bookmark1"
         ],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -486,11 +550,13 @@ shortlog/ shows information about a set of changesets
         "parents": [
           "f8bbb9024b10f93cdbb8d940337398291d40dea8"
         ],
+        "phase": "public",
         "tags": [],
         "user": "test"
       },
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -500,11 +566,13 @@ shortlog/ shows information about a set of changesets
         "parents": [
           "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e"
         ],
+        "phase": "public",
         "tags": [],
         "user": "test"
       },
       {
         "bookmarks": [],
+        "branch": "default",
         "date": [
           0.0,
           0
@@ -512,6 +580,7 @@ shortlog/ shows information about a set of changesets
         "desc": "initial",
         "node": "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e",
         "parents": [],
+        "phase": "public",
         "tags": [],
         "user": "test"
       }
@@ -732,7 +801,309 @@ summary/ shows a summary of repository state
   $ request json-summary
   200 Script output follows
   
-  "not yet implemented"
+  {
+    "archives": [
+      {
+        "extension": ".tar.bz2",
+        "node": "tip",
+        "type": "bz2",
+        "url": "http://*:$HGPORT/archive/tip.tar.bz2" (glob)
+      }
+    ],
+    "bookmarks": [
+      {
+        "bookmark": "bookmark2",
+        "date": [
+          0.0,
+          0
+        ],
+        "node": "ceed296fe500c3fac9541e31dad860cb49c89e45"
+      },
+      {
+        "bookmark": "bookmark1",
+        "date": [
+          0.0,
+          0
+        ],
+        "node": "8d7c456572acf3557e8ed8a07286b10c408bcec5"
+      }
+    ],
+    "branches": [
+      {
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "node": "cc725e08502a79dd1eda913760fbe06ed7a9abc7",
+        "status": "open"
+      },
+      {
+        "branch": "test-branch",
+        "date": [
+          0.0,
+          0
+        ],
+        "node": "ed66c30e87eb65337c05a4229efaa5f1d5285a90",
+        "status": "inactive"
+      }
+    ],
+    "labels": [],
+    "lastchange": [
+      0.0,
+      0
+    ],
+    "node": "cc725e08502a79dd1eda913760fbe06ed7a9abc7",
+    "shortlog": [
+      {
+        "bookmarks": [],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "merge test-branch into default",
+        "node": "cc725e08502a79dd1eda913760fbe06ed7a9abc7",
+        "parents": [
+          "ceed296fe500c3fac9541e31dad860cb49c89e45",
+          "ed66c30e87eb65337c05a4229efaa5f1d5285a90"
+        ],
+        "phase": "draft",
+        "tags": [
+          "tip"
+        ],
+        "user": "test"
+      },
+      {
+        "bookmarks": [],
+        "branch": "test-branch",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "another commit in test-branch",
+        "node": "ed66c30e87eb65337c05a4229efaa5f1d5285a90",
+        "parents": [
+          "6ab967a8ab3489227a83f80e920faa039a71819f"
+        ],
+        "phase": "draft",
+        "tags": [],
+        "user": "test"
+      },
+      {
+        "bookmarks": [],
+        "branch": "test-branch",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "create test branch",
+        "node": "6ab967a8ab3489227a83f80e920faa039a71819f",
+        "parents": [
+          "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e"
+        ],
+        "phase": "draft",
+        "tags": [],
+        "user": "test"
+      },
+      {
+        "bookmarks": [
+          "bookmark2"
+        ],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "create tag2",
+        "node": "ceed296fe500c3fac9541e31dad860cb49c89e45",
+        "parents": [
+          "f2890a05fea49bfaf9fb27ed5490894eba32da78"
+        ],
+        "phase": "draft",
+        "tags": [],
+        "user": "test"
+      },
+      {
+        "bookmarks": [],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "another commit to da/foo",
+        "node": "f2890a05fea49bfaf9fb27ed5490894eba32da78",
+        "parents": [
+          "93a8ce14f89156426b7fa981af8042da53f03aa0"
+        ],
+        "phase": "draft",
+        "tags": [
+          "tag2"
+        ],
+        "user": "test"
+      },
+      {
+        "bookmarks": [],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "create tag",
+        "node": "93a8ce14f89156426b7fa981af8042da53f03aa0",
+        "parents": [
+          "78896eb0e102174ce9278438a95e12543e4367a7"
+        ],
+        "phase": "public",
+        "tags": [],
+        "user": "test"
+      },
+      {
+        "bookmarks": [],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "move foo",
+        "node": "78896eb0e102174ce9278438a95e12543e4367a7",
+        "parents": [
+          "8d7c456572acf3557e8ed8a07286b10c408bcec5"
+        ],
+        "phase": "public",
+        "tags": [
+          "tag1"
+        ],
+        "user": "test"
+      },
+      {
+        "bookmarks": [
+          "bookmark1"
+        ],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "modify da/foo",
+        "node": "8d7c456572acf3557e8ed8a07286b10c408bcec5",
+        "parents": [
+          "f8bbb9024b10f93cdbb8d940337398291d40dea8"
+        ],
+        "phase": "public",
+        "tags": [],
+        "user": "test"
+      },
+      {
+        "bookmarks": [],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "modify foo",
+        "node": "f8bbb9024b10f93cdbb8d940337398291d40dea8",
+        "parents": [
+          "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e"
+        ],
+        "phase": "public",
+        "tags": [],
+        "user": "test"
+      },
+      {
+        "bookmarks": [],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "initial",
+        "node": "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e",
+        "parents": [],
+        "phase": "public",
+        "tags": [],
+        "user": "test"
+      }
+    ],
+    "tags": [
+      {
+        "date": [
+          0.0,
+          0
+        ],
+        "node": "f2890a05fea49bfaf9fb27ed5490894eba32da78",
+        "tag": "tag2"
+      },
+      {
+        "date": [
+          0.0,
+          0
+        ],
+        "node": "78896eb0e102174ce9278438a95e12543e4367a7",
+        "tag": "tag1"
+      }
+    ]
+  }
+
+  $ request json-changelog?rev=create
+  200 Script output follows
+  
+  {
+    "entries": [
+      {
+        "bookmarks": [],
+        "branch": "test-branch",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "create test branch",
+        "node": "6ab967a8ab3489227a83f80e920faa039a71819f",
+        "parents": [
+          "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e"
+        ],
+        "phase": "draft",
+        "tags": [],
+        "user": "test"
+      },
+      {
+        "bookmarks": [
+          "bookmark2"
+        ],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "create tag2",
+        "node": "ceed296fe500c3fac9541e31dad860cb49c89e45",
+        "parents": [
+          "f2890a05fea49bfaf9fb27ed5490894eba32da78"
+        ],
+        "phase": "draft",
+        "tags": [],
+        "user": "test"
+      },
+      {
+        "bookmarks": [],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "create tag",
+        "node": "93a8ce14f89156426b7fa981af8042da53f03aa0",
+        "parents": [
+          "78896eb0e102174ce9278438a95e12543e4367a7"
+        ],
+        "phase": "public",
+        "tags": [],
+        "user": "test"
+      }
+    ],
+    "node": "cc725e08502a79dd1eda913760fbe06ed7a9abc7",
+    "query": "create"
+  }
 
 filediff/{revision}/{path} shows changes to a file in a revision
 
@@ -862,7 +1233,98 @@ filelog/{revision}/{path} shows history of a single file
   $ request json-filelog/f8bbb9024b10/foo
   200 Script output follows
   
-  "not yet implemented"
+  {
+    "entries": [
+      {
+        "bookmarks": [],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "modify foo",
+        "node": "f8bbb9024b10f93cdbb8d940337398291d40dea8",
+        "parents": [
+          "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e"
+        ],
+        "phase": "public",
+        "tags": [],
+        "user": "test"
+      },
+      {
+        "bookmarks": [],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "initial",
+        "node": "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e",
+        "parents": [],
+        "phase": "public",
+        "tags": [],
+        "user": "test"
+      }
+    ]
+  }
+
+  $ request json-filelog/cc725e08502a/da/foo
+  200 Script output follows
+  
+  {
+    "entries": [
+      {
+        "bookmarks": [],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "another commit to da/foo",
+        "node": "f2890a05fea49bfaf9fb27ed5490894eba32da78",
+        "parents": [
+          "8d7c456572acf3557e8ed8a07286b10c408bcec5"
+        ],
+        "phase": "draft",
+        "tags": [
+          "tag2"
+        ],
+        "user": "test"
+      },
+      {
+        "bookmarks": [
+          "bookmark1"
+        ],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "modify da/foo",
+        "node": "8d7c456572acf3557e8ed8a07286b10c408bcec5",
+        "parents": [
+          "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e"
+        ],
+        "phase": "public",
+        "tags": [],
+        "user": "test"
+      },
+      {
+        "bookmarks": [],
+        "branch": "default",
+        "date": [
+          0.0,
+          0
+        ],
+        "desc": "initial",
+        "node": "06e557f3edf66faa1ccaba5dd8c203c21cc79f1e",
+        "parents": [],
+        "phase": "public",
+        "tags": [],
+        "user": "test"
+      }
+    ]
+  }
 
 (archive/ doesn't use templating, so ignore it)
 

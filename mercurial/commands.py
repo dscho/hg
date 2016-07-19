@@ -59,6 +59,7 @@ from . import (
     obsolete,
     patch,
     phases,
+    policy,
     pvec,
     repair,
     revlog,
@@ -215,7 +216,7 @@ subrepoopts = [
 debugrevlogopts = [
     ('c', 'changelog', False, _('open changelog')),
     ('m', 'manifest', False, _('open manifest')),
-    ('', 'dir', False, _('open directory manifest')),
+    ('', 'dir', '', _('open directory manifest')),
 ]
 
 # Commands start here, listed alphabetically
@@ -468,26 +469,27 @@ def annotate(ui, repo, *pats, **opts):
 
         lines = fctx.annotate(follow=follow, linenumber=linenumber,
                               diffopts=diffopts)
+        if not lines:
+            continue
         formats = []
         pieces = []
 
         for f, sep in funcmap:
             l = [f(n) for n, dummy in lines]
-            if l:
-                if fm:
-                    formats.append(['%s' for x in l])
-                else:
-                    sizes = [encoding.colwidth(x) for x in l]
-                    ml = max(sizes)
-                    formats.append([sep + ' ' * (ml - w) + '%s' for w in sizes])
-                pieces.append(l)
+            if fm:
+                formats.append(['%s' for x in l])
+            else:
+                sizes = [encoding.colwidth(x) for x in l]
+                ml = max(sizes)
+                formats.append([sep + ' ' * (ml - w) + '%s' for w in sizes])
+            pieces.append(l)
 
         for f, p, l in zip(zip(*formats), zip(*pieces), lines):
             fm.startitem()
             fm.write(fields, "".join(f), *p)
             fm.write('line', ": %s", l[1])
 
-        if lines and not lines[-1][1].endswith('\n'):
+        if not lines[-1][1].endswith('\n'):
             fm.plain('\n')
 
     fm.end()
@@ -2089,51 +2091,56 @@ def debugbundle(ui, bundlepath, all=None, spec=None, **opts):
         gen = exchange.readbundle(ui, f, bundlepath)
         if isinstance(gen, bundle2.unbundle20):
             return _debugbundle2(ui, gen, all=all, **opts)
-        if all:
-            ui.write(("format: id, p1, p2, cset, delta base, len(delta)\n"))
+        _debugchangegroup(ui, gen, all=all, **opts)
 
-            def showchunks(named):
-                ui.write("\n%s\n" % named)
-                chain = None
-                while True:
-                    chunkdata = gen.deltachunk(chain)
-                    if not chunkdata:
-                        break
-                    node = chunkdata['node']
-                    p1 = chunkdata['p1']
-                    p2 = chunkdata['p2']
-                    cs = chunkdata['cs']
-                    deltabase = chunkdata['deltabase']
-                    delta = chunkdata['delta']
-                    ui.write("%s %s %s %s %s %s\n" %
-                             (hex(node), hex(p1), hex(p2),
-                              hex(cs), hex(deltabase), len(delta)))
-                    chain = node
+def _debugchangegroup(ui, gen, all=None, indent=0, **opts):
+    indent_string = ' ' * indent
+    if all:
+        ui.write(("%sformat: id, p1, p2, cset, delta base, len(delta)\n")
+                 % indent_string)
 
-            chunkdata = gen.changelogheader()
-            showchunks("changelog")
-            chunkdata = gen.manifestheader()
-            showchunks("manifest")
-            while True:
-                chunkdata = gen.filelogheader()
-                if not chunkdata:
-                    break
-                fname = chunkdata['filename']
-                showchunks(fname)
-        else:
-            if isinstance(gen, bundle2.unbundle20):
-                raise error.Abort(_('use debugbundle2 for this file'))
-            chunkdata = gen.changelogheader()
+        def showchunks(named):
+            ui.write("\n%s%s\n" % (indent_string, named))
             chain = None
             while True:
                 chunkdata = gen.deltachunk(chain)
                 if not chunkdata:
                     break
                 node = chunkdata['node']
-                ui.write("%s\n" % hex(node))
+                p1 = chunkdata['p1']
+                p2 = chunkdata['p2']
+                cs = chunkdata['cs']
+                deltabase = chunkdata['deltabase']
+                delta = chunkdata['delta']
+                ui.write("%s%s %s %s %s %s %s\n" %
+                         (indent_string, hex(node), hex(p1), hex(p2),
+                          hex(cs), hex(deltabase), len(delta)))
                 chain = node
 
-def _debugbundle2(ui, gen, **opts):
+        chunkdata = gen.changelogheader()
+        showchunks("changelog")
+        chunkdata = gen.manifestheader()
+        showchunks("manifest")
+        while True:
+            chunkdata = gen.filelogheader()
+            if not chunkdata:
+                break
+            fname = chunkdata['filename']
+            showchunks(fname)
+    else:
+        if isinstance(gen, bundle2.unbundle20):
+            raise error.Abort(_('use debugbundle2 for this file'))
+        chunkdata = gen.changelogheader()
+        chain = None
+        while True:
+            chunkdata = gen.deltachunk(chain)
+            if not chunkdata:
+                break
+            node = chunkdata['node']
+            ui.write("%s%s\n" % (indent_string, hex(node)))
+            chain = node
+
+def _debugbundle2(ui, gen, all=None, **opts):
     """lists the contents of a bundle2"""
     if not isinstance(gen, bundle2.unbundle20):
         raise error.Abort(_('not a bundle2 file'))
@@ -2143,15 +2150,7 @@ def _debugbundle2(ui, gen, **opts):
         if part.type == 'changegroup':
             version = part.params.get('version', '01')
             cg = changegroup.getunbundler(version, part, 'UN')
-            chunkdata = cg.changelogheader()
-            chain = None
-            while True:
-                chunkdata = cg.deltachunk(chain)
-                if not chunkdata:
-                    break
-                node = chunkdata['node']
-                ui.write("    %s\n" % hex(node))
-                chain = node
+            _debugchangegroup(ui, cg, all=all, indent=4, **opts)
 
 @command('debugcreatestreamclonebundle', [], 'FILE')
 def debugcreatestreamclonebundle(ui, repo, fname):
@@ -2301,7 +2300,9 @@ def debugdag(ui, repo, file_=None, *revs, **opts):
 @command('debugdata', debugrevlogopts, _('-c|-m|FILE REV'))
 def debugdata(ui, repo, file_, rev=None, **opts):
     """dump the contents of a data file revision"""
-    if opts.get('changelog') or opts.get('manifest'):
+    if opts.get('changelog') or opts.get('manifest') or opts.get('dir'):
+        if rev is not None:
+            raise error.CommandError('debugdata', _('invalid arguments'))
         file_, rev = None, file_
     elif rev is None:
         raise error.CommandError('debugdata', _('invalid arguments'))
@@ -2524,15 +2525,16 @@ def debugignore(ui, repo, *files, **opts):
                             break
             if ignored:
                 if ignored == nf:
-                    ui.write("%s is ignored\n" % f)
+                    ui.write(_("%s is ignored\n") % f)
                 else:
-                    ui.write("%s is ignored because of containing folder %s\n"
+                    ui.write(_("%s is ignored because of "
+                               "containing folder %s\n")
                              % (f, ignored))
                 ignorefile, lineno, line = ignoredata
-                ui.write("(ignore rule in %s, line %d: '%s')\n"
+                ui.write(_("(ignore rule in %s, line %d: '%s')\n")
                          % (ignorefile, lineno, line))
             else:
-                ui.write("%s is not ignored\n" % f)
+                ui.write(_("%s is not ignored\n") % f)
 
 @command('debugindex', debugrevlogopts +
     [('f', 'format', 0, _('revlog format'), _('FORMAT'))],
@@ -2563,12 +2565,12 @@ def debugindex(ui, repo, file_=None, **opts):
         break
 
     if format == 0:
-        ui.write("   rev    offset  length " + basehdr + " linkrev"
-                 " %s %s p2\n" % ("nodeid".ljust(idlen), "p1".ljust(idlen)))
+        ui.write(("   rev    offset  length " + basehdr + " linkrev"
+                 " %s %s p2\n") % ("nodeid".ljust(idlen), "p1".ljust(idlen)))
     elif format == 1:
-        ui.write("   rev flag   offset   length"
+        ui.write(("   rev flag   offset   length"
                  "     size " + basehdr + "   link     p1     p2"
-                 " %s\n" % "nodeid".rjust(idlen))
+                 " %s\n") % "nodeid".rjust(idlen))
 
     for i in r:
         node = r.node(i)
@@ -2743,7 +2745,16 @@ def debuginstall(ui, **opts):
     fm.write('pythonlib', _("checking Python lib (%s)...\n"),
              os.path.dirname(os.__file__))
 
+    # hg version
+    hgver = util.version()
+    fm.write('hgver', _("checking Mercurial version (%s)\n"),
+             hgver.split('+')[0])
+    fm.write('hgverextra', _("checking Mercurial custom build (%s)\n"),
+             '+'.join(hgver.split('+')[1:]))
+
     # compiled modules
+    fm.write('hgmodulepolicy', _("checking module policy (%s)\n"),
+             policy.policy)
     fm.write('hgmodules', _("checking installed modules (%s)...\n"),
              os.path.dirname(__file__))
 
@@ -3022,13 +3033,13 @@ def debuglocks(ui, repo, **opts):
                     else:
                         locker = 'user %s, process %s, host %s' \
                                  % (user, pid, host)
-                ui.write("%-6s %s (%ds)\n" % (name + ":", locker, age))
+                ui.write(("%-6s %s (%ds)\n") % (name + ":", locker, age))
                 return 1
             except OSError as e:
                 if e.errno != errno.ENOENT:
                     raise
 
-        ui.write("%-6s free\n" % (name + ":"))
+        ui.write(("%-6s free\n") % (name + ":"))
         return 0
 
     held += report(repo.svfs, "lock", repo.lock)
@@ -3321,8 +3332,8 @@ def debugrevlog(ui, repo, file_=None, **opts):
 
     if opts.get("dump"):
         numrevs = len(r)
-        ui.write("# rev p1rev p2rev start   end deltastart base   p1   p2"
-                 " rawsize totalsize compression heads chainlen\n")
+        ui.write(("# rev p1rev p2rev start   end deltastart base   p1   p2"
+                 " rawsize totalsize compression heads chainlen\n"))
         ts = 0
         heads = set()
 
@@ -3511,18 +3522,19 @@ def debugrevspec(ui, repo, expr, **opts):
         ui.note(revset.prettyformat(tree), "\n")
         newtree = revset.expandaliases(ui, tree)
         if newtree != tree:
-            ui.note("* expanded:\n", revset.prettyformat(newtree), "\n")
+            ui.note(("* expanded:\n"), revset.prettyformat(newtree), "\n")
         tree = newtree
         newtree = revset.foldconcat(tree)
         if newtree != tree:
-            ui.note("* concatenated:\n", revset.prettyformat(newtree), "\n")
+            ui.note(("* concatenated:\n"), revset.prettyformat(newtree), "\n")
         if opts["optimize"]:
-            weight, optimizedtree = revset.optimize(newtree, True)
-            ui.note("* optimized:\n", revset.prettyformat(optimizedtree), "\n")
+            optimizedtree = revset.optimize(newtree)
+            ui.note(("* optimized:\n"),
+                    revset.prettyformat(optimizedtree), "\n")
     func = revset.match(ui, expr, repo)
     revs = func(repo)
     if ui.verbose:
-        ui.note("* set:\n", revset.prettyformatset(revs), "\n")
+        ui.note(("* set:\n"), revset.prettyformatset(revs), "\n")
     for c in revs:
         ui.write("%s\n" % c)
 
@@ -3677,7 +3689,7 @@ def debugtemplate(ui, repo, tmpl, **opts):
         ui.note(templater.prettyformat(tree), '\n')
         newtree = templater.expandaliases(tree, aliases)
         if newtree != tree:
-            ui.note("* expanded:\n", templater.prettyformat(newtree), '\n')
+            ui.note(("* expanded:\n"), templater.prettyformat(newtree), '\n')
 
     mapfile = None
     if revs is None:
@@ -4406,7 +4418,7 @@ def grep(ui, repo, pattern, *pats, **opts):
             if not opts.get('files_with_matches'):
                 ui.write(sep, label='grep.sep')
                 if not opts.get('text') and binary():
-                    ui.write(" Binary file matches")
+                    ui.write(_(" Binary file matches"))
                 else:
                     for s, label in l:
                         ui.write(s, label=label)
@@ -4570,7 +4582,10 @@ def help_(ui, name=None, **opts):
     Returns 0 if successful.
     """
 
-    textwidth = min(ui.termwidth(), 80) - 2
+    textwidth = ui.configint('ui', 'textwidth', 78)
+    termwidth = ui.termwidth() - 2
+    if textwidth <= 0 or termwidth < textwidth:
+        textwidth = termwidth
 
     keep = opts.get('system') or []
     if len(keep) == 0:
@@ -5773,6 +5788,9 @@ def pull(ui, repo, source="default", **opts):
     If SOURCE is omitted, the 'default' path will be used.
     See :hg:`help urls` for more information.
 
+    Specifying bookmark as ``.`` is equivalent to specifying the active
+    bookmark's name.
+
     Returns 0 on success, 1 if an update had unresolved files.
     """
     source, branches = hg.parseurl(ui.expandpath(source), opts.get('branch'))
@@ -5794,6 +5812,7 @@ def pull(ui, repo, source="default", **opts):
             remotebookmarks = other.listkeys('bookmarks')
             pullopargs['remotebookmarks'] = remotebookmarks
             for b in opts['bookmark']:
+                b = repo._bookmarks.expandname(b)
                 if b not in remotebookmarks:
                     raise error.Abort(_('remote bookmark %s not found!') % b)
                 revs.append(remotebookmarks[b])
@@ -5926,6 +5945,15 @@ def push(ui, repo, dest=None, **opts):
         if not revs:
             raise error.Abort(_("specified revisions evaluate to an empty set"),
                              hint=_("use different revision arguments"))
+    elif path.pushrev:
+        # It doesn't make any sense to specify ancestor revisions. So limit
+        # to DAG heads to make discovery simpler.
+        expr = revset.formatspec('heads(%r)', path.pushrev)
+        revs = scmutil.revrange(repo, [expr])
+        revs = [repo[rev].node() for rev in revs]
+        if not revs:
+            raise error.Abort(_('default push revset for path evaluates to an '
+                                'empty set'))
 
     repo._subtoppath = dest
     try:
@@ -6300,7 +6328,10 @@ def revert(ui, repo, *pats, **opts):
     related method.
 
     Modified files are saved with a .orig suffix before reverting.
-    To disable these backups, use --no-backup.
+    To disable these backups, use --no-backup. It is possible to store
+    the backup files in a custom directory relative to the root of the
+    repository by setting the ``ui.origbackuppath`` configuration
+    option.
 
     See :hg:`help dates` for a list of formats valid for -d/--date.
 
@@ -6380,6 +6411,11 @@ def rollback(ui, repo, **opts):
       commit transaction if it isn't checked out. Use --force to
       override this protection.
 
+      The rollback command can be entirely disabled by setting the
+      ``ui.rollback`` configuration setting to false. If you're here
+      because you want to use rollback and it's disabled, you can
+      re-enable the command by setting ``ui.rollback`` to true.
+
     This command is not intended for use on public repositories. Once
     changes are visible for pull by other users, rolling a transaction
     back locally is ineffective (someone else may already have pulled
@@ -6389,6 +6425,9 @@ def rollback(ui, repo, **opts):
 
     Returns 0 on success, 1 if no rollback data is available.
     """
+    if not ui.configbool('ui', 'rollback', True):
+        raise error.Abort(_('rollback is disabled because it is unsafe'),
+                          hint=('see `hg help -v rollback` for information'))
     return repo.rollback(dryrun=opts.get('dry_run'),
                          force=opts.get('force'))
 

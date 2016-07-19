@@ -260,7 +260,6 @@ Test extension help:
        extdiff       command to allow external programs to compare revisions
        factotum      http authentication with factotum
        gpg           commands to sign and verify changesets
-       hgcia         hooks for integrating with the CIA.vc notification service
        hgk           browse the repository in a graphical way
        highlight     syntax highlighting for hgweb (requires Pygments)
        histedit      interactive history editing
@@ -428,6 +427,22 @@ Verbose help for add
       --version           output version information and exit
    -h --help              display help and exit
       --hidden            consider hidden changesets
+
+Test the textwidth config option
+
+  $ hg root -h  --config ui.textwidth=50
+  hg root
+  
+  print the root (top) of the current working
+  directory
+  
+      Print the root directory of the current
+      repository.
+  
+      Returns 0 on success.
+  
+  (some details hidden, use --verbose to show
+  complete help)
 
 Test help option with version option
 
@@ -1499,6 +1514,18 @@ Test section lookup
       "pushurl"
          The URL to use for push operations. If not defined, the location
          defined by the path's main entry is used.
+  
+      "pushrev"
+         A revset defining which revisions to push by default.
+  
+         When 'hg push' is executed without a "-r" argument, the revset defined
+         by this sub-option is evaluated to determine what to push.
+  
+         For example, a value of "." will push the working directory's revision
+         by default.
+  
+         Revsets specifying bookmarks will not result in the bookmark being
+         pushed.
   
       The following special named paths exist:
   

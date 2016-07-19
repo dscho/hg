@@ -210,10 +210,12 @@ table tr.parity1:hover {
   background: #D5E1E6;
 }
 */
-table tr.parity0 {
+table tr.parity0,
+table td.annotate.parity0 {
   background: #F1F6F7;
 }
-table tr.parity1 {
+table tr.parity1,
+table td.annotate.parity1 {
   background: #FFFFFF;
 }
 table tr td {
@@ -331,6 +333,19 @@ td.source {
 td.linenr {
   width: 60px;
 }
+tr.thisrev a { color:#999999; text-decoration: none; }
+tr.thisrev td.source { color:#009900; }
+div.annotate-info {
+  display: none;
+  position: absolute;
+  background-color: #FFFFFF;
+  border: 1px solid #000000;
+  text-align: left;
+  color: #000000;
+  padding: 5px;
+}
+div.annotate-info a { color: #0000FF; }
+td.annotate:hover div.annotate-info { display: inline; }
 
 div#powered-by {
   position: absolute;

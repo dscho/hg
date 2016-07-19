@@ -1,6 +1,23 @@
 # perf.py - performance test routines
 '''helper extension to measure performance'''
 
+# "historical portability" policy of perf.py:
+#
+# We have to do:
+# - make perf.py "loadable" with as wide Mercurial version as possible
+#   This doesn't mean that perf commands work correctly with that Mercurial.
+#   BTW, perf.py itself has been available since 1.1 (or eb240755386d).
+# - make historical perf command work correctly with as wide Mercurial
+#   version as possible
+#
+# We have to do, if possible with reasonable cost:
+# - make recent perf command for historical feature work correctly
+#   with early Mercurial
+#
+# We don't have to do:
+# - make perf command for recent feature work correctly with early
+#   Mercurial
+
 from __future__ import absolute_import
 import functools
 import os
@@ -8,25 +25,97 @@ import random
 import sys
 import time
 from mercurial import (
-    branchmap,
     cmdutil,
     commands,
     copies,
     error,
+    extensions,
     mdiff,
     merge,
-    obsolete,
-    repoview,
     revlog,
-    scmutil,
     util,
 )
 
-formatteropts = commands.formatteropts
-revlogopts = commands.debugrevlogopts
+# for "historical portability":
+# try to import modules separately (in dict order), and ignore
+# failure, because these aren't available with early Mercurial
+try:
+    from mercurial import branchmap # since 2.5 (or bcee63733aad)
+except ImportError:
+    pass
+try:
+    from mercurial import obsolete # since 2.3 (or ad0d6c2b3279)
+except ImportError:
+    pass
+try:
+    from mercurial import repoview # since 2.5 (or 3a6ddacb7198)
+except ImportError:
+    pass
+try:
+    from mercurial import scmutil # since 1.9 (or 8b252e826c68)
+except ImportError:
+    pass
+
+# for "historical portability":
+# define util.safehasattr forcibly, because util.safehasattr has been
+# available since 1.9.3 (or 94b200a11cf7)
+_undefined = object()
+def safehasattr(thing, attr):
+    return getattr(thing, attr, _undefined) is not _undefined
+setattr(util, 'safehasattr', safehasattr)
+
+# for "historical portability":
+# use locally defined empty option list, if formatteropts isn't
+# available, because commands.formatteropts has been available since
+# 3.2 (or 7a7eed5176a4), even though formatting itself has been
+# available since 2.2 (or ae5f92e154d3)
+formatteropts = getattr(commands, "formatteropts", [])
+
+# for "historical portability":
+# use locally defined option list, if debugrevlogopts isn't available,
+# because commands.debugrevlogopts has been available since 3.7 (or
+# 5606f7d0d063), even though cmdutil.openrevlog() has been available
+# since 1.9 (or a79fea6b3e77).
+revlogopts = getattr(commands, "debugrevlogopts", [
+        ('c', 'changelog', False, ('open changelog')),
+        ('m', 'manifest', False, ('open manifest')),
+        ('', 'dir', False, ('open directory manifest')),
+        ])
 
 cmdtable = {}
-command = cmdutil.command(cmdtable)
+
+# for "historical portability":
+# define parsealiases locally, because cmdutil.parsealiases has been
+# available since 1.5 (or 6252852b4332)
+def parsealiases(cmd):
+    return cmd.lstrip("^").split("|")
+
+if safehasattr(cmdutil, 'command'):
+    import inspect
+    command = cmdutil.command(cmdtable)
+    if 'norepo' not in inspect.getargspec(command)[0]:
+        # for "historical portability":
+        # wrap original cmdutil.command, because "norepo" option has
+        # been available since 3.1 (or 75a96326cecb)
+        _command = command
+        def command(name, options=(), synopsis=None, norepo=False):
+            if norepo:
+                commands.norepo += ' %s' % ' '.join(parsealiases(name))
+            return _command(name, list(options), synopsis)
+else:
+    # for "historical portability":
+    # define "@command" annotation locally, because cmdutil.command
+    # has been available since 1.9 (or 2daa5179e73f)
+    def command(name, options=(), synopsis=None, norepo=False):
+        def decorator(func):
+            if synopsis:
+                cmdtable[name] = func, list(options), synopsis
+            else:
+                cmdtable[name] = func, list(options)
+            if norepo:
+                commands.norepo += ' %s' % ' '.join(parsealiases(name))
+            return func
+        return decorator
 
 def getlen(ui):
     if ui.configbool("perf", "stub"):
@@ -796,3 +885,18 @@ def perflrucache(ui, size=4, gets=10000, sets=10000, mixed=10000,
         timer, fm = gettimer(ui, opts)
         timer(fn, title=title)
         fm.end()
+
+def uisetup(ui):
+    if (util.safehasattr(cmdutil, 'openrevlog') and
+        not util.safehasattr(commands, 'debugrevlogopts')):
+        # for "historical portability":
+        # In this case, Mercurial should be 1.9 (or a79fea6b3e77) -
+        # 3.7 (or 5606f7d0d063). Therefore, '--dir' option for
+        # openrevlog() should cause failure, because it has been
+        # available since 3.5 (or 49c583ca48c4).
+        def openrevlog(orig, repo, cmd, file_, opts):
+            if opts.get('dir') and not util.safehasattr(repo, 'dirlog'):
+                raise error.Abort("This version doesn't support --dir option",
+                                  hint="use 3.5 or later")
+            return orig(repo, cmd, file_, opts)
+        extensions.wrapfunction(cmdutil, 'openrevlog', openrevlog)

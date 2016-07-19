@@ -7,9 +7,13 @@
 
 from __future__ import absolute_import
 
-import SocketServer
 import errno
+import gc
 import os
+import random
+import select
+import signal
+import socket
 import struct
 import sys
 import traceback
@@ -178,6 +182,10 @@ class server(object):
 
         self.client = fin
 
+    def cleanup(self):
+        """release and restore resources taken during server session"""
+        pass
+
     def _read(self, size):
         if not size:
             return ''
@@ -229,12 +237,8 @@ class server(object):
             self.repo.ui = self.repo.dirstate._ui = repoui
             self.repo.invalidateall()
 
-        # reset last-print time of progress bar per command
-        # (progbar is singleton, we don't have to do for all uis)
-        if copiedui._progbar:
-            copiedui._progbar.resetstate()
-
         for ui in uis:
+            ui.resetstate()
             # any kind of interaction must use server channels, but chg may
             # replace channels by fully functional tty files. so nontty is
             # enforced only if cin is a channel.
@@ -278,6 +282,9 @@ class server(object):
         hellomsg += 'encoding: ' + encoding.encoding
         hellomsg += '\n'
         hellomsg += 'pid: %d' % util.getpid()
+        if util.safehasattr(os, 'getpgid'):
+            hellomsg += '\n'
+            hellomsg += 'pgid: %d' % os.getpgid(0)
 
         # write the hello msg in -one- chunk
         self.cout.write(hellomsg)
@@ -332,66 +339,193 @@ class pipeservice(object):
             sv = server(ui, self.repo, fin, fout)
             return sv.serve()
         finally:
+            sv.cleanup()
             _restoreio(ui, fin, fout)
 
-class _requesthandler(SocketServer.StreamRequestHandler):
-    def handle(self):
-        ui = self.server.ui
-        repo = self.server.repo
-        sv = None
-        try:
-            sv = server(ui, repo, self.rfile, self.wfile)
-            try:
-                sv.serve()
-            # handle exceptions that may be raised by command server. most of
-            # known exceptions are caught by dispatch.
-            except error.Abort as inst:
-                ui.warn(_('abort: %s\n') % inst)
-            except IOError as inst:
-                if inst.errno != errno.EPIPE:
-                    raise
-            except KeyboardInterrupt:
-                pass
-        except: # re-raises
-            # also write traceback to error channel. otherwise client cannot
-            # see it because it is written to server's stderr by default.
-            if sv:
-                cerr = sv.cerr
-            else:
-                cerr = channeledoutput(self.wfile, 'e')
-            traceback.print_exc(file=cerr)
-            raise
+def _initworkerprocess():
+    # use a different process group from the master process, making this
+    # process pass kernel "is_current_pgrp_orphaned" check so signals like
+    # SIGTSTP, SIGTTIN, SIGTTOU are not ignored.
+    os.setpgid(0, 0)
+    # change random state otherwise forked request handlers would have a
+    # same state inherited from parent.
+    random.seed()
 
-class unixservice(object):
+def _serverequest(ui, repo, conn, createcmdserver):
+    fin = conn.makefile('rb')
+    fout = conn.makefile('wb')
+    sv = None
+    try:
+        sv = createcmdserver(repo, conn, fin, fout)
+        try:
+            sv.serve()
+        # handle exceptions that may be raised by command server. most of
+        # known exceptions are caught by dispatch.
+        except error.Abort as inst:
+            ui.warn(_('abort: %s\n') % inst)
+        except IOError as inst:
+            if inst.errno != errno.EPIPE:
+                raise
+        except KeyboardInterrupt:
+            pass
+        finally:
+            sv.cleanup()
+    except: # re-raises
+        # also write traceback to error channel. otherwise client cannot
+        # see it because it is written to server's stderr by default.
+        if sv:
+            cerr = sv.cerr
+        else:
+            cerr = channeledoutput(fout, 'e')
+        traceback.print_exc(file=cerr)
+        raise
+    finally:
+        fin.close()
+        try:
+            fout.close()  # implicit flush() may cause another EPIPE
+        except IOError as inst:
+            if inst.errno != errno.EPIPE:
+                raise
+
+class unixservicehandler(object):
+    """Set of pluggable operations for unix-mode services
+
+    Almost all methods except for createcmdserver() are called in the main
+    process. You can't pass mutable resource back from createcmdserver().
+    """
+
+    pollinterval = None
+
+    def __init__(self, ui):
+        self.ui = ui
+
+    def bindsocket(self, sock, address):
+        util.bindunixsocket(sock, address)
+
+    def unlinksocket(self, address):
+        os.unlink(address)
+
+    def printbanner(self, address):
+        self.ui.status(_('listening at %s\n') % address)
+        self.ui.flush()  # avoid buffering of status message
+
+    def shouldexit(self):
+        """True if server should shut down; checked per pollinterval"""
+        return False
+
+    def newconnection(self):
+        """Called when main process notices new connection"""
+        pass
+
+    def createcmdserver(self, repo, conn, fin, fout):
+        """Create new command server instance; called in the process that
+        serves for the current connection"""
+        return server(self.ui, repo, fin, fout)
+
+class unixforkingservice(object):
     """
     Listens on unix domain socket and forks server per connection
     """
-    def __init__(self, ui, repo, opts):
+
+    def __init__(self, ui, repo, opts, handler=None):
         self.ui = ui
         self.repo = repo
         self.address = opts['address']
-        if not util.safehasattr(SocketServer, 'UnixStreamServer'):
+        if not util.safehasattr(socket, 'AF_UNIX'):
             raise error.Abort(_('unsupported platform'))
         if not self.address:
             raise error.Abort(_('no socket path specified with --address'))
+        self._servicehandler = handler or unixservicehandler(ui)
+        self._sock = None
+        self._oldsigchldhandler = None
+        self._workerpids = set()  # updated by signal handler; do not iterate
 
     def init(self):
-        class cls(SocketServer.ForkingMixIn, SocketServer.UnixStreamServer):
-            ui = self.ui
-            repo = self.repo
-        self.server = cls(self.address, _requesthandler)
-        self.ui.status(_('listening at %s\n') % self.address)
-        self.ui.flush()  # avoid buffering of status message
+        self._sock = socket.socket(socket.AF_UNIX)
+        self._servicehandler.bindsocket(self._sock, self.address)
+        self._sock.listen(socket.SOMAXCONN)
+        o = signal.signal(signal.SIGCHLD, self._sigchldhandler)
+        self._oldsigchldhandler = o
+        self._servicehandler.printbanner(self.address)
+
+    def _cleanup(self):
+        signal.signal(signal.SIGCHLD, self._oldsigchldhandler)
+        self._sock.close()
+        self._servicehandler.unlinksocket(self.address)
+        # don't kill child processes as they have active clients, just wait
+        self._reapworkers(0)
 
     def run(self):
         try:
-            self.server.serve_forever()
+            self._mainloop()
         finally:
-            os.unlink(self.address)
+            self._cleanup()
+
+    def _mainloop(self):
+        h = self._servicehandler
+        while not h.shouldexit():
+            try:
+                ready = select.select([self._sock], [], [], h.pollinterval)[0]
+                if not ready:
+                    continue
+                conn, _addr = self._sock.accept()
+            except (select.error, socket.error) as inst:
+                if inst.args[0] == errno.EINTR:
+                    continue
+                raise
+
+            pid = os.fork()
+            if pid:
+                try:
+                    self.ui.debug('forked worker process (pid=%d)\n' % pid)
+                    self._workerpids.add(pid)
+                    h.newconnection()
+                finally:
+                    conn.close()  # release handle in parent process
+            else:
+                try:
+                    self._runworker(conn)
+                    conn.close()
+                    os._exit(0)
+                except:  # never return, hence no re-raises
+                    try:
+                        self.ui.traceback(force=True)
+                    finally:
+                        os._exit(255)
+
+    def _sigchldhandler(self, signal, frame):
+        self._reapworkers(os.WNOHANG)
+
+    def _reapworkers(self, options):
+        while self._workerpids:
+            try:
+                pid, _status = os.waitpid(-1, options)
+            except OSError as inst:
+                if inst.errno == errno.EINTR:
+                    continue
+                if inst.errno != errno.ECHILD:
+                    raise
+                # no child processes at all (reaped by other waitpid()?)
+                self._workerpids.clear()
+                return
+            if pid == 0:
+                # no waitable child processes
+                return
+            self.ui.debug('worker process exited (pid=%d)\n' % pid)
+            self._workerpids.discard(pid)
+
+    def _runworker(self, conn):
+        signal.signal(signal.SIGCHLD, self._oldsigchldhandler)
+        _initworkerprocess()
+        h = self._servicehandler
+        try:
+            _serverequest(self.ui, self.repo, conn, h.createcmdserver)
+        finally:
+            gc.collect()  # trigger __del__ since worker process uses os._exit
 
 _servicemap = {
     'pipe': pipeservice,
-    'unix': unixservice,
+    'unix': unixforkingservice,
     }
 
 def createservice(ui, repo, opts):

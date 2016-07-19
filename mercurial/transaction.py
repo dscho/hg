@@ -31,10 +31,9 @@ postfinalizegenerators = set([
     'dirstate'
 ])
 
-class GenerationGroup(object):
-    ALL='all'
-    PREFINALIZE='prefinalize'
-    POSTFINALIZE='postfinalize'
+gengroupall='all'
+gengroupprefinalize='prefinalize'
+gengrouppostfinalize='postfinalize'
 
 def active(func):
     def _active(self, *args, **kwds):
@@ -73,7 +72,7 @@ def _playback(journal, report, opener, vfsmap, entries, backupentries,
                 filepath = vfs.join(f)
                 backuppath = vfs.join(b)
                 try:
-                    util.copyfile(backuppath, filepath)
+                    util.copyfile(backuppath, filepath, checkambig=True)
                     backupfiles.append(b)
                 except IOError:
                     report(_("failed to recover %s\n") % f)
@@ -289,7 +288,7 @@ class transaction(object):
         # but for bookmarks that are handled outside this mechanism.
         self._filegenerators[genid] = (order, filenames, genfunc, location)
 
-    def _generatefiles(self, suffix='', group=GenerationGroup.ALL):
+    def _generatefiles(self, suffix='', group=gengroupall):
         # write files registered for generation
         any = False
         for id, entry in sorted(self._filegenerators.iteritems()):
@@ -297,8 +296,8 @@ class transaction(object):
             order, filenames, genfunc, location = entry
 
             # for generation at closing, check if it's before or after finalize
-            postfinalize = group == GenerationGroup.POSTFINALIZE
-            if (group != GenerationGroup.ALL and
+            postfinalize = group == gengrouppostfinalize
+            if (group != gengroupall and
                 (id in postfinalizegenerators) != (postfinalize)):
                 continue
 
@@ -311,7 +310,8 @@ class transaction(object):
                         self.registertmp(name, location=location)
                     else:
                         self.addbackup(name, location=location)
-                    files.append(vfs(name, 'w', atomictemp=True))
+                    files.append(vfs(name, 'w', atomictemp=True,
+                                     checkambig=not suffix))
                 genfunc(*files)
             finally:
                 for f in files:
@@ -427,13 +427,13 @@ class transaction(object):
         '''commit the transaction'''
         if self.count == 1:
             self.validator(self)  # will raise exception if needed
-            self._generatefiles(group=GenerationGroup.PREFINALIZE)
+            self._generatefiles(group=gengroupprefinalize)
             categories = sorted(self._finalizecallback)
             for cat in categories:
                 self._finalizecallback[cat](self)
             # Prevent double usage and help clear cycles.
             self._finalizecallback = None
-            self._generatefiles(group=GenerationGroup.POSTFINALIZE)
+            self._generatefiles(group=gengrouppostfinalize)
 
         self.count -= 1
         if self.count != 0:

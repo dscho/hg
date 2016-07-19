@@ -149,6 +149,14 @@ largefiles clients refuse to push largefiles repos to vanilla servers
   $ hg commit -m "m2"
   Invoking status precommit hook
   A f2
+  $ hg verify --large
+  checking changesets
+  checking manifests
+  crosschecking files in changesets and manifests
+  checking files
+  2 files, 2 changesets, 2 total revisions
+  searching 1 changesets for largefiles
+  verified existence of 1 revisions of 1 largefiles
   $ hg serve --config extensions.largefiles=! -R ../r6 -d -p $HGPORT --pid-file ../hg.pid
   $ cat ../hg.pid >> $DAEMON_PIDS
   $ hg push http://localhost:$HGPORT
@@ -224,8 +232,8 @@ Archive contains largefiles
   ...     f.write(urllib2.urlopen(u).read())
   $ unzip -t archive.zip
   Archive:  archive.zip
-      testing: empty-default/.hg_archival.txt   OK
-      testing: empty-default/f1         OK
+      testing: empty-default/.hg_archival.txt*OK (glob)
+      testing: empty-default/f1*OK (glob)
   No errors detected in compressed data of archive.zip.
 
 test 'verify' with remotestore:
@@ -304,6 +312,136 @@ largefiles pulled on update - no server side problems:
   $ rm -rf empty http-clone*
 
 used all HGPORTs, kill all daemons
+  $ killdaemons.py
+
+largefiles should batch verify remote calls
+
+  $ hg init batchverifymain
+  $ cd batchverifymain
+  $ echo "aaa" >> a
+  $ hg add --large a
+  $ hg commit -m "a"
+  Invoking status precommit hook
+  A a
+  $ echo "bbb" >> b
+  $ hg add --large b
+  $ hg commit -m "b"
+  Invoking status precommit hook
+  A b
+  $ cd ..
+  $ hg serve -R batchverifymain -d -p $HGPORT --pid-file hg.pid \
+  > -A access.log
+  $ cat hg.pid >> $DAEMON_PIDS
+  $ hg clone --noupdate http://localhost:$HGPORT batchverifyclone
+  requesting all changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 2 changesets with 2 changes to 2 files
+  $ hg -R batchverifyclone verify --large --lfa
+  checking changesets
+  checking manifests
+  crosschecking files in changesets and manifests
+  checking files
+  2 files, 2 changesets, 2 total revisions
+  searching 2 changesets for largefiles
+  verified existence of 2 revisions of 2 largefiles
+  $ tail -1 access.log
+  127.0.0.1 - - [*] "GET /?cmd=batch HTTP/1.1" 200 - x-hgarg-1:cmds=statlfile+sha%3D972a1a11f19934401291cc99117ec614933374ce%3Bstatlfile+sha%3Dc801c9cfe94400963fcb683246217d5db77f9a9a (glob)
+  $ hg -R batchverifyclone update
+  getting changed largefiles
+  2 largefiles updated, 0 removed
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
+Clear log file before next test
+
+  $ printf "" > access.log
+
+Verify should check file on remote server only when file is not
+available locally.
+
+  $ echo "ccc" >> batchverifymain/c
+  $ hg -R batchverifymain status
+  ? c
+  $ hg -R batchverifymain add --large batchverifymain/c
+  $ hg -R batchverifymain commit -m "c"
+  Invoking status precommit hook
+  A c
+  $ hg -R batchverifyclone pull
+  pulling from http://localhost:$HGPORT/
+  searching for changes
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
+  (run 'hg update' to get a working copy)
+  $ hg -R batchverifyclone verify --lfa
+  checking changesets
+  checking manifests
+  crosschecking files in changesets and manifests
+  checking files
+  3 files, 3 changesets, 3 total revisions
+  searching 3 changesets for largefiles
+  verified existence of 3 revisions of 3 largefiles
+  $ tail -1 access.log
+  127.0.0.1 - - [*] "GET /?cmd=batch HTTP/1.1" 200 - x-hgarg-1:cmds=statlfile+sha%3Dc8559c3c9cfb42131794b7d8009230403b9b454c (glob)
+
+  $ killdaemons.py
+
+largefiles should not ask for password again after succesfull authorization
+
+  $ hg init credentialmain
+  $ cd credentialmain
+  $ echo "aaa" >> a
+  $ hg add --large a
+  $ hg commit -m "a"
+  Invoking status precommit hook
+  A a
+
+Before running server clear the user cache to force clone to download
+a large file from the server rather than to get it from the cache
+
+  $ rm "${USERCACHE}"/*
+
+  $ cd ..
+  $ cat << EOT > userpass.py
+  > import base64
+  > from mercurial.hgweb import common
+  > def perform_authentication(hgweb, req, op):
+  >     auth = req.env.get('HTTP_AUTHORIZATION')
+  >     if not auth:
+  >         raise common.ErrorResponse(common.HTTP_UNAUTHORIZED, 'who',
+  >                 [('WWW-Authenticate', 'Basic Realm="mercurial"')])
+  >     if base64.b64decode(auth.split()[1]).split(':', 1) != ['user', 'pass']:
+  >         raise common.ErrorResponse(common.HTTP_FORBIDDEN, 'no')
+  > def extsetup():
+  >     common.permhooks.insert(0, perform_authentication)
+  > EOT
+  $ hg serve --config extensions.x=userpass.py -R credentialmain \
+  >          -d -p $HGPORT --pid-file hg.pid -A access.log
+  $ cat hg.pid >> $DAEMON_PIDS
+  $ cat << EOF > get_pass.py
+  > import getpass
+  > def newgetpass(arg):
+  >   return "pass"
+  > getpass.getpass = newgetpass
+  > EOF
+  $ hg clone --config ui.interactive=true --config extensions.getpass=get_pass.py \
+  >          http://user@localhost:$HGPORT credentialclone
+  requesting all changes
+  http authorization required for http://localhost:$HGPORT/
+  realm: mercurial
+  user: user
+  password: adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
+  updating to branch default
+  getting changed largefiles
+  1 largefiles updated, 0 removed
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+
+  $ rm hg.pid access.log
   $ killdaemons.py
 
 #endif

@@ -9,6 +9,7 @@ from __future__ import absolute_import
 
 import copy
 import errno
+import hashlib
 import os
 import posixpath
 import re
@@ -50,14 +51,14 @@ def _expandedabspath(path):
 
 def _getstorehashcachename(remotepath):
     '''get a unique filename for the store hash cache of a remote repository'''
-    return util.sha1(_expandedabspath(remotepath)).hexdigest()[0:12]
+    return hashlib.sha1(_expandedabspath(remotepath)).hexdigest()[0:12]
 
 class SubrepoAbort(error.Abort):
     """Exception class used to avoid handling a subrepo error more than once"""
     def __init__(self, *args, **kw):
+        self.subrepo = kw.pop('subrepo', None)
+        self.cause = kw.pop('cause', None)
         error.Abort.__init__(self, *args, **kw)
-        self.subrepo = kw.get('subrepo')
-        self.cause = kw.get('cause')
 
 def annotatesubrepoerror(func):
     def decoratedmethod(self, *args, **kargs):
@@ -585,7 +586,7 @@ class abstractsubrepo(object):
         return 1
 
     def revert(self, substate, *pats, **opts):
-        self.ui.warn('%s: reverting %s subrepos is unsupported\n' \
+        self.ui.warn(_('%s: reverting %s subrepos is unsupported\n') \
             % (substate[0], substate[2]))
         return []
 
@@ -659,7 +660,7 @@ class hgsubrepo(abstractsubrepo):
         yield '# %s\n' % _expandedabspath(remotepath)
         vfs = self._repo.vfs
         for relname in filelist:
-            filehash = util.sha1(vfs.tryread(relname)).hexdigest()
+            filehash = hashlib.sha1(vfs.tryread(relname)).hexdigest()
             yield '%s = %s\n' % (relname, filehash)
 
     @propertycache
@@ -1413,7 +1414,7 @@ class gitsubrepo(abstractsubrepo):
             if command in ('cat-file', 'symbolic-ref'):
                 return retdata, p.returncode
             # for all others, abort
-            raise error.Abort('git %s error %d in %s' %
+            raise error.Abort(_('git %s error %d in %s') %
                              (command, p.returncode, self._relpath))
 
         return retdata, p.returncode

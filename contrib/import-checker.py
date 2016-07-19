@@ -11,8 +11,9 @@ import sys
 # Import a minimal set of stdlib modules needed for list_stdlib_modules()
 # to work when run from a virtualenv.  The modules were chosen empirically
 # so that the return value matches the return value without virtualenv.
-import BaseHTTPServer
-import zlib
+if True: # disable lexical sorting checks
+    import BaseHTTPServer
+    import zlib
 
 # Whitelist of modules that symbols can be directly imported from.
 allowsymbolimports = (
@@ -126,22 +127,32 @@ def fromlocalfunc(modulename, localmods):
     False
     >>> fromlocal(None, 1)
     ('foo', 'foo.__init__', True)
+    >>> fromlocal('foo1', 1)
+    ('foo.foo1', 'foo.foo1', False)
     >>> fromlocal2 = fromlocalfunc('foo.xxx.yyy', localmods)
     >>> fromlocal2(None, 2)
     ('foo', 'foo.__init__', True)
+    >>> fromlocal2('bar2', 1)
+    False
+    >>> fromlocal2('bar', 2)
+    ('foo.bar', 'foo.bar.__init__', True)
     """
     prefix = '.'.join(modulename.split('.')[:-1])
     if prefix:
         prefix += '.'
     def fromlocal(name, level=0):
-        # name is None when relative imports are used.
-        if name is None:
+        # name is false value when relative imports are used.
+        if not name:
             # If relative imports are used, level must not be absolute.
             assert level > 0
             candidates = ['.'.join(modulename.split('.')[:-level])]
         else:
-            # Check relative name first.
-            candidates = [prefix + name, name]
+            if not level:
+                # Check relative name first.
+                candidates = [prefix + name, name]
+            else:
+                candidates = ['.'.join(modulename.split('.')[:-level]) +
+                              '.' + name]
 
         for n in candidates:
             if n in localmods:
@@ -175,6 +186,9 @@ def list_stdlib_modules():
 
     >>> 'cStringIO' in mods
     True
+
+    >>> 'cffi' in mods
+    True
     """
     for m in sys.builtin_module_names:
         yield m
@@ -186,6 +200,8 @@ def list_stdlib_modules():
     for m in 'fcntl', 'grp', 'pwd', 'termios':  # Unix only
         yield m
     for m in 'cPickle', 'datetime': # in Python (not C) on PyPy
+        yield m
+    for m in ['cffi']:
         yield m
     stdlib_prefixes = set([sys.prefix, sys.exec_prefix])
     # We need to supplement the list of prefixes for the search to work
@@ -360,7 +376,7 @@ def verify_modern_convention(module, root, localmods, root_col_offset=0):
     * Symbols can only be imported from specific modules (see
       `allowsymbolimports`). For other modules, first import the module then
       assign the symbol to a module-level variable. In addition, these imports
-      must be performed before other relative imports. This rule only
+      must be performed before other local imports. This rule only
       applies to import statements outside of any blocks.
     * Relative imports from the standard library are not allowed.
     * Certain modules must be aliased to alternate names to avoid aliasing
@@ -371,8 +387,8 @@ def verify_modern_convention(module, root, localmods, root_col_offset=0):
 
     # Whether a local/non-stdlib import has been performed.
     seenlocal = None
-    # Whether a relative, non-symbol import has been seen.
-    seennonsymbolrelative = False
+    # Whether a local/non-stdlib, non-symbol import has been seen.
+    seennonsymbollocal = False
     # The last name to be imported (for sorting).
     lastname = None
     # Relative import levels encountered so far.
@@ -446,26 +462,26 @@ def verify_modern_convention(module, root, localmods, root_col_offset=0):
 
             # Direct symbol import is only allowed from certain modules and
             # must occur before non-symbol imports.
+            found = fromlocal(node.module, node.level)
+            if found and found[2]:  # node.module is a package
+                prefix = found[0] + '.'
+                symbols = [n.name for n in node.names
+                           if not fromlocal(prefix + n.name)]
+            else:
+                symbols = [n.name for n in node.names]
             if node.module and node.col_offset == root_col_offset:
-                found = fromlocal(node.module, node.level)
-                if found and found[2]:  # node.module is a package
-                    prefix = found[0] + '.'
-                    symbols = [n.name for n in node.names
-                               if not fromlocal(prefix + n.name)]
-                else:
-                    symbols = [n.name for n in node.names]
-
                 if symbols and fullname not in allowsymbolimports:
                     yield msg('direct symbol import %s from %s',
                               ', '.join(symbols), fullname)
 
-                if symbols and seennonsymbolrelative:
+                if symbols and seennonsymbollocal:
                     yield msg('symbol import follows non-symbol import: %s',
                               fullname)
+            if not symbols and fullname not in stdlib_modules:
+                seennonsymbollocal = True
 
             if not node.module:
                 assert node.level
-                seennonsymbolrelative = True
 
                 # Only allow 1 group per level.
                 if (node.level in seenlevels
@@ -652,7 +668,7 @@ def sources(f, modname):
     the input file.
     """
     py = False
-    if f.endswith('.py'):
+    if not f.endswith('.t'):
         with open(f) as src:
             yield src.read(), modname, f, 0
             py = True

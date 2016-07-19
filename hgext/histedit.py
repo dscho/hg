@@ -169,30 +169,35 @@ the drop to be implicit for missing commits by adding::
 
 """
 
-import pickle
+from __future__ import absolute_import
+
 import errno
 import os
 import sys
 
-from mercurial import bundle2
-from mercurial import cmdutil
-from mercurial import discovery
-from mercurial import error
-from mercurial import copies
-from mercurial import context
-from mercurial import destutil
-from mercurial import exchange
-from mercurial import extensions
-from mercurial import hg
-from mercurial import node
-from mercurial import repair
-from mercurial import scmutil
-from mercurial import util
-from mercurial import obsolete
-from mercurial import merge as mergemod
-from mercurial.lock import release
 from mercurial.i18n import _
+from mercurial import (
+    bundle2,
+    cmdutil,
+    context,
+    copies,
+    destutil,
+    discovery,
+    error,
+    exchange,
+    extensions,
+    hg,
+    lock,
+    merge as mergemod,
+    node,
+    obsolete,
+    repair,
+    scmutil,
+    util,
+)
 
+pickle = util.pickle
+release = lock.release
 cmdtable = {}
 command = cmdutil.command(cmdtable)
 
@@ -415,9 +420,7 @@ class histeditaction(object):
         <hash> <rev> <summary>
         """
         ctx = self.repo[self.node]
-        summary = ''
-        if ctx.description():
-            summary = ctx.description().splitlines()[0]
+        summary = _getsummary(ctx)
         line = '%s %s %d %s' % (self.verb, ctx, ctx.rev(), summary)
         # trim to 75 columns by default so it's not stupidly wide in my editor
         # (the 5 more are left for verb)
@@ -1264,6 +1267,14 @@ def _newhistedit(ui, repo, state, revs, freeargs, opts):
                                     'histedit')
     state.backupfile = backupfile
 
+def _getsummary(ctx):
+    # a common pattern is to extract the summary but default to the empty
+    # string
+    summary = ctx.description() or ''
+    if summary:
+        summary = summary.splitlines()[0]
+    return summary
+
 def bootstrapcontinue(ui, state, opts):
     repo = state.repo
     if state.actions:
@@ -1304,6 +1315,40 @@ def ruleeditor(repo, ui, actions, editcomment=""):
 
     rules are in the format [ [act, ctx], ...] like in state.rules
     """
+    if repo.ui.configbool("experimental", "histedit.autoverb"):
+        newact = util.sortdict()
+        for act in actions:
+            ctx = repo[act.node]
+            summary = _getsummary(ctx)
+            fword = summary.split(' ', 1)[0].lower()
+            added = False
+
+            # if it doesn't end with the special character '!' just skip this
+            if fword.endswith('!'):
+                fword = fword[:-1]
+                if fword in primaryactions | secondaryactions | tertiaryactions:
+                    act.verb = fword
+                    # get the target summary
+                    tsum = summary[len(fword) + 1:].lstrip()
+                    # safe but slow: reverse iterate over the actions so we
+                    # don't clash on two commits having the same summary
+                    for na, l in reversed(list(newact.iteritems())):
+                        actx = repo[na.node]
+                        asum = _getsummary(actx)
+                        if asum == tsum:
+                            added = True
+                            l.append(act)
+                            break
+
+            if not added:
+                newact[act] = []
+
+        # copy over and flatten the new list
+        actions = []
+        for na, l in newact.iteritems():
+            actions.append(na)
+            actions += l
+
     rules = '\n'.join([act.torule() for act in actions])
     rules += '\n\n'
     rules += editcomment

@@ -139,6 +139,7 @@ import fnmatch
 import socket
 import time
 
+from mercurial.i18n import _
 from mercurial import (
     cmdutil,
     error,
@@ -146,7 +147,6 @@ from mercurial import (
     patch,
     util,
 )
-from mercurial.i18n import _
 
 # Note for extension authors: ONLY specify testedwith = 'internal' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
@@ -363,7 +363,7 @@ class notifier(object):
             s = patch.diffstat(difflines)
             # s may be nil, don't include the header if it is
             if s:
-                self.ui.write('\ndiffstat:\n\n%s' % s)
+                self.ui.write(_('\ndiffstat:\n\n%s') % s)
 
         if maxdiff == 0:
             return

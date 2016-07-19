@@ -1,6 +1,26 @@
 mimetype = 'application/json'
-filerevision = '"not yet implemented"'
-search = '"not yet implemented"'
+filerevision = '\{
+  "node": {node|json},
+  "path": {file|json},
+  "date": {date|json},
+  "desc": {desc|utf8|json},
+  "branch": {if(branch, branch%changesetbranch, "default"|json)},
+  "bookmarks": [{join(bookmarks%changelistentryname, ", ")}],
+  "tags": [{join(tags%changelistentryname, ", ")}],
+  "user": {author|utf8|json},
+  "parents": [{join(parent%changesetparent, ", ")}],
+  "phase": {phase|json},
+  "lines": [{join(text%lineentry, ", ")}]
+  }'
+lineentry = '\{
+  "line": {line|json}
+  }'
+search = '\{
+  "node": {node|json},
+  "query": {query|json},
+  "entries": [{join(entries%searchentry, ", ")}]
+  }'
+searchentry = '{changelistentry}'
 # changelog and shortlog are the same web API but with different
 # number of entries.
 changelog = changelist.tmpl
@@ -9,10 +29,13 @@ changelistentry = '\{
   "node": {node|json},
   "date": {date|json},
   "desc": {desc|utf8|json},
+  "branch": {if(branch, branch%changesetbranch, "default"|json)},
   "bookmarks": [{join(bookmarks%changelistentryname, ", ")}],
   "tags": [{join(tags%changelistentryname, ", ")}],
   "user": {author|utf8|json},
-  "parents": [{join(allparents%changesetparent, ", ")}]
+  "phase": {phase|json},
+  "parents": [{if(allparents, join(allparents%changesetparent, ", "),
+                  join(parent%changesetparent, ", "))}]
   }'
 changelistentryname = '{name|utf8|json}'
 changeset = '\{
@@ -78,7 +101,23 @@ branchentry = '\{
   "date": {date|json},
   "status": {status|json}
   }'
-summary = '"not yet implemented"'
+shortlogentry = '{changelistentry}'
+summary = '\{
+  "node": {node|json},
+  "lastchange": {lastchange|json},
+  "bookmarks": [{join(bookmarks%bookmarkentry, ", ")}],
+  "branches": [{join(branches%branchentry, ", ")}],
+  "shortlog": [{join(shortlog%shortlogentry, ", ")}],
+  "tags": [{join(tags%tagentry, ", ")}],
+  "archives": [{join(archives%archiveentry, ", ")}],
+  "labels": {labels|json}
+  }'
+archiveentry = '\{
+  "node": {node|json},
+  "extension": {extension|json},
+  "type": {type|json},
+  "url": {"{urlbase}{url}archive/{node}{extension}"|json}
+  }'
 filediff = '\{
   "path": {file|json},
   "node": {node|json},
@@ -156,7 +195,9 @@ fileannotation = '\{
   "lineno": {lineno|json},
   "revdate": {revdate|json}
   }'
-filelog = '"not yet implemented"'
+filelog = '\{
+  "entries": [{join(entries%changelistentry, ", ")}]
+  }'
 graph = '"not yet implemented"'
 helptopics = '\{
   "topics": [{join(topics%helptopicentry, ", ")}],
@@ -180,5 +221,6 @@ indexentry = '\{
   "name": {name|utf8|json},
   "description": {description|utf8|json},
   "contact": {contact|utf8|json},
-  "lastchange": {lastchange|json}
+  "lastchange": {lastchange|json},
+  "labels": {labels|json}
   }'

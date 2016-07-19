@@ -7,11 +7,14 @@
 # GNU General Public License version 2 or any later version.
 
 '''store class for local filesystem'''
+from __future__ import absolute_import
 
 from mercurial.i18n import _
 
-import lfutil
-import basestore
+from . import (
+    basestore,
+    lfutil,
+)
 
 class localstore(basestore.basestore):
     '''localstore first attempts to grab files out of the store in the remote
@@ -33,7 +36,6 @@ class localstore(basestore.basestore):
             retval[hash] = lfutil.instore(self.remote, hash)
         return retval
 
-
     def _getfile(self, tmpfile, filename, hash):
         path = lfutil.findfile(self.remote, hash)
         if not path:
@@ -42,29 +44,23 @@ class localstore(basestore.basestore):
         with open(path, 'rb') as fd:
             return lfutil.copyandhash(fd, tmpfile)
 
-    def _verifyfile(self, cctx, cset, contents, standin, verified):
-        filename = lfutil.splitstandin(standin)
-        if not filename:
-            return False
-        fctx = cctx[standin]
-        key = (filename, fctx.filenode())
-        if key in verified:
-            return False
-
-        expecthash = fctx.data()[0:40]
-        storepath, exists = lfutil.findstorepath(self.remote, expecthash)
-        verified.add(key)
-        if not exists:
-            self.ui.warn(
-                _('changeset %s: %s references missing %s\n')
-                % (cset, filename, storepath))
-            return True                 # failed
-
-        if contents:
-            actualhash = lfutil.hashfile(storepath)
-            if actualhash != expecthash:
+    def _verifyfiles(self, contents, filestocheck):
+        failed = False
+        for cset, filename, expectedhash in filestocheck:
+            storepath, exists = lfutil.findstorepath(self.repo, expectedhash)
+            if not exists:
+                storepath, exists = lfutil.findstorepath(
+                    self.remote, expectedhash)
+            if not exists:
                 self.ui.warn(
-                    _('changeset %s: %s references corrupted %s\n')
+                    _('changeset %s: %s references missing %s\n')
                     % (cset, filename, storepath))
-                return True             # failed
-        return False
+                failed = True
+            elif contents:
+                actualhash = lfutil.hashfile(storepath)
+                if actualhash != expectedhash:
+                    self.ui.warn(
+                        _('changeset %s: %s references corrupted %s\n')
+                        % (cset, filename, storepath))
+                    failed = True
+        return failed

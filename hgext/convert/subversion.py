@@ -3,13 +3,13 @@
 # Copyright(C) 2007 Daniel Holth et al
 from __future__ import absolute_import
 
-import cPickle as pickle
 import os
 import re
 import sys
 import tempfile
 import xml.dom.minidom
 
+from mercurial.i18n import _
 from mercurial import (
     encoding,
     error,
@@ -17,10 +17,10 @@ from mercurial import (
     strutil,
     util,
 )
-from mercurial.i18n import _
 
 from . import common
 
+pickle = util.pickle
 stringio = util.stringio
 propertycache = util.propertycache
 urlerr = util.urlerr

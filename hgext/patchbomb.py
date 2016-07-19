@@ -71,6 +71,7 @@ import os
 import socket
 import tempfile
 
+from mercurial.i18n import _
 from mercurial import (
     cmdutil,
     commands,
@@ -83,7 +84,6 @@ from mercurial import (
     util,
 )
 stringio = util.stringio
-from mercurial.i18n import _
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
@@ -708,13 +708,7 @@ def email(ui, repo, *revs, **opts):
                 fp.close()
         else:
             if not sendmail:
-                verifycert = ui.config('smtp', 'verifycert', 'strict')
-                if opts.get('insecure'):
-                    ui.setconfig('smtp', 'verifycert', 'loose', 'patchbomb')
-                try:
-                    sendmail = mail.connect(ui, mbox=mbox)
-                finally:
-                    ui.setconfig('smtp', 'verifycert', verifycert, 'patchbomb')
+                sendmail = mail.connect(ui, mbox=mbox)
             ui.status(_('sending '), subj, ' ...\n')
             ui.progress(_('sending'), i, item=subj, total=len(msgs),
                         unit=_('emails'))

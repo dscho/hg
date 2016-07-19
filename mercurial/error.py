@@ -15,12 +15,17 @@ from __future__ import absolute_import
 
 # Do not import anything here, please
 
-class HintException(Exception):
-    def __init__(self, *args, **kw):
-        Exception.__init__(self, *args)
-        self.hint = kw.get('hint')
+class Hint(object):
+    """Mix-in to provide a hint of an error
 
-class RevlogError(HintException):
+    This should come first in the inheritance list to consume a hint and
+    pass remaining arguments to the exception class.
+    """
+    def __init__(self, *args, **kw):
+        self.hint = kw.pop('hint', None)
+        super(Hint, self).__init__(*args, **kw)
+
+class RevlogError(Hint, Exception):
     pass
 
 class FilteredIndexError(IndexError):
@@ -50,10 +55,10 @@ class ManifestLookupError(LookupError):
 class CommandError(Exception):
     """Exception raised on errors in parsing the command line."""
 
-class InterventionRequired(HintException):
+class InterventionRequired(Hint, Exception):
     """Exception raised when a command requires human intervention."""
 
-class Abort(HintException):
+class Abort(Hint, Exception):
     """Raised if a command needs to print an error and exit."""
 
 class HookLoadError(Abort):
@@ -87,10 +92,10 @@ class ResponseExpected(Abort):
         from .i18n import _
         Abort.__init__(self, _('response expected'))
 
-class OutOfBandError(HintException):
+class OutOfBandError(Hint, Exception):
     """Exception raised when a remote repo reports failure"""
 
-class ParseError(HintException):
+class ParseError(Hint, Exception):
     """Raised when parsing config files and {rev,file}sets (msg[, pos])"""
 
 class UnknownIdentifier(ParseError):
@@ -102,7 +107,7 @@ class UnknownIdentifier(ParseError):
         self.function = function
         self.symbols = symbols
 
-class RepoError(HintException):
+class RepoError(Hint, Exception):
     pass
 
 class RepoLookupError(RepoError):
@@ -235,3 +240,6 @@ class InvalidBundleSpecification(Exception):
 
 class UnsupportedBundleSpecification(Exception):
     """error raised when a bundle specification is not supported."""
+
+class CorruptedState(Exception):
+    """error raised when a command is not able to read its state from file"""

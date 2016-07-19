@@ -1146,8 +1146,8 @@ test for Git CVE-2016-3068
   $ hg commit -m "add subrepo"
   $ cd ..
   $ rm -f pwned.txt
-  $ env -u GIT_ALLOW_PROTOCOL \
-  > PWNED_MSG="your git is too old or mercurial has regressed" hg clone \
+  $ unset GIT_ALLOW_PROTOCOL
+  $ PWNED_MSG="your git is too old or mercurial has regressed" hg clone \
   > malicious-subrepository malicious-subrepository-protected
   Cloning into '$TESTTMP/tc/malicious-subrepository-protected/s'... (glob)
   fatal: transport 'ext' not allowed

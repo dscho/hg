@@ -43,31 +43,38 @@
 # completes fairly quickly, includes both shell and Python scripts, and
 # includes some scripts that run daemon processes.)
 
-from __future__ import print_function
+from __future__ import absolute_import, print_function
 
-from distutils import version
 import difflib
+import distutils.version as version
 import errno
 import json
 import optparse
 import os
-import shutil
-import subprocess
-import signal
-import socket
-import sys
-import tempfile
-import time
 import random
 import re
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
 import threading
-import killdaemons as killmod
+import time
+import unittest
+import xml.dom.minidom as minidom
+
 try:
     import Queue as queue
 except ImportError:
     import queue
-from xml.dom import minidom
-import unittest
+
+if os.environ.get('RTUNICODEPEDANTRY', False):
+    try:
+        reload(sys)
+        sys.setdefaultencoding("undefined")
+    except NameError:
+        pass
 
 osenvironb = getattr(os, 'environb', os.environ)
 processlock = threading.Lock()
@@ -207,7 +214,8 @@ def getparser():
     parser.add_option("-k", "--keywords",
         help="run tests matching keywords")
     parser.add_option("-l", "--local", action="store_true",
-        help="shortcut for --with-hg=<testdir>/../hg")
+        help="shortcut for --with-hg=<testdir>/../hg, "
+             "and --with-chg=<testdir>/../contrib/chg/chg if --chg is set")
     parser.add_option("--loop", action="store_true",
         help="loop tests repeatedly")
     parser.add_option("--runs-per-test", type="int", dest="runs_per_test",
@@ -301,11 +309,16 @@ def parseargs(args, parser):
             sys.stderr.write('warning: --with-hg should specify an hg script\n')
     if options.local:
         testdir = os.path.dirname(_bytespath(canonpath(sys.argv[0])))
-        hgbin = os.path.join(os.path.dirname(testdir), b'hg')
-        if os.name != 'nt' and not os.access(hgbin, os.X_OK):
-            parser.error('--local specified, but %r not found or not executable'
-                         % hgbin)
-        options.with_hg = hgbin
+        reporootdir = os.path.dirname(testdir)
+        pathandattrs = [(b'hg', 'with_hg')]
+        if options.chg:
+            pathandattrs.append((b'contrib/chg/chg', 'with_chg'))
+        for relpath, attr in pathandattrs:
+            binpath = os.path.join(reporootdir, relpath)
+            if os.name != 'nt' and not os.access(binpath, os.X_OK):
+                parser.error('--local specified, but %r not found or '
+                             'not executable' % binpath)
+            setattr(options, attr, binpath)
 
     if (options.chg or options.with_chg) and os.name == 'nt':
         parser.error('chg does not work on %s' % os.name)
@@ -468,6 +481,7 @@ def terminate(proc):
         pass
 
 def killdaemons(pidfile):
+    import killdaemons as killmod
     return killmod.killdaemons(pidfile, tryhard=False, remove=True,
                                logfn=vlog)
 
@@ -941,13 +955,18 @@ class PythonTest(Test):
 
         return result
 
-# This script may want to drop globs from lines matching these patterns on
-# Windows, but check-code.py wants a glob on these lines unconditionally.  Don't
-# warn if that is the case for anything matching these lines.
+# Some glob patterns apply only in some circumstances, so the script
+# might want to remove (glob) annotations that otherwise should be
+# retained.
 checkcodeglobpats = [
+    # On Windows it looks like \ doesn't require a (glob), but we know
+    # better.
     re.compile(br'^pushing to \$TESTTMP/.*[^)]$'),
     re.compile(br'^moving \S+/.*[^)]$'),
-    re.compile(br'^pulling from \$TESTTMP/.*[^)]$')
+    re.compile(br'^pulling from \$TESTTMP/.*[^)]$'),
+    # Not all platforms have 127.0.0.1 as loopback (though most do),
+    # so we always glob that too.
+    re.compile(br'.*127.0.0.1.*$'),
 ]
 
 bchr = chr
@@ -1255,6 +1274,7 @@ class TTest(Test):
                         return True
                 return b'-glob'
             return True
+        el = el.replace(b'127.0.0.1', b'*')
         i, n = 0, len(el)
         res = b''
         while i < n:
@@ -1836,7 +1856,8 @@ class TextTestRunner(unittest.TextTestRunner):
                                 tres = {'result': res}
 
                             outcome[tc.name] = tres
-                    jsonout = json.dumps(outcome, sort_keys=True, indent=4)
+                    jsonout = json.dumps(outcome, sort_keys=True, indent=4,
+                                         separators=(',', ': '))
                     fp.writelines(("testreport =", jsonout))
 
             self._runner._checkhglib('Tested')
@@ -2485,7 +2506,8 @@ class TestRunner(object):
 
     def _outputcoverage(self):
         """Produce code coverage output."""
-        from coverage import coverage
+        import coverage
+        coverage = coverage.coverage
 
         vlog('# Producing coverage report')
         # chdir is the easiest way to get short, relative paths in the

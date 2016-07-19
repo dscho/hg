@@ -10,6 +10,7 @@ from __future__ import absolute_import
 import contextlib
 import errno
 import glob
+import hashlib
 import os
 import re
 import shutil
@@ -224,7 +225,7 @@ def filteredhash(repo, maxrev):
     key = None
     revs = sorted(r for r in cl.filteredrevs if r <= maxrev)
     if revs:
-        s = util.sha1()
+        s = hashlib.sha1()
         for rev in revs:
             s.update('%s;' % rev)
         key = s.digest()
@@ -377,8 +378,24 @@ class abstractvfs(object):
     def readlock(self, path):
         return util.readlock(self.join(path))
 
-    def rename(self, src, dst):
-        return util.rename(self.join(src), self.join(dst))
+    def rename(self, src, dst, checkambig=False):
+        """Rename from src to dst
+
+        checkambig argument is used with util.filestat, and is useful
+        only if destination file is guarded by any lock
+        (e.g. repo.lock or repo.wlock).
+        """
+        dstpath = self.join(dst)
+        oldstat = checkambig and util.filestat(dstpath)
+        if oldstat and oldstat.stat:
+            ret = util.rename(self.join(src), dstpath)
+            newstat = util.filestat(dstpath)
+            if newstat.isambig(oldstat):
+                # stat of renamed file is ambiguous to original one
+                advanced = (oldstat.stat.st_mtime + 1) & 0x7fffffff
+                os.utime(dstpath, (advanced, advanced))
+            return ret
+        return util.rename(self.join(src), dstpath)
 
     def readlink(self, path):
         return os.readlink(self.join(path))
@@ -451,7 +468,8 @@ class abstractvfs(object):
         # have a use case.
         vfs = getattr(self, 'vfs', self)
         if getattr(vfs, '_backgroundfilecloser', None):
-            raise error.Abort('can only have 1 active background file closer')
+            raise error.Abort(
+                _('can only have 1 active background file closer'))
 
         with backgroundfilecloser(ui, expectedcount=expectedcount) as bfc:
             try:
@@ -502,7 +520,7 @@ class vfs(abstractvfs):
         os.chmod(name, self.createmode & 0o666)
 
     def __call__(self, path, mode="r", text=False, atomictemp=False,
-                 notindexed=False, backgroundclose=False):
+                 notindexed=False, backgroundclose=False, checkambig=False):
         '''Open ``path`` file, which is relative to vfs root.
 
         Newly created directories are marked as "not to be indexed by
@@ -521,6 +539,10 @@ class vfs(abstractvfs):
            closing a file on a background thread and reopening it. (If the
            file were opened multiple times, there could be unflushed data
            because the original file handle hasn't been flushed/closed yet.)
+
+        ``checkambig`` argument is passed to atomictemplfile (valid
+        only for writing), and is useful only if target file is
+        guarded by any lock (e.g. repo.lock or repo.wlock).
         '''
         if self._audit:
             r = util.checkosfilename(path)
@@ -540,7 +562,8 @@ class vfs(abstractvfs):
             if basename:
                 if atomictemp:
                     util.makedirs(dirname, self.createmode, notindexed)
-                    return util.atomictempfile(f, mode, self.createmode)
+                    return util.atomictempfile(f, mode, self.createmode,
+                                               checkambig=checkambig)
                 try:
                     if 'w' in mode:
                         util.unlink(f)
@@ -568,8 +591,9 @@ class vfs(abstractvfs):
 
         if backgroundclose:
             if not self._backgroundfilecloser:
-                raise error.Abort('backgroundclose can only be used when a '
+                raise error.Abort(_('backgroundclose can only be used when a '
                                   'backgroundclosing context manager is active')
+                                  )
 
             fp = delayclosedfile(fp, self._backgroundfilecloser)
 
@@ -640,7 +664,7 @@ class readonlyvfs(abstractvfs, auditvfs):
 
     def __call__(self, path, mode='r', *args, **kw):
         if mode not in ('r', 'rb'):
-            raise error.Abort('this vfs is read only')
+            raise error.Abort(_('this vfs is read only'))
         return self.vfs(path, mode, *args, **kw)
 
     def join(self, path, *insidef):
@@ -751,7 +775,7 @@ def revsingle(repo, revspec, default='.'):
 
 def _pairspec(revspec):
     tree = revset.parse(revspec)
-    tree = revset.optimize(tree, True)[1]  # fix up "x^:y" -> "(x^):y"
+    tree = revset.optimize(tree)  # fix up "x^:y" -> "(x^):y"
     return tree and tree[0] in ('range', 'rangepre', 'rangepost', 'rangeall')
 
 def revpair(repo, revs):
@@ -784,10 +808,29 @@ def revpair(repo, revs):
 
     return repo.lookup(first), repo.lookup(second)
 
-def revrange(repo, revs):
-    """Yield revision as strings from a list of revision specifications."""
+def revrange(repo, specs):
+    """Execute 1 to many revsets and return the union.
+
+    This is the preferred mechanism for executing revsets using user-specified
+    config options, such as revset aliases.
+
+    The revsets specified by ``specs`` will be executed via a chained ``OR``
+    expression. If ``specs`` is empty, an empty result is returned.
+
+    ``specs`` can contain integers, in which case they are assumed to be
+    revision numbers.
+
+    It is assumed the revsets are already formatted. If you have arguments
+    that need to be expanded in the revset, call ``revset.formatspec()``
+    and pass the result as an element of ``specs``.
+
+    Specifying a single revset is allowed.
+
+    Returns a ``revset.abstractsmartset`` which is a list-like interface over
+    integer revisions.
+    """
     allspecs = []
-    for spec in revs:
+    for spec in specs:
         if isinstance(spec, int):
             spec = revset.formatspec('rev(%d)', spec)
         allspecs.append(spec)
@@ -1183,6 +1226,9 @@ class filecache(object):
         return self
 
     def __get__(self, obj, type=None):
+        # if accessed on the class, return the descriptor itself.
+        if obj is None:
+            return self
         # do we need to check if the file changed?
         if self.name in obj.__dict__:
             assert self.name in obj._filecache, self.name
@@ -1358,8 +1404,8 @@ class backgroundfilecloser(object):
     def close(self, fh):
         """Schedule a file for closing."""
         if not self._entered:
-            raise error.Abort('can only call close() when context manager '
-                              'active')
+            raise error.Abort(_('can only call close() when context manager '
+                              'active'))
 
         # If a background thread encountered an exception, raise now so we fail
         # fast. Otherwise we may potentially go on for minutes until the error
@@ -1375,4 +1421,3 @@ class backgroundfilecloser(object):
             return
 
         self._queue.put(fh, block=True, timeout=None)
-

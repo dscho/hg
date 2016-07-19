@@ -7,6 +7,7 @@
 
 from __future__ import absolute_import
 
+import hashlib
 import itertools
 import os
 import sys
@@ -97,7 +98,7 @@ class remotebatch(peer.batcher):
             batchablefn = getattr(mtd, 'batchable', None)
             if batchablefn is not None:
                 batchable = batchablefn(mtd.im_self, *args, **opts)
-                encargsorres, encresref = batchable.next()
+                encargsorres, encresref = next(batchable)
                 if encresref:
                     req.append((name, encargsorres,))
                     rsp.append((batchable, encresref, resref,))
@@ -115,7 +116,7 @@ class remotebatch(peer.batcher):
         for encres, r in zip(encresults, rsp):
             batchable, encresref, resref = r
             encresref.set(encres)
-            resref.set(batchable.next())
+            resref.set(next(batchable))
 
 class remoteiterbatcher(peer.iterbatcher):
     def __init__(self, remote):
@@ -138,7 +139,7 @@ class remoteiterbatcher(peer.iterbatcher):
         for name, args, opts, resref in self.calls:
             mtd = getattr(self._remote, name)
             batchable = mtd.batchable(mtd.im_self, *args, **opts)
-            encargsorres, encresref = batchable.next()
+            encargsorres, encresref = next(batchable)
             assert encresref
             req.append((name, encargsorres))
             rsp.append((batchable, encresref))
@@ -150,7 +151,7 @@ class remoteiterbatcher(peer.iterbatcher):
         for (batchable, encresref), encres in itertools.izip(
                 self._rsp, self._resultiter):
             encresref.set(encres)
-            yield batchable.next()
+            yield next(batchable)
 
 # Forward a couple of names from peer to make wireproto interactions
 # slightly more sensible.
@@ -231,17 +232,19 @@ class wirepeer(peer.peerrepository):
                             for k, v in argsdict.iteritems())
             cmds.append('%s %s' % (op, args))
         rsp = self._callstream("batch", cmds=';'.join(cmds))
-        # TODO this response parsing is probably suboptimal for large
-        # batches with large responses.
-        work = rsp.read(1024)
-        chunk = work
+        chunk = rsp.read(1024)
+        work = [chunk]
         while chunk:
-            while ';' in work:
-                one, work = work.split(';', 1)
+            while ';' not in chunk and chunk:
+                chunk = rsp.read(1024)
+                work.append(chunk)
+            merged = ''.join(work)
+            while ';' in merged:
+                one, merged = merged.split(';', 1)
                 yield unescapearg(one)
             chunk = rsp.read(1024)
-            work += chunk
-        yield unescapearg(work)
+            work = [merged, chunk]
+        yield unescapearg(''.join(work))
 
     def _submitone(self, op, args):
         return self._call(op, **args)
@@ -408,7 +411,7 @@ class wirepeer(peer.peerrepository):
 
         if heads != ['force'] and self.capable('unbundlehash'):
             heads = encodelist(['hashed',
-                                util.sha1(''.join(sorted(heads))).digest()])
+                                hashlib.sha1(''.join(sorted(heads))).digest()])
         else:
             heads = encodelist(heads)
 
@@ -533,8 +536,17 @@ class ooberror(object):
     def __init__(self, message):
         self.message = message
 
+def getdispatchrepo(repo, proto, command):
+    """Obtain the repo used for processing wire protocol commands.
+
+    The intent of this function is to serve as a monkeypatch point for
+    extensions that need commands to operate on different repo views under
+    specialized circumstances.
+    """
+    return repo.filtered('served')
+
 def dispatch(repo, proto, command):
-    repo = repo.filtered("served")
+    repo = getdispatchrepo(repo, proto, command)
     func, spec = commands[command]
     args = proto.getargs(spec)
     return func(repo, proto, *args)

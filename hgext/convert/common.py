@@ -7,20 +7,20 @@
 from __future__ import absolute_import
 
 import base64
-import cPickle as pickle
 import datetime
 import errno
 import os
 import re
 import subprocess
 
+from mercurial.i18n import _
 from mercurial import (
     error,
     phases,
     util,
 )
-from mercurial.i18n import _
 
+pickle = util.pickle
 propertycache = util.propertycache
 
 def encodeargs(args):

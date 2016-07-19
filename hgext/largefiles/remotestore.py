@@ -5,20 +5,30 @@
 # GNU General Public License version 2 or any later version.
 
 '''remote largefile store; the base class for wirestore'''
+from __future__ import absolute_import
 
-from mercurial import util, wireproto, error
 from mercurial.i18n import _
+
+from mercurial import (
+    error,
+    util,
+    wireproto,
+)
+
+from . import (
+    basestore,
+    lfutil,
+    localstore,
+)
 
 urlerr = util.urlerr
 urlreq = util.urlreq
-
-import lfutil
-import basestore
 
 class remotestore(basestore.basestore):
     '''a largefile store accessed over a network'''
     def __init__(self, ui, repo, url):
         super(remotestore, self).__init__(ui, repo, url)
+        self._lstore = localstore.localstore(self.ui, self.repo, self.repo)
 
     def put(self, source, hash):
         if self.sendfile(source, hash):
@@ -65,34 +75,43 @@ class remotestore(basestore.basestore):
 
         return lfutil.copyandhash(chunks, tmpfile)
 
-    def _verifyfile(self, cctx, cset, contents, standin, verified):
-        filename = lfutil.splitstandin(standin)
-        if not filename:
-            return False
-        fctx = cctx[standin]
-        key = (filename, fctx.filenode())
-        if key in verified:
-            return False
+    def _hashesavailablelocally(self, hashes):
+        existslocallymap = self._lstore.exists(hashes)
+        localhashes = [hash for hash in hashes if existslocallymap[hash]]
+        return localhashes
 
-        verified.add(key)
+    def _verifyfiles(self, contents, filestocheck):
+        failed = False
+        expectedhashes = [expectedhash
+                          for cset, filename, expectedhash in filestocheck]
+        localhashes = self._hashesavailablelocally(expectedhashes)
+        stats = self._stat([expectedhash for expectedhash in expectedhashes
+                            if expectedhash not in localhashes])
 
-        expecthash = fctx.data()[0:40]
-        stat = self._stat([expecthash])[expecthash]
-        if not stat:
-            return False
-        elif stat == 1:
-            self.ui.warn(
-                _('changeset %s: %s: contents differ\n')
-                % (cset, filename))
-            return True # failed
-        elif stat == 2:
-            self.ui.warn(
-                _('changeset %s: %s missing\n')
-                % (cset, filename))
-            return True # failed
-        else:
-            raise RuntimeError('verify failed: unexpected response from '
-                               'statlfile (%r)' % stat)
+        for cset, filename, expectedhash in filestocheck:
+            if expectedhash in localhashes:
+                filetocheck = (cset, filename, expectedhash)
+                verifyresult = self._lstore._verifyfiles(contents,
+                                                         [filetocheck])
+                if verifyresult:
+                    failed = True
+            else:
+                stat = stats[expectedhash]
+                if stat:
+                    if stat == 1:
+                        self.ui.warn(
+                            _('changeset %s: %s: contents differ\n')
+                            % (cset, filename))
+                        failed = True
+                    elif stat == 2:
+                        self.ui.warn(
+                            _('changeset %s: %s missing\n')
+                            % (cset, filename))
+                        failed = True
+                    else:
+                        raise RuntimeError('verify failed: unexpected response '
+                                           'from statlfile (%r)' % stat)
+        return failed
 
     def batch(self):
         '''Support for remote batching.'''

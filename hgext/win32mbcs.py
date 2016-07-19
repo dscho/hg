@@ -49,11 +49,11 @@ from __future__ import absolute_import
 import os
 import sys
 
+from mercurial.i18n import _
 from mercurial import (
     encoding,
     error,
 )
-from mercurial.i18n import _
 
 # Note for extension authors: ONLY specify testedwith = 'internal' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should
@@ -192,5 +192,5 @@ def extsetup(ui):
         # command line options is not yet applied when
         # extensions.loadall() is called.
         if '--debug' in sys.argv:
-            ui.write("[win32mbcs] activated with encoding: %s\n"
+            ui.write(("[win32mbcs] activated with encoding: %s\n")
                      % _encoding)

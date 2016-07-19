@@ -248,3 +248,64 @@ web templates
    > {desc|escape}
    warning: follow desc keyword with either firstline or websub
   [1]
+
+'string join across lines with no space' detection
+
+  $ cat > stringjoin.py <<EOF
+  > foo = (' foo'
+  >        'bar foo.'
+  >        'bar foo:'
+  >        'bar foo@'
+  >        'bar foo%'
+  >        'bar foo*'
+  >        'bar foo+'
+  >        'bar foo-'
+  >        'bar')
+  > EOF
+
+'missing _() in ui message' detection
+
+  $ cat > uigettext.py <<EOF
+  > ui.status("% 10s %05d % -3.2f %*s %%"
+  >           # this use '\\\\' instead of '\\', because the latter in
+  >           # heredoc on shell becomes just '\'
+  >           '\\\\ \n \t \0'
+  >           """12345
+  >           """
+  >           '''.:*+-=
+  >           ''' "%-6d \n 123456 .:*+-= foobar")
+  > EOF
+
+(Checking multiple invalid files at once examines whether caching
+translation table for repquote() works as expected or not. All files
+should break rules depending on result of repquote(), in this case)
+
+  $ "$check_code" stringjoin.py uigettext.py
+  stringjoin.py:1:
+   > foo = (' foo'
+   string join across lines with no space
+  stringjoin.py:2:
+   >        'bar foo.'
+   string join across lines with no space
+  stringjoin.py:3:
+   >        'bar foo:'
+   string join across lines with no space
+  stringjoin.py:4:
+   >        'bar foo@'
+   string join across lines with no space
+  stringjoin.py:5:
+   >        'bar foo%'
+   string join across lines with no space
+  stringjoin.py:6:
+   >        'bar foo*'
+   string join across lines with no space
+  stringjoin.py:7:
+   >        'bar foo+'
+   string join across lines with no space
+  stringjoin.py:8:
+   >        'bar foo-'
+   string join across lines with no space
+  uigettext.py:1:
+   > ui.status("% 10s %05d % -3.2f %*s %%"
+   missing _() in ui message (use () to hide false-positives)
+  [1]

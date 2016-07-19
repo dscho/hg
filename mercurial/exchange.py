@@ -8,6 +8,7 @@
 from __future__ import absolute_import
 
 import errno
+import hashlib
 
 from .i18n import _
 from .node import (
@@ -857,14 +858,14 @@ def _pushbundle2(pushop):
         try:
             reply = pushop.remote.unbundle(stream, ['force'], 'push')
         except error.BundleValueError as exc:
-            raise error.Abort('missing support for %s' % exc)
+            raise error.Abort(_('missing support for %s') % exc)
         try:
             trgetter = None
             if pushback:
                 trgetter = pushop.trmanager.transaction
             op = bundle2.processbundle(pushop.repo, reply, trgetter)
         except error.BundleValueError as exc:
-            raise error.Abort('missing support for %s' % exc)
+            raise error.Abort(_('missing support for %s') % exc)
         except bundle2.AbortFromPart as exc:
             pushop.ui.status(_('remote: %s\n') % exc)
             raise error.Abort(_('push failed on remote'), hint=exc.hint)
@@ -1055,7 +1056,8 @@ class pulloperation(object):
         # revision we try to pull (None is "all")
         self.heads = heads
         # bookmark pulled explicitly
-        self.explicitbookmarks = bookmarks
+        self.explicitbookmarks = [repo._bookmarks.expandname(bookmark)
+                                  for bookmark in bookmarks]
         # do we force pull?
         self.force = force
         # whether a streaming clone was requested
@@ -1323,7 +1325,7 @@ def _pullbundle2(pullop):
     try:
         op = bundle2.processbundle(pullop.repo, bundle, pullop.gettransaction)
     except error.BundleValueError as exc:
-        raise error.Abort('missing support for %s' % exc)
+        raise error.Abort(_('missing support for %s') % exc)
 
     if pullop.fetch:
         results = [cg['return'] for cg in op.records['changegroup']]
@@ -1646,7 +1648,7 @@ def check_heads(repo, their_heads, context):
     Used by peer for unbundling.
     """
     heads = repo.heads()
-    heads_hash = util.sha1(''.join(sorted(heads))).digest()
+    heads_hash = hashlib.sha1(''.join(sorted(heads))).digest()
     if not (their_heads == ['force'] or their_heads == heads or
             their_heads == ['hashed', heads_hash]):
         # someone else committed/pushed/unbundled while we

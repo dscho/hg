@@ -17,6 +17,7 @@ from .node import (
 )
 from . import (
     encoding,
+    error,
     lock as lockmod,
     obsolete,
     util,
@@ -109,39 +110,6 @@ class bmstore(dict):
                             location='plain')
         tr.hookargs['bookmark_moved'] = '1'
 
-    def write(self):
-        '''Write bookmarks
-
-        Write the given bookmark => hash dictionary to the .hg/bookmarks file
-        in a format equal to those of localtags.
-
-        We also store a backup of the previous state in undo.bookmarks that
-        can be copied back on rollback.
-        '''
-        msg = 'bm.write() is deprecated, use bm.recordchange(transaction)'
-        self._repo.ui.deprecwarn(msg, '3.7')
-        # TODO: writing the active bookmark should probably also use a
-        # transaction.
-        self._writeactive()
-        if self._clean:
-            return
-        repo = self._repo
-        if (repo.ui.configbool('devel', 'all-warnings')
-                or repo.ui.configbool('devel', 'check-locks')):
-            l = repo._wlockref and repo._wlockref()
-            if l is None or not l.held:
-                repo.ui.develwarn('bookmarks write with no wlock')
-
-        tr = repo.currenttransaction()
-        if tr:
-            self.recordchange(tr)
-            # invalidatevolatilesets() is omitted because this doesn't
-            # write changes out actually
-            return
-
-        self._writerepo(repo)
-        repo.invalidatevolatilesets()
-
     def _writerepo(self, repo):
         """Factored out for extensibility"""
         rbm = repo._bookmarks
@@ -150,7 +118,8 @@ class bmstore(dict):
             rbm._writeactive()
 
         with repo.wlock():
-            file_ = repo.vfs('bookmarks', 'w', atomictemp=True)
+            file_ = repo.vfs('bookmarks', 'w', atomictemp=True,
+                             checkambig=True)
             try:
                 self._write(file_)
             except: # re-raises
@@ -164,7 +133,8 @@ class bmstore(dict):
             return
         with self._repo.wlock():
             if self._active is not None:
-                f = self._repo.vfs('bookmarks.current', 'w', atomictemp=True)
+                f = self._repo.vfs('bookmarks.current', 'w', atomictemp=True,
+                                   checkambig=True)
                 try:
                     f.write(encoding.fromlocal(self._active))
                 finally:
@@ -185,7 +155,10 @@ class bmstore(dict):
 
     def expandname(self, bname):
         if bname == '.':
-            return self.active
+            if self.active:
+                return self.active
+            else:
+                raise error.Abort(_("no active bookmark"))
         return bname
 
 def _readactive(repo, marks):

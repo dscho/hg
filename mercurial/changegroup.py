@@ -135,7 +135,7 @@ class cg1unpacker(object):
     version = '01'
     _grouplistcount = 1 # One list of files after the manifests
 
-    def __init__(self, fh, alg):
+    def __init__(self, fh, alg, extras=None):
         if alg == 'UN':
             alg = None # get more modern without breaking too much
         if not alg in util.decompressors:
@@ -145,6 +145,7 @@ class cg1unpacker(object):
             alg = '_truncatedBZ'
         self._stream = util.decompressors[alg](fh)
         self._type = alg
+        self.extras = extras or {}
         self.callback = None
 
     # These methods (compressed, read, seek, tell) all appear to only
@@ -530,6 +531,17 @@ class cg1packer(object):
     def fileheader(self, fname):
         return chunkheader(len(fname)) + fname
 
+    # Extracted both for clarity and for overriding in extensions.
+    def _sortgroup(self, revlog, nodelist, lookup):
+        """Sort nodes for change group and turn them into revnums."""
+        # for generaldelta revlogs, we linearize the revs; this will both be
+        # much quicker and generate a much smaller bundle
+        if (revlog._generaldelta and self._reorder is None) or self._reorder:
+            dag = dagutil.revlogdag(revlog)
+            return dag.linearize(set(revlog.rev(n) for n in nodelist))
+        else:
+            return sorted([revlog.rev(n) for n in nodelist])
+
     def group(self, nodelist, revlog, lookup, units=None):
         """Calculate a delta group, yielding a sequence of changegroup chunks
         (strings).
@@ -549,14 +561,7 @@ class cg1packer(object):
             yield self.close()
             return
 
-        # for generaldelta revlogs, we linearize the revs; this will both be
-        # much quicker and generate a much smaller bundle
-        if (revlog._generaldelta and self._reorder is None) or self._reorder:
-            dag = dagutil.revlogdag(revlog)
-            revs = set(revlog.rev(n) for n in nodelist)
-            revs = dag.linearize(revs)
-        else:
-            revs = sorted([revlog.rev(n) for n in nodelist])
+        revs = self._sortgroup(revlog, nodelist, lookup)
 
         # add the parent of the first rev
         p = revlog.parentrevs(revs[0])[0]
@@ -724,10 +729,11 @@ class cg1packer(object):
             dir = min(tmfnodes)
             nodes = tmfnodes[dir]
             prunednodes = self.prune(dirlog(dir), nodes, commonrevs)
-            for x in self._packmanifests(dir, prunednodes,
-                                         makelookupmflinknode(dir)):
-                size += len(x)
-                yield x
+            if not dir or prunednodes:
+                for x in self._packmanifests(dir, prunednodes,
+                                             makelookupmflinknode(dir)):
+                    size += len(x)
+                    yield x
             del tmfnodes[dir]
         self._verbosenote(_('%8.i (manifests)\n') % size)
         yield self._manifestsdone()
@@ -895,8 +901,8 @@ def getbundler(version, repo, bundlecaps=None):
     assert version in supportedoutgoingversions(repo)
     return _packermap[version][0](repo, bundlecaps)
 
-def getunbundler(version, fh, alg):
-    return _packermap[version][1](fh, alg)
+def getunbundler(version, fh, alg, extras=None):
+    return _packermap[version][1](fh, alg, extras=extras)
 
 def _changegroupinfo(repo, nodes, source):
     if repo.ui.verbose or source == 'bundle':
@@ -924,7 +930,8 @@ def getsubsetraw(repo, outgoing, bundler, source, fastpath=False):
 
 def getsubset(repo, outgoing, bundler, source, fastpath=False):
     gengroup = getsubsetraw(repo, outgoing, bundler, source, fastpath)
-    return getunbundler(bundler.version, util.chunkbuffer(gengroup), None)
+    return getunbundler(bundler.version, util.chunkbuffer(gengroup), None,
+                        {'clcount': len(outgoing.missing)})
 
 def changegroupsubset(repo, roots, heads, source, version='01'):
     """Compute a changegroup consisting of all the nodes that are

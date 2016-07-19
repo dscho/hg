@@ -10,7 +10,6 @@
 from __future__ import absolute_import
 
 import base64
-import httplib
 import os
 import socket
 
@@ -22,19 +21,22 @@ from . import (
     sslutil,
     util,
 )
-stringio = util.stringio
 
+httplib = util.httplib
+stringio = util.stringio
 urlerr = util.urlerr
 urlreq = util.urlreq
 
-class passwordmgr(urlreq.httppasswordmgrwithdefaultrealm):
-    def __init__(self, ui):
-        urlreq.httppasswordmgrwithdefaultrealm.__init__(self)
+class passwordmgr(object):
+    def __init__(self, ui, passwddb):
         self.ui = ui
+        self.passwddb = passwddb
+
+    def add_password(self, realm, uri, user, passwd):
+        return self.passwddb.add_password(realm, uri, user, passwd)
 
     def find_user_password(self, realm, authuri):
-        authinfo = urlreq.httppasswordmgrwithdefaultrealm.find_user_password(
-            self, realm, authuri)
+        authinfo = self.passwddb.find_user_password(realm, authuri)
         user, passwd = authinfo
         if user and passwd:
             self._writedebug(user, passwd)
@@ -64,7 +66,7 @@ class passwordmgr(urlreq.httppasswordmgrwithdefaultrealm):
             if not passwd:
                 passwd = self.ui.getpass()
 
-        self.add_password(realm, authuri, user, passwd)
+        self.passwddb.add_password(realm, authuri, user, passwd)
         self._writedebug(user, passwd)
         return (user, passwd)
 
@@ -73,8 +75,7 @@ class passwordmgr(urlreq.httppasswordmgrwithdefaultrealm):
         self.ui.debug(msg % (user, passwd and '*' * len(passwd) or 'not set'))
 
     def find_stored_password(self, authuri):
-        return urlreq.httppasswordmgrwithdefaultrealm.find_user_password(
-            self, None, authuri)
+        return self.passwddb.find_user_password(None, authuri)
 
 class proxyhandler(urlreq.proxyhandler):
     def __init__(self, ui):
@@ -183,17 +184,6 @@ if has_https:
 class httpconnection(keepalive.HTTPConnection):
     # must be able to send big bundle as stream.
     send = _gen_sendfile(keepalive.HTTPConnection.send)
-
-    def connect(self):
-        if has_https and self.realhostport: # use CONNECT proxy
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((self.host, self.port))
-            if _generic_proxytunnel(self):
-                # we do not support client X.509 certificates
-                self.sock = sslutil.wrapsocket(self.sock, None, None, None,
-                                               serverhostname=self.host)
-        else:
-            keepalive.HTTPConnection.connect(self)
 
     def getresponse(self):
         proxyres = getattr(self, 'proxyres', None)
@@ -354,16 +344,17 @@ if has_https:
                 _generic_proxytunnel(self)
                 host = self.realhostport.rsplit(':', 1)[0]
             self.sock = sslutil.wrapsocket(
-                self.sock, self.key_file, self.cert_file, serverhostname=host,
-                **sslutil.sslkwargs(self.ui, host))
-            sslutil.validator(self.ui, host)(self.sock)
+                self.sock, self.key_file, self.cert_file, ui=self.ui,
+                serverhostname=host)
+            sslutil.validatesocket(self.sock)
 
     class httpshandler(keepalive.KeepAliveHandler, urlreq.httpshandler):
         def __init__(self, ui):
             keepalive.KeepAliveHandler.__init__(self)
             urlreq.httpshandler.__init__(self)
             self.ui = ui
-            self.pwmgr = passwordmgr(self.ui)
+            self.pwmgr = passwordmgr(self.ui,
+                                     self.ui.httppasswordmgrdb)
 
         def _start_transaction(self, h, req):
             _generic_start_transaction(self, h, req)
@@ -477,7 +468,11 @@ def opener(ui, authinfo=None):
     '''
     # experimental config: ui.usehttp2
     if ui.configbool('ui', 'usehttp2', False):
-        handlers = [httpconnectionmod.http2handler(ui, passwordmgr(ui))]
+        handlers = [
+            httpconnectionmod.http2handler(
+                ui,
+                passwordmgr(ui, ui.httppasswordmgrdb))
+        ]
     else:
         handlers = [httphandler()]
         if has_https:
@@ -485,10 +480,12 @@ def opener(ui, authinfo=None):
 
     handlers.append(proxyhandler(ui))
 
-    passmgr = passwordmgr(ui)
+    passmgr = passwordmgr(ui, ui.httppasswordmgrdb)
     if authinfo is not None:
-        passmgr.add_password(*authinfo)
-        user, passwd = authinfo[2:4]
+        realm, uris, user, passwd = authinfo
+        saveduser, savedpass = passmgr.find_stored_password(uris[0])
+        if user != saveduser or passwd:
+            passmgr.add_password(realm, uris, user, passwd)
         ui.debug('http auth: user %s, password %s\n' %
                  (user, passwd and '*' * len(passwd) or 'not set'))
 
@@ -497,8 +494,20 @@ def opener(ui, authinfo=None):
     handlers.extend([h(ui, passmgr) for h in handlerfuncs])
     opener = urlreq.buildopener(*handlers)
 
-    # 1.0 here is the _protocol_ version
-    opener.addheaders = [('User-agent', 'mercurial/proto-1.0')]
+    # The user agent should should *NOT* be used by servers for e.g.
+    # protocol detection or feature negotiation: there are other
+    # facilities for that.
+    #
+    # "mercurial/proto-1.0" was the original user agent string and
+    # exists for backwards compatibility reasons.
+    #
+    # The "(Mercurial %s)" string contains the distribution
+    # name and version. Other client implementations should choose their
+    # own distribution name. Since servers should not be using the user
+    # agent string for anything, clients should be able to define whatever
+    # user agent they deem appropriate.
+    agent = 'mercurial/proto-1.0 (Mercurial %s)' % util.version()
+    opener.addheaders = [('User-agent', agent)]
     opener.addheaders.append(('Accept', 'application/mercurial-0.1'))
     return opener
 

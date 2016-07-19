@@ -8,8 +8,6 @@
 
 from __future__ import absolute_import
 
-import BaseHTTPServer
-import SocketServer
 import errno
 import os
 import socket
@@ -23,6 +21,8 @@ from .. import (
     util,
 )
 
+httpservermod = util.httpserver
+socketserver = util.socketserver
 urlerr = util.urlerr
 urlreq = util.urlreq
 
@@ -53,18 +53,18 @@ class _error_logger(object):
         for msg in seq:
             self.handler.log_error("HG error:  %s", msg)
 
-class _httprequesthandler(BaseHTTPServer.BaseHTTPRequestHandler):
+class _httprequesthandler(httpservermod.basehttprequesthandler):
 
     url_scheme = 'http'
 
     @staticmethod
-    def preparehttpserver(httpserver, ssl_cert):
+    def preparehttpserver(httpserver, ui):
         """Prepare .socket of new HTTPServer instance"""
         pass
 
     def __init__(self, *args, **kargs):
         self.protocol_version = 'HTTP/1.1'
-        BaseHTTPServer.BaseHTTPRequestHandler.__init__(self, *args, **kargs)
+        httpservermod.basehttprequesthandler.__init__(self, *args, **kargs)
 
     def _log_any(self, fp, format, *args):
         fp.write("%s - - [%s] %s\n" % (self.client_address[0],
@@ -147,9 +147,9 @@ class _httprequesthandler(BaseHTTPServer.BaseHTTPRequestHandler):
         env['wsgi.input'] = self.rfile
         env['wsgi.errors'] = _error_logger(self)
         env['wsgi.multithread'] = isinstance(self.server,
-                                             SocketServer.ThreadingMixIn)
+                                             socketserver.ThreadingMixIn)
         env['wsgi.multiprocess'] = isinstance(self.server,
-                                              SocketServer.ForkingMixIn)
+                                              socketserver.ForkingMixIn)
         env['wsgi.run_once'] = 0
 
         self.saved_status = None
@@ -222,15 +222,25 @@ class _httprequesthandlerssl(_httprequesthandler):
     url_scheme = 'https'
 
     @staticmethod
-    def preparehttpserver(httpserver, ssl_cert):
+    def preparehttpserver(httpserver, ui):
         try:
-            import ssl
-            ssl.wrap_socket
+            from .. import sslutil
+            sslutil.modernssl
         except ImportError:
             raise error.Abort(_("SSL support is unavailable"))
-        httpserver.socket = ssl.wrap_socket(
-            httpserver.socket, server_side=True,
-            certfile=ssl_cert, ssl_version=ssl.PROTOCOL_TLSv1)
+
+        certfile = ui.config('web', 'certificate')
+
+        # These config options are currently only meant for testing. Use
+        # at your own risk.
+        cafile = ui.config('devel', 'servercafile')
+        reqcert = ui.configbool('devel', 'serverrequirecert')
+
+        httpserver.socket = sslutil.wrapserversocket(httpserver.socket,
+                                                     ui,
+                                                     certfile=certfile,
+                                                     cafile=cafile,
+                                                     requireclientcert=reqcert)
 
     def setup(self):
         self.connection = self.request
@@ -240,10 +250,10 @@ class _httprequesthandlerssl(_httprequesthandler):
 try:
     import threading
     threading.activeCount() # silence pyflakes and bypass demandimport
-    _mixin = SocketServer.ThreadingMixIn
+    _mixin = socketserver.ThreadingMixIn
 except ImportError:
     if util.safehasattr(os, "fork"):
-        _mixin = SocketServer.ForkingMixIn
+        _mixin = socketserver.ForkingMixIn
     else:
         class _mixin(object):
             pass
@@ -253,18 +263,18 @@ def openlog(opt, default):
         return open(opt, 'a')
     return default
 
-class MercurialHTTPServer(object, _mixin, BaseHTTPServer.HTTPServer):
+class MercurialHTTPServer(object, _mixin, httpservermod.httpserver):
 
     # SO_REUSEADDR has broken semantics on windows
     if os.name == 'nt':
         allow_reuse_address = 0
 
     def __init__(self, ui, app, addr, handler, **kwargs):
-        BaseHTTPServer.HTTPServer.__init__(self, addr, handler, **kwargs)
+        httpservermod.httpserver.__init__(self, addr, handler, **kwargs)
         self.daemon_threads = True
         self.application = app
 
-        handler.preparehttpserver(self, ui.config('web', 'certificate'))
+        handler.preparehttpserver(self, ui)
 
         prefix = ui.config('web', 'prefix', '')
         if prefix:

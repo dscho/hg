@@ -110,15 +110,16 @@ EXTRA ATTRIBUTES AND METHODS
 from __future__ import absolute_import, print_function
 
 import errno
-import httplib
+import hashlib
 import socket
 import sys
-import thread
+import threading
 
 from . import (
     util,
 )
 
+httplib = util.httplib
 urlerr = util.urlerr
 urlreq = util.urlreq
 
@@ -134,7 +135,7 @@ class ConnectionManager(object):
       * keep track of all existing
       """
     def __init__(self):
-        self._lock = thread.allocate_lock()
+        self._lock = threading.Lock()
         self._hostmap = {} # map hosts to a list of connections
         self._connmap = {} # map connections to host
         self._readymap = {} # map connection to ready state
@@ -624,8 +625,7 @@ def error_handler(url):
     keepalive_handler.close_all()
 
 def continuity(url):
-    from . import util
-    md5 = util.md5
+    md5 = hashlib.md5
     format = '%25s: %s'
 
     # first fetch the file with the normal http handler

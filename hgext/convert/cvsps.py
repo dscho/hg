@@ -6,15 +6,16 @@
 # GNU General Public License version 2 or any later version.
 from __future__ import absolute_import
 
-import cPickle as pickle
 import os
 import re
 
+from mercurial.i18n import _
 from mercurial import (
     hook,
     util,
 )
-from mercurial.i18n import _
+
+pickle = util.pickle
 
 class logentry(object):
     '''Class logentry has the following attributes:

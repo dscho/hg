@@ -18,11 +18,12 @@ inserted due to big distance from its paren revision (zero).
   > done
 
   $ cd ..
+  >>> from __future__ import print_function
   >>> import os
   >>> regsize = os.stat("repo/.hg/store/00manifest.i").st_size
   >>> gdsize = os.stat("gdrepo/.hg/store/00manifest.i").st_size
   >>> if regsize < gdsize:
-  ...     print 'generaldata increased size of manifest'
+  ...     print('generaldata increased size of manifest')
 
 Verify rev reordering doesnt create invalid bundles (issue4462)
 This requires a commit tree that when pulled will reorder manifest revs such
@@ -153,8 +154,8 @@ Test that strip bundle use bundle2
   0 files updated, 0 files merged, 5 files removed, 0 files unresolved
   saved backup bundle to $TESTTMP/aggressive/.hg/strip-backup/1c5d4dc9a8b8-6c68e60c-backup.hg (glob)
   $ hg debugbundle .hg/strip-backup/*
-  Stream params: {'Compression': 'BZ'}
-  changegroup -- "{'version': '02'}"
+  Stream params: sortdict([('Compression', 'BZ')])
+  changegroup -- "sortdict([('version', '02'), ('nbchanges', '1')])"
       1c5d4dc9a8b8d6e1750966d343e94db665e7a1e9
 
   $ cd ..

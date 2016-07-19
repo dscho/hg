@@ -262,7 +262,8 @@ class hgbuildmo(build):
 
 
 class hgdist(Distribution):
-    pure = ispypy
+    pure = False
+    cffi = ispypy
 
     global_options = Distribution.global_options + \
                      [('pure', None, "use pure (slow) Python "
@@ -316,6 +317,13 @@ class hgbuildpy(build_py):
 
         if self.distribution.pure:
             self.distribution.ext_modules = []
+        elif self.distribution.cffi:
+            exts = []
+            # cffi modules go here
+            if sys.platform == 'darwin':
+                import setup_osutil_cffi
+                exts.append(setup_osutil_cffi.ffi.distutils_extension())
+            self.distribution.ext_modules = exts
         else:
             h = os.path.join(get_python_inc(), 'Python.h')
             if not os.path.exists(h):
@@ -536,7 +544,9 @@ packages = ['mercurial', 'mercurial.hgweb', 'mercurial.httpclient',
             'hgext.fsmonitor.pywatchman', 'hgext.highlight',
             'hgext.largefiles', 'hgext.zeroconf', 'hgext3rd']
 
-common_depends = ['mercurial/util.h']
+common_depends = ['mercurial/bitmanipulation.h',
+                  'mercurial/compat.h',
+                  'mercurial/util.h']
 
 osutil_ldflags = []
 
@@ -546,8 +556,9 @@ if sys.platform == 'darwin':
 extmodules = [
     Extension('mercurial.base85', ['mercurial/base85.c'],
               depends=common_depends),
-    Extension('mercurial.bdiff', ['mercurial/bdiff.c'],
-              depends=common_depends),
+    Extension('mercurial.bdiff', ['mercurial/bdiff.c',
+                                  'mercurial/bdiff_module.c'],
+              depends=common_depends + ['mercurial/bdiff.h']),
     Extension('mercurial.diffhelpers', ['mercurial/diffhelpers.c'],
               depends=common_depends),
     Extension('mercurial.mpatch', ['mercurial/mpatch.c'],

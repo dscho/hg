@@ -31,6 +31,46 @@
   >   hg log --template '{rev}\n' -r "$1"
   > }
 
+extension to build '_intlist()' and '_hexlist()', which is necessary because
+these predicates use '\0' as a separator:
+
+  $ cat <<EOF > debugrevlistspec.py
+  > from __future__ import absolute_import
+  > from mercurial import (
+  >     cmdutil,
+  >     node as nodemod,
+  >     revset,
+  > )
+  > cmdtable = {}
+  > command = cmdutil.command(cmdtable)
+  > @command('debugrevlistspec',
+  >     [('', 'optimize', None, 'print parsed tree after optimizing'),
+  >      ('', 'bin', None, 'unhexlify arguments')])
+  > def debugrevlistspec(ui, repo, fmt, *args, **opts):
+  >     if opts['bin']:
+  >         args = map(nodemod.bin, args)
+  >     expr = revset.formatspec(fmt, list(args))
+  >     if ui.verbose:
+  >         tree = revset.parse(expr, lookup=repo.__contains__)
+  >         ui.note(revset.prettyformat(tree), "\n")
+  >         if opts["optimize"]:
+  >             opttree = revset.optimize(tree)
+  >             ui.note("* optimized:\n", revset.prettyformat(opttree), "\n")
+  >     func = revset.match(ui, expr, repo)
+  >     revs = func(repo)
+  >     if ui.verbose:
+  >         ui.note("* set:\n", revset.prettyformatset(revs), "\n")
+  >     for c in revs:
+  >         ui.write("%s\n" % c)
+  > EOF
+  $ cat <<EOF >> $HGRCPATH
+  > [extensions]
+  > debugrevlistspec = $TESTTMP/debugrevlistspec.py
+  > EOF
+  $ trylist() {
+  >   hg debugrevlistspec --debug "$@"
+  > }
+
   $ hg init repo
   $ cd repo
 
@@ -393,6 +433,12 @@ quoting needed
   $ log 'date(2005) and 1::'
   4
   $ hg book -d date
+
+function name should be a symbol
+
+  $ log '"date"(2005)'
+  hg: parse error: not a symbol
+  [255]
 
 keyword arguments
 
@@ -898,6 +944,445 @@ Test working-directory revision
   $ log 'tag(tip)'
   9
 
+Test order of revisions in compound expression
+----------------------------------------------
+
+The general rule is that only the outermost (= leftmost) predicate can
+enforce its ordering requirement. The other predicates should take the
+ordering defined by it.
+
+ 'A & B' should follow the order of 'A':
+
+  $ log '2:0 & 0::2'
+  2
+  1
+  0
+
+ 'head()' combines sets in right order:
+
+  $ log '2:0 & head()'
+  2
+  1
+  0
+
+ 'a + b', which is optimized to '_list(a b)', should take the ordering of
+ the left expression:
+
+  $ try --optimize '2:0 & (0 + 1 + 2)'
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (group
+      (or
+        ('symbol', '0')
+        ('symbol', '1')
+        ('symbol', '2'))))
+  * optimized:
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (func
+      ('symbol', '_list')
+      ('string', '0\x001\x002')))
+  * set:
+  <baseset [0, 1, 2]>
+  0
+  1
+  2
+ BROKEN: should be '2 1 0'
+
+ 'A + B' should take the ordering of the left expression:
+
+  $ try --optimize '2:0 & (0:1 + 2)'
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (group
+      (or
+        (range
+          ('symbol', '0')
+          ('symbol', '1'))
+        ('symbol', '2'))))
+  * optimized:
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (or
+      (range
+        ('symbol', '0')
+        ('symbol', '1'))
+      ('symbol', '2')))
+  * set:
+  <addset
+    <filteredset
+      <spanset+ 0:1>,
+      <spanset- 0:2>>,
+    <baseset [2]>>
+  0
+  1
+  2
+ BROKEN: should be '2 1 0'
+
+ '_intlist(a b)' should behave like 'a + b':
+
+  $ trylist --optimize '2:0 & %ld' 0 1 2
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (func
+      ('symbol', '_intlist')
+      ('string', '0\x001\x002')))
+  * optimized:
+  (and
+    (func
+      ('symbol', '_intlist')
+      ('string', '0\x001\x002'))
+    (range
+      ('symbol', '2')
+      ('symbol', '0')))
+  * set:
+  <filteredset
+    <spanset- 0:2>,
+    <baseset [0, 1, 2]>>
+  2
+  1
+  0
+
+  $ trylist --optimize '%ld & 2:0' 0 2 1
+  (and
+    (func
+      ('symbol', '_intlist')
+      ('string', '0\x002\x001'))
+    (range
+      ('symbol', '2')
+      ('symbol', '0')))
+  * optimized:
+  (and
+    (func
+      ('symbol', '_intlist')
+      ('string', '0\x002\x001'))
+    (range
+      ('symbol', '2')
+      ('symbol', '0')))
+  * set:
+  <filteredset
+    <spanset- 0:2>,
+    <baseset [0, 2, 1]>>
+  2
+  1
+  0
+ BROKEN: should be '0 2 1'
+
+ '_hexlist(a b)' should behave like 'a + b':
+
+  $ trylist --optimize --bin '2:0 & %ln' `hg log -T '{node} ' -r0:2`
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (func
+      ('symbol', '_hexlist')
+      ('string', '*'))) (glob)
+  * optimized:
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (func
+      ('symbol', '_hexlist')
+      ('string', '*'))) (glob)
+  * set:
+  <baseset [0, 1, 2]>
+  0
+  1
+  2
+ BROKEN: should be '2 1 0'
+
+  $ trylist --optimize --bin '%ln & 2:0' `hg log -T '{node} ' -r0+2+1`
+  (and
+    (func
+      ('symbol', '_hexlist')
+      ('string', '*')) (glob)
+    (range
+      ('symbol', '2')
+      ('symbol', '0')))
+  * optimized:
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (func
+      ('symbol', '_hexlist')
+      ('string', '*'))) (glob)
+  * set:
+  <baseset [0, 2, 1]>
+  0
+  2
+  1
+
+ 'present()' should do nothing other than suppressing an error:
+
+  $ try --optimize '2:0 & present(0 + 1 + 2)'
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (func
+      ('symbol', 'present')
+      (or
+        ('symbol', '0')
+        ('symbol', '1')
+        ('symbol', '2'))))
+  * optimized:
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (func
+      ('symbol', 'present')
+      (func
+        ('symbol', '_list')
+        ('string', '0\x001\x002'))))
+  * set:
+  <baseset [0, 1, 2]>
+  0
+  1
+  2
+ BROKEN: should be '2 1 0'
+
+ 'reverse()' should take effect only if it is the outermost expression:
+
+  $ try --optimize '0:2 & reverse(all())'
+  (and
+    (range
+      ('symbol', '0')
+      ('symbol', '2'))
+    (func
+      ('symbol', 'reverse')
+      (func
+        ('symbol', 'all')
+        None)))
+  * optimized:
+  (and
+    (range
+      ('symbol', '0')
+      ('symbol', '2'))
+    (func
+      ('symbol', 'reverse')
+      (func
+        ('symbol', 'all')
+        None)))
+  * set:
+  <filteredset
+    <spanset- 0:2>,
+    <spanset+ 0:9>>
+  2
+  1
+  0
+ BROKEN: should be '0 1 2'
+
+ 'sort()' should take effect only if it is the outermost expression:
+
+  $ try --optimize '0:2 & sort(all(), -rev)'
+  (and
+    (range
+      ('symbol', '0')
+      ('symbol', '2'))
+    (func
+      ('symbol', 'sort')
+      (list
+        (func
+          ('symbol', 'all')
+          None)
+        (negate
+          ('symbol', 'rev')))))
+  * optimized:
+  (and
+    (range
+      ('symbol', '0')
+      ('symbol', '2'))
+    (func
+      ('symbol', 'sort')
+      (list
+        (func
+          ('symbol', 'all')
+          None)
+        ('string', '-rev'))))
+  * set:
+  <filteredset
+    <spanset- 0:2>,
+    <spanset+ 0:9>>
+  2
+  1
+  0
+ BROKEN: should be '0 1 2'
+
+ for 'A & f(B)', 'B' should not be affected by the order of 'A':
+
+  $ try --optimize '2:0 & first(1 + 0 + 2)'
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (func
+      ('symbol', 'first')
+      (or
+        ('symbol', '1')
+        ('symbol', '0')
+        ('symbol', '2'))))
+  * optimized:
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (func
+      ('symbol', 'first')
+      (func
+        ('symbol', '_list')
+        ('string', '1\x000\x002'))))
+  * set:
+  <baseset
+    <limit n=1, offset=0,
+      <spanset- 0:2>,
+      <baseset [1, 0, 2]>>>
+  1
+
+  $ try --optimize '2:0 & not last(0 + 2 + 1)'
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (not
+      (func
+        ('symbol', 'last')
+        (or
+          ('symbol', '0')
+          ('symbol', '2')
+          ('symbol', '1')))))
+  * optimized:
+  (difference
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (func
+      ('symbol', 'last')
+      (func
+        ('symbol', '_list')
+        ('string', '0\x002\x001'))))
+  * set:
+  <filteredset
+    <spanset- 0:2>,
+    <not
+      <baseset
+        <last n=1,
+          <fullreposet+ 0:9>,
+          <baseset [1, 2, 0]>>>>>
+  2
+  0
+
+ for 'A & (op)(B)', 'B' should not be affected by the order of 'A':
+
+  $ try --optimize '2:0 & (1 + 0 + 2):(0 + 2 + 1)'
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (range
+      (group
+        (or
+          ('symbol', '1')
+          ('symbol', '0')
+          ('symbol', '2')))
+      (group
+        (or
+          ('symbol', '0')
+          ('symbol', '2')
+          ('symbol', '1')))))
+  * optimized:
+  (and
+    (range
+      ('symbol', '2')
+      ('symbol', '0'))
+    (range
+      (func
+        ('symbol', '_list')
+        ('string', '1\x000\x002'))
+      (func
+        ('symbol', '_list')
+        ('string', '0\x002\x001'))))
+  * set:
+  <filteredset
+    <baseset [1]>,
+    <spanset- 0:2>>
+  1
+
+ 'A & B' can be rewritten as 'B & A' by weight, but the ordering rule should
+ be determined before the optimization (i.e. 'B' should take the ordering of
+ 'A'):
+
+  $ try --optimize 'contains("glob:*") & (2 + 0 + 1)'
+  (and
+    (func
+      ('symbol', 'contains')
+      ('string', 'glob:*'))
+    (group
+      (or
+        ('symbol', '2')
+        ('symbol', '0')
+        ('symbol', '1'))))
+  * optimized:
+  (and
+    (func
+      ('symbol', '_list')
+      ('string', '2\x000\x001'))
+    (func
+      ('symbol', 'contains')
+      ('string', 'glob:*')))
+  * set:
+  <filteredset
+    <baseset [2, 0, 1]>,
+    <contains 'glob:*'>>
+  2
+  0
+  1
+ BROKEN: should be '0 1 2'
+
+  $ try --optimize 'reverse(contains("glob:*")) & (0 + 2 + 1)'
+  (and
+    (func
+      ('symbol', 'reverse')
+      (func
+        ('symbol', 'contains')
+        ('string', 'glob:*')))
+    (group
+      (or
+        ('symbol', '0')
+        ('symbol', '2')
+        ('symbol', '1'))))
+  * optimized:
+  (and
+    (func
+      ('symbol', '_list')
+      ('string', '0\x002\x001'))
+    (func
+      ('symbol', 'reverse')
+      (func
+        ('symbol', 'contains')
+        ('string', 'glob:*'))))
+  * set:
+  <filteredset
+    <baseset [1, 2, 0]>,
+    <contains 'glob:*'>>
+  1
+  2
+  0
+ BROKEN: should be '2 1 0'
+
 test sort revset
 --------------------------------------------
 
@@ -951,6 +1436,19 @@ test sorting two sorted collections in different orders backwards
   8
   6
   2
+
+test empty sort key which is noop
+
+  $ log 'sort(0 + 2 + 1, "")'
+  0
+  2
+  1
+
+test invalid sort keys
+
+  $ log 'sort(all(), -invalid)'
+  hg: parse error: unknown sort key '-invalid'
+  [255]
 
   $ cd ..
 
@@ -1089,6 +1587,67 @@ test sorting by multiple keys including variable-length strings
   1 b11  m12  u111 112 7200
   0 b12  m111 u112 111 10800
   2 b111 m11  u12  111 3600
+
+ toposort prioritises graph branches
+
+  $ hg up 2
+  0 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ touch a
+  $ hg addremove
+  adding a
+  $ hg ci -m 't1' -u 'tu' -d '130 0'
+  created new head
+  $ echo 'a' >> a
+  $ hg ci -m 't2' -u 'tu' -d '130 0'
+  $ hg book book1
+  $ hg up 4
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  (leaving bookmark book1)
+  $ touch a
+  $ hg addremove
+  adding a
+  $ hg ci -m 't3' -u 'tu' -d '130 0'
+
+  $ hg log -r 'sort(all(), topo)'
+  7 b111 t3   tu   130 0
+  4 b111 m112 u111 110 14400
+  3 b112 m111 u11  120 0
+  6 b111 t2   tu   130 0
+  5 b111 t1   tu   130 0
+  2 b111 m11  u12  111 3600
+  1 b11  m12  u111 112 7200
+  0 b12  m111 u112 111 10800
+
+  $ hg log -r 'sort(all(), -topo)'
+  0 b12  m111 u112 111 10800
+  1 b11  m12  u111 112 7200
+  2 b111 m11  u12  111 3600
+  5 b111 t1   tu   130 0
+  6 b111 t2   tu   130 0
+  3 b112 m111 u11  120 0
+  4 b111 m112 u111 110 14400
+  7 b111 t3   tu   130 0
+
+  $ hg log -r 'sort(all(), topo, topo.firstbranch=book1)'
+  6 b111 t2   tu   130 0
+  5 b111 t1   tu   130 0
+  7 b111 t3   tu   130 0
+  4 b111 m112 u111 110 14400
+  3 b112 m111 u11  120 0
+  2 b111 m11  u12  111 3600
+  1 b11  m12  u111 112 7200
+  0 b12  m111 u112 111 10800
+
+topographical sorting can't be combined with other sort keys, and you can't
+use the topo.firstbranch option when topo sort is not active:
+
+  $ hg log -r 'sort(all(), "topo user")'
+  hg: parse error: topo sort order cannot be combined with other sort keys
+  [255]
+
+  $ hg log -r 'sort(all(), user, topo.firstbranch=book1)'
+  hg: parse error: topo.firstbranch can only be used when using the topo sort key
+  [255]
 
   $ cd ..
   $ cd repo
@@ -1480,6 +2039,16 @@ no crash by empty group "()" while optimizing to "only()"
   hg: parse error: missing argument
   [255]
 
+invalid function call should not be optimized to only()
+
+  $ log '"ancestors"(6) and not ancestors(4)'
+  hg: parse error: not a symbol
+  [255]
+
+  $ log 'ancestors(6) and not "ancestors"(4)'
+  hg: parse error: not a symbol
+  [255]
+
 we can use patterns when searching for tags
 
   $ log 'tag("1..*")'
@@ -1550,7 +2119,10 @@ we can use patterns when searching for tags
   0
   $ log '4::8 - 8'
   4
-  $ log 'matching(1 or 2 or 3) and (2 or 3 or 1)'
+
+matching() should preserve the order of the input set:
+
+  $ log '(2 or 3 or 1) and matching(1 or 2 or 3)'
   2
   3
   1
@@ -1967,12 +2539,12 @@ test unknown reference:
   (func
     ('symbol', 'unknownref')
     ('symbol', '0'))
-  abort: failed to parse the definition of revset alias "unknownref": '$' not for alias arguments
+  abort: bad definition of revset alias "unknownref": invalid symbol '$2'
   [255]
 
   $ hg debugrevspec --debug --config revsetalias.anotherbadone='branch(' "tip"
   ('symbol', 'tip')
-  warning: failed to parse the definition of revset alias "anotherbadone": at 7: not a prefix: end
+  warning: bad definition of revset alias "anotherbadone": at 7: not a prefix: end
   * set:
   <baseset [9]>
   9
@@ -1985,7 +2557,7 @@ test unknown reference:
 
   $ hg debugrevspec --debug --config revsetalias.'bad name'='tip' "tip"
   ('symbol', 'tip')
-  warning: failed to parse the declaration of revset alias "bad name": at 4: invalid token
+  warning: bad declaration of revset alias "bad name": at 4: invalid token
   * set:
   <baseset [9]>
   9

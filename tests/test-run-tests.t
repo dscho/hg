@@ -2,10 +2,7 @@ This file tests the behavior of run-tests.py itself.
 
 Avoid interference from actual test env:
 
-  $ unset HGTEST_JOBS
-  $ unset HGTEST_TIMEOUT
-  $ unset HGTEST_PORT
-  $ unset HGTEST_SHELL
+  $ . "$TESTDIR/helper-runtests.sh"
 
 Smoke test with install
 ============
@@ -196,6 +193,10 @@ test --xunit support
   ]]>  </testcase>
   </testsuite>
 
+  $ cat .testtimes
+  test-failure-unicode.t * (glob)
+  test-failure.t * (glob)
+  test-success.t * (glob)
   $ rm test-failure-unicode.t
 
 test for --retest
@@ -304,6 +305,8 @@ Verify that we can try other ports
   .
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
   $ rm test-serve-inuse.t
+  $ killdaemons.py $DAEMON_PIDS
+  $ rm $DAEMON_PIDS
 
 Running In Debug Mode
 ======================
@@ -586,11 +589,35 @@ Missing skips or blacklisted skips don't count as executed:
   testreport ={
       "test-bogus.t": {
           "result": "skip"
-      }, 
+      },
       "test-failure.t": {
           "result": "skip"
       }
   } (no-eol)
+
+Whitelist trumps blacklist
+  $ echo test-failure.t > whitelist
+  $ rt --blacklist=blacklist --whitelist=whitelist --json\
+  >   test-failure.t test-bogus.t
+  s
+  --- $TESTTMP/test-failure.t
+  +++ $TESTTMP/test-failure.t.err
+  @@ -1,5 +1,5 @@
+     $ echo babar
+  -  rataxes
+  +  babar
+   This is a noop statement so that
+   this test is still more bytes than success.
+   pad pad pad pad............................................................
+  
+  ERROR: test-failure.t output changed
+  !
+  Skipped test-bogus.t: Doesn't exist
+  Failed test-failure.t: output changed
+  # Ran 1 tests, 1 skipped, 0 warned, 1 failed.
+  python hash seed: * (glob)
+  [1]
+
 test for --json
 ==================
 
@@ -707,6 +734,10 @@ backslash on end of line with glob matching is handled properly
   # Ran 1 tests, 0 skipped, 0 warned, 0 failed.
 
   $ rm -f test-glob-backslash.t
+
+Test globbing of 127.0.0.1
+  $ echo 172.16.18.1
+  127.0.0.1 (glob)
 
 Test reusability for third party tools
 ======================================

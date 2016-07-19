@@ -26,6 +26,15 @@ import optparse
 import os
 import re
 import sys
+if sys.version_info[0] < 3:
+    opentext = open
+else:
+    def opentext(f):
+        return open(f, encoding='ascii')
+try:
+    xrange
+except NameError:
+    xrange = range
 try:
     import re2
 except ImportError:
@@ -41,26 +50,26 @@ def compilere(pat, multiline=False):
             pass
     return re.compile(pat)
 
+# check "rules depending on implementation of repquote()" in each
+# patterns (especially pypats), before changing around repquote()
+_repquotefixedmap = {' ': ' ', '\n': '\n', '.': 'p', ':': 'q',
+                     '%': '%', '\\': 'b', '*': 'A', '+': 'P', '-': 'M'}
+def _repquoteencodechr(i):
+    if i > 255:
+        return 'u'
+    c = chr(i)
+    if c in _repquotefixedmap:
+        return _repquotefixedmap[c]
+    if c.isalpha():
+        return 'x'
+    if c.isdigit():
+        return 'n'
+    return 'o'
+_repquotett = ''.join(_repquoteencodechr(i) for i in xrange(256))
+
 def repquote(m):
-    fromc = '.:'
-    tochr = 'pq'
-    def encodechr(i):
-        if i > 255:
-            return 'u'
-        c = chr(i)
-        if c in ' \n':
-            return c
-        if c.isalpha():
-            return 'x'
-        if c.isdigit():
-            return 'n'
-        try:
-            return tochr[fromc.find(c)]
-        except (ValueError, IndexError):
-            return 'o'
     t = m.group('text')
-    tt = ''.join(encodechr(i) for i in xrange(256))
-    t = t.translate(tt)
+    t = t.translate(_repquotett)
     return m.group('quote') + t + m.group('quote')
 
 def reppython(m):
@@ -103,7 +112,7 @@ testpats = [
     (r'tail -n', "don't use the '-n' option to tail, just use '-<num>'"),
     (r'sha1sum', "don't use sha1sum, use $TESTDIR/md5sum.py"),
     (r'ls.*-\w*R', "don't use 'ls -R', use 'find'"),
-    (r'printf.*[^\\]\\([1-9]|0\d)', "don't use 'printf \NNN', use Python"),
+    (r'printf.*[^\\]\\([1-9]|0\d)', r"don't use 'printf \NNN', use Python"),
     (r'printf.*[^\\]\\x', "don't use printf \\x, use Python"),
     (r'\$\(.*\)', "don't use $(expr), use `expr`"),
     (r'rm -rf \*', "don't use naked rm -rf, target a directory"),
@@ -114,7 +123,7 @@ testpats = [
     (r'export .*=', "don't export and assign at once"),
     (r'^source\b', "don't use 'source', use '.'"),
     (r'touch -d', "don't use 'touch -d', use 'touch -t' instead"),
-    (r'ls +[^|\n-]+ +-', "options to 'ls' must come before filenames"),
+    (r'\bls +[^|\n-]+ +-', "options to 'ls' must come before filenames"),
     (r'[^>\n]>\s*\$HGRCPATH', "don't overwrite $HGRCPATH, append to it"),
     (r'^stop\(\)', "don't use 'stop' as a shell function name"),
     (r'(\[|\btest\b).*-e ', "don't use 'test -e', use 'test -f'"),
@@ -133,6 +142,7 @@ testpats = [
     (r'\|&', "don't use |&, use 2>&1"),
     (r'\w =  +\w', "only one space after = allowed"),
     (r'\bsed\b.*[^\\]\\n', "don't use 'sed ... \\n', use a \\ and a newline"),
+    (r'env.*-u', "don't use 'env -u VAR', use 'unset VAR'")
   ],
   # warnings
   [
@@ -179,6 +189,8 @@ utestpats = [
     (r'^  .*: largefile \S+ not available from file:.*/.*[^)]$', winglobmsg),
     (r'^  .*file://\$TESTTMP',
      'write "file:/*/$TESTTMP" + (glob) to match on windows too'),
+    (r'^  [^$>].*27\.0\.0\.1.*[^)]$',
+     'use (glob) to match localhost IP on hosts without 127.0.0.1 too'),
     (r'^  (cat|find): .*: No such file or directory',
      'use test -f to test for file existence'),
     (r'^  diff -[^ -]*p',
@@ -197,8 +209,8 @@ utestpats = [
   ],
   # warnings
   [
-    (r'^  [^*?/\n]* \(glob\)$',
-     "glob match with no glob character (?*/)"),
+    (r'^  (?!.*127\.0\.0\.1)[^*?/\n]* \(glob\)$',
+     "glob match with no glob string (?, *, /, and 127.0.0.1)"),
   ]
 ]
 
@@ -214,7 +226,7 @@ for i in [0, 1]:
 
 utestfilters = [
     (r"<<(\S+)((.|\n)*?\n  > \1)", rephere),
-    (r"( *)(#([^\n]*\S)?)", repcomment),
+    (r"( +)(#([^\n]*\S)?)", repcomment),
 ]
 
 pypats = [
@@ -238,7 +250,6 @@ pypats = [
     (r'^\s+(\w|\.)+=\w[^,()\n]*$', "missing whitespace in assignment"),
     (r'\w\s=\s\s+\w', "gratuitous whitespace after ="),
     (r'.{81}', "line too long"),
-    (r' x+[xo][\'"]\n\s+[\'"]x', 'string join across lines with no space'),
     (r'[^\n]\Z', "no trailing newline"),
     (r'(\S[ \t]+|^[ \t]+)\n', "trailing whitespace"),
 #    (r'^\s+[^_ \n][^_. \n]+_[^_\n]+\s*=',
@@ -305,8 +316,6 @@ pypats = [
     (r'^\s*except\s([^\(,]+|\([^\)]+\))\s*,',
      'legacy exception syntax; use "as" instead of ","'),
     (r':\n(    )*( ){1,3}[^ ]', "must indent 4 spaces"),
-    (r'ui\.(status|progress|write|note|warn)\([\'\"]x',
-     "missing _() in ui message (use () to hide false-positives)"),
     (r'release\(.*wlock, .*lock\)', "wrong lock release order"),
     (r'\b__bool__\b', "__bool__ should be __nonzero__ in Python 2"),
     (r'os\.path\.join\(.*, *(""|\'\')\)',
@@ -318,9 +327,37 @@ pypats = [
     (r'^import Queue', "don't use Queue, use util.queue + util.empty"),
     (r'^import cStringIO', "don't use cStringIO.StringIO, use util.stringio"),
     (r'^import urllib', "don't use urllib, use util.urlreq/util.urlerr"),
+    (r'^import SocketServer', "don't use SockerServer, use util.socketserver"),
+    (r'^import urlparse', "don't use urlparse, use util.urlparse"),
+    (r'^import xmlrpclib', "don't use xmlrpclib, use util.xmlrpclib"),
+    (r'^import cPickle', "don't use cPickle, use util.pickle"),
+    (r'^import pickle', "don't use pickle, use util.pickle"),
+    (r'^import httplib', "don't use httplib, use util.httplib"),
+    (r'^import BaseHTTPServer', "use util.httpserver instead"),
+    (r'\.next\(\)', "don't use .next(), use next(...)"),
+
+    # rules depending on implementation of repquote()
+    (r' x+[xpqo%APM][\'"]\n\s+[\'"]x',
+     'string join across lines with no space'),
+    (r'''(?x)ui\.(status|progress|write|note|warn)\(
+         [ \t\n#]*
+         (?# any strings/comments might precede a string, which
+           # contains translatable message)
+         ((['"]|\'\'\'|""")[ \npq%bAPMxno]*(['"]|\'\'\'|""")[ \t\n#]+)*
+         (?# sequence consisting of below might precede translatable message
+           # - formatting string: "% 10s", "%05d", "% -3.2f", "%*s", "%%" ...
+           # - escaped character: "\\", "\n", "\0" ...
+           # - character other than '%', 'b' as '\', and 'x' as alphabet)
+         (['"]|\'\'\'|""")
+         ((%([ n]?[PM]?([np]+|A))?x)|%%|b[bnx]|[ \nnpqAPMo])*x
+         (?# this regexp can't use [^...] style,
+           # because _preparepats forcibly adds "\n" into [^...],
+           # even though this regexp wants match it against "\n")''',
+     "missing _() in ui message (use () to hide false-positives)"),
   ],
   # warnings
   [
+    # rules depending on implementation of repquote()
     (r'(^| )pp +xxxxqq[ \n][^\n]', "add two newlines after '.. note::'"),
   ]
 ]
@@ -365,9 +402,13 @@ cpats = [
     (r'^\s*#import\b', "use only #include in standard C code"),
     (r'strcpy\(', "don't use strcpy, use strlcpy or memcpy"),
     (r'strcat\(', "don't use strcat"),
+
+    # rules depending on implementation of repquote()
   ],
   # warnings
-  []
+  [
+    # rules depending on implementation of repquote()
+  ]
 ]
 
 cfilters = [
@@ -433,7 +474,6 @@ def _preparepats():
         filters = c[3]
         for i, flt in enumerate(filters):
             filters[i] = re.compile(flt[0]), flt[1]
-_preparepats()
 
 class norepeatlogger(object):
     def __init__(self):
@@ -486,12 +526,15 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
     result = True
 
     try:
-        fp = open(f)
+        with opentext(f) as fp:
+            try:
+                pre = post = fp.read()
+            except UnicodeDecodeError as e:
+                print("%s while reading %s" % (e, f))
+                return result
     except IOError as e:
         print("Skipping %s, %s" % (f, str(e).split(':', 1)[0]))
         return result
-    pre = post = fp.read()
-    fp.close()
 
     for name, match, magic, filters, pats in checks:
         if debug:
@@ -578,7 +621,7 @@ def checkfile(f, logfunc=_defaultlogger.log, maxerr=None, warnings=False,
 
     return result
 
-if __name__ == "__main__":
+def main():
     parser = optparse.OptionParser("%prog [options] [files]")
     parser.add_option("-w", "--warnings", action="store_true",
                       help="include warning-level checks")
@@ -600,10 +643,15 @@ if __name__ == "__main__":
     else:
         check = args
 
+    _preparepats()
+
     ret = 0
     for f in check:
         if not checkfile(f, maxerr=options.per_file, warnings=options.warnings,
                          blame=options.blame, debug=options.debug,
                          lineno=options.lineno):
             ret = 1
-    sys.exit(ret)
+    return ret
+
+if __name__ == "__main__":
+    sys.exit(main())

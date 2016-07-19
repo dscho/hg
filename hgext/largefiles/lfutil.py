@@ -7,20 +7,29 @@
 # GNU General Public License version 2 or any later version.
 
 '''largefiles utility code: must not import other modules in this package.'''
+from __future__ import absolute_import
 
+import copy
+import hashlib
 import os
 import platform
 import stat
-import copy
 
-from mercurial import dirstate, httpconnection, match as match_, util, scmutil
 from mercurial.i18n import _
-from mercurial import node, error
+
+from mercurial import (
+    dirstate,
+    error,
+    httpconnection,
+    match as matchmod,
+    node,
+    scmutil,
+    util,
+)
 
 shortname = '.hglf'
 shortnameslash = shortname + '/'
 longname = 'largefiles'
-
 
 # -- Private worker functions ------------------------------------------
 
@@ -152,7 +161,7 @@ def openlfdirstate(ui, repo, create=True):
 
 def lfdirstatestatus(lfdirstate, repo):
     wctx = repo['.']
-    match = match_.always(repo.root, repo.getcwd())
+    match = matchmod.always(repo.root, repo.getcwd())
     unsure, s = lfdirstate.status(match, [], False, False, False)
     modified, clean = s.modified, s.clean
     for lfile in unsure:
@@ -180,12 +189,11 @@ def listlfiles(repo, rev=None, matcher=None):
             if rev is not None or repo.dirstate[f] != '?']
 
 def instore(repo, hash, forcelocal=False):
-    '''Return true if a largefile with the given hash exists in the user
-    cache.'''
+    '''Return true if a largefile with the given hash exists in the store'''
     return os.path.exists(storepath(repo, hash, forcelocal))
 
 def storepath(repo, hash, forcelocal=False):
-    '''Return the correct location in the repository largefiles cache for a
+    '''Return the correct location in the repository largefiles store for a
     file with the given hash.'''
     if not forcelocal and repo.shared():
         return repo.vfs.reljoin(repo.sharedpath, longname, hash)
@@ -250,7 +258,6 @@ def copyalltostore(repo, node):
         if isstandin(filename) and filename in ctx.manifest():
             realfile = splitstandin(filename)
             copytostore(repo, ctx.node(), realfile)
-
 
 def copytostoreabsolute(repo, file, hash):
     if inusercache(repo.ui, hash):
@@ -350,7 +357,7 @@ def writestandin(repo, standin, hash, executable):
 def copyandhash(instream, outfile):
     '''Read bytes from instream (iterable) and write them to outfile,
     computing the SHA-1 hash of the data along the way. Return the hash.'''
-    hasher = util.sha1('')
+    hasher = hashlib.sha1('')
     for data in instream:
         hasher.update(data)
         outfile.write(data)
@@ -362,7 +369,7 @@ def hashrepofile(repo, file):
 def hashfile(file):
     if not os.path.exists(file):
         return ''
-    hasher = util.sha1('')
+    hasher = hashlib.sha1('')
     fd = open(file, 'rb')
     for data in util.filechunkiter(fd, 128 * 1024):
         hasher.update(data)
@@ -391,7 +398,7 @@ def urljoin(first, second, *arg):
 def hexsha1(data):
     """hexsha1 returns the hex-encoded sha1 sum of the data in the file-like
     object data"""
-    h = util.sha1()
+    h = hashlib.sha1()
     for chunk in util.filechunkiter(data):
         h.update(chunk)
     return h.hexdigest()
@@ -533,7 +540,7 @@ def updatestandinsbymatch(repo, match):
         # otherwise to update all standins if the largefiles are
         # large.
         lfdirstate = openlfdirstate(ui, repo)
-        dirtymatch = match_.always(repo.root, repo.getcwd())
+        dirtymatch = matchmod.always(repo.root, repo.getcwd())
         unsure, s = lfdirstate.status(dirtymatch, [], False, False,
                                       False)
         modifiedfiles = unsure + s.modified + s.added + s.removed

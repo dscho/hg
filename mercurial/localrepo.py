@@ -8,6 +8,7 @@
 from __future__ import absolute_import
 
 import errno
+import hashlib
 import inspect
 import os
 import random
@@ -57,16 +58,16 @@ from . import (
 )
 
 release = lockmod.release
-propertycache = util.propertycache
 urlerr = util.urlerr
 urlreq = util.urlreq
-filecache = scmutil.filecache
 
-class repofilecache(filecache):
+class repofilecache(scmutil.filecache):
     """All filecache usage on repo are done for logic that should be unfiltered
     """
 
     def __get__(self, repo, type=None):
+        if repo is None:
+            return self
         return super(repofilecache, self).__get__(repo.unfiltered(), type)
     def __set__(self, repo, value):
         return super(repofilecache, self).__set__(repo.unfiltered(), value)
@@ -78,7 +79,7 @@ class storecache(repofilecache):
     def join(self, obj, fname):
         return obj.sjoin(fname)
 
-class unfilteredpropertycache(propertycache):
+class unfilteredpropertycache(util.propertycache):
     """propertycache that apply to unfiltered repo only"""
 
     def __get__(self, repo, type=None):
@@ -87,7 +88,7 @@ class unfilteredpropertycache(propertycache):
             return super(unfilteredpropertycache, self).__get__(unfi)
         return getattr(unfi, self.name)
 
-class filteredpropertycache(propertycache):
+class filteredpropertycache(util.propertycache):
     """propertycache that must take filtering in account"""
 
     def cachevalue(self, obj, value):
@@ -553,7 +554,10 @@ class localrepository(object):
         The revset is specified as a string ``expr`` that may contain
         %-formatting to escape certain types. See ``revset.formatspec``.
 
-        Return a revset.abstractsmartset, which is a list-like interface
+        Revset aliases from the configuration are not expanded. To expand
+        user aliases, consider calling ``scmutil.revrange()``.
+
+        Returns a revset.abstractsmartset, which is a list-like interface
         that contains integer revisions.
         '''
         expr = revset.formatspec(expr, *args)
@@ -565,6 +569,9 @@ class localrepository(object):
 
         This is a convenience wrapper around ``revs()`` that iterates the
         result and is a generator of changectx instances.
+
+        Revset aliases from the configuration are not expanded. To expand
+        user aliases, consider calling ``scmutil.revrange()``.
         '''
         for r in self.revs(expr, *args):
             yield self[r]
@@ -881,12 +888,6 @@ class localrepository(object):
             f = f[1:]
         return filelog.filelog(self.svfs, f)
 
-    def parents(self, changeid=None):
-        '''get list of changectxs for parents of changeid'''
-        msg = 'repo.parents() is deprecated, use repo[%r].parents()' % changeid
-        self.ui.deprecwarn(msg, '3.7')
-        return self[changeid].parents()
-
     def changectx(self, changeid):
         return self[changeid]
 
@@ -1008,7 +1009,8 @@ class localrepository(object):
                 or self.ui.configbool('devel', 'check-locks')):
             l = self._lockref and self._lockref()
             if l is None or not l.held:
-                self.ui.develwarn('transaction with no lock')
+                raise RuntimeError('programming error: transaction requires '
+                                   'locking')
         tr = self.currenttransaction()
         if tr is not None:
             return tr.nest()
@@ -1019,11 +1021,8 @@ class localrepository(object):
                 _("abandoned transaction found"),
                 hint=_("run 'hg recover' to clean up transaction"))
 
-        # make journal.dirstate contain in-memory changes at this point
-        self.dirstate.write(None)
-
         idbase = "%.40f#%f" % (random.random(), time.time())
-        txnid = 'TXN:' + util.sha1(idbase).hexdigest()
+        txnid = 'TXN:' + hashlib.sha1(idbase).hexdigest()
         self.hook('pretxnopen', throw=True, txnname=desc, txnid=txnid)
 
         self._writejournal(desc)
@@ -1049,13 +1048,9 @@ class localrepository(object):
                 # transaction running
                 repo.dirstate.write(None)
             else:
-                # prevent in-memory changes from being written out at
-                # the end of outer wlock scope or so
-                repo.dirstate.invalidate()
-
                 # discard all changes (including ones already written
                 # out) in this transaction
-                repo.vfs.rename('journal.dirstate', 'dirstate')
+                repo.dirstate.restorebackup(None, prefix='journal.')
 
                 repo.invalidate(clearfilecache=True)
 
@@ -1110,8 +1105,7 @@ class localrepository(object):
         return [(vfs, undoname(x)) for vfs, x in self._journalfiles()]
 
     def _writejournal(self, desc):
-        self.vfs.write("journal.dirstate",
-                          self.vfs.tryread("dirstate"))
+        self.dirstate.savebackup(None, prefix='journal.')
         self.vfs.write("journal.branch",
                           encoding.fromlocal(self.dirstate.branch()))
         self.vfs.write("journal.desc",
@@ -1186,9 +1180,9 @@ class localrepository(object):
         vfsmap = {'plain': self.vfs, '': self.svfs}
         transaction.rollback(self.svfs, vfsmap, 'undo', ui.warn)
         if self.vfs.exists('undo.bookmarks'):
-            self.vfs.rename('undo.bookmarks', 'bookmarks')
+            self.vfs.rename('undo.bookmarks', 'bookmarks', checkambig=True)
         if self.svfs.exists('undo.phaseroots'):
-            self.svfs.rename('undo.phaseroots', 'phaseroots')
+            self.svfs.rename('undo.phaseroots', 'phaseroots', checkambig=True)
         self.invalidate()
 
         parentgone = (parents[0] not in self.changelog.nodemap or
@@ -1197,7 +1191,7 @@ class localrepository(object):
             # prevent dirstateguard from overwriting already restored one
             dsguard.close()
 
-            self.vfs.rename('undo.dirstate', 'dirstate')
+            self.dirstate.restorebackup(None, prefix='undo.')
             try:
                 branch = self.vfs.read('undo.branch')
                 self.dirstate.setbranch(encoding.tolocal(branch))
@@ -1206,7 +1200,6 @@ class localrepository(object):
                           'current branch is still \'%s\'\n')
                         % self.dirstate.branch())
 
-            self.dirstate.invalidate()
             parents = tuple([p.rev() for p in self[None].parents()])
             if len(parents) > 1:
                 ui.status(_('working directory now based on '

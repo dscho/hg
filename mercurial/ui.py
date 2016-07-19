@@ -29,6 +29,8 @@ from . import (
     util,
 )
 
+urlreq = util.urlreq
+
 samplehgrcs = {
     'user':
 """# example user config (see "hg help config" for more info)
@@ -107,6 +109,8 @@ class ui(object):
         self._trustusers = set()
         self._trustgroups = set()
         self.callhooks = True
+        # Insecure server connections requested.
+        self.insecureconnections = False
 
         if src:
             self.fout = src.fout
@@ -120,7 +124,10 @@ class ui(object):
             self._trustgroups = src._trustgroups.copy()
             self.environ = src.environ
             self.callhooks = src.callhooks
+            self.insecureconnections = src.insecureconnections
             self.fixconfig()
+
+            self.httppasswordmgrdb = src.httppasswordmgrdb
         else:
             self.fout = sys.stdout
             self.ferr = sys.stderr
@@ -132,8 +139,16 @@ class ui(object):
             for f in scmutil.rcpath():
                 self.readconfig(f, trust=True)
 
+            self.httppasswordmgrdb = urlreq.httppasswordmgrwithdefaultrealm()
+
     def copy(self):
         return self.__class__(self)
+
+    def resetstate(self):
+        """Clear internal state that shouldn't persist across commands"""
+        if self._progbar:
+            self._progbar.resetstate()  # reset last-print time of progress bar
+        self.httppasswordmgrdb = urlreq.httppasswordmgrwithdefaultrealm()
 
     def formatter(self, topic, opts):
         return formatter.formatter(self, topic, opts)
@@ -213,6 +228,9 @@ class ui(object):
             root = root or os.getcwd()
             for c in self._tcfg, self._ucfg, self._ocfg:
                 for n, p in c.items('paths'):
+                    # Ignore sub-options.
+                    if ':' in n:
+                        continue
                     if not p:
                         continue
                     if '%%' in p:
@@ -1135,12 +1153,15 @@ class ui(object):
         '''
         return msg
 
-    def develwarn(self, msg, stacklevel=1):
+    def develwarn(self, msg, stacklevel=1, config=None):
         """issue a developer warning message
 
         Use 'stacklevel' to report the offender some layers further up in the
         stack.
         """
+        if not self.configbool('devel', 'all-warnings'):
+            if config is not None and not self.configbool('devel', config):
+                return
         msg = 'devel-warn: ' + msg
         stacklevel += 1 # get in develwarn
         if self.tracebackflag:
@@ -1166,7 +1187,7 @@ class ui(object):
             return
         msg += ("\n(compatibility will be dropped after Mercurial-%s,"
                 " update your code.)") % version
-        self.develwarn(msg, stacklevel=2)
+        self.develwarn(msg, stacklevel=2, config='deprec-warn')
 
 class paths(dict):
     """Represents a collection of paths and their configs.
@@ -1259,6 +1280,10 @@ def pushurlpathoption(ui, path, value):
         u.fragment = None
 
     return str(u)
+
+@pathsuboption('pushrev', 'pushrev')
+def pushrevpathoption(ui, path, value):
+    return value
 
 class path(object):
     """Represents an individual path and its configuration."""

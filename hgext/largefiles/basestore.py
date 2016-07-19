@@ -7,13 +7,13 @@
 # GNU General Public License version 2 or any later version.
 
 '''base class for store implementations and store-related utility code'''
+from __future__ import absolute_import
 
-import re
-
-from mercurial import util, node, hg, error
 from mercurial.i18n import _
 
-import lfutil
+from mercurial import node, util
+
+from . import lfutil
 
 class StoreError(Exception):
     '''Raised when there is a problem getting files from or putting
@@ -116,19 +116,26 @@ class basestore(object):
         '''Verify the existence (and, optionally, contents) of every big
         file revision referenced by every changeset in revs.
         Return 0 if all is well, non-zero on any errors.'''
-        failed = False
 
         self.ui.status(_('searching %d changesets for largefiles\n') %
                        len(revs))
         verified = set()                # set of (filename, filenode) tuples
-
+        filestocheck = []               # list of (cset, filename, expectedhash)
         for rev in revs:
             cctx = self.repo[rev]
             cset = "%d:%s" % (cctx.rev(), node.short(cctx.node()))
 
             for standin in cctx:
-                if self._verifyfile(cctx, cset, contents, standin, verified):
-                    failed = True
+                filename = lfutil.splitstandin(standin)
+                if filename:
+                    fctx = cctx[standin]
+                    key = (filename, fctx.filenode())
+                    if key not in verified:
+                        verified.add(key)
+                        expectedhash = fctx.data()[0:40]
+                        filestocheck.append((cset, filename, expectedhash))
+
+        failed = self._verifyfiles(contents, filestocheck)
 
         numrevs = len(verified)
         numlfiles = len(set([fname for (fname, fnode) in verified]))
@@ -150,72 +157,10 @@ class basestore(object):
         exist in the store).'''
         raise NotImplementedError('abstract method')
 
-    def _verifyfile(self, cctx, cset, contents, standin, verified):
-        '''Perform the actual verification of a file in the store.
-        'cset' is only used in warnings.
+    def _verifyfiles(self, contents, filestocheck):
+        '''Perform the actual verification of files in the store.
         'contents' controls verification of content hash.
-        'standin' is the standin path of the largefile to verify.
-        'verified' is maintained as a set of already verified files.
-        Returns _true_ if it is a standin and any problems are found!
+        'filestocheck' is list of files to check.
+        Returns _true_ if any problems are found!
         '''
         raise NotImplementedError('abstract method')
-
-import localstore, wirestore
-
-_storeprovider = {
-    'file':  [localstore.localstore],
-    'http':  [wirestore.wirestore],
-    'https': [wirestore.wirestore],
-    'ssh': [wirestore.wirestore],
-    }
-
-_scheme_re = re.compile(r'^([a-zA-Z0-9+-.]+)://')
-
-# During clone this function is passed the src's ui object
-# but it needs the dest's ui object so it can read out of
-# the config file. Use repo.ui instead.
-def _openstore(repo, remote=None, put=False):
-    ui = repo.ui
-
-    if not remote:
-        lfpullsource = getattr(repo, 'lfpullsource', None)
-        if lfpullsource:
-            path = ui.expandpath(lfpullsource)
-        elif put:
-            path = ui.expandpath('default-push', 'default')
-        else:
-            path = ui.expandpath('default')
-
-        # ui.expandpath() leaves 'default-push' and 'default' alone if
-        # they cannot be expanded: fallback to the empty string,
-        # meaning the current directory.
-        if path == 'default-push' or path == 'default':
-            path = ''
-            remote = repo
-        else:
-            path, _branches = hg.parseurl(path)
-            remote = hg.peer(repo, {}, path)
-
-    # The path could be a scheme so use Mercurial's normal functionality
-    # to resolve the scheme to a repository and use its path
-    path = util.safehasattr(remote, 'url') and remote.url() or remote.path
-
-    match = _scheme_re.match(path)
-    if not match:                       # regular filesystem path
-        scheme = 'file'
-    else:
-        scheme = match.group(1)
-
-    try:
-        storeproviders = _storeprovider[scheme]
-    except KeyError:
-        raise error.Abort(_('unsupported URL scheme %r') % scheme)
-
-    for classobj in storeproviders:
-        try:
-            return classobj(ui, repo, remote)
-        except lfutil.storeprotonotcapable:
-            pass
-
-    raise error.Abort(_('%s does not appear to be a largefile store') %
-                     util.hidepassword(path))

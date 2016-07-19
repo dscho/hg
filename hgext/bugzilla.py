@@ -281,8 +281,6 @@ from __future__ import absolute_import
 
 import re
 import time
-import urlparse
-import xmlrpclib
 
 from mercurial.i18n import _
 from mercurial.node import short
@@ -292,6 +290,9 @@ from mercurial import (
     mail,
     util,
 )
+
+urlparse = util.urlparse
+xmlrpclib = util.xmlrpclib
 
 # Note for extension authors: ONLY specify testedwith = 'internal' for
 # extensions which SHIP WITH MERCURIAL. Non-mainline extensions should

@@ -918,28 +918,25 @@ class basefilectx(object):
             return p[1]
         return filectx(self._repo, self._path, fileid=-1, filelog=self._filelog)
 
-    def annotate(self, follow=False, linenumber=None, diffopts=None):
-        '''returns a list of tuples of (ctx, line) for each line
+    def annotate(self, follow=False, linenumber=False, diffopts=None):
+        '''returns a list of tuples of ((ctx, number), line) for each line
         in the file, where ctx is the filectx of the node where
-        that line was last changed.
-        This returns tuples of ((ctx, linenumber), line) for each line,
-        if "linenumber" parameter is NOT "None".
-        In such tuples, linenumber means one at the first appearance
-        in the managed file.
-        To reduce annotation cost,
-        this returns fixed value(False is used) as linenumber,
-        if "linenumber" parameter is "False".'''
+        that line was last changed; if linenumber parameter is true, number is
+        the line number at the first appearance in the managed file, otherwise,
+        number has a fixed value of False.
+        '''
 
-        if linenumber is None:
+        def lines(text):
+            if text.endswith("\n"):
+                return text.count("\n")
+            return text.count("\n") + 1
+
+        if linenumber:
             def decorate(text, rev):
-                return ([rev] * len(text.splitlines()), text)
-        elif linenumber:
-            def decorate(text, rev):
-                size = len(text.splitlines())
-                return ([(rev, i) for i in xrange(1, size + 1)], text)
+                return ([(rev, i) for i in xrange(1, lines(text) + 1)], text)
         else:
             def decorate(text, rev):
-                return ([(rev, False)] * len(text.splitlines()), text)
+                return ([(rev, False)] * lines(text), text)
 
         def pair(parent, child):
             blocks = mdiff.allblocks(parent[1], child[1], opts=diffopts,

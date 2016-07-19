@@ -63,6 +63,7 @@ typedef struct {
 
 struct hgclient_tag_ {
 	int sockfd;
+	pid_t pgid;
 	pid_t pid;
 	context_t ctx;
 	unsigned int capflags;
@@ -125,10 +126,15 @@ static void readchannel(hgclient_t *hgc)
 		return;  /* assumes input request */
 
 	size_t cursize = 0;
+	int emptycount = 0;
 	while (cursize < hgc->ctx.datasize) {
 		rsize = recv(hgc->sockfd, hgc->ctx.data + cursize,
 			     hgc->ctx.datasize - cursize, 0);
-		if (rsize < 0)
+		/* rsize == 0 normally indicates EOF, while it's also a valid
+		 * packet size for unix socket. treat it as EOF and abort if
+		 * we get many empty responses in a row. */
+		emptycount = (rsize == 0 ? emptycount + 1 : 0);
+		if (rsize < 0 || emptycount > 20)
 			abortmsg("failed to read data block");
 		cursize += rsize;
 	}
@@ -339,6 +345,8 @@ static void readhello(hgclient_t *hgc)
 			u = dataend;
 		if (strncmp(s, "capabilities:", t - s + 1) == 0) {
 			hgc->capflags = parsecapabilities(t + 2, u);
+		} else if (strncmp(s, "pgid:", t - s + 1) == 0) {
+			hgc->pgid = strtol(t + 2, NULL, 10);
 		} else if (strncmp(s, "pid:", t - s + 1) == 0) {
 			hgc->pid = strtol(t + 2, NULL, 10);
 		}
@@ -461,6 +469,12 @@ void hgc_close(hgclient_t *hgc)
 	freecontext(&hgc->ctx);
 	close(hgc->sockfd);
 	free(hgc);
+}
+
+pid_t hgc_peerpgid(const hgclient_t *hgc)
+{
+	assert(hgc);
+	return hgc->pgid;
 }
 
 pid_t hgc_peerpid(const hgclient_t *hgc)

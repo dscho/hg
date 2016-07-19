@@ -37,10 +37,22 @@ The following ``share.`` config options influence this feature:
     The default naming mode is "identity."
 '''
 
-from mercurial.i18n import _
-from mercurial import cmdutil, commands, hg, util, extensions, bookmarks, error
-from mercurial.hg import repository, parseurl
+from __future__ import absolute_import
+
 import errno
+from mercurial.i18n import _
+from mercurial import (
+    bookmarks,
+    cmdutil,
+    commands,
+    error,
+    extensions,
+    hg,
+    util,
+)
+
+repository = hg.repository
+parseurl = hg.parseurl
 
 cmdtable = {}
 command = cmdutil.command(cmdtable)
@@ -135,7 +147,7 @@ def _hassharedbookmarks(repo):
         if inst.errno != errno.ENOENT:
             raise
         return False
-    return 'bookmarks' in shared
+    return hg.sharedbookmarks in shared
 
 def _getsrcrepo(repo):
     """
@@ -145,10 +157,15 @@ def _getsrcrepo(repo):
     if repo.sharedpath == repo.path:
         return None
 
+    if util.safehasattr(repo, 'srcrepo') and repo.srcrepo:
+        return repo.srcrepo
+
     # the sharedpath always ends in the .hg; we want the path to the repo
     source = repo.vfs.split(repo.sharedpath)[0]
     srcurl, branches = parseurl(source)
-    return repository(repo.ui, srcurl)
+    srcrepo = repository(repo.ui, srcurl)
+    repo.srcrepo = srcrepo
+    return srcrepo
 
 def getbkfile(orig, repo):
     if _hassharedbookmarks(repo):

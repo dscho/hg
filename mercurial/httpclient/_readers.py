@@ -33,7 +33,12 @@ have any clients outside of httpplus.
 """
 from __future__ import absolute_import
 
-import httplib
+try:
+    import httplib
+    httplib.HTTPException
+except ImportError:
+    import http.client as httplib
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -93,7 +98,7 @@ class AbstractReader(object):
             need -= len(b)
             if need == 0:
                 break
-        result = ''.join(blocks)
+        result = b''.join(blocks)
         assert len(result) == amt or (self._finished and len(result) < amt)
 
         return result

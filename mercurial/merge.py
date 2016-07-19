@@ -8,6 +8,7 @@
 from __future__ import absolute_import
 
 import errno
+import hashlib
 import os
 import shutil
 import struct
@@ -373,7 +374,7 @@ class mergestate(object):
         """Write current state on disk in a version 1 file"""
         f = self._repo.vfs(self.statepathv1, 'w')
         irecords = iter(records)
-        lrecords = irecords.next()
+        lrecords = next(irecords)
         assert lrecords[0] == 'L'
         f.write(hex(self._local) + '\n')
         for rtype, data in irecords:
@@ -408,7 +409,7 @@ class mergestate(object):
         if fcl.isabsent():
             hash = nullhex
         else:
-            hash = util.sha1(fcl.path()).hexdigest()
+            hash = hashlib.sha1(fcl.path()).hexdigest()
             self._repo.vfs.write('merge/' + hash, fcl.data())
         self._state[fd] = ['u', hash, fcl.path(),
                            fca.path(), hex(fca.filenode()),
@@ -989,19 +990,19 @@ def calculateupdates(repo, wctx, mctx, ancestors, branchmerge, force,
             if len(bids) == 1: # all bids are the same kind of method
                 m, l = bids.items()[0]
                 if all(a == l[0] for a in l[1:]): # len(bids) is > 1
-                    repo.ui.note(" %s: consensus for %s\n" % (f, m))
+                    repo.ui.note(_(" %s: consensus for %s\n") % (f, m))
                     actions[f] = l[0]
                     continue
             # If keep is an option, just do it.
             if 'k' in bids:
-                repo.ui.note(" %s: picking 'keep' action\n" % f)
+                repo.ui.note(_(" %s: picking 'keep' action\n") % f)
                 actions[f] = bids['k'][0]
                 continue
             # If there are gets and they all agree [how could they not?], do it.
             if 'g' in bids:
                 ga0 = bids['g'][0]
                 if all(a == ga0 for a in bids['g'][1:]):
-                    repo.ui.note(" %s: picking 'get' action\n" % f)
+                    repo.ui.note(_(" %s: picking 'get' action\n") % f)
                     actions[f] = ga0
                     continue
             # TODO: Consider other simple actions such as mode changes
@@ -1075,15 +1076,14 @@ def batchget(repo, mctx, actions):
                 absf = repo.wjoin(f)
                 orig = scmutil.origpath(ui, repo, absf)
                 try:
-                    # TODO Mercurial has always aborted if an untracked
-                    # directory is replaced by a tracked file, or generally
-                    # with file/directory merges. This needs to be sorted out.
                     if repo.wvfs.isfileorlink(f):
                         util.rename(absf, orig)
                 except OSError as e:
                     if e.errno != errno.ENOENT:
                         raise
 
+            if repo.wvfs.isdir(f):
+                repo.wvfs.removedirs(f)
             wwrite(f, fctx(f).data(), flags, backgroundclose=True)
             if i == 100:
                 yield i, f
@@ -1442,9 +1442,7 @@ def update(repo, node, branchmerge, force, ancestor=None,
             pas = [repo[ancestor]]
 
         if node is None:
-            if (repo.ui.configbool('devel', 'all-warnings')
-                    or repo.ui.configbool('devel', 'oldapi')):
-                repo.ui.develwarn('update with no target')
+            repo.ui.deprecwarn('update with no target', '3.9')
             rev, _mark, _act = destutil.destupdate(repo)
             node = repo[rev].node()
 

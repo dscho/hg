@@ -1,5 +1,6 @@
 #require test-repo
 
+  $ . "$TESTDIR/helpers-testrepo.sh"
   $ import_checker="$TESTDIR"/../contrib/import-checker.py
 
 Run the doctests from the import checker, and make sure
@@ -11,6 +12,7 @@ it's working correctly.
 Run additional tests for the import checker
 
   $ mkdir testpackage
+  $ touch testpackage/__init__.py
 
   $ cat > testpackage/multiple.py << EOF
   > from __future__ import absolute_import
@@ -113,7 +115,16 @@ Run additional tests for the import checker
   > from testpackage.unsorted import foo
   > EOF
 
-  $ python "$import_checker" testpackage/*.py testpackage/subpackage/*.py
+  $ mkdir testpackage2
+  $ touch testpackage2/__init__.py
+
+  $ cat > testpackage2/latesymbolimport.py << EOF
+  > from __future__ import absolute_import
+  > from testpackage import unsorted
+  > from mercurial.node import hex
+  > EOF
+
+  $ python "$import_checker" testpackage*/*.py testpackage/subpackage/*.py
   testpackage/importalias.py:2: ui module must be "as" aliased to uimod
   testpackage/importfromalias.py:2: ui from testpackage must be "as" aliased to uimod
   testpackage/importfromrelative.py:2: import should be relative: testpackage.unsorted
@@ -131,6 +142,7 @@ Run additional tests for the import checker
   testpackage/subpackage/localimport.py:8: import should be relative: testpackage.subpackage.levelpriority
   testpackage/symbolimport.py:2: direct symbol import foo from testpackage.unsorted
   testpackage/unsorted.py:3: imports not lexically sorted: os < sys
+  testpackage2/latesymbolimport.py:3: symbol import follows non-symbol import: mercurial.node
   [1]
 
   $ cd "$TESTDIR"/..
@@ -144,8 +156,13 @@ these may expose other cycles.
 Known-bad files are excluded by -X as some of them would produce unstable
 outputs, which should be fixed later.
 
-  $ hg locate 'mercurial/**.py' 'hgext/**.py' 'tests/**.py' \
+  $ hg locate 'set:**.py or grep(r"^#!.*?python")' \
   > 'tests/**.t' \
+  > -X contrib/debugshell.py \
+  > -X contrib/win32/hgwebdir_wsgi.py \
+  > -X doc/gendoc.py \
+  > -X doc/hgmanpage.py \
+  > -X i18n/posplit \
   > -X tests/test-hgweb-auth.py \
   > -X tests/hypothesishelpers.py \
   > -X tests/test-ctxmanager.py \
@@ -162,5 +179,3 @@ outputs, which should be fixed later.
   > -X tests/test-hgweb-no-request-uri.t \
   > -X tests/test-hgweb-non-interactive.t \
   > | sed 's-\\-/-g' | python "$import_checker" -
-  Import cycle: hgext.largefiles.basestore -> hgext.largefiles.localstore -> hgext.largefiles.basestore
-  [1]

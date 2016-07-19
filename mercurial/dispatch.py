@@ -384,7 +384,7 @@ class cmdalias(object):
         self.cmdname = ''
         self.definition = definition
         self.fn = None
-        self.args = []
+        self.givenargs = []
         self.opts = []
         self.help = ''
         self.badalias = None
@@ -432,7 +432,7 @@ class cmdalias(object):
                              % (self.name, inst))
             return
         self.cmdname = cmd = args.pop(0)
-        args = map(util.expandpath, args)
+        self.givenargs = args
 
         for invalidarg in ("--cwd", "-R", "--repository", "--repo", "--config"):
             if _earlygetopt([invalidarg], args):
@@ -448,7 +448,6 @@ class cmdalias(object):
             else:
                 self.fn, self.opts = tableentry
 
-            self.args = aliasargs(self.fn, args)
             if self.help.startswith("hg " + cmd):
                 # drop prefix in old-style help lines so hg shows the alias
                 self.help = self.help[4 + len(cmd):]
@@ -461,6 +460,11 @@ class cmdalias(object):
         except error.AmbiguousCommand:
             self.badalias = (_("alias '%s' resolves to ambiguous command '%s'")
                              % (self.name, cmd))
+
+    @property
+    def args(self):
+        args = map(util.expandpath, self.givenargs)
+        return aliasargs(self.fn, args)
 
     def __getattr__(self, name):
         adefaults = {'norepo': True, 'optionalrepo': False, 'inferrepo': False}
@@ -629,10 +633,16 @@ def runcommand(lui, repo, cmd, fullargs, ui, options, d, cmdpats, cmdoptions):
     # run pre-hook, and abort if it fails
     hook.hook(lui, repo, "pre-%s" % cmd, True, args=" ".join(fullargs),
               pats=cmdpats, opts=cmdoptions)
-    ret = _runcommand(ui, options, cmd, d)
-    # run post-hook, passing command result
-    hook.hook(lui, repo, "post-%s" % cmd, False, args=" ".join(fullargs),
-              result=ret, pats=cmdpats, opts=cmdoptions)
+    try:
+        ret = _runcommand(ui, options, cmd, d)
+        # run post-hook, passing command result
+        hook.hook(lui, repo, "post-%s" % cmd, False, args=" ".join(fullargs),
+                  result=ret, pats=cmdpats, opts=cmdoptions)
+    except Exception:
+        # run failure hook and re-raise
+        hook.hook(lui, repo, "fail-%s" % cmd, False, args=" ".join(fullargs),
+                  pats=cmdpats, opts=cmdoptions)
+        raise
     return ret
 
 def _getlocal(ui, rpath, wd=None):
@@ -660,12 +670,8 @@ def _getlocal(ui, rpath, wd=None):
 
     return path, lui
 
-def _checkshellalias(lui, ui, args, precheck=True):
-    """Return the function to run the shell alias, if it is required
-
-    'precheck' is whether this function is invoked before adding
-    aliases or not.
-    """
+def _checkshellalias(lui, ui, args):
+    """Return the function to run the shell alias, if it is required"""
     options = {}
 
     try:
@@ -676,16 +682,11 @@ def _checkshellalias(lui, ui, args, precheck=True):
     if not args:
         return
 
-    if precheck:
-        strict = True
-        cmdtable = commands.table.copy()
-        addaliases(lui, cmdtable)
-    else:
-        strict = False
-        cmdtable = commands.table
+    cmdtable = commands.table
 
     cmd = args[0]
     try:
+        strict = ui.configbool("ui", "strict")
         aliases, entry = cmdutil.findcmd(cmd, cmdtable, strict)
     except (error.AmbiguousCommand, error.UnknownCommand):
         return
@@ -735,12 +736,6 @@ def _dispatch(req):
     rpath = _earlygetopt(["-R", "--repository", "--repo"], args)
     path, lui = _getlocal(ui, rpath)
 
-    # Now that we're operating in the right directory/repository with
-    # the right config settings, check for shell aliases
-    shellaliasfn = _checkshellalias(lui, ui, args)
-    if shellaliasfn:
-        return shellaliasfn()
-
     # Configure extensions in phases: uisetup, extsetup, cmdtable, and
     # reposetup. Programs like TortoiseHg will call _dispatch several
     # times so we keep track of configured extensions in _loaded.
@@ -762,13 +757,11 @@ def _dispatch(req):
 
     addaliases(lui, commands.table)
 
-    if not lui.configbool("ui", "strict"):
-        # All aliases and commands are completely defined, now.
-        # Check abbreviation/ambiguity of shell alias again, because shell
-        # alias may cause failure of "_parse" (see issue4355)
-        shellaliasfn = _checkshellalias(lui, ui, args, precheck=False)
-        if shellaliasfn:
-            return shellaliasfn()
+    # All aliases and commands are completely defined, now.
+    # Check abbreviation/ambiguity of shell alias.
+    shellaliasfn = _checkshellalias(lui, ui, args)
+    if shellaliasfn:
+        return shellaliasfn()
 
     # check for fallback encoding
     fallback = lui.config('ui', 'fallbackencoding')
@@ -825,7 +818,7 @@ def _dispatch(req):
 
     if cmdoptions.get('insecure', False):
         for ui_ in uis:
-            ui_.setconfig('web', 'cacerts', '!', '--insecure')
+            ui_.insecureconnections = True
 
     if options['version']:
         return commands.version_(ui)

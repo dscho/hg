@@ -811,6 +811,15 @@ variables it is passed are listed with names of the form ``$HG_foo``.
   dictionary of options (with unspecified options set to their defaults).
   ``$HG_PATS`` is a list of arguments. Hook failure is ignored.
 
+``fail-<command>``
+  Run after a failed invocation of an associated command. The contents
+  of the command line are passed as ``$HG_ARGS``. Parsed command line
+  arguments are passed as ``$HG_PATS`` and ``$HG_OPTS``. These contain
+  string representations of the python data internally passed to
+  <command>. ``$HG_OPTS`` is a dictionary of options (with unspecified
+  options set to their defaults). ``$HG_PATS`` is a list of arguments.
+  Hook failure is ignored.
+
 ``pre-<command>``
   Run before executing the associated command. The contents of the
   command line are passed as ``$HG_ARGS``. Parsed command line arguments
@@ -967,6 +976,8 @@ is treated as a failure.
 ``hostfingerprints``
 --------------------
 
+(Deprecated. Use ``[hostsecurity]``'s ``fingerprints`` options instead.)
+
 Fingerprints of the certificates of known HTTPS servers.
 
 A HTTPS connection to a server with a fingerprint configured here will
@@ -985,6 +996,114 @@ For example::
     [hostfingerprints]
     hg.intevation.de = fc:e2:8d:d9:51:cd:cb:c1:4d:18:6b:b7:44:8d:49:72:57:e6:cd:33
     hg.intevation.org = fc:e2:8d:d9:51:cd:cb:c1:4d:18:6b:b7:44:8d:49:72:57:e6:cd:33
+
+``hostsecurity``
+----------------
+
+Used to specify global and per-host security settings for connecting to
+other machines.
+
+The following options control default behavior for all hosts.
+
+``ciphers``
+    Defines the cryptographic ciphers to use for connections.
+
+    Value must be a valid OpenSSL Cipher List Format as documented at
+    https://www.openssl.org/docs/manmaster/apps/ciphers.html#CIPHER-LIST-FORMAT.
+
+    This setting is for advanced users only. Setting to incorrect values
+    can significantly lower connection security or decrease performance.
+    You have been warned.
+
+    This option requires Python 2.7.
+
+``minimumprotocol``
+    Defines the minimum channel encryption protocol to use.
+
+    By default, the highest version of TLS supported by both client and server
+    is used.
+
+    Allowed values are: ``tls1.0``, ``tls1.1``, ``tls1.2``.
+
+    When running on an old Python version, only ``tls1.0`` is allowed since
+    old versions of Python only support up to TLS 1.0.
+
+    When running a Python that supports modern TLS versions, the default is
+    ``tls1.1``. ``tls1.0`` can still be used to allow TLS 1.0. However, this
+    weakens security and should only be used as a feature of last resort if
+    a server does not support TLS 1.1+.
+
+Options in the ``[hostsecurity]`` section can have the form
+``hostname``:``setting``. This allows multiple settings to be defined on a
+per-host basis.
+
+The following per-host settings can be defined.
+
+``ciphers``
+    This behaves like ``ciphers`` as described above except it only applies
+    to the host on which it is defined.
+
+``fingerprints``
+    A list of hashes of the DER encoded peer/remote certificate. Values have
+    the form ``algorithm``:``fingerprint``. e.g.
+    ``sha256:c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2``.
+
+    The following algorithms/prefixes are supported: ``sha1``, ``sha256``,
+    ``sha512``.
+
+    Use of ``sha256`` or ``sha512`` is preferred.
+
+    If a fingerprint is specified, the CA chain is not validated for this
+    host and Mercurial will require the remote certificate to match one
+    of the fingerprints specified. This means if the server updates its
+    certificate, Mercurial will abort until a new fingerprint is defined.
+    This can provide stronger security than traditional CA-based validation
+    at the expense of convenience.
+
+    This option takes precedence over ``verifycertsfile``.
+
+``minimumprotocol``
+    This behaves like ``minimumprotocol`` as described above except it
+    only applies to the host on which it is defined.
+
+``verifycertsfile``
+    Path to file a containing a list of PEM encoded certificates used to
+    verify the server certificate. Environment variables and ``~user``
+    constructs are expanded in the filename.
+
+    The server certificate or the certificate's certificate authority (CA)
+    must match a certificate from this file or certificate verification
+    will fail and connections to the server will be refused.
+
+    If defined, only certificates provided by this file will be used:
+    ``web.cacerts`` and any system/default certificates will not be
+    used.
+
+    This option has no effect if the per-host ``fingerprints`` option
+    is set.
+
+    The format of the file is as follows:
+
+        -----BEGIN CERTIFICATE-----
+        ... (certificate in base64 PEM encoding) ...
+        -----END CERTIFICATE-----
+        -----BEGIN CERTIFICATE-----
+        ... (certificate in base64 PEM encoding) ...
+        -----END CERTIFICATE-----
+
+For example::
+
+    [hostsecurity]
+    hg.example.com:fingerprints = sha256:c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2
+    hg2.example.com:fingerprints = sha1:914f1aff87249c09b6859b88b1906d30756491ca, sha1:fc:e2:8d:d9:51:cd:cb:c1:4d:18:6b:b7:44:8d:49:72:57:e6:cd:33
+    foo.example.com:verifycertsfile = /etc/ssl/trusted-ca-certs.pem
+
+To change the default minimum protocol version to TLS 1.2 but to allow TLS 1.1
+when connecting to ``hg.example.com``::
+
+    [hostsecurity]
+    minimumprotocol = tls1.2
+    hg.example.com:minimumprotocol = tls1.1
 
 ``http_proxy``
 --------------
@@ -1020,8 +1139,8 @@ This section specifies behavior during merges and updates.
    file in the changeset being merged or updated to, and has different
    contents. Options are ``abort``, ``warn`` and ``ignore``. With ``abort``,
    abort on such files. With ``warn``, warn on such files and back them up as
-   .orig. With ``ignore``, don't print a warning and back them up as
-   .orig. (default: ``abort``)
+   ``.orig``. With ``ignore``, don't print a warning and back them up as
+   ``.orig``. (default: ``abort``)
 
 ``checkunknown``
    Controls behavior when an unknown file that isn't ignored has the same name
@@ -1209,6 +1328,18 @@ The following sub-options can be defined:
 ``pushurl``
    The URL to use for push operations. If not defined, the location
    defined by the path's main entry is used.
+
+``pushrev``
+   A revset defining which revisions to push by default.
+
+   When :hg:`push` is executed without a ``-r`` argument, the revset
+   defined by this sub-option is evaluated to determine what to push.
+
+   For example, a value of ``.`` will push the working directory's
+   revision by default.
+
+   Revsets specifying bookmarks will not result in the bookmark being
+   pushed.
 
 The following special named paths exist:
 
@@ -1441,16 +1572,6 @@ Configuration for extensions that need to send email messages.
 ``tls``
     Optional. Method to enable TLS when connecting to mail server: starttls,
     smtps or none. (default: none)
-
-``verifycert``
-    Optional. Verification for the certificate of mail server, when
-    ``tls`` is starttls or smtps. "strict", "loose" or False. For
-    "strict" or "loose", the certificate is verified as same as the
-    verification for HTTPS connections (see ``[hostfingerprints]`` and
-    ``[web] cacerts`` also). For "strict", sending email is also
-    aborted, if there is no configuration for mail server in
-    ``[hostfingerprints]`` and ``[web] cacerts``.  --insecure for
-    :hg:`email` overwrites this as "loose". (default: strict)
 
 ``username``
     Optional. User name for authenticating with the SMTP server.
@@ -1738,6 +1859,13 @@ User interface controls.
     large organisation with its own Mercurial deployment process and crash
     reports should be addressed to your internal support.
 
+``textwidth``
+    Maximum width of help text. A longer line generated by ``hg help`` or
+    ``hg subcommand --help`` will be broken after white space to get this
+    width or the terminal width, whichever comes first.
+    A non-positive value will disable this and the terminal width will be
+    used. (default: 78)
+
 ``timeout``
     The timeout used when a lock is held (in seconds), a negative value
     means no timeout. (default: 600)
@@ -1944,6 +2072,14 @@ The full set of options is:
 
 ``ipv6``
     Whether to use IPv6. (default: False)
+
+``labels``
+    List of string *labels* associated with the repository.
+
+    Labels are exposed as a template keyword and can be used to customize
+    output. e.g. the ``index`` template can group or filter repositories
+    by labels and the ``summary`` template can display additional content
+    if a specific label is present.
 
 ``logoimg``
     File name of the logo image that some templates display on each page.

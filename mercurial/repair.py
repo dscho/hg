@@ -9,6 +9,7 @@
 from __future__ import absolute_import
 
 import errno
+import hashlib
 
 from .i18n import _
 from .node import short
@@ -35,7 +36,7 @@ def _bundle(repo, bases, heads, node, suffix, compress=True):
     # Include a hash of all the nodes in the filename for uniqueness
     allcommits = repo.set('%ln::%ln', bases, heads)
     allhashes = sorted(c.hex() for c in allcommits)
-    totalhash = util.sha1(''.join(allhashes)).hexdigest()
+    totalhash = hashlib.sha1(''.join(allhashes)).hexdigest()
     name = "%s/%s-%s-%s.hg" % (backupdir, short(node), totalhash[:8], suffix)
 
     comp = None
@@ -166,6 +167,13 @@ def strip(ui, repo, nodelist, backup=True, topic='backup'):
             tr.startgroup()
             cl.strip(striprev, tr)
             mfst.strip(striprev, tr)
+            if 'treemanifest' in repo.requirements: # safe but unnecessary
+                                                    # otherwise
+                for unencoded, encoded, size in repo.store.datafiles():
+                    if (unencoded.startswith('meta/') and
+                        unencoded.endswith('00manifest.i')):
+                        dir = unencoded[5:-12]
+                        repo.dirlog(dir).strip(striprev, tr)
             for fn in files:
                 repo.file(fn).strip(striprev, tr)
             tr.endgroup()

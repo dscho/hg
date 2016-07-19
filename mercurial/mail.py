@@ -41,16 +41,16 @@ def _unifiedheaderinit(self, *args, **kw):
     kw['continuation_ws'] = ' '
     _oldheaderinit(self, *args, **kw)
 
-email.Header.Header.__dict__['__init__'] = _unifiedheaderinit
+setattr(email.header.Header, '__init__', _unifiedheaderinit)
 
 class STARTTLS(smtplib.SMTP):
     '''Derived class to verify the peer certificate for STARTTLS.
 
     This class allows to pass any keyword arguments to SSL socket creation.
     '''
-    def __init__(self, sslkwargs, host=None, **kwargs):
+    def __init__(self, ui, host=None, **kwargs):
         smtplib.SMTP.__init__(self, **kwargs)
-        self._sslkwargs = sslkwargs
+        self._ui = ui
         self._host = host
 
     def starttls(self, keyfile=None, certfile=None):
@@ -60,8 +60,8 @@ class STARTTLS(smtplib.SMTP):
         (resp, reply) = self.docmd("STARTTLS")
         if resp == 220:
             self.sock = sslutil.wrapsocket(self.sock, keyfile, certfile,
-                                           serverhostname=self._host,
-                                           **self._sslkwargs)
+                                           ui=self._ui,
+                                           serverhostname=self._host)
             self.file = smtplib.SSLFakeFile(self.sock)
             self.helo_resp = None
             self.ehlo_resp = None
@@ -74,14 +74,14 @@ class SMTPS(smtplib.SMTP):
 
     This class allows to pass any keyword arguments to SSL socket creation.
     '''
-    def __init__(self, sslkwargs, keyfile=None, certfile=None, host=None,
+    def __init__(self, ui, keyfile=None, certfile=None, host=None,
                  **kwargs):
         self.keyfile = keyfile
         self.certfile = certfile
         smtplib.SMTP.__init__(self, **kwargs)
         self._host = host
         self.default_port = smtplib.SMTP_SSL_PORT
-        self._sslkwargs = sslkwargs
+        self._ui = ui
 
     def _get_socket(self, host, port, timeout):
         if self.debuglevel > 0:
@@ -89,8 +89,8 @@ class SMTPS(smtplib.SMTP):
         new_socket = socket.create_connection((host, port), timeout)
         new_socket = sslutil.wrapsocket(new_socket,
                                         self.keyfile, self.certfile,
-                                        serverhostname=self._host,
-                                        **self._sslkwargs)
+                                        ui=self._ui,
+                                        serverhostname=self._host)
         self.file = smtplib.SSLFakeFile(new_socket)
         return new_socket
 
@@ -106,22 +106,11 @@ def _smtp(ui):
     mailhost = ui.config('smtp', 'host')
     if not mailhost:
         raise error.Abort(_('smtp.host not configured - cannot send mail'))
-    verifycert = ui.config('smtp', 'verifycert', 'strict')
-    if verifycert not in ['strict', 'loose']:
-        if util.parsebool(verifycert) is not False:
-            raise error.Abort(_('invalid smtp.verifycert configuration: %s')
-                             % (verifycert))
-        verifycert = False
-    if (starttls or smtps) and verifycert:
-        sslkwargs = sslutil.sslkwargs(ui, mailhost)
-    else:
-        # 'ui' is required by sslutil.wrapsocket() and set by sslkwargs()
-        sslkwargs = {'ui': ui}
     if smtps:
         ui.note(_('(using smtps)\n'))
-        s = SMTPS(sslkwargs, local_hostname=local_hostname, host=mailhost)
+        s = SMTPS(ui, local_hostname=local_hostname, host=mailhost)
     elif starttls:
-        s = STARTTLS(sslkwargs, local_hostname=local_hostname, host=mailhost)
+        s = STARTTLS(ui, local_hostname=local_hostname, host=mailhost)
     else:
         s = smtplib.SMTP(local_hostname=local_hostname)
     if smtps:
@@ -137,9 +126,9 @@ def _smtp(ui):
         s.ehlo()
         s.starttls()
         s.ehlo()
-    if (starttls or smtps) and verifycert:
+    if starttls or smtps:
         ui.note(_('(verifying remote certificate)\n'))
-        sslutil.validator(ui, mailhost)(s.sock, verifycert == 'strict')
+        sslutil.validatesocket(s.sock)
     username = ui.config('smtp', 'username')
     password = ui.config('smtp', 'password')
     if username and not password:

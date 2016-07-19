@@ -4,6 +4,9 @@ hg debuginstall
   checking Python executable (*) (glob)
   checking Python version (2.*) (glob)
   checking Python lib (*lib*)... (glob)
+  checking Mercurial version (*) (glob)
+  checking Mercurial custom build (*) (glob)
+  checking module policy (*) (glob)
   checking installed modules (*mercurial)... (glob)
   checking templates (*mercurial?templates)... (glob)
   checking default template (*mercurial?templates?map-cmdline.default) (glob)
@@ -23,7 +26,10 @@ hg debuginstall JSON
     "encoding": "ascii",
     "encodingerror": null,
     "extensionserror": null,
+    "hgmodulepolicy": "*", (glob)
     "hgmodules": "*mercurial", (glob)
+    "hgver": "*", (glob)
+    "hgverextra": "*", (glob)
     "problems": 0,
     "pythonexe": "*", (glob)
     "pythonlib": "*", (glob)
@@ -41,6 +47,9 @@ hg debuginstall with no username
   checking Python executable (*) (glob)
   checking Python version (2.*) (glob)
   checking Python lib (*lib*)... (glob)
+  checking Mercurial version (*) (glob)
+  checking Mercurial custom build (*) (glob)
+  checking module policy (*) (glob)
   checking installed modules (*mercurial)... (glob)
   checking templates (*mercurial?templates)... (glob)
   checking default template (*mercurial?templates?map-cmdline.default) (glob)
@@ -62,6 +71,9 @@ path variables are expanded (~ is the same as $TESTTMP)
   checking Python executable (*) (glob)
   checking Python version (*) (glob)
   checking Python lib (*lib*)... (glob)
+  checking Mercurial version (*) (glob)
+  checking Mercurial custom build (*) (glob)
+  checking module policy (*) (glob)
   checking installed modules (*mercurial)... (glob)
   checking templates (*mercurial?templates)... (glob)
   checking default template (*mercurial?templates?map-cmdline.default) (glob)
@@ -70,6 +82,8 @@ path variables are expanded (~ is the same as $TESTTMP)
   no problems detected
 
 #if test-repo
+  $ . "$TESTDIR/helpers-testrepo.sh"
+
   $ cat >> wixxml.py << EOF
   > import os, subprocess, sys
   > import xml.etree.ElementTree as ET

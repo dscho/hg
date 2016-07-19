@@ -74,6 +74,8 @@ def _trypending(root, vfs, filename):
                 raise
     return (vfs(filename), False)
 
+_token = object()
+
 class dirstate(object):
 
     def __init__(self, opener, ui, root, validate):
@@ -365,7 +367,7 @@ class dirstate(object):
 
     def setbranch(self, branch):
         self._branch = encoding.fromlocal(branch)
-        f = self._opener('branch', 'w', atomictemp=True)
+        f = self._opener('branch', 'w', atomictemp=True, checkambig=True)
         try:
             f.write(self._branch + '\n')
             f.close()
@@ -580,6 +582,8 @@ class dirstate(object):
             del self._map[f]
             if f in self._nonnormalset:
                 self._nonnormalset.remove(f)
+            if f in self._copymap:
+                del self._copymap[f]
 
     def _discoverpath(self, path, normed, ignoremissing, exists, storemap):
         if exists is None:
@@ -688,16 +692,15 @@ class dirstate(object):
         self._pl = (parent, nullid)
         self._dirty = True
 
-    def write(self, tr=False):
+    def write(self, tr=_token):
         if not self._dirty:
             return
 
         filename = self._filename
-        if tr is False: # not explicitly specified
-            if (self._ui.configbool('devel', 'all-warnings')
-                or self._ui.configbool('devel', 'check-dirstate-write')):
-                self._ui.develwarn('use dirstate.write with '
-                                   'repo.currenttransaction()')
+        if tr is _token: # not explicitly specified
+            self._ui.deprecwarn('use dirstate.write with '
+                               'repo.currenttransaction()',
+                               '3.9')
 
             if self._opener.lexists(self._pendingfilename):
                 # if pending file already exists, in-memory changes
@@ -727,7 +730,7 @@ class dirstate(object):
                                 self._writedirstate, location='plain')
             return
 
-        st = self._opener(filename, "w", atomictemp=True)
+        st = self._opener(filename, "w", atomictemp=True, checkambig=True)
         self._writedirstate(st)
 
     def _writedirstate(self, st):
@@ -1206,14 +1209,16 @@ class dirstate(object):
         else:
             return self._filename
 
-    def _savebackup(self, tr, suffix):
+    def savebackup(self, tr, suffix='', prefix=''):
         '''Save current dirstate into backup file with suffix'''
+        assert len(suffix) > 0 or len(prefix) > 0
         filename = self._actualfilename(tr)
 
         # use '_writedirstate' instead of 'write' to write changes certainly,
         # because the latter omits writing out if transaction is running.
         # output file will be used to create backup of dirstate at this point.
-        self._writedirstate(self._opener(filename, "w", atomictemp=True))
+        self._writedirstate(self._opener(filename, "w", atomictemp=True,
+                                         checkambig=True))
 
         if tr:
             # ensure that subsequent tr.writepending returns True for
@@ -1227,17 +1232,22 @@ class dirstate(object):
             # end of this transaction
             tr.registertmp(filename, location='plain')
 
-        self._opener.write(filename + suffix, self._opener.tryread(filename))
+        self._opener.write(prefix + self._filename + suffix,
+                           self._opener.tryread(filename))
 
-    def _restorebackup(self, tr, suffix):
+    def restorebackup(self, tr, suffix='', prefix=''):
         '''Restore dirstate by backup file with suffix'''
+        assert len(suffix) > 0 or len(prefix) > 0
         # this "invalidate()" prevents "wlock.release()" from writing
         # changes of dirstate out after restoring from backup file
         self.invalidate()
         filename = self._actualfilename(tr)
-        self._opener.rename(filename + suffix, filename)
+        # using self._filename to avoid having "pending" in the backup filename
+        self._opener.rename(prefix + self._filename + suffix, filename,
+                            checkambig=True)
 
-    def _clearbackup(self, tr, suffix):
+    def clearbackup(self, tr, suffix='', prefix=''):
         '''Clear backup file with suffix'''
-        filename = self._actualfilename(tr)
-        self._opener.unlink(filename + suffix)
+        assert len(suffix) > 0 or len(prefix) > 0
+        # using self._filename to avoid having "pending" in the backup filename
+        self._opener.unlink(prefix + self._filename + suffix)

@@ -9,7 +9,6 @@
 from __future__ import absolute_import
 
 import errno
-import httplib
 import os
 import socket
 import tempfile
@@ -27,6 +26,7 @@ from . import (
     wireproto,
 )
 
+httplib = util.httplib
 urlerr = util.urlerr
 urlreq = util.urlreq
 
@@ -302,7 +302,7 @@ def instance(ui, path, create):
     except error.RepoError as httpexception:
         try:
             r = statichttprepo.instance(ui, "static-" + path, create)
-            ui.note('(falling back to static-http)\n')
+            ui.note(_('(falling back to static-http)\n'))
             return r
         except error.RepoError:
             raise httpexception # use the original http RepoError instead

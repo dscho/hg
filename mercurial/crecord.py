@@ -91,6 +91,7 @@ class patchnode(object):
     def allchildren(self):
         "Return a list of all of the direct children of this node"
         raise NotImplementedError("method must be implemented by subclass")
+
     def nextsibling(self):
         """
         Return the closest next item of the same type where there are no items
@@ -110,18 +111,12 @@ class patchnode(object):
     def parentitem(self):
         raise NotImplementedError("method must be implemented by subclass")
 
-
-    def nextitem(self, constrainlevel=True, skipfolded=True):
+    def nextitem(self, skipfolded=True):
         """
-        If constrainLevel == True, return the closest next item
-        of the same type where there are no items of different types between
-        the current item and this closest item.
+        Try to return the next item closest to this item, regardless of item's
+        type (header, hunk, or hunkline).
 
-        If constrainLevel == False, then try to return the next item
-        closest to this item, regardless of item's type (header, hunk, or
-        HunkLine).
-
-        If skipFolded == True, and the current item is folded, then the child
+        If skipfolded == True, and the current item is folded, then the child
         items that are hidden due to folding will be skipped when determining
         the next item.
 
@@ -131,9 +126,7 @@ class patchnode(object):
             itemfolded = self.folded
         except AttributeError:
             itemfolded = False
-        if constrainlevel:
-            return self.nextsibling()
-        elif skipfolded and itemfolded:
+        if skipfolded and itemfolded:
             nextitem = self.nextsibling()
             if nextitem is None:
                 try:
@@ -164,43 +157,31 @@ class patchnode(object):
             except AttributeError: # parent and/or grandparent was None
                 return None
 
-    def previtem(self, constrainlevel=True, skipfolded=True):
+    def previtem(self):
         """
-        If constrainLevel == True, return the closest previous item
-        of the same type where there are no items of different types between
-        the current item and this closest item.
-
-        If constrainLevel == False, then try to return the previous item
-        closest to this item, regardless of item's type (header, hunk, or
-        HunkLine).
-
-        If skipFolded == True, and the current item is folded, then the items
-        that are hidden due to folding will be skipped when determining the
-        next item.
+        Try to return the previous item closest to this item, regardless of
+        item's type (header, hunk, or hunkline).
 
         If it is not possible to get the previous item, return None.
         """
-        if constrainlevel:
-            return self.prevsibling()
-        else:
-            # try previous sibling's last child's last child,
-            # else try previous sibling's last child, else try previous sibling
-            prevsibling = self.prevsibling()
-            if prevsibling is not None:
-                prevsiblinglastchild = prevsibling.lastchild()
-                if ((prevsiblinglastchild is not None) and
-                    not prevsibling.folded):
-                    prevsiblinglclc = prevsiblinglastchild.lastchild()
-                    if ((prevsiblinglclc is not None) and
-                        not prevsiblinglastchild.folded):
-                        return prevsiblinglclc
-                    else:
-                        return prevsiblinglastchild
+        # try previous sibling's last child's last child,
+        # else try previous sibling's last child, else try previous sibling
+        prevsibling = self.prevsibling()
+        if prevsibling is not None:
+            prevsiblinglastchild = prevsibling.lastchild()
+            if ((prevsiblinglastchild is not None) and
+                not prevsibling.folded):
+                prevsiblinglclc = prevsiblinglastchild.lastchild()
+                if ((prevsiblinglclc is not None) and
+                    not prevsiblinglastchild.folded):
+                    return prevsiblinglclc
                 else:
-                    return prevsibling
+                    return prevsiblinglastchild
+            else:
+                return prevsibling
 
-            # try parent (or None)
-            return self.parentitem()
+        # try parent (or None)
+        return self.parentitem()
 
 class patch(patchnode, list): # todo: rename patchroot
     """
@@ -235,7 +216,6 @@ class uiheader(patchnode):
         # flag is False if this header was ever unfolded from initial state
         self.neverunfolded = True
         self.hunks = [uihunk(h, self) for h in self.hunks]
-
 
     def prettystr(self):
         x = stringio()
@@ -392,6 +372,7 @@ class uihunk(patchnode):
     def allchildren(self):
         "return a list of all of the direct children of this node"
         return self.changedlines
+
     def countchanges(self):
         """changedlines -> (n+,n-)"""
         add = len([l for l in self.changedlines if l.applied
@@ -455,14 +436,12 @@ class uihunk(patchnode):
 
     def __getattr__(self, name):
         return getattr(self._hunk, name)
+
     def __repr__(self):
         return '<hunk %r@%d>' % (self.filename(), self.fromline)
 
-def filterpatch(ui, chunks, chunkselector, operation=None):
+def filterpatch(ui, chunks, chunkselector):
     """interactively filter patch chunks into applied-only chunks"""
-
-    if operation is None:
-        operation = _('confirm')
     chunks = list(chunks)
     # convert chunks list into structure suitable for displaying/modifying
     # with curses.  create a list of headers only.
@@ -603,13 +582,10 @@ class curseschunkselector(object):
         the last hunkline of the hunk prior to the selected hunk.  or, if
         the first hunkline of a hunk is currently selected, then select the
         hunk itself.
-
-        if the currently selected item is already at the top of the screen,
-        scroll the screen down to show the new-selected item.
         """
         currentitem = self.currentselecteditem
 
-        nextitem = currentitem.previtem(constrainlevel=False)
+        nextitem = currentitem.previtem()
 
         if nextitem is None:
             # if no parent item (i.e. currentitem is the first header), then
@@ -623,13 +599,10 @@ class curseschunkselector(object):
         select (if possible) the previous item on the same level as the
         currently selected item.  otherwise, select (if possible) the
         parent-item of the currently selected item.
-
-        if the currently selected item is already at the top of the screen,
-        scroll the screen down to show the new-selected item.
         """
         currentitem = self.currentselecteditem
-        nextitem = currentitem.previtem()
-        # if there's no previous item on this level, try choosing the parent
+        nextitem = currentitem.prevsibling()
+        # if there's no previous sibling, try choosing the parent
         if nextitem is None:
             nextitem = currentitem.parentitem()
         if nextitem is None:
@@ -646,14 +619,11 @@ class curseschunkselector(object):
         the first hunkline of the selected hunk.  or, if the last hunkline of
         a hunk is currently selected, then select the next hunk, if one exists,
         or if not, the next header if one exists.
-
-        if the currently selected item is already at the bottom of the screen,
-        scroll the screen up to show the new-selected item.
         """
         #self.startprintline += 1 #debug
         currentitem = self.currentselecteditem
 
-        nextitem = currentitem.nextitem(constrainlevel=False)
+        nextitem = currentitem.nextitem()
         # if there's no next item, keep the selection as-is
         if nextitem is None:
             nextitem = currentitem
@@ -662,24 +632,21 @@ class curseschunkselector(object):
 
     def downarrowshiftevent(self):
         """
-        if the cursor is already at the bottom chunk, scroll the screen up and
-        move the cursor-position to the subsequent chunk.  otherwise, only move
-        the cursor position down one chunk.
+        select (if possible) the next item on the same level as the currently
+        selected item.  otherwise, select (if possible) the next item on the
+        same level as the parent item of the currently selected item.
         """
-        # todo: update docstring
-
         currentitem = self.currentselecteditem
-        nextitem = currentitem.nextitem()
-        # if there's no previous item on this level, try choosing the parent's
-        # nextitem.
+        nextitem = currentitem.nextsibling()
+        # if there's no next sibling, try choosing the parent's nextsibling
         if nextitem is None:
             try:
-                nextitem = currentitem.parentitem().nextitem()
+                nextitem = currentitem.parentitem().nextsibling()
             except AttributeError:
-                # parentitem returned None, so nextitem() can't be called
+                # parentitem returned None, so nextsibling() can't be called
                 nextitem = None
         if nextitem is None:
-            # if no next item on parent-level, then no change...
+            # if parent has no next sibling, then no change...
             nextitem = currentitem
 
         self.currentselecteditem = nextitem
@@ -765,7 +732,6 @@ class curseschunkselector(object):
         elif selstart < padstartbuffered:
             # negative values scroll in pgup direction
             self.scrolllines(selstart - padstartbuffered)
-
 
     def scrolllines(self, numlines):
         "scroll the screen up (down) by numlines when numlines >0 (<0)."
@@ -893,7 +859,6 @@ class curseschunkselector(object):
 
         if isinstance(item, (uiheader, uihunk)):
             item.folded = not item.folded
-
 
     def alignstring(self, instr, window):
         """
@@ -1132,7 +1097,6 @@ class curseschunkselector(object):
 
         lineprefix = " "*self.hunkindentnumchars + checkbox
         frtoline = "   " + hunk.getfromtoline().strip("\n")
-
 
         outstr += self.printstring(self.chunkpad, lineprefix, towin=towin,
                                    align=False) # add uncolored checkbox/indent
@@ -1377,7 +1341,7 @@ the following are valid keystrokes:
                       F : fold / unfold parent item and all of its ancestors
                       m : edit / resume editing the commit message
                       e : edit the currently selected hunk
-                      a : toggle amend mode (hg rev >= 2.2), only with commit -i
+                      a : toggle amend mode, only with commit -i
                       c : confirm selected changes
                       r : review/edit and confirm selected changes
                       q : quit without confirming (no changes will be made)
