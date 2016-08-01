@@ -139,6 +139,9 @@ def _hostsettings(ui, hostname):
         'legacyfingerprint': False,
         # PROTOCOL_* constant to use for SSLContext.__init__.
         'protocol': None,
+        # String representation of minimum protocol to be used for UI
+        # presentation.
+        'protocolui': None,
         # ssl.CERT_* constant used by SSLContext.verify_mode.
         'verifymode': None,
         # Defines extra ssl.OP* bitwise options to set.
@@ -181,7 +184,13 @@ def _hostsettings(ui, hostname):
     protocol = ui.config('hostsecurity', key, protocol)
     validateprotocol(protocol, key)
 
-    s['protocol'], s['ctxoptions'] = protocolsettings(protocol)
+    # If --insecure is used, we allow the use of TLS 1.0 despite config options.
+    # We always print a "connection security to %s is disabled..." message when
+    # --insecure is used. So no need to print anything more here.
+    if ui.insecureconnections:
+        protocol = 'tls1.0'
+
+    s['protocol'], s['ctxoptions'], s['protocolui'] = protocolsettings(protocol)
 
     ciphers = ui.config('hostsecurity', 'ciphers')
     ciphers = ui.config('hostsecurity', '%s:ciphers' % hostname, ciphers)
@@ -279,7 +288,12 @@ def _hostsettings(ui, hostname):
     return s
 
 def protocolsettings(protocol):
-    """Resolve the protocol and context options for a config value."""
+    """Resolve the protocol for a config value.
+
+    Returns a 3-tuple of (protocol, options, ui value) where the first
+    2 items are values used by SSLContext and the last is a string value
+    of the ``minimumprotocol`` config option equivalent.
+    """
     if protocol not in configprotocols:
         raise ValueError('protocol value not supported: %s' % protocol)
 
@@ -301,7 +315,7 @@ def protocolsettings(protocol):
                               hint=_('upgrade Python or disable setting since '
                                      'only TLS 1.0 is supported'))
 
-        return ssl.PROTOCOL_TLSv1, 0
+        return ssl.PROTOCOL_TLSv1, 0, 'tls1.0'
 
     # WARNING: returned options don't work unless the modern ssl module
     # is available. Be careful when adding options here.
@@ -323,7 +337,7 @@ def protocolsettings(protocol):
     # There is no guarantee this attribute is defined on the module.
     options |= getattr(ssl, 'OP_NO_COMPRESSION', 0)
 
-    return ssl.PROTOCOL_SSLv23, options
+    return ssl.PROTOCOL_SSLv23, options, protocol
 
 def wrapsocket(sock, keyfile, certfile, ui, serverhostname=None):
     """Add SSL/TLS to a socket.
@@ -395,19 +409,71 @@ def wrapsocket(sock, keyfile, certfile, ui, serverhostname=None):
         # a hint to the user.
         # Only modern ssl module exposes SSLContext.get_ca_certs() so we can
         # only show this warning if modern ssl is available.
-        if (caloaded and settings['verifymode'] == ssl.CERT_REQUIRED and
-            modernssl and not sslcontext.get_ca_certs()):
-            ui.warn(_('(an attempt was made to load CA certificates but none '
-                      'were loaded; see '
-                      'https://mercurial-scm.org/wiki/SecureConnections for '
-                      'how to configure Mercurial to avoid this error)\n'))
-        # Try to print more helpful error messages for known failures.
-        if util.safehasattr(e, 'reason'):
-            if e.reason == 'UNSUPPORTED_PROTOCOL':
-                ui.warn(_('(could not negotiate a common protocol; see '
+        # The exception handler is here because of
+        # https://bugs.python.org/issue20916.
+        try:
+            if (caloaded and settings['verifymode'] == ssl.CERT_REQUIRED and
+                modernssl and not sslcontext.get_ca_certs()):
+                ui.warn(_('(an attempt was made to load CA certificates but '
+                          'none were loaded; see '
                           'https://mercurial-scm.org/wiki/SecureConnections '
                           'for how to configure Mercurial to avoid this '
                           'error)\n'))
+        except ssl.SSLError:
+            pass
+        # Try to print more helpful error messages for known failures.
+        if util.safehasattr(e, 'reason'):
+            # This error occurs when the client and server don't share a
+            # common/supported SSL/TLS protocol. We've disabled SSLv2 and SSLv3
+            # outright. Hopefully the reason for this error is that we require
+            # TLS 1.1+ and the server only supports TLS 1.0. Whatever the
+            # reason, try to emit an actionable warning.
+            if e.reason == 'UNSUPPORTED_PROTOCOL':
+                # We attempted TLS 1.0+.
+                if settings['protocolui'] == 'tls1.0':
+                    # We support more than just TLS 1.0+. If this happens,
+                    # the likely scenario is either the client or the server
+                    # is really old. (e.g. server doesn't support TLS 1.0+ or
+                    # client doesn't support modern TLS versions introduced
+                    # several years from when this comment was written).
+                    if supportedprotocols != set(['tls1.0']):
+                        ui.warn(_(
+                            '(could not communicate with %s using security '
+                            'protocols %s; if you are using a modern Mercurial '
+                            'version, consider contacting the operator of this '
+                            'server; see '
+                            'https://mercurial-scm.org/wiki/SecureConnections '
+                            'for more info)\n') % (
+                                serverhostname,
+                                ', '.join(sorted(supportedprotocols))))
+                    else:
+                        ui.warn(_(
+                            '(could not communicate with %s using TLS 1.0; the '
+                            'likely cause of this is the server no longer '
+                            'supports TLS 1.0 because it has known security '
+                            'vulnerabilities; see '
+                            'https://mercurial-scm.org/wiki/SecureConnections '
+                            'for more info)\n') % serverhostname)
+                else:
+                    # We attempted TLS 1.1+. We can only get here if the client
+                    # supports the configured protocol. So the likely reason is
+                    # the client wants better security than the server can
+                    # offer.
+                    ui.warn(_(
+                        '(could not negotiate a common security protocol (%s+) '
+                        'with %s; the likely cause is Mercurial is configured '
+                        'to be more secure than the server can support)\n') % (
+                        settings['protocolui'], serverhostname))
+                    ui.warn(_('(consider contacting the operator of this '
+                              'server and ask them to support modern TLS '
+                              'protocol versions; or, set '
+                              'hostsecurity.%s:minimumprotocol=tls1.0 to allow '
+                              'use of legacy, less secure protocols when '
+                              'communicating with this server)\n') %
+                            serverhostname)
+                    ui.warn(_(
+                        '(see https://mercurial-scm.org/wiki/SecureConnections '
+                        'for more info)\n'))
         raise
 
     # check if wrap_socket failed silently because socket had been
@@ -439,7 +505,7 @@ def wrapserversocket(sock, ui, certfile=None, keyfile=None, cafile=None,
 
     Typically ``cafile`` is only defined if ``requireclientcert`` is true.
     """
-    protocol, options = protocolsettings('tls1.0')
+    protocol, options, _protocolui = protocolsettings('tls1.0')
 
     # This config option is intended for use in tests only. It is a giant
     # footgun to kill security. Don't define it.

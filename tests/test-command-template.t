@@ -3253,6 +3253,9 @@ Test localdate(date, tz) function:
   1970-01-01 09:00 +0900
   $ TZ=JST-09 hg log -r0 -T '{localdate(date, "UTC")|isodate}\n'
   1970-01-01 00:00 +0000
+  $ TZ=JST-09 hg log -r0 -T '{localdate(date, "blahUTC")|isodate}\n'
+  hg: parse error: localdate expects a timezone
+  [255]
   $ TZ=JST-09 hg log -r0 -T '{localdate(date, "+0200")|isodate}\n'
   1970-01-01 02:00 +0200
   $ TZ=JST-09 hg log -r0 -T '{localdate(date, "0")|isodate}\n'
@@ -3432,6 +3435,21 @@ a revset item must be evaluated as an integer revision, not an offset from tip
   -1:000000000000
   $ hg log -l 1 -T '{revset("%s", "null") % "{rev}:{node|short}"}\n'
   -1:000000000000
+
+join() should pick '{rev}' from revset items:
+
+  $ hg log -R ../a -T '{join(revset("parents(%d)", rev), ", ")}\n' -r6
+  4, 5
+
+on the other hand, parents are formatted as '{rev}:{node|formatnode}' by
+default. join() should agree with the default formatting:
+
+  $ hg log -R ../a -T '{join(parents, ", ")}\n' -r6
+  5:13207e5a10d9, 4:bbe44766e73d
+
+  $ hg log -R ../a -T '{join(parents, ",\n")}\n' -r6 --debug
+  5:13207e5a10d9fd28ec424934298e176197f2c67f,
+  4:bbe44766e73d5f11ed2177f1838de10c53ef3e74
 
 Test active bookmark templating
 

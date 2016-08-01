@@ -587,6 +587,8 @@ recovery from invalid cache file with some bad records
   $ f --size .hg/cache/rbc-revs*
   .hg/cache/rbc-revs-v1: size=120
   $ hg log -r 'branch(.)' -T '{rev} ' --debug
+  history modification detected - truncating revision branch cache to revision 13
+  history modification detected - truncating revision branch cache to revision 1
   3 4 8 9 10 11 12 13 truncating cache/rbc-revs-v1 to 8
   $ rm -f .hg/cache/branch* && hg head a -T '{rev}\n' --debug
   5
@@ -632,7 +634,7 @@ situation where the cache is out of sync and the hash check detects it
 cache is rebuilt when corruption is detected
   $ echo > .hg/cache/rbc-names-v1
   $ hg log -r '5:&branch(.)' -T '{rev} ' --debug
-  rebuilding corrupted revision branch cache
+  referenced branch names not found - rebuilding revision branch cache from scratch
   8 9 10 11 12 13 truncating cache/rbc-revs-v1 to 40
   $ f --size --hexdump .hg/cache/rbc-*
   .hg/cache/rbc-names-v1: size=79
@@ -666,5 +668,35 @@ Test that cache files are created and grows correctly:
   0040: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................|
   0050: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................|
   0060: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................|
+
+  $ cd ..
+
+Test for multiple incorrect branch cache entries:
+
+  $ hg init b
+  $ cd b
+  $ touch f
+  $ hg ci -Aqmf
+  $ echo >> f
+  $ hg ci -Amf
+  $ hg branch -q branch
+  $ hg ci -Amf
+
+  $ f --size --hexdump .hg/cache/rbc-*
+  .hg/cache/rbc-names-v1: size=14
+  0000: 64 65 66 61 75 6c 74 00 62 72 61 6e 63 68       |default.branch|
+  .hg/cache/rbc-revs-v1: size=24
+  0000: 66 e5 f5 aa 00 00 00 00 fa 4c 04 e5 00 00 00 00 |f........L......|
+  0010: 56 46 78 69 00 00 00 01                         |VFxi....|
+  $ : > .hg/cache/rbc-revs-v1
+
+No superfluous rebuilding of cache:
+  $ hg log -r "branch(null)&branch(branch)" --debug
+  $ f --size --hexdump .hg/cache/rbc-*
+  .hg/cache/rbc-names-v1: size=14
+  0000: 64 65 66 61 75 6c 74 00 62 72 61 6e 63 68       |default.branch|
+  .hg/cache/rbc-revs-v1: size=24
+  0000: 66 e5 f5 aa 00 00 00 00 fa 4c 04 e5 00 00 00 00 |f........L......|
+  0010: 56 46 78 69 00 00 00 01                         |VFxi....|
 
   $ cd ..

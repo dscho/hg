@@ -896,7 +896,7 @@ def verify(repo):
                         ret = (ctx.sub(subpath, allowcreate=False).verify()
                                or ret)
                     except error.RepoError as e:
-                        repo.ui.warn(_('%s: %s\n') % (rev, e))
+                        repo.ui.warn(('%s: %s\n') % (rev, e))
             except Exception:
                 repo.ui.warn(_('.hgsubstate is corrupt in revision %s\n') %
                              node.short(ctx.node()))
@@ -923,7 +923,7 @@ def remoteui(src, opts):
         dst.setconfig('bundle', 'mainreporoot', r, 'copied')
 
     # copy selected local settings to the remote ui
-    for sect in ('auth', 'hostfingerprints', 'http_proxy'):
+    for sect in ('auth', 'hostfingerprints', 'hostsecurity', 'http_proxy'):
         for key, val in src.configitems(sect):
             dst.setconfig(sect, key, val, 'copied')
     v = src.config('web', 'cacerts')

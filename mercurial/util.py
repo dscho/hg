@@ -396,10 +396,26 @@ def versiontuple(v=None, n=4):
     (3, 6, None)
     >>> versiontuple(v, 4)
     (3, 6, None, None)
+
+    >>> v = '3.9-rc'
+    >>> versiontuple(v, 2)
+    (3, 9)
+    >>> versiontuple(v, 3)
+    (3, 9, None)
+    >>> versiontuple(v, 4)
+    (3, 9, None, 'rc')
+
+    >>> v = '3.9-rc+2-02a8fea4289b'
+    >>> versiontuple(v, 2)
+    (3, 9)
+    >>> versiontuple(v, 3)
+    (3, 9, None)
+    >>> versiontuple(v, 4)
+    (3, 9, None, 'rc+2-02a8fea4289b')
     """
     if not v:
         v = version()
-    parts = v.split('+', 1)
+    parts = remod.split('[\+-]', v, 1)
     if len(parts) == 1:
         vparts, extra = parts[0], None
     else:
@@ -424,7 +440,14 @@ def versiontuple(v=None, n=4):
 
 # used by parsedate
 defaultdateformats = (
-    '%Y-%m-%d %H:%M:%S',
+    '%Y-%m-%dT%H:%M:%S', # the 'real' ISO8601
+    '%Y-%m-%dT%H:%M',    #   without seconds
+    '%Y-%m-%dT%H%M%S',   # another awful but legal variant without :
+    '%Y-%m-%dT%H%M',     #   without seconds
+    '%Y-%m-%d %H:%M:%S', # our common legal variant
+    '%Y-%m-%d %H:%M',    #   without seconds
+    '%Y-%m-%d %H%M%S',   # without :
+    '%Y-%m-%d %H%M',     #   without seconds
     '%Y-%m-%d %I:%M:%S%p',
     '%Y-%m-%d %H:%M',
     '%Y-%m-%d %I:%M%p',
@@ -1730,24 +1753,39 @@ def shortdate(date=None):
     """turn (timestamp, tzoff) tuple into iso 8631 date."""
     return datestr(date, format='%Y-%m-%d')
 
-def parsetimezone(tz):
-    """parse a timezone string and return an offset integer"""
-    if tz[0] in "+-" and len(tz) == 5 and tz[1:].isdigit():
-        sign = (tz[0] == "+") and 1 or -1
-        hours = int(tz[1:3])
-        minutes = int(tz[3:5])
-        return -sign * (hours * 60 + minutes) * 60
-    if tz == "GMT" or tz == "UTC":
-        return 0
-    return None
+def parsetimezone(s):
+    """find a trailing timezone, if any, in string, and return a
+       (offset, remainder) pair"""
+
+    if s.endswith("GMT") or s.endswith("UTC"):
+        return 0, s[:-3].rstrip()
+
+    # Unix-style timezones [+-]hhmm
+    if len(s) >= 5 and s[-5] in "+-" and s[-4:].isdigit():
+        sign = (s[-5] == "+") and 1 or -1
+        hours = int(s[-4:-2])
+        minutes = int(s[-2:])
+        return -sign * (hours * 60 + minutes) * 60, s[:-5].rstrip()
+
+    # ISO8601 trailing Z
+    if s.endswith("Z") and s[-2:-1].isdigit():
+        return 0, s[:-1]
+
+    # ISO8601-style [+-]hh:mm
+    if (len(s) >= 6 and s[-6] in "+-" and s[-3] == ":" and
+        s[-5:-3].isdigit() and s[-2:].isdigit()):
+        sign = (s[-6] == "+") and 1 or -1
+        hours = int(s[-5:-3])
+        minutes = int(s[-2:])
+        return -sign * (hours * 60 + minutes) * 60, s[:-6]
+
+    return None, s
 
 def strdate(string, format, defaults=[]):
     """parse a localized time string and return a (unixtime, offset) tuple.
     if the string cannot be parsed, ValueError is raised."""
     # NOTE: unixtime = localunixtime + offset
-    offset, date = parsetimezone(string.split()[-1]), string
-    if offset is not None:
-        date = " ".join(string.split()[:-1])
+    offset, date = parsetimezone(string)
 
     # add missing elements from defaults
     usenow = False # default to using biased defaults

@@ -469,22 +469,36 @@ Clients talking same TLS versions work
 Clients requiring newer TLS version than what server supports fail
 
   $ P="$CERTSDIR" hg id https://localhost:$HGPORT/
-  (could not negotiate a common protocol; see https://mercurial-scm.org/wiki/SecureConnections for how to configure Mercurial to avoid this error)
+  (could not negotiate a common security protocol (tls1.1+) with localhost; the likely cause is Mercurial is configured to be more secure than the server can support)
+  (consider contacting the operator of this server and ask them to support modern TLS protocol versions; or, set hostsecurity.localhost:minimumprotocol=tls1.0 to allow use of legacy, less secure protocols when communicating with this server)
+  (see https://mercurial-scm.org/wiki/SecureConnections for more info)
   abort: error: *unsupported protocol* (glob)
   [255]
 
   $ P="$CERTSDIR" hg --config hostsecurity.minimumprotocol=tls1.1 id https://localhost:$HGPORT/
-  (could not negotiate a common protocol; see https://mercurial-scm.org/wiki/SecureConnections for how to configure Mercurial to avoid this error)
+  (could not negotiate a common security protocol (tls1.1+) with localhost; the likely cause is Mercurial is configured to be more secure than the server can support)
+  (consider contacting the operator of this server and ask them to support modern TLS protocol versions; or, set hostsecurity.localhost:minimumprotocol=tls1.0 to allow use of legacy, less secure protocols when communicating with this server)
+  (see https://mercurial-scm.org/wiki/SecureConnections for more info)
   abort: error: *unsupported protocol* (glob)
   [255]
   $ P="$CERTSDIR" hg --config hostsecurity.minimumprotocol=tls1.2 id https://localhost:$HGPORT/
-  (could not negotiate a common protocol; see https://mercurial-scm.org/wiki/SecureConnections for how to configure Mercurial to avoid this error)
+  (could not negotiate a common security protocol (tls1.2+) with localhost; the likely cause is Mercurial is configured to be more secure than the server can support)
+  (consider contacting the operator of this server and ask them to support modern TLS protocol versions; or, set hostsecurity.localhost:minimumprotocol=tls1.0 to allow use of legacy, less secure protocols when communicating with this server)
+  (see https://mercurial-scm.org/wiki/SecureConnections for more info)
   abort: error: *unsupported protocol* (glob)
   [255]
   $ P="$CERTSDIR" hg --config hostsecurity.minimumprotocol=tls1.2 id https://localhost:$HGPORT1/
-  (could not negotiate a common protocol; see https://mercurial-scm.org/wiki/SecureConnections for how to configure Mercurial to avoid this error)
+  (could not negotiate a common security protocol (tls1.2+) with localhost; the likely cause is Mercurial is configured to be more secure than the server can support)
+  (consider contacting the operator of this server and ask them to support modern TLS protocol versions; or, set hostsecurity.localhost:minimumprotocol=tls1.0 to allow use of legacy, less secure protocols when communicating with this server)
+  (see https://mercurial-scm.org/wiki/SecureConnections for more info)
   abort: error: *unsupported protocol* (glob)
   [255]
+
+--insecure will allow TLS 1.0 connections and override configs
+
+  $ hg --config hostsecurity.minimumprotocol=tls1.2 id --insecure https://localhost:$HGPORT1/
+  warning: connection security to localhost is disabled per current settings; communication is susceptible to eavesdropping and tampering
+  5fed3813f7f5
 
 The per-host config option overrides the default
 
@@ -497,7 +511,22 @@ The per-host config option by itself works
 
   $ P="$CERTSDIR" hg id https://localhost:$HGPORT/ \
   > --config hostsecurity.localhost:minimumprotocol=tls1.2
-  (could not negotiate a common protocol; see https://mercurial-scm.org/wiki/SecureConnections for how to configure Mercurial to avoid this error)
+  (could not negotiate a common security protocol (tls1.2+) with localhost; the likely cause is Mercurial is configured to be more secure than the server can support)
+  (consider contacting the operator of this server and ask them to support modern TLS protocol versions; or, set hostsecurity.localhost:minimumprotocol=tls1.0 to allow use of legacy, less secure protocols when communicating with this server)
+  (see https://mercurial-scm.org/wiki/SecureConnections for more info)
+  abort: error: *unsupported protocol* (glob)
+  [255]
+
+.hg/hgrc file [hostsecurity] settings are applied to remote ui instances (issue5305)
+
+  $ cat >> copy-pull/.hg/hgrc << EOF
+  > [hostsecurity]
+  > localhost:minimumprotocol=tls1.2
+  > EOF
+  $ P="$CERTSDIR" hg -R copy-pull id https://localhost:$HGPORT/
+  (could not negotiate a common security protocol (tls1.2+) with localhost; the likely cause is Mercurial is configured to be more secure than the server can support)
+  (consider contacting the operator of this server and ask them to support modern TLS protocol versions; or, set hostsecurity.localhost:minimumprotocol=tls1.0 to allow use of legacy, less secure protocols when communicating with this server)
+  (see https://mercurial-scm.org/wiki/SecureConnections for more info)
   abort: error: *unsupported protocol* (glob)
   [255]
 

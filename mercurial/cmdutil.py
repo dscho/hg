@@ -2481,14 +2481,15 @@ def remove(ui, repo, m, prefix, after, force, subrepos, warnings=None):
     for f in files:
         def insubrepo():
             for subpath in wctx.substate:
-                if f.startswith(subpath):
+                if f.startswith(subpath + '/'):
                     return True
             return False
 
         count += 1
         ui.progress(_('deleting'), count, total=total, unit=_('files'))
         isdir = f in deleteddirs or wctx.hasdir(f)
-        if f in repo.dirstate or isdir or f == '.' or insubrepo():
+        if (f in repo.dirstate or isdir or f == '.'
+            or insubrepo() or f in subs):
             continue
 
         if repo.wvfs.exists(f):
@@ -2583,7 +2584,7 @@ def cat(ui, repo, ctx, matcher, prefix, **opts):
     # Don't warn about "missing" files that are really in subrepos
     def badfn(path, msg):
         for subpath in ctx.substate:
-            if path.startswith(subpath):
+            if path.startswith(subpath + '/'):
                 return
         matcher.bad(path, msg)
 
